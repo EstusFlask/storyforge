@@ -14,6 +14,7 @@
  */
 import type { Table } from 'dexie'
 import { db } from '../db/schema'
+import { removeCodexEntryReferences } from '../codex/references'
 import { PROJECT_TABLES } from './project-tables'
 import type { TableSpec } from './types'
 
@@ -147,20 +148,22 @@ export async function cascadeDeleteGroup(projectId: number, wgId: number): Promi
     for (const spec of worldScopedTables()) {
       const wgField = spec.worldGroupField ?? 'worldGroupId'
 
-      // codexCategories 特殊:内置分类(builtInKey 非空)保持全局,不按世界删
-      if (spec.name === 'codexCategories') {
-        const all = await spec.table.where('projectId').equals(projectId).toArray()
-        for (const row of all as any[]) {
-          if (row[wgField] === wgId && !row.builtInKey) await spec.table.delete(row.id)
-        }
-        continue
-      }
       // outlineNodes 特殊:不删,只 setNull(卷脱离该世界)
       if (spec.name === 'outlineNodes') {
         const all = await spec.table.where('projectId').equals(projectId).toArray()
         for (const row of all as any[]) {
           if (row[wgField] === wgId) await spec.table.update(row.id, { [wgField]: null })
         }
+        continue
+      }
+      if (spec.name === 'codexEntries') {
+        const rows = await db.codexEntries.where('projectId').equals(projectId).toArray()
+        const deletedIds = new Set(rows
+          .filter(row => row.worldGroupId === wgId)
+          .map(row => row.id)
+          .filter((id): id is number => id != null))
+        await removeCodexEntryReferences(projectId, deletedIds)
+        if (deletedIds.size) await db.codexEntries.bulkDelete([...deletedIds])
         continue
       }
 
@@ -190,9 +193,6 @@ export async function cascadeDeleteGroup(projectId: number, wgId: number): Promi
 export async function stampPrimaryWorld(projectId: number, primaryId: number): Promise<void> {
   await db.transaction('rw', transactionTablesFor('migrate'), async () => {
     for (const spec of worldScopedTables()) {
-      // codexCategories(分类结构)永远保持全局共用(内置 + 自定义都不盖章),
-      // 只有「词条」codexEntries 才盖章归属主世界。与手写版 migrate 一致。
-      if (spec.name === 'codexCategories') continue
       const wgField = spec.worldGroupField ?? 'worldGroupId'
       const rows = await spec.table.where('projectId').equals(projectId).toArray()
       for (const row of rows as any[]) {

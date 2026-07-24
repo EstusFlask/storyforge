@@ -6,6 +6,7 @@
  */
 import { create } from 'zustand'
 import { db } from '../lib/db/schema'
+import { removeCodexEntryReferences } from '../lib/codex/references'
 import {
   BUILTIN_CATEGORIES, stringifyFieldSchema,
   type CodexCategory, type CodexEntry, type CodexDomain, type CodexFieldDef,
@@ -165,6 +166,7 @@ export const useCodexStore = create<CodexStore>((set, get) => ({
 
   deleteCategory: async (id) => {
     const cat = get().categories.find(c => c.id === id)
+    if (!cat) return
     if (cat?.builtInKey) {
       console.warn('[Codex] 内置分类不可删除，仅可隐藏')
       return
@@ -183,6 +185,7 @@ export const useCodexStore = create<CodexStore>((set, get) => ({
     }
     const entryIds = get().entries.filter(e => toDeleteCatIds.has(e.categoryId)).map(e => e.id!).filter(Boolean)
     await db.transaction('rw', db.codexCategories, db.codexEntries, async () => {
+      await removeCodexEntryReferences(cat.projectId, new Set(entryIds))
       await db.codexEntries.bulkDelete(entryIds)
       await db.codexCategories.bulkDelete([...toDeleteCatIds])
     })
@@ -211,7 +214,12 @@ export const useCodexStore = create<CodexStore>((set, get) => ({
   },
 
   deleteEntry: async (id) => {
-    await db.codexEntries.delete(id)
+    const entry = get().entries.find(item => item.id === id)
+    if (!entry) return
+    await db.transaction('rw', db.codexEntries, async () => {
+      await removeCodexEntryReferences(entry.projectId, new Set([id]))
+      await db.codexEntries.delete(id)
+    })
     set({ entries: get().entries.filter(e => e.id !== id) })
   },
 

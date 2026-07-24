@@ -4,7 +4,7 @@ import type {
   ItemLedgerEntry,
 } from '../types'
 import type { CodexCategory, CodexEntry } from '../types/codex'
-import { parseEntryFields, parseFieldSchema } from '../types/codex'
+import { codexEntryInWorld, parseEntryFields, parseFieldSchema } from '../types/codex'
 import { aggregateInventory } from '../types/item-ledger'
 
 export type EditorEntityKind = 'character' | 'item' | 'location' | 'codex'
@@ -37,12 +37,6 @@ const KIND_PRIORITY: Record<EditorEntityKind, number> = {
 function clip(value: string | undefined, max = 160): string {
   const normalized = value?.trim().replace(/\s+/g, ' ') ?? ''
   return normalized.length > max ? `${normalized.slice(0, max)}...` : normalized
-}
-
-function inWorld(value: { worldGroupId?: number | null }, target?: number | null): boolean {
-  if (target === undefined) return true
-  const worldGroupId = value.worldGroupId ?? null
-  return worldGroupId === null || worldGroupId === (target ?? null)
 }
 
 export function buildEditorEntityReferences(
@@ -106,10 +100,10 @@ export function buildEditorEntityReferences(
     })
   }
 
-  const visibleCategories = input.codexCategories.filter(category => !category.hidden && inWorld(category, worldGroupId))
+  const visibleCategories = input.codexCategories.filter(category => !category.hidden)
   const categoryById = new Map(visibleCategories.map(category => [category.id, category]))
   for (const entry of input.codexEntries) {
-    if (!entry.name.trim() || !inWorld(entry, worldGroupId)) continue
+    if (!entry.name.trim() || !codexEntryInWorld(entry, worldGroupId)) continue
     const category = categoryById.get(entry.categoryId)
     if (!category) continue
     const fields = parseEntryFields(entry.fields)

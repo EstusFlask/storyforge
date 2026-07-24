@@ -66,7 +66,10 @@ export interface CodexCategory {
   /** 是否隐藏（内置分类不可删，但可隐藏） */
   hidden?: boolean
   order: number
-  /** 多世界：所属世界组（null = 主世界/单世界） */
+  /**
+   * 历史兼容字段。分类 schema 由整个项目共享，不按世界复制；
+   * 新数据始终写 null，旧备份中的数值也按项目级分类处理。
+   */
   worldGroupId?: number | null
   createdAt: number
   updatedAt: number
@@ -142,6 +145,31 @@ export function parseEntryRefs(json: string | undefined): Record<string, number[
 
 export function stringifyEntryRefs(refs: Record<string, number[]>): string {
   return JSON.stringify(refs)
+}
+
+/**
+ * Codex 词条的世界作用域判定。
+ *
+ * - `target === undefined`：调用方明确未启用作用域过滤，返回全部（如项目级维护工具）。
+ * - `target === null`：单世界数据，只读取尚未归属世界组的词条。
+ * - `target === number`：多世界数据，只读取该世界的词条；null 不是“全局词条”。
+ *
+ * 开启多世界时，stampPrimaryWorld 会把既有 null 词条迁移到主世界。因此把 null
+ * 继续视为全局会让迁移后新建错位数据泄漏到所有世界。
+ */
+export function codexEntryInWorld(
+  entry: Pick<CodexEntry, 'worldGroupId'>,
+  target?: number | null,
+): boolean {
+  if (target === undefined) return true
+  return (entry.worldGroupId ?? null) === (target ?? null)
+}
+
+export function filterCodexEntriesByWorld<T extends Pick<CodexEntry, 'worldGroupId'>>(
+  entries: readonly T[],
+  target?: number | null,
+): T[] {
+  return entries.filter(entry => codexEntryInWorld(entry, target))
 }
 
 // ── 内置分类与字段 schema（预置 seed，见设计文档 3.2） ──────────────

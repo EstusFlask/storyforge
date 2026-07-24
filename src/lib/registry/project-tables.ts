@@ -184,14 +184,14 @@ export const PROJECT_TABLES: TableSpec[] = [
   // (itemSystems 表已于 DB v29 并入 codex.artifact 词条并删除)
 
   // ───────────────────── 词条系统 ─────────────────────
-  { table: db.codexCategories, name: 'codexCategories', owner: 'project', worldScoped: true,
+  { table: db.codexCategories, name: 'codexCategories', owner: 'project',
     exportable: true, tree: { parentField: 'parentId' }, exportIdField: true,
     refs: [{ kind: 'simple', field: 'id', target: 'codexEntries[categoryId]', onDelete: 'cascade' }],
     exportRemap: [
       { field: 'parentId', remapVia: 'codexCategories', selfTree: true, exportAs: '_parentExportId' },
       { field: 'worldGroupId', remapVia: 'worldGroups', exportAs: '_worldGroupExportId' },
     ],
-    note: '内置分类(builtInKey 非空)保持 worldGroupId=null 全局,不盖章不按世界删' },
+    note: '分类 schema 项目级共享；worldGroupId 仅为旧备份兼容字段，不参与世界生命周期' },
 
   { table: db.codexEntries, name: 'codexEntries', owner: 'project', worldScoped: true,
     exportable: true,

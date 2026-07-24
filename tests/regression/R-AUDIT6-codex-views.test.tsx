@@ -111,13 +111,15 @@ describe('AUDIT-6 / HEALTH-4 · 词条受控视图', () => {
     const mineral = category({ id: 2, domain: 'natural', name: '矿物灵材', builtInKey: 'mineral' })
     const city = category({ id: 3, name: '城池', builtInKey: 'city' })
     const host = await mount(createElement(CodexEntryDetail, {
-      entry: entry({ importance: 2 }),
+      entry: entry({ importance: 2, worldGroupId: 7 }),
       category: artifact,
       allCategories: [artifact, mineral, city],
       allEntries: [
-        entry(),
-        entry({ id: 11, categoryId: 2, name: '秘银' }),
-        entry({ id: 12, categoryId: 3, name: '镜城' }),
+        entry({ worldGroupId: 7 }),
+        entry({ id: 11, categoryId: 2, name: '秘银', worldGroupId: 7 }),
+        entry({ id: 12, categoryId: 3, name: '镜城', worldGroupId: 7 }),
+        entry({ id: 13, categoryId: 2, name: '异界银', worldGroupId: 8 }),
+        entry({ id: 14, categoryId: 2, name: '未迁移银', worldGroupId: null }),
       ],
       nameDuplicate: true,
       onChange,

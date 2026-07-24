@@ -22,6 +22,7 @@ describe('R-EDITOR4 · editor entity references', () => {
       codexEntries: [
         { id: 11, projectId: 1, categoryId: 10, name: '玄门', summary: '修行势力', description: '', fields: '{}', order: 0, worldGroupId: 2, createdAt: 1, updatedAt: 1 },
         { id: 12, projectId: 1, categoryId: 10, name: '魔域', summary: '错误世界', description: '', fields: '{}', order: 1, worldGroupId: 3, createdAt: 1, updatedAt: 1 },
+        { id: 13, projectId: 1, categoryId: 10, name: '旧空域', summary: '未迁移词条', description: '', fields: '{}', order: 2, worldGroupId: null, createdAt: 1, updatedAt: 1 },
       ],
     })
 

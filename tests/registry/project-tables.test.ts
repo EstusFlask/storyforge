@@ -13,6 +13,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { db } from '../../src/lib/db/schema'
 import { PROJECT_TABLES } from '../../src/lib/registry/project-tables'
 import { checkRegistry } from '../../src/lib/registry/validate'
+import { parseEntryRefs } from '../../src/lib/types/codex'
 import {
   projectScopedTables, worldScopedTables, exportableTables,
   transactionTablesFor, cascadeDeleteProject, cascadeDeleteGroup, stampPrimaryWorld,
@@ -42,11 +43,12 @@ describe('Phase 1.1a · PROJECT_TABLES 注册表', () => {
       for (const t of [
         'worldviews', 'powerSystems', 'geographies', 'histories', 'worldNodes',
         'historicalTimelineEvents', 'historicalKeywords', 'outlineNodes',
-        'codexCategories', 'codexEntries', 'worldRulesProfiles',
+        'codexEntries', 'worldRulesProfiles',
         'knowledgeLedger',
       ]) {
         expect(names, `worldScoped 应含 ${t}`).toContain(t)
       }
+      expect(names, '词条分类 schema 应为项目级共享').not.toContain('codexCategories')
     })
 
     it('exportableTables 不含 global/transient/统计表', () => {
@@ -115,7 +117,7 @@ describe('Phase 1.1a · PROJECT_TABLES 注册表', () => {
       expect(await db.importFiles.count(), 'importFiles 应全清(间接归属 blob)').toBe(0)
     })
 
-    it('cascadeDeleteGroup 删世界数据 + 内置词条分类保留 + 大纲 setNull', async () => {
+    it('cascadeDeleteGroup 删世界数据 + 所有词条分类保留 + 大纲 setNull', async () => {
       const now = Date.now()
       const projectId = await db.projects.add({
         name: 'P', genre: '', description: '', targetWordCount: 0,
@@ -126,9 +128,18 @@ describe('Phase 1.1a · PROJECT_TABLES 注册表', () => {
       } as any) as number
 
       await db.worldviews.add({ projectId, worldGroupId: wgId, worldOrigin: 'x', createdAt: now, updatedAt: now } as any)
-      await db.codexEntries.add({ projectId, worldGroupId: wgId, categoryId: 0, name: '玄铁', fields: '{}', refs: '{}', createdAt: now, updatedAt: now } as any)
       // 内置词条分类(builtInKey 非空,worldGroupId=null)应保留
-      await db.codexCategories.add({ projectId, worldGroupId: null, builtInKey: 'mineral', domain: 'natural', name: '矿物', createdAt: now, updatedAt: now } as any)
+      const categoryId = await db.codexCategories.add({ projectId, worldGroupId: null, builtInKey: 'mineral', domain: 'natural', name: '矿物', createdAt: now, updatedAt: now } as any) as number
+      // 自定义分类也是项目级共享 schema，即使旧备份带 worldGroupId 也不能随世界删除
+      await db.codexCategories.add({ projectId, worldGroupId: wgId, domain: 'natural', name: '旧自定义分类', createdAt: now, updatedAt: now } as any)
+      const doomedEntryId = await db.codexEntries.add({
+        projectId, worldGroupId: wgId, categoryId, name: '玄铁', fields: '{}', refs: '{}',
+        createdAt: now, updatedAt: now,
+      } as any) as number
+      const survivorId = await db.codexEntries.add({
+        projectId, worldGroupId: 999, categoryId, name: '异界器物', fields: '{}',
+        refs: JSON.stringify({ material: [doomedEntryId] }), createdAt: now, updatedAt: now,
+      } as any) as number
       // 大纲卷挂该世界 → 应被 setNull 不删
       const nodeId = await db.outlineNodes.add({ projectId, worldGroupId: wgId, parentId: null, type: 'volume', title: '第一卷', summary: '', order: 0, createdAt: now, updatedAt: now } as any) as number
 
@@ -141,7 +152,8 @@ describe('Phase 1.1a · PROJECT_TABLES 注册表', () => {
       const ceLeft = (await db.codexEntries.where('projectId').equals(projectId).toArray())
         .filter((e: any) => e.worldGroupId === wgId)
       expect(ceLeft.length, '词条删').toBe(0)
-      expect(await db.codexCategories.count(), '内置分类保留').toBe(1)
+      expect(await db.codexCategories.count(), '内置和自定义分类都保留').toBe(2)
+      expect(parseEntryRefs((await db.codexEntries.get(survivorId))?.refs).material, '跨世界悬空引用清理').toEqual([])
       const node = await db.outlineNodes.get(nodeId)
       expect(node?.worldGroupId ?? null, '大纲卷 setNull 不删').toBeNull()
       expect(await db.worldGroups.get(wgId), '世界组本身删').toBeUndefined()

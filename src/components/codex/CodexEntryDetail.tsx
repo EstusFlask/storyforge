@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react'
 import { ChevronRight, Star } from 'lucide-react'
 import { CInput, CTextarea } from '../shared/CompositionInput'
 import {
+  codexEntryInWorld,
   parseEntryFields,
   parseEntryRefs,
   parseFieldSchema,
@@ -118,6 +119,7 @@ export default function CodexEntryDetail({
           allCategories={allCategories}
           allEntries={allEntries}
           currentEntryId={entry.id!}
+          worldGroupId={entry.worldGroupId ?? null}
           onValue={value => setField(definition.key, value)}
           onRef={ids => setRef(definition.key, ids)}
         />
@@ -133,6 +135,7 @@ function CodexFieldRow({
   allCategories,
   allEntries,
   currentEntryId,
+  worldGroupId,
   onValue,
   onRef,
 }: {
@@ -142,6 +145,7 @@ function CodexFieldRow({
   allCategories: CodexCategory[]
   allEntries: CodexEntry[]
   currentEntryId: number
+  worldGroupId: number | null
   onValue: (value: string) => void
   onRef: (ids: number[]) => void
 }) {
@@ -172,6 +176,7 @@ function CodexFieldRow({
             allCategories={allCategories}
             allEntries={allEntries}
             currentEntryId={currentEntryId}
+            worldGroupId={worldGroupId}
             onChange={onRef}
           />
         )}
@@ -191,6 +196,7 @@ function CodexRefSelector({
   allCategories,
   allEntries,
   currentEntryId,
+  worldGroupId,
   onChange,
 }: {
   refCategory?: string
@@ -199,6 +205,7 @@ function CodexRefSelector({
   allCategories: CodexCategory[]
   allEntries: CodexEntry[]
   currentEntryId: number
+  worldGroupId: number | null
   onChange: (ids: number[]) => void
 }) {
   const [open, setOpen] = useState(false)
@@ -208,9 +215,10 @@ function CodexRefSelector({
       : []
     return allEntries
       .filter(entry => entry.id !== currentEntryId)
+      .filter(entry => codexEntryInWorld(entry, worldGroupId))
       .filter(entry => hintCategoryIds.length === 0 || hintCategoryIds.includes(entry.categoryId))
       .sort((left, right) => left.name.localeCompare(right.name))
-  }, [allCategories, allEntries, currentEntryId, refCategory])
+  }, [allCategories, allEntries, currentEntryId, refCategory, worldGroupId])
   const selected = allEntries.filter(entry => value.includes(entry.id!))
 
   const toggle = (id: number) => {

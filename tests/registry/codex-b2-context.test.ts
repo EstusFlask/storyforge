@@ -39,4 +39,31 @@ describe('Codex B2 · 词条进生成上下文', () => {
     expect(r.text).toContain('玄铁精')        // 词条名进上下文 → AI 可调用
     expect(r.text).toContain('玄铁结晶')
   })
+
+  it('多世界只读取目标世界词条，不把 null 误当成跨世界全局词条', async () => {
+    const projectId = await seedWithCodexEntry()
+    const category = await db.codexCategories.where('projectId').equals(projectId).first()
+    const now = Date.now()
+    await db.codexEntries.bulkAdd([
+      {
+        projectId, categoryId: category!.id!, name: '镜界玄铁', summary: '镜界专属',
+        description: '', fields: '{}', order: 1, worldGroupId: 7,
+        createdAt: now, updatedAt: now,
+      } as any,
+      {
+        projectId, categoryId: category!.id!, name: '雾界玄铁', summary: '雾界专属',
+        description: '', fields: '{}', order: 2, worldGroupId: 8,
+        createdAt: now, updatedAt: now,
+      } as any,
+    ])
+
+    const mirror = await assembleContext({ projectId, worldGroupId: 7, sourceKeys: ['codex'] })
+    expect(mirror.text).toContain('镜界玄铁')
+    expect(mirror.text).not.toContain('雾界玄铁')
+    expect(mirror.text).not.toContain('玄铁精')
+
+    const singleWorld = await assembleContext({ projectId, worldGroupId: null, sourceKeys: ['codex'] })
+    expect(singleWorld.text).toContain('玄铁精')
+    expect(singleWorld.text).not.toContain('镜界玄铁')
+  })
 })
