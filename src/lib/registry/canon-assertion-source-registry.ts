@@ -4,7 +4,12 @@
  * 模型只能引用本表登记的 table/field/predicate 闭集。这里不保存用户数据，只定义
  * 哪些现有设定字段可以成为可追溯 Canon 的证据来源。
  */
-export type CanonAssertionSourceTable = 'worldviews' | 'powerSystems' | 'storyCores' | 'characters'
+export type CanonAssertionSourceTable =
+  | 'worldviews'
+  | 'powerSystems'
+  | 'cultivationSystems'
+  | 'storyCores'
+  | 'characters'
 
 export interface CanonAssertionSourceFieldSpec {
   field: string
@@ -37,6 +42,14 @@ export const CANON_ASSERTION_SOURCE_REGISTRY: readonly CanonAssertionSourceSpec[
       { field: 'description', label: '体系描述', predicates: ['magicSource'] },
       { field: 'levels', label: '力量等级', predicates: ['powerCeiling'] },
       { field: 'rules', label: '体系规则', predicates: ['magicSource', 'deityAuthority', 'powerCeiling'] },
+    ],
+  },
+  {
+    table: 'cultivationSystems',
+    label: '修炼体系',
+    fields: [
+      { field: 'description', label: '流派描述', predicates: ['magicSource', 'powerCeiling'] },
+      { field: 'stages', label: '境界图谱', predicates: ['powerCeiling'] },
     ],
   },
   {

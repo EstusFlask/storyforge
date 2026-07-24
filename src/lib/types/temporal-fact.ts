@@ -115,6 +115,7 @@ export interface TemporalFact {
   /** CONSISTENCY-3：可移植的设定来源 FK；旧多态 sourceRecordId 仅保留兼容。 */
   sourceWorldviewId?: number | null
   sourcePowerSystemId?: number | null
+  sourceCultivationSystemId?: number | null
   sourceStoryCoreId?: number | null
   sourceCharacterId?: number | null
   /** 来源字段必须来自 CANON_ASSERTION_SOURCE_REGISTRY。 */

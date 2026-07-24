@@ -32,6 +32,10 @@ describe('WORLD-1 · Codex 引用生命周期', () => {
       refs: JSON.stringify({ material: [targetId], related: [targetId] }),
       order: 1, worldGroupId: null, createdAt: now, updatedAt: now,
     } as any) as number
+    const characterId = await db.characters.add({
+      projectId, name: '林舟', role: 'protagonist', raceEntryId: targetId,
+      createdAt: now, updatedAt: now,
+    } as any) as number
 
     await useCodexStore.getState().loadExisting(projectId)
     await useCodexStore.getState().deleteEntry(targetId)
@@ -41,5 +45,6 @@ describe('WORLD-1 · Codex 引用生命周期', () => {
       material: [],
       related: [],
     })
+    expect((await db.characters.get(characterId))?.raceEntryId ?? null).toBeNull()
   })
 })

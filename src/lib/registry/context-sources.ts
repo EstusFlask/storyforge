@@ -21,6 +21,7 @@ import {
   getContextMemo,
 } from '../ai/context-builder'
 import { buildCodexContext } from '../ai/codex-context'
+import { buildCultivationContext } from '../ai/cultivation-context'
 import { buildWorldRulesContext } from '../ai/world-rules-manifest'
 import { formatHandoff } from '../ai/chapter-memory/handoff-format'
 import { getChapterDerivedMemoryStatus, normalizeChapterText } from '../ai/chapter-memory/text-normalization'
@@ -628,7 +629,14 @@ export const CONTEXT_SOURCES: ContextSource[] = [
     layer: 'L2',
     budgetTokens: 4000, // 放宽:容下完整力量体系(描述/等级/规则)
     requiresWorldGroupId: true,
-    read: async input => formatPowerSystemBlock(await readPowerSystem(input.projectId, input.worldGroupId)),
+    read: async input => {
+      const [foundation, cultivation] = await Promise.all([
+        readPowerSystem(input.projectId, input.worldGroupId)
+          .then(formatPowerSystemBlock),
+        buildCultivationContext(input.projectId, input.worldGroupId),
+      ])
+      return [foundation, cultivation].filter(Boolean).join('\n')
+    },
   },
   {
     key: 'codex',

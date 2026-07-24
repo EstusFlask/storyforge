@@ -28,6 +28,7 @@ import type {
   KnowledgeLedgerEntry,
   StorylineProgress,
   StorylineCrossing,
+  CultivationSystem,
 } from '../types'
 import type { TemporalFact } from '../types/temporal-fact'
 
@@ -111,6 +112,8 @@ export interface ProjectExportData {
   worldRulesProfiles?: (Omit<WorldRulesProfile, 'id' | 'projectId' | 'worldGroupId'> & WorldGroupExportRef)[]
   codexCategories?: (Omit<CodexCategory, 'id' | 'projectId' | 'parentId' | 'worldGroupId'> & WorldGroupExportRef & { _exportId: number; _parentExportId: number | null })[]
   codexEntries?: (Omit<CodexEntry, 'id' | 'projectId' | 'categoryId' | 'worldGroupId'> & WorldGroupExportRef & { _categoryExportId: number })[]
+  /** WORLD-1 / Phase 37 修炼流派与境界 DAG（角色/异兽 FK 由注册表重映射）。 */
+  cultivationSystems?: (Omit<CultivationSystem, 'id' | 'projectId' | 'worldGroupId'> & WorldGroupExportRef & { _exportId: number })[]
 }
 
 /** 导出项目为 JSON(注册表派生) */

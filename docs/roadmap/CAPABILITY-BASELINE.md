@@ -161,20 +161,28 @@
 
 ### 已有能力
 
-- Codex 分类、词条、字段 schema、引用选择器和多世界作用域已存在。
+- Codex 分类 schema 项目级共享、词条严格按世界隔离；手动新增、AI 拆分、编辑器提示、
+  ref 选择和 AI 上下文使用同一作用域判定。删词条/世界会清理 JSON 引用和角色种族 FK。
 - 世界规则、多世界、历史年表、重要地点、地图和角色设计已有产品能力。
 - Phase 36 已为上游设定、正文、下游产物和系统入口建立内容类型标记。
+- Phase 37-a 已交付：DB v41 `cultivationSystems`、多套体系、境界 DAG 分叉/合流编辑、
+  角色种族/主修/当前设定境界、异兽体系/境界关联、世界宪法来源、AI 上下文以及
+  项目/世界/删除/迁移/导出导入生命周期。
 
 ### 当前边界 / 尚未完成
 
 - 自然/人文词条分类、人工器物并入、势力合并、历史线归并尚未完整收口。
 - 自定义分类/字段与 AI 导入分类仍需完整端到端交付。
-- 修炼体系、角色力量阶段和异兽关联仍未形成完整下游产物。
+- Phase 34 的逐章修炼进度、突破候选、作者确认和历程视图仍未交付；角色卡当前境界
+  是上游设定，不冒充正文派生的下游进度。
 - 地图的距离、规模和相对位置增强仍待设计确认。
 
 ### 代码与设计入口
 
 - `src/components/codex/CodexPanel.tsx`
+- `src/components/worldview/CultivationSystemsPanel.tsx`
+- `src/lib/types/cultivation.ts`
+- `src/lib/ai/cultivation-context.ts`
 - `src/lib/registry/project-tables.ts`
 - `docs/CODEX-REDESIGN.md`
 - `docs/WORLD-RULES-MULTIWORLD-DESIGN.md`

@@ -11,6 +11,7 @@ import CharacterAxesPicker from './CharacterAxesPicker'
 import CharacterDimensionFields from './CharacterDimensionFields'
 import CharacterStatusPanel from './CharacterStatusPanel'
 import CharacterSupplementAction from './CharacterSupplementAction'
+import CharacterWorldAffiliations from './CharacterWorldAffiliations'
 
 interface Props {
   char: Character
@@ -61,7 +62,13 @@ export default function CharacterDetailCard({
                   const value = event.target.value
                   onPatch(value === 'cross'
                     ? { isCrossWorld: true, homeWorldGroupId: null }
-                    : { isCrossWorld: false, homeWorldGroupId: value ? Number(value) : null })
+                    : {
+                        isCrossWorld: false,
+                        homeWorldGroupId: value ? Number(value) : null,
+                        raceEntryId: null,
+                        cultivationSystemId: null,
+                        cultivationStageId: null,
+                      })
                 }}
                 className="px-1.5 py-0.5 bg-bg-elevated text-text-secondary text-[10px] rounded border border-border focus:outline-none focus:border-accent cursor-pointer"
                 title="角色所属世界"
@@ -125,6 +132,13 @@ export default function CharacterDetailCard({
       />
 
       <CharacterStatusPanel projectId={projectId} characterName={char.name} />
+
+      <CharacterWorldAffiliations
+        character={char}
+        projectId={projectId}
+        worldGroups={worldGroups}
+        onChange={onPatch}
+      />
 
       {expanded && (
         <div className="space-y-4">

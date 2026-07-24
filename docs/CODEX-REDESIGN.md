@@ -1,7 +1,7 @@
 # 设定层重构设计文档 — 词条系统 + 修炼体系
 
 > Phase 35（世界观词条化重构）+ Phase 37（修炼体系）+ 关联 Phase 34（力量阶段追踪）/ Phase 36（上下游标记）
-> 状态：**设计定稿**（4 项决策已拍板，修炼体系支持分叉）| 作者构想 + 实现设计
+> 状态：**Phase 35 主体已落地；Phase 37-a 已完成（2026-07-25）；Phase 34 待施工**
 > 配套：`docs/roadmap/README.md`（WORLD-1 当前归属与施工顺序）；原 Phase 34/35/36/37 完整历史见 `docs/ROADMAP-LEGACY.md`。
 
 ---
@@ -319,10 +319,13 @@ export interface CultivationStage {
 
 ## 十一、分期实施
 
-**Phase 37-a 修炼体系（先，独立、是 34 前置）**
-- `cultivationSystems` 表 + store + 面板（多套 + 境界阶梯编辑）
-- 角色卡关联主修体系
-- 验证：能建多套体系、排境界
+**Phase 37-a 修炼体系（✅ 完成 2026-07-25，是 34 前置）**
+- ✅ DB v41 `cultivationSystems` + store + 力量体系页内的多套境界 DAG 编辑
+- ✅ 角色卡关联种族、主修体系和当前设定境界；异兽词条关联体系/境界
+- ✅ 多世界精确隔离、AI 上下文、世界宪法来源、删除/迁移/导出导入生命周期
+- ✅ DAG 可线性、分叉、合流；拒绝重复 ID、悬空父节点、自环和任意有向环
+- 代码入口：`types/cultivation.ts`、`stores/cultivation.ts`、
+  `components/worldview/CultivationSystemsPanel.tsx`、`ai/cultivation-context.ts`
 
 **Phase 35-a 词条地基（✅ 完成 2026-06-04）**
 - ✅ `codexCategories` / `codexEntries` 表（DB v25）+ 内置 7 类分类 seed（含各自 fieldSchema）

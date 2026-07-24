@@ -63,6 +63,12 @@ describe('R-export-fullcoverage · 全表多世界往返安全网', () => {
     const newChars = await db.characters.where('projectId').equals(newId).toArray()
     const newChar1 = newChars.find(c => c.name === '林惊羽')!
     expect(newChar1.homeWorldGroupId).toBe(newWgA)
+    const newCultivation = await db.cultivationSystems.where('projectId').equals(newId).first()
+    const newCodexEntries = await db.codexEntries.where('projectId').equals(newId).toArray()
+    expect(newCultivation?.worldGroupId).toBe(newWgA)
+    expect(newChar1.cultivationSystemId).toBe(newCultivation?.id)
+    expect(newChar1.cultivationStageId).toBe('qi')
+    expect(newChar1.raceEntryId).toBe(newCodexEntries.find(entry => entry.name === '青云宗')?.id)
 
     // 角色关系重映射
     const newRels = await db.characterRelations.where('projectId').equals(newId).toArray()

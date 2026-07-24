@@ -27,8 +27,8 @@ describe('Phase 1.1a · PROJECT_TABLES 注册表', () => {
       expect(result.ok, result.errors.join('; ')).toBe(true)
     })
 
-    it('登记了全部 45 张表', () => {
-      expect(PROJECT_TABLES.length).toBe(45)   // v40 storylineProgress/storylineCrossings→45
+    it('登记了全部 46 张表', () => {
+      expect(PROJECT_TABLES.length).toBe(46)   // v41 cultivationSystems→46
     })
 
     it('每张表名唯一', () => {
@@ -43,7 +43,7 @@ describe('Phase 1.1a · PROJECT_TABLES 注册表', () => {
       for (const t of [
         'worldviews', 'powerSystems', 'geographies', 'histories', 'worldNodes',
         'historicalTimelineEvents', 'historicalKeywords', 'outlineNodes',
-        'codexEntries', 'worldRulesProfiles',
+        'codexEntries', 'worldRulesProfiles', 'cultivationSystems',
         'knowledgeLedger',
       ]) {
         expect(names, `worldScoped 应含 ${t}`).toContain(t)
@@ -140,6 +140,15 @@ describe('Phase 1.1a · PROJECT_TABLES 注册表', () => {
         projectId, worldGroupId: 999, categoryId, name: '异界器物', fields: '{}',
         refs: JSON.stringify({ material: [doomedEntryId] }), createdAt: now, updatedAt: now,
       } as any) as number
+      const systemId = await db.cultivationSystems.add({
+        projectId, worldGroupId: wgId, name: '斗破修炼', description: '', stages: '[]',
+        createdAt: now, updatedAt: now,
+      } as any) as number
+      const characterId = await db.characters.add({
+        projectId, name: '旅者', role: 'protagonist',
+        cultivationSystemId: systemId, cultivationStageId: 'root',
+        createdAt: now, updatedAt: now,
+      } as any) as number
       // 大纲卷挂该世界 → 应被 setNull 不删
       const nodeId = await db.outlineNodes.add({ projectId, worldGroupId: wgId, parentId: null, type: 'volume', title: '第一卷', summary: '', order: 0, createdAt: now, updatedAt: now } as any) as number
 
@@ -154,6 +163,9 @@ describe('Phase 1.1a · PROJECT_TABLES 注册表', () => {
       expect(ceLeft.length, '词条删').toBe(0)
       expect(await db.codexCategories.count(), '内置和自定义分类都保留').toBe(2)
       expect(parseEntryRefs((await db.codexEntries.get(survivorId))?.refs).material, '跨世界悬空引用清理').toEqual([])
+      expect(await db.cultivationSystems.get(systemId), '修炼体系随世界删除').toBeUndefined()
+      expect((await db.characters.get(characterId))?.cultivationSystemId ?? null, '角色修炼关联置空').toBeNull()
+      expect((await db.characters.get(characterId))?.cultivationStageId ?? null, '角色境界关联置空').toBeNull()
       const node = await db.outlineNodes.get(nodeId)
       expect(node?.worldGroupId ?? null, '大纲卷 setNull 不删').toBeNull()
       expect(await db.worldGroups.get(wgId), '世界组本身删').toBeUndefined()
@@ -172,6 +184,10 @@ describe('Phase 1.1a · PROJECT_TABLES 注册表', () => {
       await db.worldviews.add({ projectId, worldOrigin: 'x', createdAt: now, updatedAt: now } as any)
       await db.outlineNodes.add({ projectId, parentId: null, type: 'volume', title: 'V', summary: '', order: 0, createdAt: now, updatedAt: now } as any)
       await db.codexCategories.add({ projectId, worldGroupId: null, builtInKey: 'mineral', domain: 'natural', name: '矿物', createdAt: now, updatedAt: now } as any)
+      const cultivationId = await db.cultivationSystems.add({
+        projectId, worldGroupId: null, name: '单世界修炼', description: '', stages: '[]',
+        createdAt: now, updatedAt: now,
+      } as any) as number
 
       await stampPrimaryWorld(projectId, primaryId)
 
@@ -181,6 +197,7 @@ describe('Phase 1.1a · PROJECT_TABLES 注册表', () => {
       expect(node?.worldGroupId, '大纲盖章').toBe(primaryId)
       const cat = await db.codexCategories.where('projectId').equals(projectId).first()
       expect(cat?.worldGroupId ?? null, '内置分类保持 null 全局').toBeNull()
+      expect((await db.cultivationSystems.get(cultivationId))?.worldGroupId, '修炼体系盖章').toBe(primaryId)
     })
   })
 })

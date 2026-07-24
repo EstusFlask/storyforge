@@ -220,6 +220,9 @@ export const FIELD_REGISTRY: FieldSpec[] = [
   num('characters', 'exitChapterId'),
   num('characters', 'homeWorldGroupId', ['worldGroupId', 'homeWorld']),
   bool('characters', 'isCrossWorld'),
+  num('characters', 'raceEntryId', ['种族词条ID']),
+  num('characters', 'cultivationSystemId', ['修炼体系ID', '主修体系ID']),
+  text('characters', 'cultivationStageId', ['境界ID', '当前境界ID']),
 
   // creativeRules
   longtext('creativeRules', 'writingStyle', ['style', '文风']),
@@ -334,8 +337,16 @@ export const FIELD_REGISTRY: FieldSpec[] = [
   json('codexEntries', 'refs', ['引用']),
   json('codexEntries', 'tags', ['标签']),
   num('codexEntries', 'importance', ['重要度']),
+  num('codexEntries', 'cultivationSystemId', ['修炼体系ID']),
+  text('codexEntries', 'cultivationStageId', ['境界ID', '当前境界ID']),
   num('codexEntries', 'order'),
   num('codexEntries', 'worldGroupId'),
+
+  // WORLD-1 / Phase 37 cultivationSystems
+  text('cultivationSystems', 'name', ['体系名', '修炼体系']),
+  longtext('cultivationSystems', 'description', ['体系描述']),
+  json('cultivationSystems', 'stages', ['境界阶梯', '境界图谱']),
+  num('cultivationSystems', 'worldGroupId'),
 
   // importantLocations / downstream extraction products
   text('importantLocations', 'name', ['地点名']),

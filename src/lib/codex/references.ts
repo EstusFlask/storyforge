@@ -30,4 +30,10 @@ export async function removeCodexEntryReferences(
       })
     }
   }
+  const characters = await db.characters.where('projectId').equals(projectId).toArray()
+  for (const character of characters) {
+    if (character.id != null && character.raceEntryId != null && deletedIds.has(character.raceEntryId)) {
+      await db.characters.update(character.id, { raceEntryId: null, updatedAt: Date.now() })
+    }
+  }
 }

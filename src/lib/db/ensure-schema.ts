@@ -8,6 +8,7 @@ export const REQUIRED_TABLES = [
   'codexCategories',
   'codexEntries',
   'creativeRules',
+  'cultivationSystems',
   'detailedOutlines',
   'emotionBeatCards',
   'foreshadows',

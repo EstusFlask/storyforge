@@ -131,15 +131,17 @@ export async function listSettingAssertionSources(
   projectId: number,
   worldGroupId?: number | null,
 ): Promise<SettingAssertionSource[]> {
-  const [worldviews, powerSystems, storyCores, characters] = await Promise.all([
+  const [worldviews, powerSystems, cultivationSystems, storyCores, characters] = await Promise.all([
     db.worldviews.where('projectId').equals(projectId).toArray(),
     db.powerSystems.where('projectId').equals(projectId).toArray(),
+    db.cultivationSystems.where('projectId').equals(projectId).toArray(),
     db.storyCores.where('projectId').equals(projectId).toArray(),
     db.characters.where('projectId').equals(projectId).toArray(),
   ])
   const records: Record<CanonAssertionSourceTable, Array<Record<string, unknown>>> = {
     worldviews: worldviews as unknown as Array<Record<string, unknown>>,
     powerSystems: powerSystems as unknown as Array<Record<string, unknown>>,
+    cultivationSystems: cultivationSystems as unknown as Array<Record<string, unknown>>,
     storyCores: storyCores as unknown as Array<Record<string, unknown>>,
     characters: characters as unknown as Array<Record<string, unknown>>,
   }
@@ -262,6 +264,7 @@ function sourcePatch(source: SettingAssertionSource): Partial<TemporalFact> {
   }
   if (source.table === 'worldviews') patch.sourceWorldviewId = source.recordId
   if (source.table === 'powerSystems') patch.sourcePowerSystemId = source.recordId
+  if (source.table === 'cultivationSystems') patch.sourceCultivationSystemId = source.recordId
   if (source.table === 'storyCores') patch.sourceStoryCoreId = source.recordId
   if (source.table === 'characters') patch.sourceCharacterId = source.recordId
   return patch
@@ -270,6 +273,7 @@ function sourcePatch(source: SettingAssertionSource): Partial<TemporalFact> {
 function typedSourceRecordId(fact: TemporalFact): number | null {
   if (fact.sourceRecordTable === 'worldviews') return fact.sourceWorldviewId ?? null
   if (fact.sourceRecordTable === 'powerSystems') return fact.sourcePowerSystemId ?? null
+  if (fact.sourceRecordTable === 'cultivationSystems') return fact.sourceCultivationSystemId ?? null
   if (fact.sourceRecordTable === 'storyCores') return fact.sourceStoryCoreId ?? null
   if (fact.sourceRecordTable === 'characters') return fact.sourceCharacterId ?? null
   return null

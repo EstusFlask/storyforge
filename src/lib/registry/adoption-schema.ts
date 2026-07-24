@@ -101,6 +101,13 @@ export const ADOPTION_SCHEMAS: CollectionAdoptionSpec[] = [
     fkChecks: [{ field: 'categoryId', target: 'codexCategories' }],
   },
   {
+    target: 'cultivationSystems',
+    identity: { kind: 'composite', fields: ['worldGroupId', 'name'] },
+    duplicatePolicy: 'merge',
+    required: ['name', 'description', 'stages'],
+    autoStamps: ['projectId', 'worldGroupId', 'createdAt', 'updatedAt'],
+  },
+  {
     target: 'importantLocations',
     identity: 'name',
     duplicatePolicy: 'merge',
@@ -192,6 +199,7 @@ export const ADOPTION_EXTENSIONS: readonly AdoptionExtensionSpec[] = Object.free
       'src/lib/fact-ledger/lifecycle.ts',
       'src/lib/fact-ledger/setting-assertions.ts',
       'src/lib/consistency/impact-analysis.ts',
+      'src/lib/cultivation/lifecycle.ts',
     ],
     policyRegistry: 'FACT_PREDICATE_REGISTRY',
     reason: '事实候选需要谓词、时序、证据、确认与 supersede 领域约束；它是 adopt 的受控领域扩展，不是第二套通用写回层。',
@@ -200,9 +208,13 @@ export const ADOPTION_EXTENSIONS: readonly AdoptionExtensionSpec[] = Object.free
   {
     id: 'character-merge-lifecycle',
     target: 'characters',
-    entrypoints: ['src/lib/import/character-merge.ts'],
-    policyRegistry: 'PROJECT_TABLES refs + remapCharacterReferences',
-    reason: '角色合并同时包含主记录删除与跨表引用重映射，不能用通用字段 merge 代替；普通角色新增和更新仍必须走 adopt。',
+    entrypoints: [
+      'src/lib/import/character-merge.ts',
+      'src/lib/codex/references.ts',
+      'src/lib/cultivation/lifecycle.ts',
+    ],
+    policyRegistry: 'PROJECT_TABLES refs + remapCharacterReferences + cultivation DAG validator',
+    reason: '角色合并及上游实体删除都需要在事务内重映射或置空跨表引用；普通角色新增和更新仍必须走 adopt。',
     reviewAfter: '2027-01-01',
   },
   {
@@ -238,6 +250,25 @@ export const ADOPTION_EXTENSIONS: readonly AdoptionExtensionSpec[] = Object.free
     entrypoints: ['src/lib/storyline/lifecycle.ts'],
     policyRegistry: 'PROJECT_TABLES refs',
     reason: '删除静态 StoryArc 时必须与动态进度和交汇在同一事务内完成硬级联，避免孤儿投影。',
+    reviewAfter: '2027-01-01',
+  },
+  {
+    id: 'cultivation-codex-reference-lifecycle',
+    target: 'codexEntries',
+    entrypoints: [
+      'src/lib/codex/references.ts',
+      'src/lib/cultivation/lifecycle.ts',
+    ],
+    policyRegistry: 'PROJECT_TABLES refs + cultivation DAG validator',
+    reason: '删除词条、世界、修炼体系或境界节点时必须原子清理词条 JSON 引用及异兽体系/阶段引用。',
+    reviewAfter: '2027-01-01',
+  },
+  {
+    id: 'codex-category-scope-lifecycle',
+    target: 'codexCategories',
+    entrypoints: ['src/lib/registry/lifecycle.ts'],
+    policyRegistry: 'PROJECT_TABLES lifecycle',
+    reason: '分类 schema 已改为项目级共享；删除世界时需原子清除旧备份残留的 worldGroupId，而不是删除分类。',
     reviewAfter: '2027-01-01',
   },
 ])

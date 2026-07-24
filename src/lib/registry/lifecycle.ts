@@ -15,6 +15,7 @@
 import type { Table } from 'dexie'
 import { db } from '../db/schema'
 import { removeCodexEntryReferences } from '../codex/references'
+import { clearCultivationSystemReferences } from '../cultivation/lifecycle'
 import { PROJECT_TABLES } from './project-tables'
 import type { TableSpec } from './types'
 
@@ -53,6 +54,7 @@ export function transactionTablesFor(
     // 删世界组:所有 worldScoped 表 + 角色(homeWorldGroupId setNull)+ 大纲(worldGroupId setNull)+ 世界组本身
     const set = new Set<Table>(worldScopedTables().map(s => s.table))
     set.add(db.characters)
+    set.add(db.codexCategories)
     set.add(db.outlineNodes)
     set.add(db.worldGroups)
     set.add(db.worldGroupLinks)
@@ -145,6 +147,14 @@ async function deleteBlobsInTransaction(
 
 export async function cascadeDeleteGroup(projectId: number, wgId: number): Promise<void> {
   await db.transaction('rw', transactionTablesFor('deleteGroup'), async () => {
+    // 分类 schema 已改为项目级共享；旧备份可能仍带 worldGroupId。删除世界时只清
+    // 这个历史归属值，绝不删除分类及其它世界复用的字段结构。
+    const legacyCategories = await db.codexCategories.where('projectId').equals(projectId).toArray()
+    for (const category of legacyCategories) {
+      if (category.id != null && category.worldGroupId === wgId) {
+        await db.codexCategories.update(category.id, { worldGroupId: null, updatedAt: Date.now() })
+      }
+    }
     for (const spec of worldScopedTables()) {
       const wgField = spec.worldGroupField ?? 'worldGroupId'
 
@@ -164,6 +174,16 @@ export async function cascadeDeleteGroup(projectId: number, wgId: number): Promi
           .filter((id): id is number => id != null))
         await removeCodexEntryReferences(projectId, deletedIds)
         if (deletedIds.size) await db.codexEntries.bulkDelete([...deletedIds])
+        continue
+      }
+      if (spec.name === 'cultivationSystems') {
+        const rows = await db.cultivationSystems.where('projectId').equals(projectId).toArray()
+        const deletedIds = new Set(rows
+          .filter(row => row.worldGroupId === wgId)
+          .map(row => row.id)
+          .filter((id): id is number => id != null))
+        await clearCultivationSystemReferences(projectId, deletedIds)
+        if (deletedIds.size) await db.cultivationSystems.bulkDelete([...deletedIds])
         continue
       }
 

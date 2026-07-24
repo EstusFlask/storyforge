@@ -31,6 +31,14 @@ export async function seedFullProject() {
   await db.historicalTimelineEvents.add({ projectId, worldGroupId: wgA, title: '封神之战', year: -1000, createdAt: now, updatedAt: now } as any)
   await db.historicalKeywords.add({ projectId, worldGroupId: wgA, keyword: '神器', createdAt: now, updatedAt: now } as any)
   await db.worldRulesProfiles.add({ projectId, worldGroupId: wgA, rules: '魔法守恒', createdAt: now, updatedAt: now } as any)
+  const cultivationSystem = await db.cultivationSystems.add({
+    projectId, worldGroupId: wgA, name: '青云剑修', description: '以灵气淬剑',
+    stages: JSON.stringify([
+      { id: 'qi', name: '炼气', parentStageIds: [] },
+      { id: 'foundation', name: '筑基', parentStageIds: ['qi'], breakthrough: '筑成道基' },
+    ]),
+    createdAt: now, updatedAt: now,
+  }) as number
 
   // ── worldNodes(树 + portalsJSON 自引用,wgA) ──
   const rootWorld = await db.worldNodes.add({ projectId, worldGroupId: wgA, parentId: null, name: '主世界', description: '起点', sortOrder: 0, createdAt: now, updatedAt: now } as any) as number
@@ -42,7 +50,11 @@ export async function seedFullProject() {
   await db.importantLocations.add({ projectId, parentId: locParent, name: '青云峰', type: 'peak', createdAt: now, updatedAt: now } as any)
 
   // ── 角色(homeWorldScoped:一个挂 wgA,一个跨世界) ──
-  const char1 = await db.characters.add({ projectId, homeWorldGroupId: wgA, name: '林惊羽', role: 'protagonist', personality: '坚毅', createdAt: now, updatedAt: now } as any) as number
+  const char1 = await db.characters.add({
+    projectId, homeWorldGroupId: wgA, name: '林惊羽', role: 'protagonist', personality: '坚毅',
+    cultivationSystemId: cultivationSystem, cultivationStageId: 'qi',
+    createdAt: now, updatedAt: now,
+  } as any) as number
   const char2 = await db.characters.add({ projectId, isCrossWorld: true, name: '苏长歌', role: 'supporting', createdAt: now, updatedAt: now } as any) as number
   await db.characterRelations.add({ projectId, fromCharacterId: char1, toCharacterId: char2, type: 'ally', description: '同门', createdAt: now, updatedAt: now } as any)
 
@@ -97,7 +109,12 @@ export async function seedFullProject() {
   // ── 词条(树,wgA) ──
   const cat = await db.codexCategories.add({ projectId, worldGroupId: wgA, parentId: null, name: '势力', order: 0, createdAt: now, updatedAt: now } as any) as number
   const subCat = await db.codexCategories.add({ projectId, worldGroupId: wgA, parentId: cat, name: '宗门', order: 0, createdAt: now, updatedAt: now } as any) as number
-  await db.codexEntries.add({ projectId, worldGroupId: wgA, categoryId: subCat, name: '青云宗', summary: '正道魁首', createdAt: now, updatedAt: now } as any)
+  const codexEntry = await db.codexEntries.add({
+    projectId, worldGroupId: wgA, categoryId: subCat, name: '青云宗', summary: '正道魁首',
+    createdAt: now, updatedAt: now,
+  } as any) as number
+  // 全表 FK 往返只验证 codexEntries ID 重映射；race 类别语义由角色关联测试单独覆盖。
+  await db.characters.update(char1, { raceEntryId: codexEntry })
 
   // ── FB-5 文风画像 ──
   await db.userStyleProfiles.add({ projectId, profile: '简洁明快', enabled: true, createdAt: now, updatedAt: now } as any)
@@ -113,7 +130,7 @@ export async function seedFullProject() {
     sourceQuote: '废墟中睁眼', status: 'confirmed', createdAt: now, updatedAt: now,
   })
 
-  return { projectId, wgA, wgB, char1, char2, vol, chapNode, chapter, temporalFact, ref1, cat, subCat, rootWorld, mirrorWorld, locParent }
+  return { projectId, wgA, wgB, char1, char2, vol, chapNode, chapter, temporalFact, ref1, cat, subCat, rootWorld, mirrorWorld, locParent, cultivationSystem, codexEntry }
 }
 
 /** 所有 exportable 的项目级表名(可按 projectId 查;排除 projects 与 direct-child referenceChunkAnalysis) */

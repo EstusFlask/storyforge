@@ -44,6 +44,7 @@ import type {
   CodexEntry,
   StorylineProgress,
   StorylineCrossing,
+  CultivationSystem,
 } from '../types'
 import type { AIUsageEntry } from '../ai/usage-log'
 import type { TemporalFact } from '../types/temporal-fact'
@@ -117,6 +118,9 @@ class StoryForgeDB extends Dexie {
   // Phase 35-a —— 词条系统（Codex）
   codexCategories!: Table<CodexCategory, number>
   codexEntries!: Table<CodexEntry, number>
+
+  // WORLD-1 / Phase 37 —— 世界级修炼流派与境界 DAG
+  cultivationSystems!: Table<CultivationSystem, number>
 
   // FB-5 —— 自适应文风学习（每项目一份 AI 文风画像）
   userStyleProfiles!: Table<UserStyleProfile, number>
@@ -400,6 +404,12 @@ class StoryForgeDB extends Dexie {
     this.version(40).stores({
       storylineProgress: '++id, &arcId, projectId, status, lastActiveChapterId',
       storylineCrossings: '++id, projectId, arcIdA, arcIdB, chapterId',
+    })
+
+    // v41: Phase 37-a 修炼体系。纯新增表；角色/词条上的关联字段均非索引，
+    // 旧项目保持 null/undefined，不从自由文本 powerLevel 猜测结构化归属。
+    this.version(41).stores({
+      cultivationSystems: '++id, projectId, worldGroupId, name',
     })
   }
 }

@@ -1868,3 +1868,42 @@ release metadata、ESLint、TypeScript、生产 build、bundle budget 与
 
 👉 PIPE-1 已完成；严格路线下一单位为 WORLD-1。外部复审重点：节点默认不采纳、
 闭集 gate 的诚实边界、当前章节正式入口和 `outlineNodeId` 投影时点。
+
+### [2026-07-25] Codex · REPORT · WORLD-1 第一阶段 / Codex 世界隔离 + Phase 37-a 修炼体系 DAG / `feat/world-1-model`
+
+本分支先以 `73e68f4` 冻结 Codex 作用域契约：分类与字段 schema 是项目级共享定义，
+词条在单世界和多世界中均按目标世界精确匹配；`worldGroupId = null` 只表示单世界，
+不再被多世界查询误当作全局词条。手动创建、AI 拆分采纳、重复检测、列表、编辑器实体
+提示、ref 选择和 AI 上下文共用同一判定。删除词条、分类或世界时，同一事务清理其余
+词条 JSON 引用和角色 `raceEntryId`；旧分类残留的世界 ID 在删世界时只置空，保留共享
+schema，不误删整类。
+
+Phase 37-a 新增 DB v41 `cultivationSystems`，但迁移保持空初始化：旧自由文本不能可靠
+推断体系与境界，不做有损猜测。四问：AI 通过既有 `powerSystem` 上下文源读取当前世界
+底层能量与结构化修炼体系；没有新增 AI 直写入口；体系作为世界宪法来源时仍只生成
+`candidate`，作者负责确认；新表及角色、异兽、Canon 来源 FK 全部进入三注册表、项目/
+世界生命周期和完整导出导入重映射。
+
+每个体系可维护多套 `CultivationStage` DAG，支持线性、分叉、多父节点合流和稳定层级
+计算；保存前拒绝重复 ID、空名称、悬空父节点、自环和任意有向环。世界起源的正式
+“力量体系”入口区分世界底层能量与具体修炼流派；角色卡新增结构化种族、主修体系与
+当前设定境界，异兽词条新增体系/境界选择。旧异兽自由文本字段只降为兼容备注，不删除
+用户数据。体系或阶段删除会原子清理角色、异兽和 Canon 引用；来源修改把旧断言标为
+`stale`，来源删除降为 `source-missing`。
+
+真实入口验证发现新面板最初只挂在已从侧栏移除的 legacy `power-system` 路由，组件级
+测试无法证明用户可达；现已接入当前“世界起源 → 力量体系”正式路径，并为三个字段按钮
+补充稳定无障碍名称。新增 Chromium E2E 从新建项目开始，完成“进入正式入口 → 新建剑修
+体系 → 建立炼体/筑基前后置 DAG → 新建角色 → 关联主修和当前境界 → 刷新恢复”全链路，
+不读写用户现有项目。
+
+完整验证：197 files / 677 tests 全绿；覆盖率 statements/lines 68.16%、branches
+73.30%、functions 69.40%；46 required tables、AI manual、architecture、437 个生产
+源码可达、roadmap、agent-context、canon coverage、project metrics、release
+metadata、ESLint、TypeScript、生产 build、bundle budget 与 `git diff --check`
+全绿；Chromium E2E 10/10。依赖门禁仍只被 React Router
+`GHSA-qwww-vcr4-c8h2` 的 2 个 high 公告阻塞；`npm audit fix --force` 会破坏性降级
+`react-router-dom@7.11.0`，未执行。
+
+👉 WORLD-1 下一阶段按路线进入 Phase 34：把当前角色卡“设定境界”与正文逐章派生的
+修炼进度严格分层，先冻结候选提取、作者确认、章节时点和删除/导出生命周期，再施工。

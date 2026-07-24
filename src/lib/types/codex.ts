@@ -97,6 +97,10 @@ export interface CodexEntry {
    * 也可用于任意词条。未设/0 表示未标记。非索引字段，零 DB 迁移。
    */
   importance?: number
+  /** 异兽等词条采用的修炼体系（WORLD-1）。 */
+  cultivationSystemId?: number | null
+  /** 该词条在所选体系中的当前境界 stage id。 */
+  cultivationStageId?: string | null
   order: number
   worldGroupId?: number | null
   createdAt: number
@@ -214,9 +218,9 @@ export const BUILTIN_CATEGORIES: BuiltInCategorySeed[] = [
     domain: 'natural', builtInKey: 'beast', name: '灵兽异兽', icon: '🐅',
     fields: [
       { key: 'kind', label: '类别', type: 'select', options: ['走兽', '飞禽', '水族', '虫豸', '异种'] },
-      // Phase 37 修炼体系落地后升级为 ref→cultivationSystems；当前以文本占位
-      { key: 'cultivation', label: '修炼体系', type: 'text', placeholder: '所属修炼体系（Phase 37 后可关联）' },
-      { key: 'realm', label: '当前境界', type: 'text' },
+      // WORLD-1 已有结构化关联；保留这两个旧文本字段承载老项目无法自动推断的数据。
+      { key: 'cultivation', label: '修炼体系（旧文本备注）', type: 'text', placeholder: '旧数据兼容；新数据请使用上方结构化关联' },
+      { key: 'realm', label: '境界（旧文本备注）', type: 'text' },
       { key: 'body', label: '体型外貌', type: 'longtext' },
       { key: 'habit', label: '习性性情', type: 'longtext' },
       { key: 'habitat', label: '栖息地', type: 'text' },

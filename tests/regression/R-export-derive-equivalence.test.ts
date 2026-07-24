@@ -56,6 +56,19 @@ function normalize(data: any) {
     delete row._srcPowerSystemExportId
     delete row._srcStoryCoreExportId
     delete row._srcCharacterExportId
+    delete row._srcCultivationSystemExportId
+  }
+  // WORLD-1:修炼体系及角色/词条的新便携 FK 没有旧 fixture 对应字段；
+  // 新表和这些 FK 的往返由 R-export-fullcoverage 锁定。
+  delete data.cultivationSystems
+  for (const row of data.characters ?? []) {
+    delete row._raceEntryExportId
+    delete row._cultivationSystemExportId
+    delete row.cultivationStageId
+  }
+  for (const row of data.codexEntries ?? []) {
+    delete row._cultivationSystemExportId
+    delete row.cultivationStageId
   }
   return data
 }

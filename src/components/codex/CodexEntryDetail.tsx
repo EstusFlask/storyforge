@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { ChevronRight, Star } from 'lucide-react'
 import { CInput, CTextarea } from '../shared/CompositionInput'
 import {
@@ -14,6 +14,8 @@ import type {
   CodexEntry,
   CodexFieldDef,
 } from '../../lib/types/codex'
+import { parseCultivationStages } from '../../lib/types/cultivation'
+import { useCultivationStore } from '../../stores/cultivation'
 
 interface Props {
   entry: CodexEntry
@@ -109,6 +111,10 @@ export default function CodexEntryDetail({
         className="w-full px-3 py-2 rounded-lg bg-bg-elevated border border-border text-sm resize-y"
       />
 
+      {category.builtInKey === 'beast' && (
+        <CodexCultivationLink entry={entry} onChange={onChange} />
+      )}
+
       {schema.length > 0 && <div className="border-t border-border pt-3 text-xs text-text-muted">专属属性</div>}
       {schema.map(definition => (
         <CodexFieldRow
@@ -124,6 +130,54 @@ export default function CodexEntryDetail({
           onRef={ids => setRef(definition.key, ids)}
         />
       ))}
+    </div>
+  )
+}
+
+function CodexCultivationLink({
+  entry,
+  onChange,
+}: {
+  entry: CodexEntry
+  onChange: (patch: Partial<CodexEntry>) => void
+}) {
+  const systems = useCultivationStore(state => state.systems)
+  const loadAll = useCultivationStore(state => state.loadAll)
+  useEffect(() => { loadAll(entry.projectId) }, [entry.projectId, loadAll])
+  const visible = systems.filter(system =>
+    (system.worldGroupId ?? null) === (entry.worldGroupId ?? null))
+  const selected = visible.find(system => system.id === entry.cultivationSystemId)
+  const stages = parseCultivationStages(selected?.stages)
+  return (
+    <div className="grid grid-cols-2 gap-2 border-t border-border pt-3">
+      <label>
+        <span className="block text-xs text-text-muted mb-1">结构化修炼体系</span>
+        <select
+          aria-label="异兽修炼体系"
+          value={entry.cultivationSystemId ?? ''}
+          onChange={event => onChange({
+            cultivationSystemId: event.target.value ? Number(event.target.value) : null,
+            cultivationStageId: null,
+          })}
+          className="w-full px-3 py-1.5 rounded-lg bg-bg-elevated border border-border text-sm"
+        >
+          <option value="">未关联</option>
+          {visible.map(system => <option key={system.id} value={system.id}>{system.name}</option>)}
+        </select>
+      </label>
+      <label>
+        <span className="block text-xs text-text-muted mb-1">当前境界</span>
+        <select
+          aria-label="异兽当前境界"
+          disabled={!selected}
+          value={entry.cultivationStageId ?? ''}
+          onChange={event => onChange({ cultivationStageId: event.target.value || null })}
+          className="w-full px-3 py-1.5 rounded-lg bg-bg-elevated border border-border text-sm disabled:opacity-40"
+        >
+          <option value="">未指定</option>
+          {stages.map(stage => <option key={stage.id} value={stage.id}>{stage.name}</option>)}
+        </select>
+      </label>
     </div>
   )
 }

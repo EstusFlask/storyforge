@@ -6,7 +6,8 @@
  *
  * ⚠️ 加新表 = 在此加一行 + schema.ts 加版本 + types 加类型。其它生命周期自动覆盖。
  *
- * 事实来源:docs/refactor/PROJECT_TABLES_ALL.md(表硬清单 + owner 分类 + refs)
+ * 当前事实来源:本注册表 + schema.ts + ensure-schema.ts，三者由 CI 双向校验。
+ * docs/refactor/PROJECT_TABLES_ALL.md 仅保留 Phase 1 前的历史快照。
  * 设计依据:docs/MASTER-BLUEPRINT.md §5.1
  */
 import { db } from '../db/schema'
@@ -28,6 +29,18 @@ export const PROJECT_TABLES: TableSpec[] = [
   { table: db.powerSystems, name: 'powerSystems', owner: 'project', worldScoped: true,
     exportable: true,
     exportRemap: [{ field: 'worldGroupId', remapVia: 'worldGroups', exportAs: '_worldGroupExportId' }] },
+
+  { table: db.cultivationSystems, name: 'cultivationSystems', owner: 'project', worldScoped: true,
+    exportable: true, exportIdField: true,
+    refs: [
+      { kind: 'simple', field: 'id', target: 'characters[cultivationSystemId]', onDelete: 'setNull' },
+      { kind: 'simple', field: 'id', target: 'codexEntries[cultivationSystemId]', onDelete: 'setNull' },
+    ],
+    exportRemap: [
+      { field: 'worldGroupId', remapVia: 'worldGroups', exportAs: '_worldGroupExportId' },
+    ],
+    defaults: { description: '', stages: '[]' },
+    note: 'Phase 37 修炼流派；stages 为已校验 DAG，区别于世界底层 powerSystems' },
 
   { table: db.geographies, name: 'geographies', owner: 'project', worldScoped: true,
     exportable: true,
@@ -76,7 +89,11 @@ export const PROJECT_TABLES: TableSpec[] = [
       { kind: 'simple', field: 'id', target: 'characterRelations[toCharacterId]', onDelete: 'cascade' },
       { kind: 'array', field: 'appearingCharacterIds', itemTarget: 'detailedOutlines', onDelete: 'removeItem' },
     ],
-    exportRemap: [{ field: 'homeWorldGroupId', remapVia: 'worldGroups', exportAs: '_homeWorldGroupExportId' }] },
+    exportRemap: [
+      { field: 'homeWorldGroupId', remapVia: 'worldGroups', exportAs: '_homeWorldGroupExportId' },
+      { field: 'raceEntryId', remapVia: 'codexEntries', exportAs: '_raceEntryExportId' },
+      { field: 'cultivationSystemId', remapVia: 'cultivationSystems', exportAs: '_cultivationSystemExportId' },
+    ] },
 
   { table: db.characterRelations, name: 'characterRelations', owner: 'project',
     exportable: true,
@@ -195,10 +212,14 @@ export const PROJECT_TABLES: TableSpec[] = [
 
   { table: db.codexEntries, name: 'codexEntries', owner: 'project', worldScoped: true,
     exportable: true,
-    refs: [{ kind: 'json', field: 'refs', jsonPath: '$.*', target: 'codexEntries[id]', onDelete: 'remap' }],
+    refs: [
+      { kind: 'json', field: 'refs', jsonPath: '$.*', target: 'codexEntries[id]', onDelete: 'remap' },
+      { kind: 'simple', field: 'id', target: 'characters[raceEntryId]', onDelete: 'setNull' },
+    ],
     exportRemap: [
       { field: 'categoryId', remapVia: 'codexCategories', exportAs: '_categoryExportId', onUnmapped: 'require' },
       { field: 'worldGroupId', remapVia: 'worldGroups', exportAs: '_worldGroupExportId' },
+      { field: 'cultivationSystemId', remapVia: 'cultivationSystems', exportAs: '_cultivationSystemExportId' },
     ] },
 
   // ───────────────────── 文风学习（FB-5） ─────────────────────
@@ -227,6 +248,7 @@ export const PROJECT_TABLES: TableSpec[] = [
       { field: 'sourceChapterId', remapVia: 'chapters', exportAs: '_srcChapExportId' },
       { field: 'sourceWorldviewId', remapVia: 'worldviews', exportAs: '_srcWorldviewExportId' },
       { field: 'sourcePowerSystemId', remapVia: 'powerSystems', exportAs: '_srcPowerSystemExportId' },
+      { field: 'sourceCultivationSystemId', remapVia: 'cultivationSystems', exportAs: '_srcCultivationSystemExportId' },
       { field: 'sourceStoryCoreId', remapVia: 'storyCores', exportAs: '_srcStoryCoreExportId' },
       { field: 'sourceCharacterId', remapVia: 'characters', exportAs: '_srcCharacterExportId' },
       { field: 'validFromChapterId', remapVia: 'chapters', exportAs: '_vFromChapExportId' },

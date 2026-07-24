@@ -19,6 +19,7 @@ import type { CanonAssertionSourceTable } from './canon-assertion-source-registr
 const CANON_SOURCE_TABLES = new Set<CanonAssertionSourceTable>([
   'worldviews',
   'powerSystems',
+  'cultivationSystems',
   'storyCores',
   'characters',
 ])

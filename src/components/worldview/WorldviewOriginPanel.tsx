@@ -19,6 +19,7 @@ import WorldviewOriginSidebar, {
   WORLDVIEW_ORIGIN_FIELDS,
   type WorldviewOriginFieldKey,
 } from './WorldviewOriginSidebar'
+import CultivationSystemsPanel from './CultivationSystemsPanel'
 import type { Project, DivineDesign } from '../../lib/types'
 import type { FieldGenerationMode } from '../../lib/ai/field-generation-context'
 
@@ -161,6 +162,7 @@ export default function WorldviewOriginPanel({ project }: Props) {
               contextSummary={buildCtx('power')}
               onStreamingChange={streaming => handleStreamingChange('power', streaming)}
             />
+            <CultivationSystemsPanel project={project} />
             <div className="mt-6">
               <h3 className="text-sm font-semibold text-text-primary mb-1">📚 力量层级 · 具体词条</h3>
               <p className="text-xs text-text-muted mb-3">在上面写完力量体系「全貌」后，这里把各等级/层级逐条登记，可自定义字段、打重要度星级，并进入 AI 生成上下文。</p>

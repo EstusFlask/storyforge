@@ -18,7 +18,19 @@ async function createProject(page: Page, name: string) {
 }
 
 function sidebarButton(page: Page, name: string) {
-  return page.getByRole('navigation').getByRole('button', { name, exact: true })
+  return page.getByRole('navigation')
+    .getByText(name, { exact: true })
+    .locator('xpath=ancestor::button[1]')
+}
+
+async function openSidebarLeaf(page: Page, branchName: string, leafName: string) {
+  const leaf = sidebarButton(page, leafName)
+  const branch = sidebarButton(page, branchName)
+  await branch.click()
+  if (await leaf.count() === 0) await branch.click()
+  await expect(leaf).toHaveCount(1)
+  await leaf.scrollIntoViewIfNeeded()
+  await leaf.click()
 }
 
 async function expectInputValue(page: Page, value: string) {
@@ -269,4 +281,48 @@ test('真实章节入口可打开五阶段工坊并预览首节点最终提示�
     '不写回模板或作品资料',
     { exact: false },
   )).toBeVisible()
+})
+
+test('真实世界观入口可维护修炼 DAG 并关联角色境界', async ({ page }) => {
+  await openCleanHome(page)
+  await createProject(page, 'E2E 修炼体系闭环')
+
+  await openSidebarLeaf(page, '世界观', '世界起源')
+  await page.getByRole('button', { name: '力量体系', exact: true }).click()
+  await expect(page.getByRole('heading', { name: '修炼体系', exact: true })).toBeVisible()
+
+  await page.getByRole('button', { name: '新增体系', exact: true }).click()
+  await page.getByPlaceholder('如：剑修、武夫、召唤师').fill('剑修')
+  await page.getByRole('button', { name: '确认', exact: true }).click()
+  await expect(page.getByText('剑修', { exact: true }).first()).toBeVisible()
+
+  await page.getByRole('button', { name: '添加第一个起始境界', exact: true }).click()
+  const stageNameField = page.getByText('境界名称', { exact: true }).locator('..')
+  await stageNameField.getByText('新境界', { exact: true }).click()
+  await stageNameField.locator('input').fill('炼体境')
+  await stageNameField.locator('input').press('Enter')
+  await expect(page.getByText('炼体境', { exact: true }).first()).toBeVisible()
+
+  await page.getByRole('button', { name: '添加后续境界', exact: true }).click()
+  await stageNameField.getByText('新境界', { exact: true }).click()
+  await stageNameField.locator('input').fill('筑基境')
+  await stageNameField.locator('input').press('Enter')
+  await expect(page.getByText('← 炼体境', { exact: true })).toBeVisible()
+
+  await openSidebarLeaf(page, '角色设计', '角色生成')
+  await page.getByRole('button', { name: /新建角色/ }).click()
+  await page.getByRole('button', { name: '主要', exact: true }).click()
+  await page.getByRole('button', { name: '守序善良', exact: true }).click()
+  await page.getByRole('button', { name: '创建并分流', exact: true }).click()
+
+  await page.getByLabel('主修体系').selectOption({ label: '剑修' })
+  await page.getByLabel('当前设定境界').selectOption({ label: '筑基境' })
+  await expect(page.getByLabel('主修体系').locator('option:checked')).toHaveText('剑修')
+  await expect(page.getByLabel('当前设定境界').locator('option:checked')).toHaveText('筑基境')
+
+  await page.reload()
+  await openSidebarLeaf(page, '角色设计', '角色生成')
+  await page.getByRole('button', { name: /新角色/ }).last().click()
+  await expect(page.getByLabel('主修体系').locator('option:checked')).toHaveText('剑修')
+  await expect(page.getByLabel('当前设定境界').locator('option:checked')).toHaveText('筑基境')
 })

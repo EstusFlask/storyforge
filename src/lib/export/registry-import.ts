@@ -159,6 +159,7 @@ export async function deriveImportProjectJSON(data: ProjectExportData): Promise<
         }
         if (spec.name === 'temporalFacts' && obj.sourceType === 'setting' && obj.sourceFingerprint
           && obj.sourceWorldviewId == null && obj.sourcePowerSystemId == null
+          && obj.sourceCultivationSystemId == null
           && obj.sourceStoryCoreId == null && obj.sourceCharacterId == null
           && obj.status !== 'rejected' && obj.status !== 'superseded') {
           obj.status = 'source-missing'
