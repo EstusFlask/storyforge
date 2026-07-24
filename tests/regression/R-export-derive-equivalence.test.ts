@@ -45,6 +45,14 @@ function normalize(data: any) {
     delete row.characterId
     delete row._characterExportId
   }
+  // CONSISTENCY-3: temporalFacts 新增四类可移植设定来源 FK。旧 fixture 没有这些
+  // 影子字段；新格式的实际往返由 R-CONSISTENCY3-world-constitution 锁定。
+  for (const row of data.temporalFacts ?? []) {
+    delete row._srcWorldviewExportId
+    delete row._srcPowerSystemExportId
+    delete row._srcStoryCoreExportId
+    delete row._srcCharacterExportId
+  }
   return data
 }
 

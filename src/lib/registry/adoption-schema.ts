@@ -167,6 +167,7 @@ export const ADOPTION_EXTENSIONS: readonly AdoptionExtensionSpec[] = Object.free
       'src/lib/fact-ledger/fact-ledger.ts',
       'src/lib/fact-ledger/human-readable-io.ts',
       'src/lib/fact-ledger/lifecycle.ts',
+      'src/lib/fact-ledger/setting-assertions.ts',
       'src/lib/consistency/impact-analysis.ts',
     ],
     policyRegistry: 'FACT_PREDICATE_REGISTRY',

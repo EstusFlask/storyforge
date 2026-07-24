@@ -13,6 +13,11 @@ import { db } from '../db/schema'
 import type { TemporalFact } from '../types/temporal-fact'
 import type { ExtractedFactCandidate } from '../ai/adapters/fact-extract-adapter'
 import { getFactPredicate } from '../registry/fact-predicate-registry'
+import {
+  checkSettingAssertionClashes,
+  validateSettingAssertionSource,
+  type SettingAssertionClash,
+} from './setting-assertions'
 
 const now = () => Date.now()
 
@@ -88,11 +93,36 @@ export async function adoptFactCandidates(args: {
  * 作者确认候选/异常事实 → 升为 Canon（confirmed）。§14.4：state 单值谓词在此【关闭被它取代的旧有效事实】，
  * 不按字符串相似度自动覆盖、不动 locked、event 不可被 supersede。
  */
-export async function confirmFactCandidate(factId: number): Promise<void> {
+export interface ConfirmFactResult {
+  confirmed: boolean
+  clashes: SettingAssertionClash[]
+  reason?: 'missing' | 'invalid-status' | 'source-stale' | 'source-missing'
+}
+
+export async function confirmFactCandidate(factId: number): Promise<ConfirmFactResult> {
   const fact = await db.temporalFacts.get(factId)
-  if (!fact || fact.id == null) return
-  if (!['candidate', 'stale', 'source-missing', 'invalid-range'].includes(fact.status)) return
+  if (!fact || fact.id == null) return { confirmed: false, clashes: [], reason: 'missing' }
+  if (!['candidate', 'stale', 'source-missing', 'invalid-range'].includes(fact.status)) {
+    return { confirmed: false, clashes: [], reason: 'invalid-status' }
+  }
   const spec = getFactPredicate(fact.predicate)
+  if (spec?.constitution) {
+    const sourceState = await validateSettingAssertionSource(fact)
+    if (sourceState !== 'current') {
+      await db.temporalFacts.update(fact.id, { status: sourceState, updatedAt: now() })
+      return {
+        confirmed: false,
+        clashes: [],
+        reason: sourceState === 'stale' ? 'source-stale' : 'source-missing',
+      }
+    }
+    const confirmed = await db.temporalFacts
+      .where('projectId').equals(fact.projectId)
+      .filter(row => row.status === 'confirmed')
+      .toArray()
+    const clashes = checkSettingAssertionClashes(fact, confirmed)
+    if (clashes.length) return { confirmed: false, clashes }
+  }
 
   // 单值 state 谓词：关闭同主体+谓词、当前仍有效、非锁定的旧事实（明确取代）。
   if (spec && spec.factKind === 'state' && spec.cardinality === 'single' && spec.conflictPolicy === 'supersede') {
@@ -118,6 +148,66 @@ export async function confirmFactCandidate(factId: number): Promise<void> {
     }
   }
   await db.temporalFacts.update(fact.id, { status: 'confirmed', supersedesFactId: fact.supersedesFactId ?? null, updatedAt: now() })
+  return { confirmed: true, clashes: [] }
+}
+
+export interface ReplaceConstitutionFactResult {
+  confirmed: boolean
+  clashes: SettingAssertionClash[]
+  replaced: number
+  reason?: ConfirmFactResult['reason'] | 'not-constitution' | 'locked-conflict'
+}
+
+/**
+ * 作者第二次显式操作：以候选取代所有同主体/同主题的互斥世界宪法。
+ * 普通确认绝不会走这里；locked 旧断言仍拒绝覆盖。
+ */
+export async function replaceConstitutionFactCandidate(
+  factId: number,
+): Promise<ReplaceConstitutionFactResult> {
+  const fact = await db.temporalFacts.get(factId)
+  if (!fact || fact.id == null) return { confirmed: false, clashes: [], replaced: 0, reason: 'missing' }
+  const spec = getFactPredicate(fact.predicate)
+  if (!spec?.constitution) {
+    return { confirmed: false, clashes: [], replaced: 0, reason: 'not-constitution' }
+  }
+  if (!['candidate', 'stale', 'source-missing', 'invalid-range'].includes(fact.status)) {
+    return { confirmed: false, clashes: [], replaced: 0, reason: 'invalid-status' }
+  }
+  const sourceState = await validateSettingAssertionSource(fact)
+  if (sourceState !== 'current') {
+    await db.temporalFacts.update(fact.id, { status: sourceState, updatedAt: now() })
+    return {
+      confirmed: false,
+      clashes: [],
+      replaced: 0,
+      reason: sourceState === 'stale' ? 'source-stale' : 'source-missing',
+    }
+  }
+  const confirmed = await db.temporalFacts
+    .where('projectId').equals(fact.projectId)
+    .filter(row => row.status === 'confirmed')
+    .toArray()
+  const clashes = checkSettingAssertionClashes(fact, confirmed)
+  if (clashes.some(clash => clash.confirmed.locked)) {
+    return { confirmed: false, clashes, replaced: 0, reason: 'locked-conflict' }
+  }
+  const timestamp = now()
+  await db.transaction('rw', db.temporalFacts, async () => {
+    for (const clash of clashes) {
+      if (clash.confirmed.id == null) continue
+      await db.temporalFacts.update(clash.confirmed.id, {
+        status: 'superseded',
+        updatedAt: timestamp,
+      })
+    }
+    await db.temporalFacts.update(fact.id!, {
+      status: 'confirmed',
+      supersedesFactId: clashes[0]?.confirmed.id ?? null,
+      updatedAt: timestamp,
+    })
+  })
+  return { confirmed: true, clashes, replaced: clashes.length }
 }
 
 /** 作者否决候选/异常事实（不入 Canon、不再注入生成）。不动已确认/已锁定事实。 */

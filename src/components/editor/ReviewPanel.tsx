@@ -116,6 +116,7 @@ export default function ReviewPanel(props: Props) {
         'previousPlanReconciliation',
         'recentChapterSummaries',
         'currentFacts',        // NS-6 闭环：用生成时遵循的同一套已确认事实核对（canon/observation 证据）
+        'canonAssertions',     // CONSISTENCY-3：用同一套已确认世界宪法审校
         'characterKnowledge',  // CONSISTENCY-2：同一时点角色认知投影
         'retrievedPassages',   // NS-6 闭环：召回远距前文，抓几百章前的细节/伏笔矛盾
         'worldRules',

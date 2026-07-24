@@ -23,7 +23,7 @@ import type { Project, DivineDesign } from '../../lib/types'
 import type { FieldGenerationMode } from '../../lib/ai/field-generation-context'
 
 async function buildRulesSourceContext(projectId: number, worldGroupId: number | null): Promise<string> {
-  return (await assembleContext({ projectId, worldGroupId, sourceKeys: ['worldRules'] })).text
+  return (await assembleContext({ projectId, worldGroupId, sourceKeys: ['canonAssertions', 'worldRules'] })).text
 }
 
 /**
@@ -37,7 +37,7 @@ async function buildDownstreamReverseContext(projectId: number, worldGroupId: nu
   return (await assembleContext({
     projectId,
     worldGroupId,
-    sourceKeys: ['storyCore', 'characters', 'storyArcs'],
+    sourceKeys: ['canonAssertions', 'storyCore', 'characters', 'storyArcs'],
   })).text
 }
 

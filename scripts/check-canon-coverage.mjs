@@ -87,6 +87,8 @@ const mechanisms = {
   'R-CANON-item-1': 'checkHeldItemAcquisition',
   'R-CANON-world-iso-1': 'retrieveChunks',
   'R-CANON-omniscient-1': 'checkCognitionBoundary',
+  'R-CANON-setting-clash-1': 'confirmFactCandidate',
+  'R-CANON-setting-clash-2': 'checkSettingAssertionClashes',
 }
 for (const [id, symbol] of Object.entries(mechanisms)) {
   const declaration = declarations.get(id)?.[0]

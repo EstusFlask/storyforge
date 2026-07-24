@@ -266,7 +266,7 @@ export default function ChapterEditor({ project, outlineNodeId }: Props) {
       chapterId: currentChapter?.id ?? null,
       provider: aiConfig.provider,
       model: aiConfig.model,
-      sourceKeys: ['contextMemo', 'chapterOutline', 'worldview', 'storyCore', 'powerSystem', 'codex', 'characters', 'creativeRules', 'worldRules', 'historical', 'locations', 'userStyleProfile'],
+      sourceKeys: ['contextMemo', 'chapterOutline', 'canonAssertions', 'worldview', 'storyCore', 'powerSystem', 'codex', 'characters', 'creativeRules', 'worldRules', 'historical', 'locations', 'userStyleProfile'],
     }).then(assembled => {
       if (cancelled) return
       const charIdx = assembled.included.indexOf('characters')
@@ -410,6 +410,7 @@ export default function ChapterEditor({ project, outlineNodeId }: Props) {
         'emotionBeats',
         'stateCards',
         'currentFacts', // NS-4:当前章生效的已确认事实，回注生成防止前后矛盾
+        'canonAssertions', // CONSISTENCY-3:不依赖章节时点的已确认世界宪法
         'characterKnowledge', // CONSISTENCY-2:按角色限制本章可知信息，防提前知情
         'heldItems', // CONSISTENCY-1:当前已持有物品，避免新章重复写首次获得
         'retrievedPassages', // NS-5:相关前文召回，防远距离细节/伏笔矛盾

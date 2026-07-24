@@ -8,9 +8,17 @@ import type { ExtractedFactCandidate } from '../lib/ai/adapters/fact-extract-ada
 import {
   adoptFactCandidates,
   confirmFactCandidate,
+  replaceConstitutionFactCandidate,
   rejectFactCandidate,
   listFacts,
+  type ConfirmFactResult,
+  type ReplaceConstitutionFactResult,
 } from '../lib/fact-ledger/fact-ledger'
+import {
+  adoptSettingAssertionCandidates,
+  type ExtractedSettingAssertion,
+  type SettingAssertionSource,
+} from '../lib/fact-ledger/setting-assertions'
 import { importFactCandidateDiff, type ImportFactCandidateDiffResult } from '../lib/fact-ledger/human-readable-io'
 
 interface FactLedgerStore {
@@ -18,7 +26,18 @@ interface FactLedgerStore {
   loading: boolean
   load: (projectId: number) => Promise<void>
   adopt: (args: { projectId: number; sourceChapterId: number; worldGroupId?: number | null; candidates: ExtractedFactCandidate[] }) => Promise<number>
-  confirmFact: (projectId: number, factId: number) => Promise<void>
+  adoptSetting: (args: {
+    projectId: number
+    worldGroupId?: number | null
+    candidates: readonly ExtractedSettingAssertion[]
+    sources: readonly SettingAssertionSource[]
+    subjects: {
+      worldGroups: readonly { id: number | null; name: string }[]
+      characters: readonly { id: number; name: string; worldGroupId?: number | null }[]
+    }
+  }) => Promise<{ written: number; skipped: number }>
+  confirmFact: (projectId: number, factId: number) => Promise<ConfirmFactResult>
+  replaceConstitutionFact: (projectId: number, factId: number) => Promise<ReplaceConstitutionFactResult>
   rejectFact: (projectId: number, factId: number) => Promise<void>
   importCandidateDiff: (projectId: number, raw: unknown) => Promise<ImportFactCandidateDiffResult>
 }
@@ -42,9 +61,22 @@ export const useFactLedgerStore = create<FactLedgerStore>((set, get) => ({
     return result.written
   },
 
+  adoptSetting: async (args) => {
+    const result = await adoptSettingAssertionCandidates(args)
+    await get().load(args.projectId)
+    return result
+  },
+
   confirmFact: async (projectId, factId) => {
-    await confirmFactCandidate(factId)
+    const result = await confirmFactCandidate(factId)
     await get().load(projectId)
+    return result
+  },
+
+  replaceConstitutionFact: async (projectId, factId) => {
+    const result = await replaceConstitutionFactCandidate(factId)
+    await get().load(projectId)
+    return result
   },
 
   rejectFact: async (projectId, factId) => {

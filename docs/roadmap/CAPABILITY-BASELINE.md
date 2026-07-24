@@ -87,11 +87,14 @@
 - `knowledgeLedger` 分离世界真相与角色认知，支持获知、误认、遗忘、纠正事件；v39 迁移、三注册表、角色/章节生命周期和导出导入 FK 重映射已覆盖。
 - `characterKnowledge` 按规范章序、世界与角色投影目标章开始前的 confirmed 事件，并进入正文生成上下文；事实库提供角色认知候选、确认/否决和异常复核入口。
 - 一致性审校让 LLM 只从已确认 `characterId + knowledgeKey` 闭集提取正文逐字引用，再由代码比较 unknown/mistaken；确定性比对不等于抽取不会漏。
-- `CONSISTENCY-0` 已把 6 个 `R-CANON-*` 反例落入 `tests/canon/`；3 个活动测试和 3 个显式 `todo` 由 `check:canon-coverage` 与覆盖地图双向对齐。
+- `CONSISTENCY-3` 复用 `temporalFacts` 而不另造 Canon 表；8 个单值宪法主题和 4 类设定来源受闭集注册表约束，来源 FK 可导出导入、来源字段修改自动 stale。
+- 设定抽取只接受登记 sourceKey / predicate / subject 和原文逐字 quote，永远写 candidate；普通确认对同项目、同世界、同分类型主体和同主题异值做确定性阻断，明确取代是独立作者操作且不能覆盖 locked Canon。
+- `canonAssertions` 只回注 confirmed 且来源仍有效的宪法，正文、设定、大纲和一致性审校共用；事实库“世界宪法”视图提供扫描、确认、否决、冲突与来源异常出口。
+- `CONSISTENCY-0` 已把 6 个 `R-CANON-*` 反例落入 `tests/canon/`；5 个活动测试和 1 个显式 `todo` 由 `check:canon-coverage` 与覆盖地图双向对齐。
 
 ### 当前边界 / 尚未完成
 
-- 世界宪法和设定断言冲突检测尚未覆盖世界起源、力量体系等互斥场景。
+- 世界宪法硬保证只覆盖已登记、已抽取、来源有效且已确认的单值主题；未登记散文、抽取遗漏和复杂条件规则仍属于软审计范围。
 - 一致性覆盖地图和 `tests/canon/` 是跨功能的声明基线，`tests/regression/` 继续覆盖具体实现细节；新增 Canon 声明必须先加地图行和可证伪反例，不用删除 `todo` 制造假绿。
 - 故事线动态进度、交叉和角色变化影响尚未形成统一产品出口。
 - 内联编辑器提示尚未把确定性 finding 映射到编辑器装饰层。
@@ -107,12 +110,15 @@
 - `src/lib/consistency/`
 - `src/lib/fact-ledger/`
 - `src/lib/knowledge-ledger/`
+- `src/lib/fact-ledger/setting-assertions.ts`
+- `src/lib/registry/canon-assertion-source-registry.ts`
 - `src/lib/retrieval/`
 - `src/lib/registry/assemble-context.ts`
 - `tests/regression/R-NS3-consistency-audit.test.ts`
 - `tests/regression/R-NS4-current-facts.test.ts`
 - `tests/regression/R-NS5-retrieval.test.ts`
 - `tests/regression/R-NS6-impact.test.ts`
+- `tests/regression/R-CONSISTENCY3-world-constitution.test.ts`
 - `tests/regression/R-CONSISTENCY2-*`
 - `tests/canon/R-CANON-*`
 - `scripts/check-canon-coverage.mjs`

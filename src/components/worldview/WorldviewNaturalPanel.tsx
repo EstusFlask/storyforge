@@ -17,7 +17,7 @@ import type { Project, NaturalResources } from '../../lib/types'
 import type { FieldGenerationMode } from '../../lib/ai/field-generation-context'
 
 async function buildRulesSourceContext(projectId: number, worldGroupId: number | null): Promise<string> {
-  return (await assembleContext({ projectId, worldGroupId, sourceKeys: ['worldRules'] })).text
+  return (await assembleContext({ projectId, worldGroupId, sourceKeys: ['canonAssertions', 'worldRules'] })).text
 }
 
 interface Props { project: Project }

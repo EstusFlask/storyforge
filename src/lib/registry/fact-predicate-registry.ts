@@ -114,6 +114,103 @@ export const FACT_PREDICATE_REGISTRY: readonly FactPredicateSpec[] = Object.free
     aliases: ['旧状态', '状态卡字段'],
     conflictPolicy: 'manual',
   },
+  // —— CONSISTENCY-3 世界宪法：非时序单值主题，有异值时必须人工裁决 ——
+  {
+    key: 'magicSource',
+    label: '超自然力量来源',
+    subjectTypes: ['worldGroup'],
+    factKind: 'state',
+    valueType: 'string',
+    cardinality: 'single',
+    temporal: false,
+    aliases: ['魔法来源', '力量来源', '超自然来源'],
+    conflictPolicy: 'manual',
+    constitution: true,
+  },
+  {
+    key: 'creationOrigin',
+    label: '世界创生来源',
+    subjectTypes: ['worldGroup'],
+    factKind: 'state',
+    valueType: 'string',
+    cardinality: 'single',
+    temporal: false,
+    aliases: ['创世来源', '世界起源', '创生来源'],
+    conflictPolicy: 'manual',
+    constitution: true,
+  },
+  {
+    key: 'deityAuthority',
+    label: '神明权柄规则',
+    subjectTypes: ['worldGroup'],
+    factKind: 'state',
+    valueType: 'string',
+    cardinality: 'single',
+    temporal: false,
+    aliases: ['神明权柄', '神权规则'],
+    conflictPolicy: 'manual',
+    constitution: true,
+  },
+  {
+    key: 'technologyLevel',
+    label: '技术基线',
+    subjectTypes: ['worldGroup'],
+    factKind: 'state',
+    valueType: 'string',
+    cardinality: 'single',
+    temporal: false,
+    aliases: ['科技水平', '技术水平', '文明等级'],
+    conflictPolicy: 'manual',
+    constitution: true,
+  },
+  {
+    key: 'powerCeiling',
+    label: '力量上限',
+    subjectTypes: ['worldGroup'],
+    factKind: 'state',
+    valueType: 'string',
+    cardinality: 'single',
+    temporal: false,
+    aliases: ['最高境界', '力量天花板', '修为上限'],
+    conflictPolicy: 'manual',
+    constitution: true,
+  },
+  {
+    key: 'parentStatus',
+    label: '父母/监护人状态',
+    subjectTypes: ['character'],
+    factKind: 'state',
+    valueType: 'string',
+    cardinality: 'single',
+    temporal: false,
+    aliases: ['父母状态', '监护人状态', '亲属存亡'],
+    conflictPolicy: 'manual',
+    constitution: true,
+  },
+  {
+    key: 'characterOrigin',
+    label: '角色身世来源',
+    subjectTypes: ['character'],
+    factKind: 'state',
+    valueType: 'string',
+    cardinality: 'single',
+    temporal: false,
+    aliases: ['角色身世', '出身来源', '身世来源'],
+    conflictPolicy: 'manual',
+    constitution: true,
+  },
+  {
+    key: 'trueIdentity',
+    label: '真实身份',
+    subjectTypes: ['character'],
+    factKind: 'state',
+    valueType: 'string',
+    cardinality: 'single',
+    temporal: false,
+    aliases: ['真正身份', '隐藏身份', '身份真相'],
+    conflictPolicy: 'manual',
+    constitution: true,
+  },
 ])
 
 const BY_KEY = new Map(FACT_PREDICATE_REGISTRY.map(p => [p.key, p]))
@@ -126,6 +223,11 @@ for (const spec of FACT_PREDICATE_REGISTRY) {
 /** 按 key 取谓词定义。 */
 export function getFactPredicate(key: string): FactPredicateSpec | undefined {
   return BY_KEY.get(key)
+}
+
+/** 世界宪法只接受显式标记的受控主题。 */
+export function isConstitutionPredicate(key: string): boolean {
+  return getFactPredicate(key)?.constitution === true
 }
 
 /**

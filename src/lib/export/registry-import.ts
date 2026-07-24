@@ -127,6 +127,7 @@ export async function deriveImportProjectJSON(data: ProjectExportData): Promise<
         // 外键:_exportAs → 真实 db id
         let dropRow = false
         let hasUnmappedKnowledgeRef = false
+        let hasUnmappedTemporalSourceRef = false
         for (const rm of spec.exportRemap ?? []) {
           const exportVal = obj[rm.exportAs]
           delete obj[rm.exportAs]
@@ -136,6 +137,9 @@ export async function deriveImportProjectJSON(data: ProjectExportData): Promise<
             const got = m?.get(exportVal)
             if (got == null) {
               if (spec.name === 'knowledgeLedger') hasUnmappedKnowledgeRef = true
+              if (spec.name === 'temporalFacts' && rm.field.startsWith('source')) {
+                hasUnmappedTemporalSourceRef = true
+              }
               if (rm.onUnmapped === 'drop') { dropRow = true; break }
               if (rm.onUnmapped === 'require') {
                 throw new Error(`[deriveImport] 缺失必填外键映射:${spec.name}.${rm.field}=${exportVal}`)
@@ -147,6 +151,16 @@ export async function deriveImportProjectJSON(data: ProjectExportData): Promise<
         }
         if (dropRow) continue
         if (spec.name === 'knowledgeLedger' && hasUnmappedKnowledgeRef && obj.status !== 'rejected') {
+          obj.status = 'source-missing'
+        }
+        if (spec.name === 'temporalFacts' && hasUnmappedTemporalSourceRef
+          && obj.status !== 'rejected' && obj.status !== 'superseded') {
+          obj.status = 'source-missing'
+        }
+        if (spec.name === 'temporalFacts' && obj.sourceType === 'setting' && obj.sourceFingerprint
+          && obj.sourceWorldviewId == null && obj.sourcePowerSystemId == null
+          && obj.sourceStoryCoreId == null && obj.sourceCharacterId == null
+          && obj.status !== 'rejected' && obj.status !== 'superseded') {
           obj.status = 'source-missing'
         }
 

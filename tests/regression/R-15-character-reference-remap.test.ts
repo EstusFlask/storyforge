@@ -41,7 +41,7 @@ describe('R-15: character reference remap', () => {
       createdAt: now, updatedAt: now,
     } as any)
     const factId = await db.temporalFacts.add({
-      projectId, characterId: deletedId, subjectName: '旧角色',
+      projectId, characterId: deletedId, sourceCharacterId: deletedId, subjectName: '旧角色',
       predicate: 'location', factKind: 'state', value: '旧城',
       sourceType: 'chapter', status: 'confirmed', locked: false,
       createdAt: now, updatedAt: now,
@@ -58,6 +58,7 @@ describe('R-15: character reference remap', () => {
     expect(await db.characters.get(deletedId)).toBeUndefined()
     const fact = await db.temporalFacts.get(factId)
     expect(fact?.characterId).toBeNull()
+    expect(fact?.sourceCharacterId).toBeNull()
     expect(fact?.status).toBe('source-missing') // 删除主体后不保留悬空 Canon，进入异常复核
   })
 
@@ -92,7 +93,8 @@ describe('R-15: character reference remap', () => {
       },
     ] as any[])
     const factId = await db.temporalFacts.add({
-      projectId, characterId: aliasId, objectCharacterId: aliasId, subjectName: '别名角色',
+      projectId, characterId: aliasId, objectCharacterId: aliasId,
+      sourceCharacterId: aliasId, subjectName: '别名角色',
       predicate: 'relation', factKind: 'state', value: '同门',
       sourceType: 'manual', status: 'confirmed', locked: false,
       createdAt: now, updatedAt: now,
@@ -124,6 +126,7 @@ describe('R-15: character reference remap', () => {
     const fact = await db.temporalFacts.get(factId)
     expect(fact?.characterId).toBe(primaryId)
     expect(fact?.objectCharacterId).toBe(primaryId)
+    expect(fact?.sourceCharacterId).toBe(primaryId)
     expect(fact?.subjectName).toBe('主角色')
     expect(fact?.status).toBe('confirmed') // 合并是稳定重映射，不降级
     const item = await db.itemLedger.get(itemId)

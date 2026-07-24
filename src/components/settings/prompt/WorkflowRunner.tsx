@@ -223,7 +223,7 @@ export default function WorkflowRunner({ workflow, project, onClose }: RunnerPro
         assembledText = (await assembleContext({
           projectId: project.id,
           worldGroupId: wg,
-          sourceKeys: ['storyCore', 'worldview', 'powerSystem', 'characters', 'codex'],
+          sourceKeys: ['canonAssertions', 'storyCore', 'worldview', 'powerSystem', 'characters', 'codex'],
         })).text
       } catch { /* 上下文装配失败不应阻断生成 */ }
       try {

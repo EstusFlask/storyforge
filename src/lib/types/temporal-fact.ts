@@ -71,6 +71,8 @@ export interface FactPredicateSpec {
   /** AI 别名归一（把模型自由措辞映射到本谓词） */
   aliases?: string[]
   conflictPolicy: FactConflictPolicy
+  /** CONSISTENCY-3：是否属于可做确定性单值互斥判断的世界宪法主题。 */
+  constitution?: boolean
   /** 关系类谓词（entity-ref）的客体允许类型 */
   objectEntityTypes?: FactEntityType[]
 }
@@ -108,6 +110,15 @@ export interface TemporalFact {
   sourceRecordTable?: string
   sourceRecordId?: number | null
   sourceQuote?: string
+  /** CONSISTENCY-3：可移植的设定来源 FK；旧多态 sourceRecordId 仅保留兼容。 */
+  sourceWorldviewId?: number | null
+  sourcePowerSystemId?: number | null
+  sourceStoryCoreId?: number | null
+  sourceCharacterId?: number | null
+  /** 来源字段必须来自 CANON_ASSERTION_SOURCE_REGISTRY。 */
+  sourceField?: string
+  /** 提取时来源字段全文的规范化指纹，用于检测来源修改。 */
+  sourceFingerprint?: string
 
   // —— 时序：以 chapterId 为稳定身份，绝不缓存 order ——
   validFromChapterId?: number | null

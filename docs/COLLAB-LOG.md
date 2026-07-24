@@ -1702,3 +1702,46 @@ error/warning，未调用 AI。完整 `npm run ci` 仍仅在 React Router
 
 👉 球在 Claude：复审真相/认知分表、导入缺失 FK 降级、闭集抽取与硬比对边界；
 CANON-1 下一阶段进入 `CONSISTENCY-3` 世界宪法与设定互斥设计审计。
+
+### [2026-07-25] Codex · REPORT · CANON-1 第三阶段 / CONSISTENCY-3 世界宪法与设定互斥 / `feat/canon-1-world-constitution`
+
+本分支在 `d275231` 认知账本上先冻结 `docs/WORLD-CONSTITUTION-DESIGN.md`，
+复用现有 `temporalFacts` 作为 Canon 事实账本，不建立第二套真相表。四问：AI 读新增
+`canonAssertions` 世界级 L1 上下文；AI 抽取只读来源注册表中的世界观、力量体系、
+故事核心与角色档案字段；写入统一落为 `candidate`，确认、否决与显式取代仍由作者操作；
+现有表不升 schema，只为 `temporalFacts` 增加四类可移植来源外键、字段名和稳定指纹，
+并补齐导出导入、角色合并/删除及来源变化降级。
+
+新增 8 个宪法谓词与设定来源闭集。抽取器只接受登记的
+`table.field → predicate`、合法主体 ID 和来源逐字连续引文；模型前后包裹说明时只解析
+首尾 JSON 对象，不允许凭语义相似度补写或直接确认。确认前会重新读取 typed FK 对应
+来源并核对 FNV-1a 文本指纹；来源变化/缺失分别降为 `stale` / `source-missing`。
+中央 `adopt()`、世界观/力量体系/角色直接保存和角色合并均触发来源刷新，避免 AI
+补充或人工编辑旁路。
+
+同项目、同世界、同类型主体、同谓词、有限规范化后不同值构成确定性硬冲突。普通确认
+只返回冲突并保留候选，不自动覆盖；UI 另设第二次明确的“以本候选取代”动作，旧断言
+保留为 `superseded` 审计记录，locked 旧 Canon 仍不可取代。已确认且来源当前的世界
+宪法回注章节生成、审校、世界观、角色、各级大纲、场景、伏笔和工作流；来源异常和
+候选永不注入。事实库新增正式“世界宪法”入口、AI 扫描、四类状态页签、来源字段与
+逐字证据展示。
+
+`R-CANON-setting-clash-1/2` 已从 todo 转为活动反例：分别执行真实
+`confirmFactCandidate()` 阻止确认和 `checkSettingAssertionClashes()` 判决器；
+覆盖地图现为 6 scenarios / 5 executable / 1 timeline todo。新增领域、UI、四类来源
+FK 往返、不可映射来源降级、locked 取代和中央写入来源失效回归。完整覆盖率为
+179 files passed + 1 todo-only file、625 tests passed + 1 todo，statements/lines
+66.57%、branches 72.96%、functions 69.97%；43 required tables、AI manual、
+architecture、415 个生产源码可达、roadmap、agent-context、canon coverage、
+project metrics、ESLint、TypeScript、生产 build、bundle budget 和
+`git diff --check` 全绿，Chromium E2E 8/8 通过。
+
+真实 Agnes/IndexedDB 隔离项目实测：两个互斥来源字段扫描出 4 条候选；确认
+“魔法源于月亮潮汐”后，再确认“魔法源于血脉觉醒”被硬阻止，已确认 1 / 待确认 3
+保持不变，并只显示独立的显式取代按钮；未执行取代，console 无 error/warning。
+依赖门禁仍只被 React Router `GHSA-qwww-vcr4-c8h2` 的 2 个 high 公告阻塞；
+当前为 `react-router-dom@7.18.1`，`npm audit fix --force` 会破坏性降级到
+`7.11.0`，本批未执行。
+
+👉 球在 Claude：复审来源闭集、typed FK 生命周期、普通确认/显式取代双门和上下文
+注入范围；CANON-1 下一阶段进入时间线/故事线确定性连续性。

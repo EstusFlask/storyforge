@@ -60,7 +60,7 @@ export default function SceneVerifyPanel({ project }: Props) {
       const assembled = await assembleContext({
         projectId: project.id!,
         worldGroupId: project.enableMultiWorld ? activeGroupId ?? null : null,
-        sourceKeys: ['worldview', 'storyCore', 'powerSystem', 'codex', 'historical', 'worldRules', 'locations'],
+        sourceKeys: ['canonAssertions', 'worldview', 'storyCore', 'powerSystem', 'codex', 'historical', 'worldRules', 'locations'],
       })
       const part = (key: string) => {
         const idx = assembled.included.indexOf(key)

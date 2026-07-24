@@ -11,6 +11,32 @@ import { FIELD_BY_TARGET } from './field-registry'
 import { ADOPTION_BY_TARGET } from './adoption-schema'
 import type { AdoptInput, AdoptResult, CollectionAdoptionSpec, FieldSpec, TableSpec } from './types'
 import { normalizeCharacterAxes } from '../character/character-axes'
+import {
+  refreshSettingAssertionSourceStatus,
+} from '../fact-ledger/setting-assertions'
+import type { CanonAssertionSourceTable } from './canon-assertion-source-registry'
+
+const CANON_SOURCE_TABLES = new Set<CanonAssertionSourceTable>([
+  'worldviews',
+  'powerSystems',
+  'storyCores',
+  'characters',
+])
+
+async function refreshCanonSourceAfterWrite(
+  target: string,
+  projectId: number,
+  recordId: number,
+  fields: readonly string[],
+): Promise<void> {
+  if (!CANON_SOURCE_TABLES.has(target as CanonAssertionSourceTable)) return
+  await refreshSettingAssertionSourceStatus({
+    projectId,
+    table: target as CanonAssertionSourceTable,
+    recordId,
+    changedFields: fields,
+  })
+}
 
 export async function adopt(input: AdoptInput): Promise<AdoptResult> {
   const result = emptyResult()
@@ -111,6 +137,7 @@ async function adoptCollectionRecord(
 
   patch.updatedAt = Date.now()
   await tableSpec.table.update(input.recordId!, patch as any)
+  await refreshCanonSourceAfterWrite(input.target, input.projectId, input.recordId!, Object.keys(patch))
   result.written.push({ id: input.recordId!, fields: Object.keys(patch) })
   return result
 }
@@ -226,6 +253,7 @@ async function adoptSingleton(
   const now = Date.now()
   if (target?.id != null) {
     await tableSpec.table.update(target.id, { ...patch, updatedAt: now } as any)
+    await refreshCanonSourceAfterWrite(input.target, input.projectId, target.id, Object.keys(patch))
     result.written.push({ id: target.id, fields: Object.keys(patch) })
   } else {
     const row = {
@@ -281,11 +309,13 @@ async function adoptCollection(
         const patch: Record<string, unknown> = { updatedAt: Date.now() }
         for (const [k, v] of Object.entries(item)) if (v !== null) patch[k] = v
         await tableSpec.table.update(existing.id, patch as any)
+        await refreshCanonSourceAfterWrite(input.target, input.projectId, existing.id, Object.keys(patch))
         result.written.push({ id: existing.id, fields: Object.keys(patch) })
       } else if (adoption.duplicatePolicy === 'merge') {
         const patch = mergeByStrategy(existing, item, adoption.mergeStrategy ?? 'overwrite-non-empty')
         patch.updatedAt = Date.now()
         await tableSpec.table.update(existing.id, patch as any)
+        await refreshCanonSourceAfterWrite(input.target, input.projectId, existing.id, Object.keys(patch))
         result.written.push({ id: existing.id, fields: Object.keys(patch) })
       } else {
         throw new Error(`[adopt] 重复记录 ${input.target}.${JSON.stringify(identityValue(item, adoption))}`)

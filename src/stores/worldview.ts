@@ -2,6 +2,7 @@ import { create } from 'zustand'
 import { db } from '../lib/db/schema'
 import type { Worldview, StoryCore, PowerSystem, DivineDesign, NaturalResources } from '../lib/types'
 import { adopt } from '../lib/registry/adopt'
+import { refreshSettingAssertionSourceStatus } from '../lib/fact-ledger/setting-assertions'
 
 interface WorldviewStore {
   worldview: Worldview | null
@@ -118,6 +119,12 @@ export const useWorldviewStore = create<WorldviewStore>((set, get) => ({
     }
     if (target?.id) {
       await db.powerSystems.update(target.id, { ...data, updatedAt: now() })
+      await refreshSettingAssertionSourceStatus({
+        projectId: target.projectId,
+        table: 'powerSystems',
+        recordId: target.id,
+        changedFields: Object.keys(data),
+      })
       set({ powerSystem: { ...target, ...data, updatedAt: now() } })
     } else if (projectId != null) {
       const newPs: PowerSystem = {

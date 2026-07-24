@@ -43,8 +43,8 @@
 
 | 反例 ID | 场景 | 期望抓它的机制 | 当前状态 |
 |---|---|---|---|
-| `R-CANON-setting-clash-1` | 世界起源写"魔法源于月亮潮汐",力量体系写"魔法源于血脉觉醒" | 设定一致性校验(世界宪法) | 🔴 无覆盖 |
-| `R-CANON-setting-clash-2` | 故事核心设定主角是孤儿,角色档案写主角有健在父母 | 设定一致性校验 | 🔴 无覆盖 |
+| `R-CANON-setting-clash-1` | 世界起源写"魔法源于月亮潮汐",力量体系写"魔法源于血脉觉醒" | 世界宪法受控主题 + `confirmFactCandidate` 硬冲突闸门 | 🟢 可执行 |
+| `R-CANON-setting-clash-2` | 故事核心设定主角是孤儿,角色档案写主角有健在父母 | 世界宪法分类型主体 + `checkSettingAssertionClashes` | 🟢 可执行 |
 | `R-CANON-omniscient-1` | 角色 A 第 5 章才被告知真相,第 3 章正文里 A 就提到该真相 | 认知账本(CONSISTENCY-2) | 🟢 已过（闭集比对；抽取可能漏） |
 | `R-CANON-item-1` | 角色已持有"玄铁剑",正文写"第一次捡到玄铁剑" | held-items | 🟢 已过(有测试) |
 | `R-CANON-timeline-1` | 第 3 章死亡的角色,第 5 章正文正常出场活动 | 存亡投影 canon validator | 🔴 无覆盖 |

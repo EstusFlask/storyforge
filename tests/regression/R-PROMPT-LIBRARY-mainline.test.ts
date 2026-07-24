@@ -59,7 +59,7 @@ describe('小说创作 Prompt 内容回归主模板体系', () => {
     expect(sources('task')).toEqual(expect.arrayContaining(['chapterOutline', 'detailedOutline']))
     expect(sources('continuity')).toEqual(expect.arrayContaining(['chapterContinuityHandoff', 'currentFacts', 'heldItems']))
     expect(sources('voices')).toEqual(expect.arrayContaining(['characters', 'characterRelations']))
-    expect(sources('rules')).toEqual(expect.arrayContaining(['worldview', 'worldRules', 'creativeRules']))
+    expect(sources('rules')).toEqual(expect.arrayContaining(['canonAssertions', 'worldview', 'worldRules', 'creativeRules']))
 
     const p12e = NOVEL_CONTENT_PROMPT_SEEDS.find(seed => seed.assetId === 'P12-E')!
     expect(p12e.variableBindings?.find(binding => binding.variable === 'text')?.sourceKeys).toContain('chapterContent')

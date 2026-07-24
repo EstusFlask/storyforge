@@ -10,6 +10,7 @@ import { getFactPredicate } from '../../lib/registry/fact-predicate-registry'
 import type { FactStatus } from '../../lib/types/temporal-fact'
 import { exportFactMemoryMarkdown } from '../../lib/fact-ledger/human-readable-io'
 import KnowledgeLedgerPanel from './KnowledgeLedgerPanel'
+import WorldConstitutionPanel from './WorldConstitutionPanel'
 
 type FactTab = FactStatus | 'exceptions'
 
@@ -44,7 +45,7 @@ export default function FactLibraryPanel({ project }: { project: Project }) {
   const [tab, setTab] = useState<FactTab>('exceptions')
   const [diffText, setDiffText] = useState('')
   const [ioMsg, setIoMsg] = useState('')
-  const [libraryMode, setLibraryMode] = useState<'facts' | 'knowledge'>('facts')
+  const [libraryMode, setLibraryMode] = useState<'facts' | 'knowledge' | 'constitution'>('facts')
 
   useEffect(() => { if (project.id != null) void load(project.id) }, [project.id, load])
 
@@ -87,6 +88,9 @@ export default function FactLibraryPanel({ project }: { project: Project }) {
   if (libraryMode === 'knowledge') {
     return <KnowledgeLedgerPanel project={project} onShowFacts={() => setLibraryMode('facts')} />
   }
+  if (libraryMode === 'constitution') {
+    return <WorldConstitutionPanel project={project} onShowFacts={() => setLibraryMode('facts')} />
+  }
 
   return (
     <div className="p-6 max-w-4xl mx-auto">
@@ -95,10 +99,16 @@ export default function FactLibraryPanel({ project }: { project: Project }) {
           <Database className="w-5 h-5 text-sky-400" />
           <h1 className="text-lg font-bold text-text-primary">事实库（NS-4 长期一致性）</h1>
         </div>
-        <button onClick={() => setLibraryMode('knowledge')}
-          className="px-3 py-1.5 text-xs rounded-md bg-violet-500/10 text-violet-300 hover:bg-violet-500/20">
-          查看角色认知
-        </button>
+        <div className="flex items-center gap-2">
+          <button onClick={() => setLibraryMode('constitution')}
+            className="px-3 py-1.5 text-xs rounded-md bg-amber-500/10 text-amber-300 hover:bg-amber-500/20">
+            查看世界宪法
+          </button>
+          <button onClick={() => setLibraryMode('knowledge')}
+            className="px-3 py-1.5 text-xs rounded-md bg-violet-500/10 text-violet-300 hover:bg-violet-500/20">
+            查看角色认知
+          </button>
+        </div>
       </div>
       <p className="text-xs text-text-muted mb-4">
         在章节里点「提取事实」抽取候选；确认后的事实会在写后续章节时自动注入。正文修改、删章、删角色会进入异常待复核，不会继续污染生成上下文。

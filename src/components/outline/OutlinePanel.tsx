@@ -183,6 +183,7 @@ export default function OutlinePanel({ project, onOpenChapter }: Props) {
       provider: aiConfig.provider,
       model: aiConfig.model,
       sourceKeys: [
+        'canonAssertions',
         'worldview',
         'storyCore',
         'powerSystem',

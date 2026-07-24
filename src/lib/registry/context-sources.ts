@@ -30,6 +30,7 @@ import { parseBeats } from '../types/emotion-beat'
 import { buildForeshadowTaskContext } from '../foreshadow/context'
 import { formatHeldItemsContext, readProjectHeldItems } from '../consistency/held-items'
 import { formatCharacterKnowledgeContext, readProjectCharacterKnowledge } from '../knowledge-ledger/knowledge-ledger'
+import { formatCanonAssertionsContext, readCanonAssertions } from '../fact-ledger/setting-assertions'
 import type { Chapter, Character, OutlineNode, PowerSystem, Worldview } from '../types'
 import type { ContextSource } from './types'
 import { countWords, htmlToPlainText } from '../utils/html'
@@ -496,6 +497,18 @@ export const CONTEXT_SOURCES: ContextSource[] = [
     budgetTokens: 2000,
     requiresChapterId: true,
     read: input => readCurrentFacts(input.projectId, input.chapterId, input.worldGroupId),
+  },
+  {
+    key: 'canonAssertions',
+    label: '世界宪法(已确认设定断言)',
+    scope: 'world',
+    layer: 'L1',
+    budgetTokens: 1800,
+    protectedFromTrim: true,
+    requiresWorldGroupId: true,
+    read: async input => formatCanonAssertionsContext(
+      await readCanonAssertions(input.projectId, input.worldGroupId),
+    ),
   },
   {
     key: 'characterKnowledge',
