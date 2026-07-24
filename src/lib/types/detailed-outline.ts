@@ -67,6 +67,8 @@ export interface DetailedOutline {
   foreshadowIds?: number[]
   /** 情绪走向 */
   emotionArc?: EmotionArc
+  /** 章纲工坊确认的不可写清单，供正文生成回注。 */
+  prohibitions?: string[]
 
   // ── Phase 30.3 大纲-细纲同步检测 ──────────────────────────────
   /** 生成细纲时所用的章节大纲摘要快照，用于检测大纲变更后提示用户 */

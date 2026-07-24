@@ -268,6 +268,7 @@ export const FIELD_REGISTRY: FieldSpec[] = [
   arr('detailedOutlines', 'appearingCharacterIds'),
   arr('detailedOutlines', 'foreshadowIds'),
   enumeration('detailedOutlines', 'emotionArc', ['rising', 'falling', 'flat', 'wave', 'climax']),
+  arr('detailedOutlines', 'prohibitions'),
   longtext('detailedOutlines', 'lastUsedSummary'),
 
   // foreshadows / story arcs

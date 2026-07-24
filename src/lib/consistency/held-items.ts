@@ -1,7 +1,7 @@
 import type { Chapter, ItemLedgerEntry, OutlineNode } from '../types'
-import { resolveCanonicalChapterSequence } from '../ai/chapter-memory/canonical-chapter-sequence'
 import type { ConsistencyFinding } from '../ai/adapters/consistency-audit-adapter'
 import { db } from '../db/schema'
+import { resolveProjectionBoundary } from './projection-boundary'
 
 export interface HeldItemProjection {
   itemName: string
@@ -15,7 +15,8 @@ export interface ProjectHeldItemsInput {
   entries: ItemLedgerEntry[]
   outlineNodes: OutlineNode[]
   chapters: Chapter[]
-  chapterId: number
+  chapterId?: number | null
+  outlineNodeId?: number | null
   worldGroupId?: number | null
   characterId?: number | null
 }
@@ -52,16 +53,11 @@ function includesInWorld(entry: ItemLedgerEntry, chapterWorld: Map<number, numbe
  * 按 resolveCanonicalChapterSequence 的规范章序实时计算，不缓存 order。
  */
 export function projectHeldItems(input: ProjectHeldItemsInput): HeldItemProjection[] {
-  const { sequence } = resolveCanonicalChapterSequence(input.outlineNodes, input.chapters)
-  const orderOf = new Map<number, number>()
-  const chapterWorld = new Map<number, number | null>()
-  sequence.forEach((entry, index) => {
-    if (entry.chapter.id == null) return
-    orderOf.set(entry.chapter.id, index)
-    chapterWorld.set(entry.chapter.id, entry.worldGroupId)
-  })
-
-  const currentOrder = orderOf.get(input.chapterId)
+  const {
+    targetOrder: currentOrder,
+    orderOfChapter: orderOf,
+    worldOfChapter: chapterWorld,
+  } = resolveProjectionBoundary(input)
   if (currentOrder == null) return []
 
   const grouped = new Map<string, {
@@ -107,13 +103,27 @@ export function projectHeldItems(input: ProjectHeldItemsInput): HeldItemProjecti
     }))
 }
 
-export async function readProjectHeldItems(projectId: number, chapterId: number, worldGroupId?: number | null, characterId?: number | null): Promise<HeldItemProjection[]> {
+export async function readProjectHeldItems(
+  projectId: number,
+  chapterId?: number | null,
+  worldGroupId?: number | null,
+  characterId?: number | null,
+  outlineNodeId?: number | null,
+): Promise<HeldItemProjection[]> {
   const [entries, outlineNodes, chapters] = await Promise.all([
     db.itemLedger.where('projectId').equals(projectId).toArray(),
     db.outlineNodes.where('projectId').equals(projectId).toArray(),
     db.chapters.where('projectId').equals(projectId).toArray(),
   ])
-  return projectHeldItems({ entries, outlineNodes, chapters, chapterId, worldGroupId, characterId })
+  return projectHeldItems({
+    entries,
+    outlineNodes,
+    chapters,
+    chapterId,
+    outlineNodeId,
+    worldGroupId,
+    characterId,
+  })
 }
 
 export function formatHeldItemsContext(items: HeldItemProjection[]): string {

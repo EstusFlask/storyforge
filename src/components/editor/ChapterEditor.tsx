@@ -37,6 +37,16 @@ import { useDialog } from '../shared/Dialog'
 import { useReviewResultStore } from '../../stores/review-result'
 import { useAIConfigStore } from '../../stores/ai-config'
 import { analyzeContextSegments, calculateBudget, getModelPreset, type ContextBudget } from '../../lib/ai/context-budget'
+import {
+  prepareGenerationNode,
+  runGenerationNode,
+  type PreparedGenerationNode,
+} from '../../lib/generation/generation-node'
+import {
+  createChapterGenerationNode,
+  type ChapterGenerationCategory,
+  type ChapterGenerationOperation,
+} from '../../lib/generation/chapter-generation-node'
 import RichEditor, { type RichEditorHandle } from './RichEditor'
 import EmotionBeatCard from './EmotionBeatCard'
 import FloatingToolbar from './FloatingToolbar'
@@ -44,11 +54,12 @@ import ChapterEditorHeader from './ChapterEditorHeader'
 import ChapterMemoryPanel from './ChapterMemoryPanel'
 import ChapterContextPreview from './ChapterContextPreview'
 import ChapterEditorToolbar from './ChapterEditorToolbar'
+import PromptPreviewGate from '../shared/PromptPreviewGate'
 import { useItemLedgerStore } from '../../stores/item-ledger'
 import { useLocationStore } from '../../stores/location'
 import { useCodexStore } from '../../stores/codex'
 import { buildEditorEntityReferences } from '../../lib/editor/entity-reference'
-import type { Project, StateDiffItem } from '../../lib/types'
+import type { ChatMessage, Project, StateDiffItem } from '../../lib/types'
 
 const StateDiffModal = lazy(() => import('../state/StateDiffModal'))
 const OutlinePreview = lazy(() => import('../outline/OutlinePreview'))
@@ -62,6 +73,13 @@ function LazyPanelFallback() {
 
 /** 生成任务类型(原 memory-builder 三层记忆已被 assembleContext 取代,此类型仅用于调试日志标签) */
 type MemoryTaskType = 'write' | 'plan' | 'review'
+
+interface PendingChapterGeneration {
+  operation: ChapterGenerationOperation
+  category: ChapterGenerationCategory
+  prepared: PreparedGenerationNode
+  backgroundMemoryIds: number[]
+}
 
 interface Props {
   project: Project
@@ -123,6 +141,8 @@ export default function ChapterEditor({ project, outlineNodeId }: Props) {
   const [showNotePanel, setShowNotePanel] = useState(false)
   const [compareSourceHtml, setCompareSourceHtml] = useState<string | null>(null)
   const [contextBudget, setContextBudget] = useState<ContextBudget | null>(null)
+  const [transparentMode, setTransparentMode] = useState(false)
+  const [pendingGeneration, setPendingGeneration] = useState<PendingChapterGeneration | null>(null)
   const [planReconciliationCurrent, setPlanReconciliationCurrent] = useState(false)
   const aiConfig = useAIConfigStore(s => s.config)
   const dialog = useDialog()
@@ -141,6 +161,9 @@ export default function ChapterEditor({ project, outlineNodeId }: Props) {
   useEffect(() => { loadItemLedger(project.id!) }, [project.id, loadItemLedger])
   useEffect(() => { loadLocations(project.id!) }, [project.id, loadLocations])
   useEffect(() => { loadCodex(project.id!) }, [project.id, loadCodex])
+  useEffect(() => {
+    setPendingGeneration(null)
+  }, [currentChapter?.id, outlineNodeId])
 
   // 如果从大纲进入，选择/创建对应章节（自动创建）
   useEffect(() => {
@@ -463,6 +486,54 @@ export default function ChapterEditor({ project, outlineNodeId }: Props) {
     }
   }
 
+  const chapterGenerationNode = (
+    operation: ChapterGenerationOperation,
+    category: ChapterGenerationCategory,
+  ) => createChapterGenerationNode({
+    operation,
+    category,
+    projectId: project.id!,
+    chapterIdentity: currentChapter?.id ?? outlineNodeId ?? 'unselected',
+    ai,
+  })
+
+  const runPreparedChapterGeneration = (
+    operation: ChapterGenerationOperation,
+    category: ChapterGenerationCategory,
+    prepared: PreparedGenerationNode,
+    backgroundMemoryIds: number[],
+    messages?: ChatMessage[],
+  ) => {
+    ai.setOperation(operation)
+    const node = chapterGenerationNode(operation, category)
+    void runGenerationNode(node, prepared, { messages }).catch(error => {
+      console.error('[ChapterEditor] 生成节点执行失败:', error)
+    })
+    scheduleRecentMemoryRebuild(backgroundMemoryIds)
+  }
+
+  const prepareOrRunChapterGeneration = (
+    operation: ChapterGenerationOperation,
+    category: ChapterGenerationCategory,
+    messages: ChatMessage[],
+    backgroundMemoryIds: number[],
+  ) => {
+    const node = chapterGenerationNode(operation, category)
+    const prepared = prepareGenerationNode(node, messages)
+    if (transparentMode) {
+      ai.setOperation(operation)
+      setPendingGeneration({ operation, category, prepared, backgroundMemoryIds })
+      return
+    }
+    setPendingGeneration(null)
+    runPreparedChapterGeneration(
+      operation,
+      category,
+      prepared,
+      backgroundMemoryIds,
+    )
+  }
+
   const handleGenerate = async () => {
     if (!outlineNode) return
     const backgroundMemoryIds = await prepareContinuityBeforeGeneration()
@@ -493,9 +564,12 @@ export default function ChapterEditor({ project, outlineNodeId }: Props) {
     ])
     setContextBudget(calculateBudget(aiConfig.provider, aiConfig.model, segments, aiConfig.contextWindow))
 
-    ai.setOperation('generate')
-    void ai.start(messages, undefined, { category: 'chapter.content', projectId: project.id! })
-    scheduleRecentMemoryRebuild(backgroundMemoryIds)
+    prepareOrRunChapterGeneration(
+      'generate',
+      'chapter.content',
+      messages,
+      backgroundMemoryIds,
+    )
   }
 
   const handleContinue = async () => {
@@ -511,9 +585,12 @@ export default function ChapterEditor({ project, outlineNodeId }: Props) {
       customInstruction.trim() || undefined,
       { continuity, continuityBudgetTokens },
     )
-    ai.setOperation('continue')
-    void ai.start(messages, undefined, { category: 'chapter.continue', projectId: project.id! })
-    scheduleRecentMemoryRebuild(backgroundMemoryIds)
+    prepareOrRunChapterGeneration(
+      'continue',
+      'chapter.continue',
+      messages,
+      backgroundMemoryIds,
+    )
   }
 
   const handlePolish = () => {
@@ -1026,9 +1103,54 @@ export default function ChapterEditor({ project, outlineNodeId }: Props) {
       )}
 
       {/* Phase 21.3: 上下文预算条 */}
+      <details className="mb-2 rounded-lg border border-border bg-bg-surface/60 px-3 py-2 text-xs">
+        <summary className="cursor-pointer text-text-secondary hover:text-text-primary">
+          AI 生成高级选项
+          {transparentMode && <span className="ml-2 text-accent">透明模式已开启</span>}
+        </summary>
+        <label className="mt-2 flex cursor-pointer items-start gap-2 border-t border-border pt-2">
+          <input
+            type="checkbox"
+            checked={transparentMode}
+            onChange={event => {
+              setTransparentMode(event.target.checked)
+              setPendingGeneration(null)
+            }}
+            className="mt-0.5 accent-accent"
+          />
+          <span>
+            <span className="font-medium text-text-secondary">发送前预览最终提示词</span>
+            <span className="ml-2 text-[10px] text-text-muted">
+              默认关闭；开启后可临时编辑拼接后的真实消息，不写回模板或作品资料。
+            </span>
+          </span>
+        </label>
+      </details>
+
       {contextBudget && (
         <div className="mb-2">
           <ContextBudgetBar budget={contextBudget} compact={ai.isStreaming} />
+        </div>
+      )}
+
+      {pendingGeneration && (
+        <div className="mb-3 rounded-lg border border-accent/30 bg-accent/5 p-3">
+          <PromptPreviewGate
+            messages={pendingGeneration.prepared.messages}
+            backLabel="取消本次预览"
+            onBack={() => setPendingGeneration(null)}
+            onConfirm={messages => {
+              const pending = pendingGeneration
+              setPendingGeneration(null)
+              runPreparedChapterGeneration(
+                pending.operation,
+                pending.category,
+                pending.prepared,
+                pending.backgroundMemoryIds,
+                messages,
+              )
+            }}
+          />
         </div>
       )}
 

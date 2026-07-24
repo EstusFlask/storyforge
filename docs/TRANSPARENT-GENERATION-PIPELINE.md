@@ -1,6 +1,6 @@
 # 可介入的透明生成管线 · 开发设计文档
 
-> 状态:Claude 起草(2026-07-10),待作者确认 → Codex 实施。
+> 状态:Claude 起草(2026-07-10) → 作者确认 → Codex 完成(2026-07-25)。
 > 定位:这不是一个孤立新功能,而是**把项目现有一切 AI 生成,统一收口到一个"节点链"执行模型**。分阶段生成、提示词发送前可编辑、以及未来 agent 的"每节点可介入",都是这一个抽象的三种形态。
 > 前置必读:`CLAUDE.md`(三注册表铁律)、`docs/AI-COPILOT-DESIGN.md`(§2.2 检测环软硬、§2.3 与一致性关系、AgentRunner)、本文件不覆盖数据红线。
 
@@ -40,7 +40,7 @@
 | 模板临时改 | `PromptRunPanel`("调参浮窗")可调参 + "高级:临时改 Prompt 文字",`systemOverride`/`userOverride` 运行时覆盖不写回模板;`outline-adapter` 有 `overrides:{systemPrompt,userPromptTemplate}` | 改的是**模板**,不是**拼接后最终文本** |
 | 分阶段生成 | `OutlinePanel` 已是**粗粒度分阶段**:卷纲(`outline.volume`)与章纲(`outline.chapter`)是两次独立 `ai.start`,各自 `assembleContext → messages → 流式` | 章**内**仍是一次性;没有"现状→动机→碰撞→场景卡"的细粒度阶段 + 阶段间锚定 + 阶段产物存储 |
 | 采纳落库 | `adopt()` + `FIELD_REGISTRY` + `ADOPTION_SCHEMAS` 结构化写回 + 确认 | — |
-| 软硬闸门 | `held-items`(CONSISTENCY-1)已是第一块确定性校验器 | 尚未接入"生成节点采纳前"这一环 |
+| 软硬闸门 | `held-items`、认知账本与世界宪法闭集判决器已存在 | 已接入质量节点与最终场景卡采纳前；未声明语义仍可能漏报 |
 
 **一句话现状**:装配、拼接、透明分段、模板覆盖、粗分阶段、采纳、第一块硬校验——**全有**。缺的是把它们抽象成"节点",并补上"最终提示词可编辑"和"章内细分阶段"这两段。
 
@@ -56,7 +56,7 @@ GenerationNode {
   assembleInput(ctx) → messages   // 复用 assembleContext + adapter,产出拼接后的完整 messages
   editableInput?: boolean         // 该节点是否允许"发送前编辑最终提示词"
   run(messages) → stream          // 复用 ai.start / streamChat
-  gate?(output) → GateResult      // 可选:采纳前过确定性校验(v1 只有 held-items;认知账本/canon 待 CONSISTENCY-2/3 落地)
+  gate?(output) → GateResult      // 可选:采纳前过确定性校验(held-items / knowledge / canon 闭集)
   adopt(confirmedOutput)          // 复用 adopt(),写回走注册表
   produces?: ArtifactKey          // 该节点产物的 key,供后续节点 assembleInput 锚定引用
 }
@@ -65,11 +65,23 @@ Pipeline = GenerationNode[]       // 静态数组(工坊)或由编排器动态�
 ```
 
 **三条铁律(对应 CLAUDE.md)**:
-- `assembleInput` **只能**经 `assembleContext`(读),不许在节点里手挑字段拼接。
+- `assembleInput` 的项目数据**只能**经 `assembleContext`(读),不许在节点里手挑数据库字段拼接；作者已确认、尚未落库的前序节点产物可作为本次会话输入显式传入。
 - `adopt` **只能**经 `FIELD_REGISTRY/ADOPTION_SCHEMAS`(写),不许裸 `db.xxx`。
 - 节点产物若要落库/参与生命周期,**先去 `PROJECT_TABLES` 登记**。
 
 **这一层是泛化,不是并行系统**:现有 `ChapterEditor.handleGenerate` / `OutlinePanel` 的生成流,本质就是"1 个节点";本设计是把它们重构成"走 GenerationNode",而不是另写一套。
+
+### 3.1 实施冻结(2026-07-25)
+
+本轮核对真实代码后冻结以下边界，后续实现不得自行扩大：
+
+1. **运行时而非数据库抽象**：`GenerationNode`、输入快照、工坊中间产物均先驻留会话内；PIPE-1/2 v1 不新增表，因此不引入迁移与导入导出负担。
+2. **前台确认优先**：`runNode()` 默认只执行到 output/gate，绝不自动 adopt；只有作者在结果预览确认后才显式采纳。这样不会绕过现有大纲预览与注册表写回。
+3. **快照位置**：大纲入口先用现有 `assembleContext()` 得到登记来源，再由节点的 `assembleInput` 调既有 adapter 拼成 `messages`。透明编辑只覆盖该快照，不回写 Prompt store、参数或作品字段。
+4. **兼容路径**：透明模式每次请求默认关闭。关闭时 `prepare → confirm → runNode` 与现有一键调用等价；开启时只在 confirm 与 run 之间插入 `PromptPreviewGate`。
+5. **并发与失效**：沿用控制器 request id；切换请求、取消或重新发起时，旧上下文和旧编辑草稿同时失效，禁止跨请求复用。
+6. **首个收口入口**：先完整接入卷纲/章纲四类请求并用回归证明等价，再接正文生成；章纲工坊只复用同一个节点运行器，不另写编排系统。
+7. **编排兼容层**：仓库当前没有可运行的 `AgentRunner`，只有 `PromptWorkflow` 顺序执行器。因此本轮先把每个 Workflow step 适配为 `GenerationNode`；未来 AgentRunner 只负责编排同一接口，不提前制造第二套 agent 运行时。
 
 ---
 
@@ -103,14 +115,14 @@ Pipeline = GenerationNode[]       // 静态数组(工坊)或由编排器动态�
       ↓
 ③ 碰撞预演   2-3 人动机相撞 → 反应链(≥3步)→ 不可逆结果
       ↓
-④ 质检闸门   反套路检查(软·LLM 建议)+ **持有物 held-items 确定性硬查(v1 只有这一块)**;认知边界待 CONSISTENCY-2 认知账本落地后接入;不过打回③重来
+④ 质检闸门   反套路检查(软·LLM 建议)+ **持有物 / 认知闭集 / 世界宪法 claim 确定性硬查**;不过打回③重来
       ↓
 ⑤ 落场景卡   汇总为结构化章纲(场景卡 + 不可写清单),adopt 落库
 ```
 
 **怎么做**:
-- 每节点一个 adapter(prompt),内容填 §6 方法论。`assembleInput` 经 assembleContext,并把**前序节点已确认产物**作为一个新的 CONTEXT_SOURCE 注入(→ 先去 `CONTEXT_SOURCES` 登记 `pipelineArtifact` 源)。
-- 中间产物 v1 可**先做成会话内瞬态**(工坊面板 state),不落库;确认要持久化再走 `PROJECT_TABLES` 新增一张轻表(`outlinePipelineArtifacts`),按注册表接生命周期。
+- 每节点一个 adapter(prompt),内容填 §6 方法论。项目数据经 `assembleContext` 读取；**前序节点已确认产物**作为明确的会话级参数传入，不伪装成数据库上下文源。
+- 中间产物 v1 **做成会话内瞬态**(工坊面板 state),不落库；未来确认要持久化时，才先登记 `CONTEXT_SOURCES`，并走 `PROJECT_TABLES` 新增轻表与完整生命周期。
 - UI:一个"章纲工坊"面板 = 分步 stepper,每步显示节点产物、可编辑、确认后触发下一步;每步都可选走 PIPELINE-1 的"看/改提示词"。
 - **默认仍保留"一键快速生成章纲"**(现状,一次性);工坊是"深度模式",opt-in。
 
@@ -179,7 +191,7 @@ Pipeline = GenerationNode[]       // 静态数组(工坊)或由编排器动态�
 
 1. **抽象先行**:定义 `GenerationNode` 接口 + 一个 `runNode()` 运行器(封装 assembleInput→[可选 PromptPreviewGate]→run→[可选 gate]→adopt)。先用它**重构一个现有生成**(如 `outline.chapter`),证明"泛化不改变现有行为"(回归测试全绿)。
 2. **PIPELINE-1**:实现 `PromptPreviewGate`,在 1-2 个生成入口接上"发送前预览/编辑"(默认关)。
-3. **PIPELINE-2**:实现 5 节点章纲工坊(先瞬态产物);各节点 adapter 填 §6 方法论;质检节点接 `held-items`(+ 认知账本若已就绪)。保留一键快速生成。
+3. **PIPELINE-2**:实现 5 节点章纲工坊(瞬态产物);各节点 adapter 填 §6 方法论;质检节点接 `held-items`、认知账本和世界宪法闭集。保留一键快速生成。
 4. **PIPELINE-3**:AgentRunner step 对齐 GenerationNode 接口(可等 agent 工程启动时做)。
 
 每一步都是独立可交付、可合并的,不必等下一步。
@@ -190,8 +202,8 @@ Pipeline = GenerationNode[]       // 静态数组(工坊)或由编排器动态�
 
 - **回归(重构不改行为)**:重构 `outline.chapter` 走 GenerationNode 后,现有 outline 相关回归测试全绿(证明泛化无副作用)。
 - **PIPELINE-1**:`R-PIPELINE1` — 不开高级时行为与现状一致;开高级并编辑最终提示词 → `ai.start` 收到的是编辑后 messages;覆盖不写回模板/字段(重开面板恢复原样)。
-- **PIPELINE-2**:`R-PIPELINE2` — ① 节点顺序不可跳级(未确认动机不进碰撞);② 后节点 assembleInput 确实包含前节点已确认产物;③ 质检节点对"**重复获得**"能确定性打回(v1 只有 held-items;认知边界待 CONSISTENCY-2 落地);④ 一键快速生成路径不受影响;⑤ 若加表:迁移 + 导出/导入往返(`R-PIPELINE2-migration`)。
-- **PIPELINE-3**:`R-PIPELINE3` — AgentRunner 跑一个节点时,gate/adopt 的用户确认关卡生效(前台不自主写库)。
+- **PIPELINE-2**:`R-PIPELINE2` — ① 节点顺序不可跳级(未确认动机不进碰撞);② 后节点 assembleInput 确实包含前节点已确认产物;③ 质检节点对重复获得、提前知情与宪法 claim 冲突能确定性打回;④ 一键快速生成路径不受影响;⑤ 本轮未加表，故无迁移增量。
+- **PIPELINE-3**:`R-PIPELINE3` — 当前 `PromptWorkflow` step 已经可经同一节点接口执行且不会自动写回；仓库尚无 AgentRunner，其动态编排与确认关卡继续归 AGENT-1。
 - **闸门**:`tsc` / `build` / `vitest` / `check:architecture` / `check:required-tables` / `check:ai-manual` 全绿。
 
 ---
@@ -203,6 +215,16 @@ Pipeline = GenerationNode[]       // 静态数组(工坊)或由编排器动态�
 - **走注册表**:读经 `assembleContext`、写经 `adopt`、新表进 `PROJECT_TABLES`,无裸写。
 - **半成品不外露**:未完成的节点/工坊标"实验性"并默认隐藏。
 - **验证证据**:上述测试 + 闸门全绿,commit 写清证据。
+
+### 11.1 实施结果(2026-07-25)
+
+- `src/lib/generation/generation-node.ts` 已提供统一节点、会话输入快照、确定性 gate 和显式 adopt 安全默认。
+- 卷纲/章纲四类入口、正文生成/续写和 PromptWorkflow step 已接入同一运行器；透明模式默认关闭。
+- 当前“章节 → 场景细纲”真实入口已交付五阶段工坊、节点级提示词预览、会话版本比较、按节点 token 估算和作者最终采纳。
+- 工坊中间产物不落库；最终 `scenes + prohibitions` 经 `adopt()` 写入已登记 `detailedOutlines`，并进入正文上下文。
+- gate 同时复用 held-items、knowledge ledger 和 world constitution 闭集。模型漏报仍是诚实边界，不宣称纯代码理解任意自然语言。
+- 最终 gate 只审开场、收束与实际场景叙事字段，排除 `prohibitions` 和审计元数据，避免禁令被误判为剧情、`quote` 字段自证；作者确认后的采纳只做确定性 JSON 解析，不再暗中发起第 6 次模型调用。
+- 仓库当前没有 AgentRunner；PIPELINE-3 已完成现有 Workflow step 的接口适配，动态 Agent 编排继续归 AGENT-1。
 
 ---
 

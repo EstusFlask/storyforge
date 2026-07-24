@@ -271,6 +271,9 @@ async function readDetailedOutline(projectId: number, outlineNodeId?: number | n
       .filter(Boolean).join(' / ')
     parts.push(`场景${i + 1} ${s.title || ''}: ${bits}`)
   })
+  if (detail.prohibitions?.length) {
+    parts.push(`不可写清单:${detail.prohibitions.join('；')}`)
+  }
   if (detail.endingCliffhanger) parts.push(`结尾悬念:${detail.endingCliffhanger}`)
   return parts.join('\n')
 }
@@ -288,9 +291,21 @@ async function readItemLedger(projectId: number, characterId?: number | null): P
   ].join('\n')
 }
 
-async function readHeldItems(projectId: number, chapterId?: number | null, worldGroupId?: number | null, characterId?: number | null): Promise<string> {
-  if (chapterId == null) return ''
-  return formatHeldItemsContext(await readProjectHeldItems(projectId, chapterId, worldGroupId, characterId))
+async function readHeldItems(
+  projectId: number,
+  chapterId?: number | null,
+  worldGroupId?: number | null,
+  characterId?: number | null,
+  outlineNodeId?: number | null,
+): Promise<string> {
+  if (chapterId == null && outlineNodeId == null) return ''
+  return formatHeldItemsContext(await readProjectHeldItems(
+    projectId,
+    chapterId,
+    worldGroupId,
+    characterId,
+    outlineNodeId,
+  ))
 }
 
 async function readStoryTimeline(projectId: number): Promise<string> {
@@ -522,11 +537,13 @@ export const CONTEXT_SOURCES: ContextSource[] = [
     budgetTokens: 1600,
     protectedFromTrim: true,
     requiresChapterId: true,
+    acceptsOutlineNodeAsChapterBoundary: true,
     read: async input => formatCharacterKnowledgeContext(await readProjectCharacterKnowledge(
       input.projectId,
-      input.chapterId!,
+      input.chapterId,
       input.worldGroupId,
       input.characterId,
+      input.outlineNodeId,
     )),
   },
   {
@@ -723,7 +740,14 @@ export const CONTEXT_SOURCES: ContextSource[] = [
     budgetTokens: 1000,
     protectedFromTrim: true,
     requiresChapterId: true,
-    read: input => readHeldItems(input.projectId, input.chapterId, input.worldGroupId, input.characterId),
+    acceptsOutlineNodeAsChapterBoundary: true,
+    read: input => readHeldItems(
+      input.projectId,
+      input.chapterId,
+      input.worldGroupId,
+      input.characterId,
+      input.outlineNodeId,
+    ),
   },
   {
     key: 'storyTimeline',

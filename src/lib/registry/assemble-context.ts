@@ -103,7 +103,11 @@ function selectSources(input: AssembleContextInput): ContextSource[] {
 function requirementsMet(source: ContextSource, input: AssembleContextInput): boolean {
   if (source.requiresWorldGroupId && !Object.prototype.hasOwnProperty.call(input, 'worldGroupId')) return false
   if (source.requiresOutlineNodeId && input.outlineNodeId == null && input.chapterId == null) return false
-  if (source.requiresChapterId && input.chapterId == null) return false
+  if (
+    source.requiresChapterId
+    && input.chapterId == null
+    && !(source.acceptsOutlineNodeAsChapterBoundary && input.outlineNodeId != null)
+  ) return false
   return true
 }
 

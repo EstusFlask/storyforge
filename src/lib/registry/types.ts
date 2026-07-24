@@ -298,6 +298,8 @@ export interface ContextSource {
   requiresWorldGroupId?: boolean
   requiresOutlineNodeId?: boolean
   requiresChapterId?: boolean
+  /** 规划尚未创建正文 Chapter 时，允许用 outlineNodeId 作为规范章序边界。 */
+  acceptsOutlineNodeAsChapterBoundary?: boolean
   enabled?: (input: AssembleContextInput) => boolean | Promise<boolean>
   read: (input: AssembleContextInput) => Promise<string>
 }

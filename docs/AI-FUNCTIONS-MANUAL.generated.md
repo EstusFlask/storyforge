@@ -129,7 +129,7 @@ AI 输出经 `adopt({ target, data })` 写回,只有这里登记的字段可写(
 | `codexCategories` | `builtInKey` `domain` `fieldSchema` `hidden` `icon` `name` `order` `parentId` `worldGroupId` |
 | `codexEntries` | `categoryId` `description` `fields` `icon` `importance` `name` `order` `refs` `summary` `tags` `worldGroupId` |
 | `creativeRules` | `atmosphere` `citedInsightIds` `citedReferenceIds` `consistencyRules` `narrativePOV` `prohibitions` `referenceWorksV2` `specialRequirements` `writingStyle` |
-| `detailedOutlines` | `appearingCharacterIds` `emotionArc` `endingCliffhanger` `foreshadowIds` `lastUsedSummary` `openingHook` `outlineNodeId` `sceneLocation` `scenes` |
+| `detailedOutlines` | `appearingCharacterIds` `emotionArc` `endingCliffhanger` `foreshadowIds` `lastUsedSummary` `openingHook` `outlineNodeId` `prohibitions` `sceneLocation` `scenes` |
 | `foreshadows` | `description` `echoChapterIds` `expectedResolveChapterId` `importance` `name` `notes` `plantChapterId` `resolveChapterId` `status` `timelinePosition` `type` `urgency` |
 | `historicalKeywords` | `aiBrainstorm` `aiConsult` |
 | `historicalTimelineEvents` | `aiBrainstorm` `aiConsult` |
@@ -160,26 +160,26 @@ AI 输出经 `adopt({ target, data })` 写回,只有这里登记的字段可写(
 
 ## 四、AI 调用点（消耗统计 category · 在哪触发)
 
-共 48 个 category。
+共 53 个 category。
 未分类调用: 0 个。动态 category 调用: 3 个。
 
 | category | 触发文件 |
 |---|---|
 | `ai.restructure` | `src/lib/ai/restructure.ts:54` |
 | `canon.setting.extract` | `src/components/facts/WorldConstitutionPanel.tsx:79` |
-| `chapter.content` | `src/components/editor/ChapterEditor.tsx:497` |
+| `chapter.content` | `src/lib/generation/chapter-generation-node.ts:22` |
 | `chapter.content.batch` | `src/lib/ai/batch-detail-runner.ts:256` |
-| `chapter.continue` | `src/components/editor/ChapterEditor.tsx:515` |
-| `chapter.deai` | `src/components/editor/ChapterEditor.tsx:552` |
-| `chapter.expand` | `src/components/editor/ChapterEditor.tsx:532` |
-| `chapter.memory` | `src/components/editor/ChapterEditor.tsx:326` |
-| `chapter.polish` | `src/components/editor/ChapterEditor.tsx:524` |
+| `chapter.continue` | `src/lib/generation/chapter-generation-node.ts:23` |
+| `chapter.deai` | `src/components/editor/ChapterEditor.tsx:629` |
+| `chapter.expand` | `src/components/editor/ChapterEditor.tsx:609` |
+| `chapter.memory` | `src/components/editor/ChapterEditor.tsx:349` |
+| `chapter.polish` | `src/components/editor/ChapterEditor.tsx:601` |
 | `chapter.toolbar` | `src/components/editor/FloatingToolbar.tsx:105` |
 | `character.generate` | `src/components/character/CharacterPanel.tsx:160` |
 | `character.structure` | `src/lib/ai/parse-character-output.ts:80` |
 | `character.supplement` | `src/components/character/CharacterSupplementAction.tsx:80` |
 | `codex.extract` | `src/components/codex/CodexPanel.tsx:206` |
-| `detail.scene` | `src/components/outline/DetailedOutlinePanel.tsx:151`<br/>`src/components/outline/ScenePanel.tsx:115`<br/>`src/lib/ai/batch-detail-runner.ts:109` |
+| `detail.scene` | `src/components/outline/DetailedOutlinePanel.tsx:151`<br/>`src/components/outline/ScenePanel.tsx:126`<br/>`src/lib/ai/batch-detail-runner.ts:109` |
 | `emotion.beat` | `src/components/editor/EmotionBeatCard.tsx:66` |
 | `foreshadow.structure` | `src/components/foreshadow/ForeshadowPanel.tsx:67` |
 | `foreshadow.suggest` | `src/components/foreshadow/ForeshadowPanel.tsx:216` |
@@ -190,17 +190,22 @@ AI 输出经 `adopt({ target, data })` 写回,只有这里登记的字段可写(
 | `inspiration.reverse` | `src/components/project/InspirationPanel.tsx:107` |
 | `inventory.extract` | `src/components/items/InventoryPanel.tsx:150` |
 | `location.extract` | `src/components/location/LocationPanel.tsx:106` |
-| `outline.chapter` | `src/components/outline/useOutlineGenerationController.ts:106`<br/>`src/lib/ai/batch-outline-runner.ts:123` |
+| `outline.chapter` | `src/lib/ai/batch-outline-runner.ts:123`<br/>`src/lib/outline/generation-node.ts:55` |
 | `outline.character-driven` | `src/components/outline/CharacterDrivenPlotPanel.tsx:113` |
-| `outline.volume` | `src/components/outline/useOutlineGenerationController.ts:104` |
+| `outline.volume` | `src/lib/outline/generation-node.ts:51` |
+| `outline.workshop.collision` | `src/lib/outline/workshop.ts:448` |
+| `outline.workshop.motivation` | `src/lib/outline/workshop.ts:445` |
+| `outline.workshop.scan` | `src/lib/outline/workshop.ts:442` |
+| `outline.workshop.scenes` | `src/lib/outline/workshop.ts:453` |
 | `prompt.examples` | `src/components/settings/prompt/PromptExamplesEditor.tsx:108` |
 | `reference.characters` | `src/components/project/AnalysisReportViewer.tsx:143` |
 | `reference.summary` | `src/components/project/AnalysisReportViewer.tsx:112` |
 | `relation.extract` | `src/components/relations/CharacterRelationPanel.tsx:98` |
 | `review.anti-ai` | `src/components/editor/ReviewPanel.tsx:100` |
+| `review.outline-workshop` | `src/lib/outline/workshop.ts:451` |
 | `review.quality` | `src/components/editor/ReviewPanel.tsx:92` |
 | `review.readability` | `src/components/editor/ReviewPanel.tsx:109` |
-| `review.revise` | `src/components/editor/ChapterEditor.tsx:567` |
+| `review.revise` | `src/components/editor/ChapterEditor.tsx:644` |
 | `rules.generate` | `src/components/rules/CreativeRulesPanel.tsx:80` |
 | `scene.verify` | `src/components/scene/SceneVerifyPanel.tsx:81` |
 | `story-arc.generate` | `src/components/outline/StoryArcPanel.tsx:85` |
@@ -218,8 +223,8 @@ AI 输出经 `adopt({ target, data })` 写回,只有这里登记的字段可写(
 
 - `src/components/editor/ReviewPanel.tsx:152 · ai.start`
 - `src/components/settings/NS0EvalPanel.tsx:50 · chat`
-- `src/components/settings/prompt/WorkflowRunner.tsx:287 · ai.start`
+- `src/lib/generation/workflow-generation-node.ts:23 · ai.start`
 
 ---
 
-生成时间基准:commit `873b68c`
+生成时间基准:commit `0aca5f9`

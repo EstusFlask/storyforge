@@ -230,7 +230,7 @@ export default function ChaptersListPanel({ project, initialNodeId }: Props) {
           {/* 场景细纲（可折叠） */}
           <div className="px-4 pt-2 pb-2">
             <ScenePanel
-              projectId={project.id!}
+              project={project}
               outlineNodeId={selectedNode.id!}
               chapterTitle={selectedNode.title}
               chapterSummary={selectedNode.summary}

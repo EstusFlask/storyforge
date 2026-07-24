@@ -1,8 +1,8 @@
 import type { Chapter, KnowledgeLedgerEntry, OutlineNode } from '../types'
 import type { ConsistencyFinding } from '../ai/adapters/consistency-audit-adapter'
-import { resolveCanonicalChapterSequence } from '../ai/chapter-memory/canonical-chapter-sequence'
 import { db } from '../db/schema'
 import { adopt } from '../registry/adopt'
+import { resolveProjectionBoundary } from '../consistency/projection-boundary'
 
 export const KNOWLEDGE_ACTIONS = ['learn', 'mislearn', 'forget', 'correct'] as const
 
@@ -22,7 +22,8 @@ export interface ProjectKnowledgeInput {
   entries: KnowledgeLedgerEntry[]
   outlineNodes: OutlineNode[]
   chapters: Chapter[]
-  chapterId: number
+  chapterId?: number | null
+  outlineNodeId?: number | null
   worldGroupId?: number | null
   characterId?: number | null
 }
@@ -112,12 +113,10 @@ function characterKey(entry: Pick<KnowledgeLedgerEntry, 'characterId' | 'charact
  * 事件视为基线，先于所有章节事件。章节位置始终从规范大纲顺序实时解析。
  */
 export function projectCharacterKnowledge(input: ProjectKnowledgeInput): ProjectedKnowledge[] {
-  const { sequence } = resolveCanonicalChapterSequence(input.outlineNodes, input.chapters)
-  const orderOf = new Map<number, number>()
-  sequence.forEach((entry, index) => {
-    if (entry.chapter.id != null) orderOf.set(entry.chapter.id, index)
-  })
-  const targetOrder = orderOf.get(input.chapterId)
+  const {
+    targetOrder,
+    orderOfChapter: orderOf,
+  } = resolveProjectionBoundary(input)
   if (targetOrder == null) return []
 
   const eligible = input.entries
@@ -164,22 +163,32 @@ export function projectCharacterKnowledge(input: ProjectKnowledgeInput): Project
 
 export async function readProjectCharacterKnowledge(
   projectId: number,
-  chapterId: number,
+  chapterId?: number | null,
   worldGroupId?: number | null,
   characterId?: number | null,
+  outlineNodeId?: number | null,
 ): Promise<ProjectedKnowledge[]> {
   const [entries, outlineNodes, chapters] = await Promise.all([
     db.knowledgeLedger.where('projectId').equals(projectId).toArray(),
     db.outlineNodes.where('projectId').equals(projectId).toArray(),
     db.chapters.where('projectId').equals(projectId).toArray(),
   ])
-  return projectCharacterKnowledge({ entries, outlineNodes, chapters, chapterId, worldGroupId, characterId })
+  return projectCharacterKnowledge({
+    entries,
+    outlineNodes,
+    chapters,
+    chapterId,
+    outlineNodeId,
+    worldGroupId,
+    characterId,
+  })
 }
 
 export async function readCognitionAuditSnapshot(
   projectId: number,
-  chapterId: number,
+  chapterId?: number | null,
   worldGroupId?: number | null,
+  outlineNodeId?: number | null,
 ): Promise<CognitionAuditSnapshot> {
   const [entries, outlineNodes, chapters] = await Promise.all([
     db.knowledgeLedger.where('projectId').equals(projectId).toArray(),
@@ -205,7 +214,7 @@ export async function readCognitionAuditSnapshot(
   return {
     catalog: [...catalogByKey.values()],
     projected: projectCharacterKnowledge({
-      entries, outlineNodes, chapters, chapterId, worldGroupId,
+      entries, outlineNodes, chapters, chapterId, outlineNodeId, worldGroupId,
     }),
   }
 }

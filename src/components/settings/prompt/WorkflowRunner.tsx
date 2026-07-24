@@ -17,6 +17,11 @@ import { db } from '../../../lib/db/schema'
 import type { PromptWorkflow, PromptWorkflowStep, SaveTarget } from '../../../lib/types/workflow'
 import type { Project } from '../../../lib/types'
 import { assembleWorkflowStepVars } from './workflow-helpers'
+import {
+  prepareGenerationNode,
+  runGenerationNode,
+} from '../../../lib/generation/generation-node'
+import { createWorkflowGenerationNode } from '../../../lib/generation/workflow-generation-node'
 import { useToast } from '../../shared/Toast'
 import WorkflowStepCard from './WorkflowStepCard'
 import type { StepResult } from './WorkflowStepCard'
@@ -284,7 +289,19 @@ export default function WorkflowRunner({ workflow, project, onClose }: RunnerPro
         const ctx = await buildStepContext(step, idx)
         messages = renderPrompt(tpl, ctx, { parameterValues: step.parameterValues }).messages
       }
-      const output = await ai.start(messages, undefined, { category: step.promptModuleKey, projectId: project?.id })
+      const generationNode = createWorkflowGenerationNode({
+        workflowId: workflow.id ?? workflow.name,
+        stepId: step.stepId,
+        category: step.promptModuleKey,
+        projectId: project?.id,
+        ai,
+      })
+      const output = (
+        await runGenerationNode(
+          generationNode,
+          prepareGenerationNode(generationNode, messages),
+        )
+      ).output
       // FB-1 修复 · 缺陷 A：把本步输出存进 ref(而非只存 React state),供下一步取用
       stepOutputsRef.current.set(step.stepId, output)
       updateResult(step.stepId, { status: 'done', output, tokenUsage: ai.tokenUsage })

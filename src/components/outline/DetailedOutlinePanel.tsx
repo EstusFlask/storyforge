@@ -412,7 +412,12 @@ export default function DetailedOutlinePanel({ project }: Props) {
             )}
 
             {/* D2: 增强字段展示 */}
-            {currentDetailed && (currentDetailed.openingHook || currentDetailed.endingCliffhanger || currentDetailed.emotionArc) && (
+            {currentDetailed && (
+              currentDetailed.openingHook
+              || currentDetailed.endingCliffhanger
+              || currentDetailed.emotionArc
+              || currentDetailed.prohibitions?.length
+            ) && (
               <div className="mb-4 bg-bg-surface border border-border rounded-xl p-3 space-y-2">
                 <h3 className="text-xs font-semibold text-text-muted uppercase tracking-wide">章节细纲增强信息</h3>
                 {currentDetailed.openingHook && (
@@ -445,6 +450,16 @@ export default function DetailedOutlinePanel({ project }: Props) {
                     </span>
                   )}
                 </div>
+                {currentDetailed.prohibitions && currentDetailed.prohibitions.length > 0 && (
+                  <div className="border-t border-border pt-2">
+                    <span className="text-[10px] text-warning">⛔ 不可写清单</span>
+                    <ul className="mt-1 list-disc space-y-0.5 pl-4 text-xs text-text-secondary">
+                      {currentDetailed.prohibitions.map((item, index) => (
+                        <li key={`${item}-${index}`}>{item}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
               </div>
             )}
 

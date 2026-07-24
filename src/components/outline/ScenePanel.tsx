@@ -4,8 +4,11 @@
  * 展示并编辑某章节的细纲场景列表，支持 AI 一键拆场景。
  */
 import { useState, useEffect } from 'react'
-import { Plus, Trash2, Sparkles, ChevronDown, ChevronRight } from 'lucide-react'
+import { Plus, Trash2, Sparkles, ChevronDown, ChevronRight, Wand2 } from 'lucide-react'
 import { useDetailedOutlineStore } from '../../stores/detailed-outline'
+import { useOutlineStore } from '../../stores/outline'
+import { useCharacterStore } from '../../stores/character'
+import { useForeshadowStore } from '../../stores/foreshadow'
 import { useAIStream } from '../../hooks/useAIStream'
 import { createAISessionKey } from '../../stores/ai-generation-session'
 import { buildDetailSceneGeneratePrompt, normalizeParsedScenes, parseEnhancedDetailSmart } from '../../lib/ai/adapters/detail-scene-adapter'
@@ -15,7 +18,9 @@ import { adopt } from '../../lib/registry/adopt'
 import { assembleContext } from '../../lib/registry/assemble-context'
 import { useAIConfigStore } from '../../stores/ai-config'
 import { useToast } from '../shared/Toast'
-import type { DetailedScene, ScenePace } from '../../lib/types'
+import type { DetailedScene, Project, ScenePace } from '../../lib/types'
+import ChapterOutlineWorkshop from './ChapterOutlineWorkshop'
+import { adoptChapterOutlineWorkshopResult } from '../../lib/outline/adopt-workshop'
 
 const PACE_LABELS: Record<ScenePace, string> = {
   slow:   '🐢 慢',
@@ -32,20 +37,26 @@ const PACE_COLORS: Record<ScenePace, string> = {
 }
 
 interface Props {
-  projectId: number
+  project: Project
   outlineNodeId: number
   chapterTitle: string
   chapterSummary: string
 }
 
-export default function ScenePanel({ projectId, outlineNodeId, chapterTitle, chapterSummary }: Props) {
+export default function ScenePanel({ project, outlineNodeId, chapterTitle, chapterSummary }: Props) {
+  const projectId = project.id!
   const { detailedOutlines, loadAll, getOrCreate, save } = useDetailedOutlineStore()
+  const nodes = useOutlineStore(state => state.nodes)
+  const characters = useCharacterStore(state => state.characters)
+  const foreshadows = useForeshadowStore(state => state.foreshadows)
   const ai = useAIStream(createAISessionKey(projectId, 'detail.scene', outlineNodeId))
   const aiConfig = useAIConfigStore(s => s.config)
   const toast = useToast()
   const [expanded, setExpanded] = useState(false)
+  const [showWorkshop, setShowWorkshop] = useState(false)
 
   useEffect(() => { loadAll(projectId) }, [projectId, loadAll])
+  useEffect(() => { setShowWorkshop(false) }, [outlineNodeId])
 
   const detailed = detailedOutlines.find(d => d.outlineNodeId === outlineNodeId)
   const scenes = detailed?.scenes || []
@@ -117,6 +128,29 @@ export default function ScenePanel({ projectId, outlineNodeId, chapterTitle, cha
   }
 
   const totalWords = scenes.reduce((s, sc) => s + (sc.estimatedWords || 0), 0)
+  const chapterNode = nodes.find(node => node.id === outlineNodeId && node.type === 'chapter')
+
+  const handleAdoptWorkshop = async (raw: string): Promise<boolean> => {
+    const result = await adoptChapterOutlineWorkshopResult({
+      raw,
+      projectId,
+      outlineNodeId,
+      chapterSummary,
+      validCharacterIds: new Set(
+        characters.map(character => character.id).filter((id): id is number => id != null),
+      ),
+      validForeshadowIds: new Set(
+        foreshadows.map(item => item.id).filter((id): id is number => id != null),
+      ),
+    })
+    if (!result.ok) {
+      toast.error(`采纳失败：${result.reason}`)
+      return false
+    }
+    await loadAll(projectId)
+    toast.success(`已采纳 ${result.sceneCount} 个场景和 ${result.prohibitionCount} 条不可写约束`)
+    return true
+  }
 
   return (
     <div className="border border-border rounded-lg overflow-hidden">
@@ -142,11 +176,40 @@ export default function ScenePanel({ projectId, outlineNodeId, chapterTitle, cha
           title="AI 一键拆场景">
           <Sparkles className="w-3.5 h-3.5" />
         </span>
+        <span
+          onClick={event => {
+            event.stopPropagation()
+            setExpanded(true)
+            setShowWorkshop(value => !value)
+          }}
+          className="p-1 text-text-muted hover:text-purple-500 rounded"
+          title="五阶段章纲工坊"
+        >
+          <Wand2 className="w-3.5 h-3.5" />
+        </span>
       </button>
 
       {/* 展开内容 */}
       {expanded && (
         <div className="p-3 space-y-3 bg-bg-surface">
+          {showWorkshop && chapterNode && (
+            <ChapterOutlineWorkshop
+              key={chapterNode.id}
+              project={project}
+              chapter={chapterNode}
+              nodes={nodes}
+              characters={characters}
+              onAdopt={handleAdoptWorkshop}
+              onClose={() => setShowWorkshop(false)}
+            />
+          )}
+
+          {detailed?.prohibitions && detailed.prohibitions.length > 0 && (
+            <div className="rounded border border-warning/30 bg-warning/10 p-2 text-[11px] text-text-secondary">
+              <span className="font-medium text-warning">不可写清单：</span>
+              {detailed.prohibitions.join('；')}
+            </div>
+          )}
           {/* AI 输出 */}
           {(ai.output || ai.isStreaming || ai.error) && (
             <AIStreamOutput

@@ -242,3 +242,31 @@ test('本地 OpenAI 兼容服务可刷新并保存模型列表', async ({ page }
   await expect(page.locator('input[placeholder="手动输入模型名"]')).toHaveValue('qwen-local')
   await expect(baseUrl).toHaveValue('http://localhost:1234/v1')
 })
+
+test('真实章节入口可打开五阶段工坊并预览首节点最终提示词', async ({ page }) => {
+  await createBookWithSavedChapter(
+    page,
+    'E2E 透明章纲工坊',
+    '林舟已经拿着青铜钥匙来到密室门前。',
+  )
+
+  await page.getByTitle('五阶段章纲工坊').click()
+  await expect(page.getByRole('heading', { name: /五阶段章纲工坊/ })).toBeVisible()
+  await expect(page.getByText('预计调用 5 次模型', { exact: false })).toBeVisible()
+  await expect(page.getByText('当前：现状扫描', { exact: false })).toBeVisible()
+  await expect(page.getByText('正在按注册表装配本章证据')).toHaveCount(0)
+
+  await page.getByLabel('每个节点发送前预览/编辑最终消息（一次性，不保存）').check()
+  await page.getByRole('button', { name: '生成本步', exact: true }).click()
+
+  await expect(page.getByTestId('prompt-preview-gate')).toBeVisible()
+  await expect(page.getByText('最终发送内容', { exact: true })).toBeVisible()
+  const prompts = page.getByTestId('prompt-preview-gate').locator('textarea')
+  await expect(prompts).toHaveCount(2)
+  await expect(prompts.nth(0)).toContainText('现状扫描')
+  await expect(prompts.nth(1)).toContainText('第1章')
+  await expect(page.getByTestId('prompt-preview-gate').getByText(
+    '不写回模板或作品资料',
+    { exact: false },
+  )).toBeVisible()
+})

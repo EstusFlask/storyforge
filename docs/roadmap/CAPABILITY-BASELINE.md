@@ -134,20 +134,26 @@
 
 ### 已有能力
 
-- Prompt seed、Prompt store、WorkflowRunner、模型路由和上下文装配已存在。
-- 卷纲/章纲已有批量生成、空节点补全、已写正文进度和主线约束。
-- AI 输出已有确认、采纳和结构化写回路径。
+- `GenerationNode`、输入快照和安全默认不采纳的 `runGenerationNode` 已成为统一运行时薄层。
+- 卷纲/章纲四类请求及正文生成/续写支持默认关闭的最终提示词预览与一次性编辑。
+- 当前章节页已有五阶段章纲工坊；中间产物瞬态、顺序不可跳、可重做并比较最近版本。
+- 工坊质量节点与最终采纳前复用持有物、认知账本和世界宪法闭集 gate；反套路审查保持 advisory。
+- 场景卡与不可写清单经 `adopt()` 写入细纲，并由 `detailedOutline` 上下文回注正文。
+- 既有 PromptWorkflow step 已适配同一节点接口；模型路由、上下文装配和作者确认写回语义保持不变。
 
 ### 当前边界 / 尚未完成
 
-- 最终发送前的提示词预览与编辑尚未成为统一生成节点能力。
-- 分阶段章纲工坊、节点 gate、批量改进和评估历史尚未形成一条正式管线。
-- 不能在 Outline、Chapter、Agent 各自新写一套生成编排。
+- `AgentRunner` 尚不存在；动态对话/多 Agent 编排归 `AGENT-1`，不得在 PIPE-1 伪造空壳。
+- 闭集引用由模型抽取，代码可拒绝伪造 ID/引文和已声明冲突，但不能证明模型没有漏报未声明的语义。
+- 工坊历史只保留当前会话最近版本；若未来要求跨会话持久化，必须先登记新表、迁移和导入导出，不得偷写 localStorage。
 
 ### 代码与设计入口
 
 - `src/lib/ai/`
+- `src/lib/generation/`
+- `src/lib/outline/workshop.ts`
 - `src/lib/registry/assemble-context.ts`
+- `src/components/outline/ChapterOutlineWorkshop.tsx`
 - `src/components/settings/prompt/WorkflowRunner.tsx`
 - `docs/TRANSPARENT-GENERATION-PIPELINE.md`
 
