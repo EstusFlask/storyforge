@@ -1640,3 +1640,15 @@ ROADMAP 已同步真实范围：`AUDIT-6` 仍未达到所有大面板 `<500` 行
 应用内 `1119` 隔离预览实测：文档解析页正常加载，文件格式/大小限制和 50,000 字切块提示显示；粘贴“第一章”测试文本后生成 1 块确认页，识别 1 章、21 字，随后取消确认，没有发起真实 AI 或写入项目；控制台无 error/warning。`AUDIT-6` 仍未完成，下一步继续评估 `ChapterEditor` 与 prompt 领域文件的安全拆分。
 
 👉 球在 Claude：审查本批导入 hook 的恢复/Blob 边界与父级 pipeline 控制、确认页回归证据；Codex 推送后继续其它无需产品判断项。
+
+### [2026-07-25] Codex · REPORT · GOV-1 Agent 上下文输入治理 / `refactor/context-input-governance`
+
+作者已在当前任务明确授权：把 StoryForge 的输入浪费治理排在角色物品与仓库事项之后，先严谨规划再实施；本批因此获准修改 `CLAUDE.md` 的接手和文档路由口径。三注册表铁律、四问、生产数据红线和完成定义未改变，`docs/MASTER-BLUEPRINT.md` 未修改。
+
+治理前 `AGENTS.md` 强制每个任务依次读取 `CLAUDE.md`、`COLLAB-WORKFLOW.md`、完整 `MASTER-BLUEPRINT.md`、路线图和完整能力基线，固定链共 2,979 行 / 166,002 bytes。现将 `AGENTS.md` 改为 3,915 bytes 的自包含短入口，保留三注册表、IndexedDB 生产风险、分支纪律、停止信号和验证要求；新增 `docs/CONTEXT-ROUTING.md`，按局部 UI、AI 读、AI 写、数据生命周期、新体系、PR/交接、历史追溯与宪法冲突建立“入口 → 读写 → 生命周期 → 调用方 → 测试”关联闭包。Blueprint、路线图、能力基线和历史日志只按任务 ID / 符号读取相关段落，不再作为普通任务固定前缀。
+
+新增 `scripts/check-agent-context.mjs` 与 `npm run check:agent-context` 并接入 `npm run ci`：入口上限为 8 KiB，检查三注册表、生产数据、main 和 CI 红线，拒绝恢复“所有任务全文必读”，并检查上下文路由覆盖完整。当前固定项目入口相对治理前强制链缩小 97.6%；该指标只表示仓库固定输入，不冒充系统指令、对话历史或工具实现产生的完整 token 账单。
+
+验证：`check:agent-context`、roadmap（12 个体系 / 25 个抽样任务 / 166 个历史状态标题）、architecture、42 required tables、AI manual、406 个生产源码可达、project metrics、ESLint、TypeScript、169 files / 597 tests、生产 build、bundle budget、`git diff --check` 全绿；`npm run ci:e2e` Chromium 8/8 通过。完整 `npm run ci` 正确运行到新增闸门并通过，随后仍被 React Router `GHSA-qwww-vcr4-c8h2` 的 2 个 high 公告阻塞；`npm audit fix --force` 会破坏性降级 `react-router-dom@7.11.0`，本批未冒险执行，其余闸门已独立全部通过。
+
+👉 球在 Claude：复审短入口是否完整保留宪法红线、按任务路由是否存在漏项，以及 CI 防回退规则是否足够稳定；本分支不改运行时代码、schema、注册表或用户数据。

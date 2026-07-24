@@ -3,10 +3,10 @@
 > 这是 StoryForge 当前与未来的开发入口。它只承载“现在做什么、为什么做、做到什么算完成”，不再承载全部历史实现流水账。
 >
 > 相关文档：
-> - [当前能力基线](./CAPABILITY-BASELINE.md)：新任务开工前必须先看，记录代码当前已经具备什么。
+> - [当前能力基线](./CAPABILITY-BASELINE.md)：新体系或完整功能读取对应章节，记录代码当前已经具备什么。
 > - [已完成索引](./COMPLETED.md)：按功能体系索引已交付能力、测试证据和历史记录。
 > - [历史完整快照](../ROADMAP-LEGACY.md)：本分支拆分前 `HEAD:docs/ROADMAP.md` 的原始内容，只读保存，不作为新的施工入口。
-> - [项目宪法](../../CLAUDE.md) 与 [施工蓝图](../MASTER-BLUEPRINT.md)：所有功能都必须服从三注册表和 Blueprint 的完成定义。
+> - [项目宪法](../../CLAUDE.md) 与 [施工蓝图](../MASTER-BLUEPRINT.md)：所有功能都必须服从三注册表和 Blueprint 的完成定义；读取范围由 [上下文路由](../CONTEXT-ROUTING.md) 决定。
 
 **迁移安全**：`docs/ROADMAP-LEGACY.md` 与本分支拆分前的 `HEAD:docs/ROADMAP.md` 字节级一致，共 3181 行，SHA-256 为 `e497de7d0f8100489bdcb3a7b3fcb528d07024b9dcb832f7de6e2701d584667d`。任何任务信息丢失或状态不明，先回到历史快照核对，不凭记忆补写。
 
@@ -39,7 +39,7 @@
 
 | 顺序 | 开发单位 | 作用 | 主要待开发内容 | 完成边界 | 状态 / 依赖 |
 |---:|---|---|---|---|---|
-| 0 | **GOV-1 架构、质量与发布治理** | 保证扩展前的架构、文档、供应链和发布结论可信 | P1 阻塞已收口；持续治理 `AUDIT-6/7`、`HEALTH-1/4/5` 中的组件复杂度、关键 runner/parser 覆盖、浏览器 smoke 与依赖维护 | 旁路清零或正式登记；关键运行时代码有真实门槛；发布与文档自动对齐 | **P1 COMPLETE；持续治理** |
+| 0 | **GOV-1 架构、质量与发布治理** | 保证扩展前的架构、文档、供应链和发布结论可信 | P1 阻塞与 Agent 固定输入治理已收口；持续治理 `AUDIT-6/7`、`HEALTH-1/4/5` 中的组件复杂度、关键 runner/parser 覆盖、浏览器 smoke 与依赖维护 | 旁路清零或正式登记；关键运行时代码有真实门槛；发布、文档与任务上下文自动对齐 | **P1 COMPLETE；持续治理** |
 | 1 | **INV-1 角色物品与状态账本** | 让主角、配角、NPC 拥有真实且可追溯的个人背包 | `INVENTORY-1`、`QUICKWIN-3`、角色状态同步、owner-less 历史数据迁移、按角色一致性 | 持有人、转移、提取范围、角色切换、状态投影、删除/合并、导入导出和迁移一次收口 | **COMPLETE（2026-07-25）** |
 | 2 | **CANON-1 长期一致性与 Canon** | 把长篇一致性从提示词劝告升级为可度量、可追溯的软硬工程 | `CONSISTENCY-0`、`CONSISTENCY-2`、`CONSISTENCY-3`、长期一致性路线第 2–4 步、Phase 38 写后事实检测、Phase 39 故事线进度、`EDITOR-2`、`CF-20260703-8` | 覆盖地图、知识账本、世界宪法、时序/故事线、影响传播和编辑器出口闭环；明确硬/软/未覆盖 | **READY 分期；下一产品开发单位** |
 | 3 | **PIPE-1 透明生成与质量工作坊** | 让作者看得见、改得动、能分阶段确认 AI 如何生成卷纲、章纲和正文 | `PIPELINE-1`、`PIPELINE-2`、`PIPELINE-3`、`CF-20260702-7`、Phase 38 大纲评估和改进闭环、全局骨架 | 一次性生成与 `GenerationNode` 共用一条管线；提示词、上下文、预算、gate、采纳透明 | **DESIGN → READY；依赖 CANON gate** |
@@ -70,6 +70,7 @@
 - 生产依赖漏洞降为 0，`check:dependencies` 进入本地与 GitHub CI；新增 `SECURITY.md` 漏洞响应边界。
 - 覆盖率排除静态 Prompt 数据，真实运行时基线设总门槛以及 AI / import / registry 分层门槛；不再以静态字符串抬分。
 - UI 显示语义版本 + 构建 SHA；Blueprint §1.1 的版本、源码、schema、三注册表和 Prompt 规模由 `check:project-metrics` 自动锁定。
+- Agent 自动入口改为自包含短宪法，任务专用资料由 `docs/CONTEXT-ROUTING.md` 按 UI、AI 读写、数据生命周期、路线图、PR 和历史追溯分流；`check:agent-context` 锁定入口体积、核心红线和禁止全文必读回退。
 
 ## 四、原任务唯一归属
 
