@@ -17,7 +17,17 @@ interface LegacyCharacterRow {
   [key: string]: unknown
 }
 
-/** v37 → v38：itemLedger 加 heldByName + characterId，存量条目归给项目主角。 */
+function resolveUniqueMainCharacter(characters: LegacyCharacterRow[]): LegacyCharacterRow | null {
+  const currentMain = characters.filter(character => character.roleWeight === 'main')
+  if (currentMain.length === 1) return currentMain[0]
+  if (currentMain.length > 1) return null
+
+  // v34 之前的备份可能还没有 roleWeight，才回退读取旧 role。
+  const legacyProtagonists = characters.filter(character => character.role === 'protagonist')
+  return legacyProtagonists.length === 1 ? legacyProtagonists[0] : null
+}
+
+/** v37 → v38：itemLedger 加 heldByName + characterId，存量条目归给唯一主要角色。 */
 export async function migrateItemLedgerToCharacterOwnership(tx: Transaction): Promise<void> {
   const items = await tx.table('itemLedger').toArray() as LegacyItemLedgerRow[]
   const characters = await tx.table('characters').toArray() as LegacyCharacterRow[]
@@ -32,10 +42,10 @@ export async function migrateItemLedgerToCharacterOwnership(tx: Transaction): Pr
   for (const item of items) {
     if (item.heldByName != null) continue
     const chars = byProject.get(item.projectId) ?? []
-    const protagonists = chars.filter(c => c.role === 'protagonist')
-    if (protagonists.length === 1) {
-      item.heldByName = protagonists[0].name
-      item.characterId = protagonists[0].id ?? null
+    const mainCharacter = resolveUniqueMainCharacter(chars)
+    if (mainCharacter) {
+      item.heldByName = mainCharacter.name
+      item.characterId = mainCharacter.id ?? null
     } else {
       item.heldByName = '未知(历史数据)'
       item.characterId = null

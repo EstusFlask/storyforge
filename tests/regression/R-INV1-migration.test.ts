@@ -28,7 +28,7 @@ class OldV37DB extends Dexie {
     this.version(37).stores({
       projects: '++id, name',
       itemLedger: '++id, projectId, itemName, chapterId',
-      characters: '++id, projectId, name, role',
+      characters: '++id, projectId, name, role, roleWeight',
     })
   }
 }
@@ -43,10 +43,9 @@ class UpgradedV38DB extends Dexie {
     this.version(37).stores({
       projects: '++id, name',
       itemLedger: '++id, projectId, itemName, chapterId',
-      characters: '++id, projectId, name, role',
+      characters: '++id, projectId, name, role, roleWeight',
     })
     this.version(38).stores({
-      itemLedger: '++id, projectId, itemName, heldByName, characterId, chapterId',
     }).upgrade(async (tx) => {
       await migrateItemLedgerToCharacterOwnership(tx)
     })
@@ -69,6 +68,58 @@ describe('INV-1 · v38 迁移', () => {
     const entry = await upgraded.itemLedger.get(entryId)
     expect(entry.heldByName).toBe('林风')
     expect(entry.characterId).toBe(charId)
+  })
+
+  it('现行 roleWeight=main 是唯一主要角色判定来源', async () => {
+    const old = track(new OldV37DB(nextName('inv1-m-main-weight')))
+    await old.open()
+    const pid = await old.projects.add({ name: 'test' })
+    const charId = await old.characters.add({
+      projectId: pid,
+      name: '顾离',
+      role: 'antagonist',
+      roleWeight: 'main',
+      createdAt: now,
+      updatedAt: now,
+    } as any)
+    const entryId = await old.itemLedger.add({
+      projectId: pid,
+      itemName: '黑曜石',
+      action: 'gain',
+      quantity: 1,
+      createdAt: now,
+    } as any)
+    old.close()
+
+    const upgraded = track(new UpgradedV38DB(old.name))
+    await upgraded.open()
+    const entry = await upgraded.itemLedger.get(entryId)
+    expect(entry.heldByName).toBe('顾离')
+    expect(entry.characterId).toBe(charId)
+  })
+
+  it('多个 roleWeight=main 时不回退旧 role 猜归属', async () => {
+    const old = track(new OldV37DB(nextName('inv1-m-multi-main')))
+    await old.open()
+    const pid = await old.projects.add({ name: 'test' })
+    await old.characters.bulkAdd([
+      { projectId: pid, name: '甲', role: 'protagonist', roleWeight: 'main' },
+      { projectId: pid, name: '乙', role: 'supporting', roleWeight: 'main' },
+    ] as any[])
+    const entryId = await old.itemLedger.add({
+      projectId: pid,
+      itemName: '旧钥匙',
+      action: 'gain',
+      quantity: 1,
+      createdAt: now,
+    } as any)
+    old.close()
+
+    const upgraded = track(new UpgradedV38DB(old.name))
+    await upgraded.open()
+    const entry = await upgraded.itemLedger.get(entryId)
+    expect(entry.heldByName).toBe('未知(历史数据)')
+    expect(entry.characterId).toBeNull()
   })
 
   it('多主角 → heldByName=未知(历史数据), characterId=null', async () => {

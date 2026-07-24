@@ -19,6 +19,7 @@ import {
 } from '../../lib/ai/adapters/consistency-audit-adapter'
 import { assembleContext } from '../../lib/registry/assemble-context'
 import { checkHeldItemAcquisition, readProjectHeldItems } from '../../lib/consistency/held-items'
+import { db } from '../../lib/db/schema'
 
 interface Props {
   projectId: number
@@ -280,8 +281,16 @@ async function buildDeterministicConsistencyFindings(args: {
   worldGroupId?: number | null
   chapterContent: string
 }): Promise<ConsistencyAuditResult['findings']> {
-  const heldItems = await readProjectHeldItems(args.projectId, args.chapterId, args.worldGroupId)
-  return checkHeldItemAcquisition(args.chapterContent, heldItems)
+  const [heldItems, characters] = await Promise.all([
+    readProjectHeldItems(args.projectId, args.chapterId, args.worldGroupId),
+    db.characters.where('projectId').equals(args.projectId).toArray(),
+  ])
+  return checkHeldItemAcquisition(
+    args.chapterContent,
+    heldItems,
+    [],
+    characters.map(character => character.name),
+  )
 }
 
 function ConsistencyResultView({ result }: { result: ConsistencyAuditResult }) {

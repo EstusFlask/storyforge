@@ -177,7 +177,7 @@ AI 输出经 `adopt({ target, data })` 写回,只有这里登记的字段可写(
 | `history.consult` | `src/components/history/useHistoryAI.ts:118` |
 | `history.storm` | `src/components/history/useHistoryAI.ts:120` |
 | `inspiration.reverse` | `src/components/project/InspirationPanel.tsx:107` |
-| `inventory.extract` | `src/components/items/InventoryPanel.tsx:131` |
+| `inventory.extract` | `src/components/items/InventoryPanel.tsx:150` |
 | `location.extract` | `src/components/location/LocationPanel.tsx:106` |
 | `outline.chapter` | `src/components/outline/useOutlineGenerationController.ts:106`<br/>`src/lib/ai/batch-outline-runner.ts:123` |
 | `outline.character-driven` | `src/components/outline/CharacterDrivenPlotPanel.tsx:113` |
@@ -186,9 +186,9 @@ AI 输出经 `adopt({ target, data })` 写回,只有这里登记的字段可写(
 | `reference.characters` | `src/components/project/AnalysisReportViewer.tsx:143` |
 | `reference.summary` | `src/components/project/AnalysisReportViewer.tsx:112` |
 | `relation.extract` | `src/components/relations/CharacterRelationPanel.tsx:98` |
-| `review.anti-ai` | `src/components/editor/ReviewPanel.tsx:87` |
-| `review.quality` | `src/components/editor/ReviewPanel.tsx:79` |
-| `review.readability` | `src/components/editor/ReviewPanel.tsx:96` |
+| `review.anti-ai` | `src/components/editor/ReviewPanel.tsx:88` |
+| `review.quality` | `src/components/editor/ReviewPanel.tsx:80` |
+| `review.readability` | `src/components/editor/ReviewPanel.tsx:97` |
 | `review.revise` | `src/components/editor/ChapterEditor.tsx:564` |
 | `rules.generate` | `src/components/rules/CreativeRulesPanel.tsx:80` |
 | `scene.verify` | `src/components/scene/SceneVerifyPanel.tsx:81` |
@@ -204,10 +204,10 @@ AI 输出经 `adopt({ target, data })` 写回,只有这里登记的字段可写(
 
 ### 动态 category 调用
 
-- `src/components/editor/ReviewPanel.tsx:130 · ai.start`
+- `src/components/editor/ReviewPanel.tsx:131 · ai.start`
 - `src/components/settings/NS0EvalPanel.tsx:50 · chat`
 - `src/components/settings/prompt/WorkflowRunner.tsx:287 · ai.start`
 
 ---
 
-生成时间基准:commit `ea9d51a`
+生成时间基准:commit `61ac643`

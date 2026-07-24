@@ -97,8 +97,12 @@ describe('R-15: character reference remap', () => {
       sourceType: 'manual', status: 'confirmed', locked: false,
       createdAt: now, updatedAt: now,
     } as any) as number
+    const itemId = await db.itemLedger.add({
+      projectId, itemName: '别名佩剑', heldByName: '别名角色', characterId: aliasId,
+      action: 'gain', quantity: 1, createdAt: now,
+    } as any) as number
 
-    await db.transaction('rw', db.characters, db.characterRelations, db.detailedOutlines, db.stateCards, db.temporalFacts, async () => {
+    await db.transaction('rw', db.characters, db.characterRelations, db.detailedOutlines, db.stateCards, db.temporalFacts, db.itemLedger, async () => {
       await applyCharacterReferenceRemap({
         projectId,
         fromCharacterId: aliasId,
@@ -122,6 +126,9 @@ describe('R-15: character reference remap', () => {
     expect(fact?.objectCharacterId).toBe(primaryId)
     expect(fact?.subjectName).toBe('主角色')
     expect(fact?.status).toBe('confirmed') // 合并是稳定重映射，不降级
+    const item = await db.itemLedger.get(itemId)
+    expect(item?.characterId).toBe(primaryId)
+    expect(item?.heldByName).toBe('主角色')
   })
 })
 

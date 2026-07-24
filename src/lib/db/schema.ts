@@ -374,11 +374,9 @@ class StoryForgeDB extends Dexie {
     // v38: itemLedger 加 heldByName + characterId（INV-1 按角色归属）
     this.version(38).stores({
     }).upgrade(async (tx) => {
-      try {
-        await migrateItemLedgerToCharacterOwnership(tx)
-      } catch (err) {
-        console.error('[v38 upgrade] itemLedger 迁移失败:', err)
-      }
+      // 迁移必须 fail-closed：任何异常都让 Dexie 回滚版本升级，
+      // 不能把缺失归属字段的半迁移数据库标记成 v38。
+      await migrateItemLedgerToCharacterOwnership(tx)
     })
   }
 }

@@ -53,7 +53,9 @@ describe('R-EDITOR3 · compare polish workflow', () => {
     const heldItems: HeldItemProjection[] = [{
       itemName: '青铜钥匙',
       quantity: 1,
-      evidence: [{ id: 3, itemName: '青铜钥匙' } as HeldItemProjection['evidence'][number]],
+      heldByName: '林舟',
+      characterId: null,
+      evidence: [{ id: 3, itemName: '青铜钥匙', heldByName: '林舟' } as HeldItemProjection['evidence'][number]],
     }]
     const findings = evaluateCompareDraftConsistency(
       '<p>林舟再次获得青铜钥匙，推开了门。</p>',

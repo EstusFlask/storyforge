@@ -1,11 +1,11 @@
 /**
  * 物品流水（游戏包裹式物品栏）— Phase 25.5.2-b
  *
- * 下游提取产物：AI 从已写正文中提取主角的物品获得/消耗事件，
+ * 下游提取产物：AI 从已写正文中提取各角色的物品获得/消耗事件，
  * 聚合为"当前持有数量 + 获得/消耗历程"，像游戏包裹一样。
  *
- * 设计为项目级（不按世界组）：诸天流中主角携带物品跨世界，
- * 物品栏反映的是主角的随身状态，而非某个世界的设定。
+ * 设计为项目级且按角色归属（不按世界组）：角色可携带物品跨世界，
+ * 物品栏反映角色的随身状态，而非某个世界的设定。
  */
 
 /** 物品流水动作 */
@@ -57,16 +57,19 @@ export function aggregateInventory(entries: ItemLedgerEntry[], characterId?: num
   const filtered = characterId != null
     ? entries.filter(e => (e.characterId ?? null) === (characterId ?? null))
     : entries
-  const map = new Map<string, ItemLedgerEntry[]>()
+  const map = new Map<string, { itemName: string; entries: ItemLedgerEntry[] }>()
   for (const e of filtered) {
-    const key = e.itemName.trim()
-    if (!key) continue
-    const list = map.get(key) || []
-    list.push(e)
-    map.set(key, list)
+    const itemName = e.itemName.trim()
+    if (!itemName) continue
+    // “全部角色”视图也必须保留归属边界，不能把不同角色的同名物品合成一份。
+    const ownerKey = e.characterId != null ? `id:${e.characterId}` : `name:${e.heldByName.trim()}`
+    const key = JSON.stringify([ownerKey, itemName])
+    const bucket = map.get(key) ?? { itemName, entries: [] }
+    bucket.entries.push(e)
+    map.set(key, bucket)
   }
   const result: InventoryItem[] = []
-  for (const [itemName, list] of map) {
+  for (const { itemName, entries: list } of map.values()) {
     const sorted = [...list].sort((a, b) => {
       // 优先按章节，其次按创建时间
       const ca = a.chapterId ?? 0, cb = b.chapterId ?? 0

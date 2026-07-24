@@ -21,12 +21,41 @@ export async function applyCharacterReferenceRemap(input: CharacterReferenceRema
   await remapRegisteredCharacterArrays(input.projectId, input.fromCharacterId, toCharacterId)
   await remapRegisteredCharacterJson(input.projectId, input.fromCharacterId, toCharacterId)
   await remapCharacterStateCards(input.projectId, input.fromName, toName)
+  await remapItemLedgerCharacterRefs(
+    input.projectId,
+    input.fromCharacterId,
+    toCharacterId,
+    toName,
+  )
   await remapTemporalFactCharacterRefs({
     projectId: input.projectId,
     fromCharacterId: input.fromCharacterId,
     toCharacterId,
     toName,
   })
+}
+
+/**
+ * itemLedger 是角色的软引用：删除角色时只断开 ID 并保留原持有人名；
+ * 合并角色时同时把 ID 和持有人名改为 canonical，避免物品留在已删除别名下。
+ */
+async function remapItemLedgerCharacterRefs(
+  projectId: number,
+  fromCharacterId: number,
+  toCharacterId?: number,
+  toName?: string,
+): Promise<void> {
+  const rows = await db.itemLedger
+    .where('projectId').equals(projectId)
+    .filter(entry => entry.characterId === fromCharacterId)
+    .toArray()
+  for (const row of rows) {
+    if (row.id == null) continue
+    await db.itemLedger.update(row.id, {
+      characterId: toCharacterId ?? null,
+      ...(toCharacterId != null && toName ? { heldByName: toName } : {}),
+    })
+  }
 }
 
 function targetTable(target: string): string {
@@ -189,17 +218,4 @@ async function remapCharacterStateCards(
   await db.stateCards.update(primary.id, { fields: stringifyFields(mergedFields), updatedAt: Date.now() })
   const fromIds = fromCards.map(c => c.id).filter((id): id is number => id != null)
   if (fromIds.length) await db.stateCards.bulkDelete(fromIds)
-}
-
-/** 删除角色时，遍历 itemLedger 将 characterId 置 null，保留 heldByName。 */
-export async function nullifyItemLedgerCharacterRefs(projectId: number, fromCharacterId: number): Promise<void> {
-  const rows = await db.itemLedger
-    .where('projectId').equals(projectId)
-    .filter(e => e.characterId === fromCharacterId)
-    .toArray()
-  for (const row of rows) {
-    if (row.id != null) {
-      await db.itemLedger.update(row.id, { characterId: null })
-    }
-  }
 }

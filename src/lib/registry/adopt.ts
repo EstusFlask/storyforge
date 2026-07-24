@@ -261,6 +261,9 @@ async function adoptCollection(
     if (!item) continue
     item = applyTableDefaults(item, tableSpec)
     if (input.target === 'characters') item = normalizeCharacterAxes(item)
+    if (input.target === 'itemLedger') {
+      item = await resolveItemLedgerOwner(input.projectId, item)
+    }
     if (!applyRequired(item, raw, adoption, result)) continue
     if (!await applyFkChecks(item, raw, adoption, result, input.projectId)) continue
     await applyArrayMemberChecks(item, adoption, result)
@@ -291,6 +294,21 @@ async function adoptCollection(
     }
   }
   return result
+}
+
+async function resolveItemLedgerOwner(
+  projectId: number,
+  item: Record<string, unknown>,
+): Promise<Record<string, unknown>> {
+  if (item.characterId != null || typeof item.heldByName !== 'string') return item
+  const heldByName = item.heldByName.trim()
+  if (!heldByName) return item
+  const matches = (await db.characters.where('projectId').equals(projectId).toArray())
+    .filter(character => character.name.trim() === heldByName)
+  return {
+    ...item,
+    characterId: matches.length === 1 ? matches[0].id ?? null : null,
+  }
 }
 
 function applyTableDefaults(item: Record<string, unknown>, tableSpec: TableSpec): Record<string, unknown> {

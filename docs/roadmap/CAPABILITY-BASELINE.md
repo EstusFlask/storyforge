@@ -46,18 +46,13 @@
 
 ### 已有能力
 
-- `itemLedger` 已有获得/消耗流水、编辑能力、章节关联和 `adopt()` 写回。
-- `CONTEXT_SOURCES` 已能把物品流水注入生成上下文。
-- `checkHeldItemAcquisition` 已能按章节顺序检测“已持有物品被再次写成首次获得”。
-- 状态卡、物品栏、故事年表和结构化抽取已有共享组件/adapter/测试。
-
-### 本次增量（仍待开发）
-
-- `heldByName` + `characterId` 持有人模型。
-- 主角/配角/NPC 背包切换和角色状态卡统一投影。
-- 明确的实际获得、目标/提及排除、转移方向判断。
-- owner-less 历史数据迁移、角色删除/合并、导入导出 remap。
-- `QUICKWIN-3` 的全部已写章节/自定义范围作为按角色提取的一部分交付。
+- `itemLedger` 以 `heldByName` + `characterId` 同时保存原文持有人与角色软引用；`adopt()` 会在名称唯一匹配时解析角色 ID，未匹配仍保留原名。
+- 物品栏按 `roleWeight` 分组切换主要/次要/NPC/路人背包；全部角色视图不会合并不同角色的同名物品，状态卡逐角色投影同一账本。
+- 抽取 Prompt 明确排除目标、提及、传闻、假设和无主物品，并把角色间转移拆成原持有人消耗 + 新持有人获得。
+- `CONTEXT_SOURCES`、持有投影和确定性重复获得检查均支持角色归属；审校会用角色名单避免把 A 的物品误报给 B。
+- v38 将 owner-less 历史流水迁到唯一 `roleWeight=main` 角色，旧库才回退 `role=protagonist`；多 main/无主角进入可认领的历史未归属区，迁移异常会整体回滚。
+- 角色删除在同一事务中 NULL 化 `characterId` 并保留 `heldByName`；角色合并同时重映射 ID 与 canonical 名称；导出/导入会重映射角色 ID。
+- `QUICKWIN-3` 已并入：可选全部已写章节或按规范章序选择起止章；反向/空范围在 API 调用前拦截，范围外流水不受影响。
 
 ### 禁止重复建设
 
@@ -71,9 +66,12 @@
 - `src/lib/registry/context-sources.ts`
 - `src/lib/registry/adoption-schema.ts`
 - `src/lib/registry/project-tables.ts`
+- `src/lib/inventory/extraction-range.ts`
 - `src/components/items/InventoryPanel.tsx`
 - `tests/regression/R-CONSISTENCY1-held-items.test.ts`
 - `tests/regression/R-QUICKWIN2-inventory-edit.test.ts`
+- `tests/regression/R-QUICKWIN3-inventory-extraction-range.test.ts`
+- `tests/regression/R-INV1-*.test.ts`
 
 ## CANON-1 长期一致性与 Canon
 
