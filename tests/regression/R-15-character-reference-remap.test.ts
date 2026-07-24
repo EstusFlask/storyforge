@@ -102,7 +102,7 @@ describe('R-15: character reference remap', () => {
       action: 'gain', quantity: 1, createdAt: now,
     } as any) as number
 
-    await db.transaction('rw', db.characters, db.characterRelations, db.detailedOutlines, db.stateCards, db.temporalFacts, db.itemLedger, async () => {
+    await db.transaction('rw', db.characters, db.characterRelations, db.detailedOutlines, db.stateCards, db.temporalFacts, db.itemLedger, db.knowledgeLedger, async () => {
       await applyCharacterReferenceRemap({
         projectId,
         fromCharacterId: aliasId,

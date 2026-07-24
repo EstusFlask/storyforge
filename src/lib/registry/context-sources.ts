@@ -29,6 +29,7 @@ import { parseFields } from '../types/state-card'
 import { parseBeats } from '../types/emotion-beat'
 import { buildForeshadowTaskContext } from '../foreshadow/context'
 import { formatHeldItemsContext, readProjectHeldItems } from '../consistency/held-items'
+import { formatCharacterKnowledgeContext, readProjectCharacterKnowledge } from '../knowledge-ledger/knowledge-ledger'
 import type { Chapter, Character, OutlineNode, PowerSystem, Worldview } from '../types'
 import type { ContextSource } from './types'
 import { countWords, htmlToPlainText } from '../utils/html'
@@ -495,6 +496,21 @@ export const CONTEXT_SOURCES: ContextSource[] = [
     budgetTokens: 2000,
     requiresChapterId: true,
     read: input => readCurrentFacts(input.projectId, input.chapterId, input.worldGroupId),
+  },
+  {
+    key: 'characterKnowledge',
+    label: '角色认知边界(认知账本投影)',
+    scope: 'chapter',
+    layer: 'L1',
+    budgetTokens: 1600,
+    protectedFromTrim: true,
+    requiresChapterId: true,
+    read: async input => formatCharacterKnowledgeContext(await readProjectCharacterKnowledge(
+      input.projectId,
+      input.chapterId!,
+      input.worldGroupId,
+      input.characterId,
+    )),
   },
   {
     key: 'retrievedPassages',

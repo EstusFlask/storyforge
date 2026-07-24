@@ -264,6 +264,8 @@ async function adoptCollection(
     if (input.target === 'itemLedger') {
       item = await resolveItemLedgerOwner(input.projectId, item)
     }
+    // AI/结构化采纳只能生成待确认候选，不能借输入字段绕过人工确认。
+    if (input.target === 'knowledgeLedger') item = { ...item, status: 'candidate' }
     if (!applyRequired(item, raw, adoption, result)) continue
     if (!await applyFkChecks(item, raw, adoption, result, input.projectId)) continue
     await applyArrayMemberChecks(item, adoption, result)

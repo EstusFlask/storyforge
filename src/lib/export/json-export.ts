@@ -25,6 +25,7 @@ import type {
   WorldGroup, WorldGroupLink, ItemLedgerEntry, StoryTimelineEvent,
   ImportantLocation, WorldRulesProfile, CodexCategory, CodexEntry,
   UserStyleProfile,
+  KnowledgeLedgerEntry,
 } from '../types'
 import type { TemporalFact } from '../types/temporal-fact'
 
@@ -77,6 +78,8 @@ export interface ProjectExportData {
   userStyleProfiles?: Omit<UserStyleProfile, 'id' | 'projectId'>[]
   /** NS-4 时序事实账本(各 FK 在派生导出里被 remap 成 _xxxExportId) */
   temporalFacts?: (Omit<TemporalFact, 'id' | 'projectId'> & Record<string, unknown>)[]
+  /** CONSISTENCY-2 角色认知事件账本（全部 FK 由注册表重映射）。 */
+  knowledgeLedger?: (Omit<KnowledgeLedgerEntry, 'id' | 'projectId'> & Record<string, unknown>)[]
   storyArcs?: Omit<StoryArc, 'id' | 'projectId'>[]
   worldNodes?: (Omit<WorldNode, 'id' | 'projectId' | 'worldGroupId'> & WorldGroupExportRef & { _exportId: number; _parentExportId: number | null })[]
   notes?: Omit<Note, 'id' | 'projectId'>[]

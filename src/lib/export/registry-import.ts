@@ -126,6 +126,7 @@ export async function deriveImportProjectJSON(data: ProjectExportData): Promise<
 
         // 外键:_exportAs → 真实 db id
         let dropRow = false
+        let hasUnmappedKnowledgeRef = false
         for (const rm of spec.exportRemap ?? []) {
           const exportVal = obj[rm.exportAs]
           delete obj[rm.exportAs]
@@ -134,6 +135,7 @@ export async function deriveImportProjectJSON(data: ProjectExportData): Promise<
             const m = rm.selfTree ? newIdMap : newIdMaps.get(rm.remapVia)
             const got = m?.get(exportVal)
             if (got == null) {
+              if (spec.name === 'knowledgeLedger') hasUnmappedKnowledgeRef = true
               if (rm.onUnmapped === 'drop') { dropRow = true; break }
               if (rm.onUnmapped === 'require') {
                 throw new Error(`[deriveImport] 缺失必填外键映射:${spec.name}.${rm.field}=${exportVal}`)
@@ -144,6 +146,9 @@ export async function deriveImportProjectJSON(data: ProjectExportData): Promise<
           obj[rm.field] = mappedId
         }
         if (dropRow) continue
+        if (spec.name === 'knowledgeLedger' && hasUnmappedKnowledgeRef && obj.status !== 'rejected') {
+          obj.status = 'source-missing'
+        }
 
         if (spec.owner === 'project') obj.projectId = newProjectId
         if (spec.name === 'characters') {

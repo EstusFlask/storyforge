@@ -99,6 +99,18 @@ describe('R-export-fullcoverage · 全表多世界往返安全网', () => {
     const newSte = await db.storyTimelineEvents.where('projectId').equals(newId).first()
     expect(newSte!.chapterId).toBe(newChapter!.id)
 
+    // knowledgeLedger → 世界/角色/章节/事实全部重映射
+    const newKnowledge = await db.knowledgeLedger.where('projectId').equals(newId).first()
+    const newFact = await db.temporalFacts.where('projectId').equals(newId).first()
+    expect(newKnowledge).toMatchObject({
+      worldGroupId: newWgA,
+      characterId: newChar1.id,
+      sourceChapterId: newChapter!.id,
+      factId: newFact!.id,
+      knowledgeKey: 'self.power_stage',
+      status: 'confirmed',
+    })
+
     // 重要地点树
     const newLocs = await db.importantLocations.where('projectId').equals(newId).toArray()
     const newLocParent = newLocs.find(l => l.name === '青云山')!
@@ -131,5 +143,20 @@ describe('R-export-fullcoverage · 全表多世界往返安全网', () => {
     const portals = parseWorldPortals(newRoot.portalsJSON)
     expect(portals).toHaveLength(1)
     expect(portals[0].targetWorldId).toBe(newMirror.id)
+  })
+
+  it('认知账本导入遇到不可映射 FK 时保留事件但降级复核，不把缺失章节误当基线', async () => {
+    const src = await seedEverything()
+    const exported = await exportProjectJSON(src.projectId)
+    expect(exported.knowledgeLedger).toHaveLength(1)
+    ;(exported.knowledgeLedger![0] as any)._sourceChapterExportId = 9999
+
+    const newId = await importProjectJSON(exported)
+    const imported = await db.knowledgeLedger.where('projectId').equals(newId).first()
+    expect(imported).toMatchObject({
+      sourceChapterId: null,
+      status: 'source-missing',
+      knowledgeKey: 'self.power_stage',
+    })
   })
 })

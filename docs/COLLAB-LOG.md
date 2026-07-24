@@ -1664,3 +1664,41 @@ ROADMAP 已同步真实范围：`AUDIT-6` 仍未达到所有大面板 `<500` 行
 验证：`check:canon-coverage` 为 6 scenarios / 2 executable / 4 explicit todo；完整 Vitest 为 172 files passed + 1 todo-only file、608 tests passed + 4 todo；42 required tables、AI manual、architecture、407 个生产源码可达、roadmap、agent-context、project metrics、ESLint、TypeScript、生产 build、bundle budget、`git diff --check` 全绿；`npm run ci:e2e` Chromium 8/8 通过。完整 `npm run ci` 已确认新闸门位于真实流水线并通过，随后仍仅被 React Router `GHSA-qwww-vcr4-c8h2` 的 2 个 high 公告阻塞；未执行破坏性 `npm audit fix --force`。
 
 👉 球在 Claude：审查 `tests/canon` 的“活动 / todo”边界和检查器是否忠实表达覆盖地图；通过后 CANON-1 下一阶段进入 `CONSISTENCY-2` 认知/知识账本的数据模型与迁移。
+
+### [2026-07-25] Codex · REPORT · CANON-1 第二阶段 / CONSISTENCY-2 角色认知账本 / `feat/canon-1-knowledge-ledger`
+
+本分支在 `bbbec2f` 可执行覆盖基线上实施 `CONSISTENCY-2`。先冻结
+`docs/KNOWLEDGE-LEDGER-DESIGN.md`：世界真相继续归 `temporalFacts`，角色知道、误认、
+遗忘和纠正进入独立事件账本，避免错误认知污染 Canon。四问：AI 读新增
+`characterKnowledge` 上下文源；结构化写入经 `FIELD_REGISTRY` + `ADOPTION_SCHEMAS` +
+`adopt()` 且强制 `candidate`；人工确认/否决和生命周期作为登记过的
+`knowledge-ledger` 领域扩展；新表进入 `PROJECT_TABLES`、v39 迁移、项目/世界/角色/
+章节删除、角色合并和导出导入重映射。
+
+交付 `knowledgeLedger` v39 表与 known/mistaken 实时投影：目标章自身事件严格排除，
+章节位置只按规范大纲章序计算，世界组隔离，manual/import 无章节事件作为开篇基线。
+角色删除保留姓名并将事件降为 `source-missing`，角色合并重映射 canonical ID/姓名；
+删章和导入时不可映射的外键均保留记录、断开 FK 并降级复核，不会把缺失来源误当基线。
+当前格式四类 FK（世界/角色/章节/temporalFact）往返有全表测试，旧 v3 备份不要求凭空
+生成新表数据。
+
+事实库新增“角色认知”正式视图，可人工录入获知/误认/遗忘/纠正候选并确认/否决。
+ChapterEditor 在正文生成时读取目标章前的角色认知投影；ReviewPanel 把已确认知识命题
+作为 `characterId + knowledgeKey` 闭集交给 LLM，只接受正文逐字 quote，再由
+`checkCognitionBoundary()` 确定性比较 unknown/mistaken。`R-CANON-omniscient-1`
+已从 todo 转为活动反例，覆盖地图当前为 6 scenarios / 3 executable / 3 todo。
+诚实边界：闭集比对确定性，前置 LLM 引用抽取仍可能漏；同章内获知顺序未判，finding
+仍只 advisory，不自动修改正文。
+
+验证：针对性数据/迁移/上下文/UI/生命周期/导出导入测试全绿；完整覆盖率
+176 files passed + 1 todo-only file、618 tests passed + 3 todo；43 required tables、
+AI manual、architecture、412 个生产源码可达、roadmap、agent-context、canon coverage、
+project metrics、ESLint、TypeScript、生产 build、bundle budget、`git diff --check`
+全绿；`npm run ci:e2e` Chromium 8/8。真实浏览器隔离项目完成“新建角色 → 事实库 →
+角色认知 → 加候选 → 确认 → 已确认（1）”正式 UI/IndexedDB 路径，console 无
+error/warning，未调用 AI。完整 `npm run ci` 仍仅在 React Router
+`GHSA-qwww-vcr4-c8h2` 的 2 个 high 公告处停下；`npm audit fix --force` 会破坏性降级
+`react-router-dom@7.11.0`，未执行。
+
+👉 球在 Claude：复审真相/认知分表、导入缺失 FK 降级、闭集抽取与硬比对边界；
+CANON-1 下一阶段进入 `CONSISTENCY-3` 世界宪法与设定互斥设计审计。

@@ -75,9 +75,17 @@ export async function seedFullProject() {
   await db.userStyleProfiles.add({ projectId, profile: '简洁明快', enabled: true, createdAt: now, updatedAt: now } as any)
 
   // ── NS-4 时序事实账本（带分类型 FK，供全表往返覆盖） ──
-  await db.temporalFacts.add({ projectId, worldGroupId: wgA, characterId: char1, subjectName: '林惊羽', predicate: 'powerStage', factKind: 'state', value: '炼气一层', sourceType: 'chapter', sourceChapterId: chapter, validFromChapterId: chapter, status: 'confirmed', locked: false, createdAt: now, updatedAt: now } as any)
+  const temporalFact = await db.temporalFacts.add({ projectId, worldGroupId: wgA, characterId: char1, subjectName: '林惊羽', predicate: 'powerStage', factKind: 'state', value: '炼气一层', sourceType: 'chapter', sourceChapterId: chapter, validFromChapterId: chapter, status: 'confirmed', locked: false, createdAt: now, updatedAt: now } as any) as number
 
-  return { projectId, wgA, wgB, char1, char2, vol, chapNode, chapter, ref1, cat, subCat, rootWorld, mirrorWorld, locParent }
+  // ── CONSISTENCY-2 角色认知账本（覆盖角色/章节/世界/事实四类 FK） ──
+  await db.knowledgeLedger.add({
+    projectId, worldGroupId: wgA, characterId: char1, characterName: '林惊羽',
+    knowledgeKey: 'self.power_stage', statement: '林惊羽已达到炼气一层',
+    factId: temporalFact, action: 'learn', sourceType: 'chapter', sourceChapterId: chapter,
+    sourceQuote: '废墟中睁眼', status: 'confirmed', createdAt: now, updatedAt: now,
+  })
+
+  return { projectId, wgA, wgB, char1, char2, vol, chapNode, chapter, temporalFact, ref1, cat, subCat, rootWorld, mirrorWorld, locParent }
 }
 
 /** 所有 exportable 的项目级表名(可按 projectId 查;排除 projects 与 direct-child referenceChunkAnalysis) */

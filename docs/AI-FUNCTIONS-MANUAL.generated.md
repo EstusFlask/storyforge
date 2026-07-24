@@ -74,7 +74,7 @@
 
 ## 二、上下文源清单（CONTEXT_SOURCES · AI 读什么）
 
-共 34 个上下文源。assembleContext({ sourceKeys }) 按 key 装配。
+共 35 个上下文源。assembleContext({ sourceKeys }) 按 key 装配。
 
 | key | 标签 | 作用域 | 层级 | 预算(token) |
 |---|---|---|---|---|
@@ -85,6 +85,7 @@
 | `existingVolumeOutlines` | 已有卷大纲 | project | L1 | 2400 |
 | `writtenChapterProgress` | 本卷已写正文进度 | node | L1 | 3000 |
 | `currentFacts` | 当前有效事实(事实账本投影) | chapter | L1 | 2000 |
+| `characterKnowledge` | 角色认知边界(认知账本投影) | chapter | L1 | 1600 |
 | `retrievedPassages` | 相关前文召回(NS-5 混合检索) | chapter | L2 | 2500 |
 | `detailedOutline` | 本章细纲(场景拆解) | node | L1 | 1500 |
 | `previousChapterEnding` | 全局直接前驱原文尾部 | manual | L1 | 1800 |
@@ -132,6 +133,7 @@ AI 输出经 `adopt({ target, data })` 写回,只有这里登记的字段可写(
 | `historicalTimelineEvents` | `aiBrainstorm` `aiConsult` |
 | `importantLocations` | `description` `name` `parentId` `significance` `sortOrder` `tags` |
 | `itemLedger` | `action` `chapterId` `chapterTitle` `characterId` `heldByName` `itemName` `note` `quantity` |
+| `knowledgeLedger` | `action` `belief` `characterId` `characterName` `factId` `knowledgeKey` `sourceChapterId` `sourceQuote` `sourceType` `statement` `status` `worldGroupId` |
 | `outlineNodes` | `order` `parentId` `summary` `title` `type` `worldGroupId` |
 | `referenceChunkAnalysis` | `characterCraft` `chunkIndex` `climaxDesign` `conflictEscalation` `dailyLife` `dialogueTechnique` `emotionalBeats` `endOffset` `foreshadowing` `historicalContext` `label` `languageCustoms` `materialCulture` `narrativeStyle` `openingTechnique` `otherTechniques` `pacingControl` `plotStructure` `proseStyle` `rawExcerpt` `referenceId` `socialInstitutions` `startOffset` `worldBuilding` |
 | `references` | `analysisDepth` `analysisError` `analysisProgress` `analysisStatus` `analysisSummary` `fileHash` `genre` `importSessionId` `mergedCharacters` `totalChars` |
@@ -147,6 +149,7 @@ AI 输出经 `adopt({ target, data })` 写回,只有这里登记的字段可写(
 |---|---|---|---|---|
 | `fact-ledger` | `temporalFacts` | `FACT_PREDICATE_REGISTRY` | `src/lib/fact-ledger/fact-ledger.ts`<br/>`src/lib/fact-ledger/human-readable-io.ts`<br/>`src/lib/fact-ledger/lifecycle.ts`<br/>`src/lib/consistency/impact-analysis.ts` | 2027-01-01 |
 | `character-merge-lifecycle` | `characters` | `PROJECT_TABLES refs + remapCharacterReferences` | `src/lib/import/character-merge.ts` | 2027-01-01 |
+| `knowledge-ledger` | `knowledgeLedger` | `KNOWLEDGE_ACTIONS + ADOPTION_SCHEMAS + PROJECT_TABLES` | `src/lib/knowledge-ledger/knowledge-ledger.ts`<br/>`src/lib/knowledge-ledger/lifecycle.ts` | 2027-01-01 |
 
 ## 四、AI 调用点（消耗统计 category · 在哪触发)
 
@@ -156,13 +159,13 @@ AI 输出经 `adopt({ target, data })` 写回,只有这里登记的字段可写(
 | category | 触发文件 |
 |---|---|
 | `ai.restructure` | `src/lib/ai/restructure.ts:54` |
-| `chapter.content` | `src/components/editor/ChapterEditor.tsx:494` |
+| `chapter.content` | `src/components/editor/ChapterEditor.tsx:495` |
 | `chapter.content.batch` | `src/lib/ai/batch-detail-runner.ts:256` |
-| `chapter.continue` | `src/components/editor/ChapterEditor.tsx:512` |
-| `chapter.deai` | `src/components/editor/ChapterEditor.tsx:549` |
-| `chapter.expand` | `src/components/editor/ChapterEditor.tsx:529` |
+| `chapter.continue` | `src/components/editor/ChapterEditor.tsx:513` |
+| `chapter.deai` | `src/components/editor/ChapterEditor.tsx:550` |
+| `chapter.expand` | `src/components/editor/ChapterEditor.tsx:530` |
 | `chapter.memory` | `src/components/editor/ChapterEditor.tsx:326` |
-| `chapter.polish` | `src/components/editor/ChapterEditor.tsx:521` |
+| `chapter.polish` | `src/components/editor/ChapterEditor.tsx:522` |
 | `chapter.toolbar` | `src/components/editor/FloatingToolbar.tsx:105` |
 | `character.generate` | `src/components/character/CharacterPanel.tsx:160` |
 | `character.structure` | `src/lib/ai/parse-character-output.ts:80` |
@@ -186,10 +189,10 @@ AI 输出经 `adopt({ target, data })` 写回,只有这里登记的字段可写(
 | `reference.characters` | `src/components/project/AnalysisReportViewer.tsx:143` |
 | `reference.summary` | `src/components/project/AnalysisReportViewer.tsx:112` |
 | `relation.extract` | `src/components/relations/CharacterRelationPanel.tsx:98` |
-| `review.anti-ai` | `src/components/editor/ReviewPanel.tsx:88` |
-| `review.quality` | `src/components/editor/ReviewPanel.tsx:80` |
-| `review.readability` | `src/components/editor/ReviewPanel.tsx:97` |
-| `review.revise` | `src/components/editor/ChapterEditor.tsx:564` |
+| `review.anti-ai` | `src/components/editor/ReviewPanel.tsx:94` |
+| `review.quality` | `src/components/editor/ReviewPanel.tsx:86` |
+| `review.readability` | `src/components/editor/ReviewPanel.tsx:103` |
+| `review.revise` | `src/components/editor/ChapterEditor.tsx:565` |
 | `rules.generate` | `src/components/rules/CreativeRulesPanel.tsx:80` |
 | `scene.verify` | `src/components/scene/SceneVerifyPanel.tsx:81` |
 | `story-arc.generate` | `src/components/outline/StoryArcPanel.tsx:84` |
@@ -204,10 +207,10 @@ AI 输出经 `adopt({ target, data })` 写回,只有这里登记的字段可写(
 
 ### 动态 category 调用
 
-- `src/components/editor/ReviewPanel.tsx:131 · ai.start`
+- `src/components/editor/ReviewPanel.tsx:140 · ai.start`
 - `src/components/settings/NS0EvalPanel.tsx:50 · chat`
 - `src/components/settings/prompt/WorkflowRunner.tsx:287 · ai.start`
 
 ---
 
-生成时间基准:commit `61ac643`
+生成时间基准:commit `bbbec2f`

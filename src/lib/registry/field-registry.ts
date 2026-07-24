@@ -329,6 +329,32 @@ export const FIELD_REGISTRY: FieldSpec[] = [
   text('itemLedger', 'chapterTitle', ['章节标题']),
   longtext('itemLedger', 'note', ['备注']),
 
+  // CONSISTENCY-2 角色认知事件账本
+  num('knowledgeLedger', 'worldGroupId'),
+  num('knowledgeLedger', 'characterId', ['角色ID']),
+  text('knowledgeLedger', 'characterName', ['角色名']),
+  text('knowledgeLedger', 'knowledgeKey', ['知识Key', '知识键']),
+  longtext('knowledgeLedger', 'statement', ['知识命题', '事实内容']),
+  num('knowledgeLedger', 'factId', ['关联事实ID']),
+  enumeration('knowledgeLedger', 'action', ['learn', 'mislearn', 'forget', 'correct'], {
+    获知: 'learn',
+    学会: 'learn',
+    误认: 'mislearn',
+    误以为: 'mislearn',
+    遗忘: 'forget',
+    忘记: 'forget',
+    纠正: 'correct',
+  }),
+  longtext('knowledgeLedger', 'belief', ['错误认知', '相信内容']),
+  enumeration('knowledgeLedger', 'sourceType', ['chapter', 'manual', 'import'], {
+    章节: 'chapter',
+    手动: 'manual',
+    导入: 'import',
+  }),
+  num('knowledgeLedger', 'sourceChapterId', ['来源章节ID']),
+  longtext('knowledgeLedger', 'sourceQuote', ['来源引文', '证据']),
+  enumeration('knowledgeLedger', 'status', ['candidate', 'confirmed', 'rejected', 'source-missing', 'invalid-range']),
+
   text('storyTimelineEvents', 'title', ['事件标题']),
   text('storyTimelineEvents', 'storyTime', ['故事时间']),
   num('storyTimelineEvents', 'importance', ['重要度']),

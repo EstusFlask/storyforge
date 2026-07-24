@@ -94,6 +94,21 @@ export const ADOPTION_SCHEMAS: CollectionAdoptionSpec[] = [
     fkChecks: [{ field: 'chapterId', target: 'chapters' }, { field: 'characterId', target: 'characters' }],
   },
   {
+    target: 'knowledgeLedger',
+    identity: {
+      kind: 'composite',
+      fields: ['characterId', 'knowledgeKey', 'action', 'sourceChapterId', 'statement'],
+    },
+    duplicatePolicy: 'skip',
+    required: ['characterName', 'knowledgeKey', 'statement', 'action', 'sourceType', 'status'],
+    autoStamps: ['projectId', 'worldGroupId', 'createdAt', 'updatedAt'],
+    fkChecks: [
+      { field: 'characterId', target: 'characters' },
+      { field: 'factId', target: 'temporalFacts' },
+      { field: 'sourceChapterId', target: 'chapters' },
+    ],
+  },
+  {
     target: 'storyTimelineEvents',
     identity: { kind: 'composite', fields: ['chapterId', 'title'] },
     duplicatePolicy: 'update',
@@ -164,6 +179,17 @@ export const ADOPTION_EXTENSIONS: readonly AdoptionExtensionSpec[] = Object.free
     entrypoints: ['src/lib/import/character-merge.ts'],
     policyRegistry: 'PROJECT_TABLES refs + remapCharacterReferences',
     reason: '角色合并同时包含主记录删除与跨表引用重映射，不能用通用字段 merge 代替；普通角色新增和更新仍必须走 adopt。',
+    reviewAfter: '2027-01-01',
+  },
+  {
+    id: 'knowledge-ledger',
+    target: 'knowledgeLedger',
+    entrypoints: [
+      'src/lib/knowledge-ledger/knowledge-ledger.ts',
+      'src/lib/knowledge-ledger/lifecycle.ts',
+    ],
+    policyRegistry: 'KNOWLEDGE_ACTIONS + ADOPTION_SCHEMAS + PROJECT_TABLES',
+    reason: '角色认知候选必须经人工确认，投影必须按规范章序和世界隔离计算；角色与章节删除还需要保留证据并降级复核。',
     reviewAfter: '2027-01-01',
   },
 ])

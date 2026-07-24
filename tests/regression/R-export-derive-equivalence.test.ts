@@ -32,6 +32,12 @@ function normalize(data: any) {
     delete row._sceneCharacterIndexes
   }
   for (const row of data.creativeRules ?? []) delete row._citedReferenceIndexes
+  // CONSISTENCY-2: 新表没有旧手写版 fixture 对应字段；其格式与 FK 往返由
+  // R-export-fullcoverage 单独锁死，这里仍只比较旧格式共有部分。
+  delete data.knowledgeLedger
+  for (const row of data.worldNodes ?? []) {
+    if (row.portalsJSON === undefined) delete row.portalsJSON
+  }
   // INV-1: itemLedger now carries heldByName + characterId + _characterExportId;
   // legacy fixture predates these fields. Strip them for format-compat comparison.
   for (const row of data.itemLedger ?? []) {

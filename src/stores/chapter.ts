@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import { db } from '../lib/db/schema'
 import { detachTemporalFactsForDeletedChapters } from '../lib/fact-ledger/lifecycle'
+import { detachKnowledgeForDeletedChapters } from '../lib/knowledge-ledger/lifecycle'
 import { pickBestChapterForOutline } from '../lib/chapters/selectors'
 import { transactionTablesFor } from '../lib/registry/lifecycle'
 import type { Chapter } from '../lib/types'
@@ -134,6 +135,7 @@ export const useChapterStore = create<ChapterStore>((set, get) => ({
     // DB 层:删章节 + 紧耦合的情感节拍(按 chapterId),包事务保证原子
     await db.transaction('rw', transactionTablesFor('deleteChapters'), async () => {
       await detachTemporalFactsForDeletedChapters(ids)
+      await detachKnowledgeForDeletedChapters(ids)
       await db.chapters.bulkDelete(ids)
       const beatKeys = (await db.emotionBeatCards
         .where('chapterId').anyOf(ids).primaryKeys()) as number[]

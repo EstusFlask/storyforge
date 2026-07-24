@@ -207,6 +207,21 @@ export const PROJECT_TABLES: TableSpec[] = [
     ],
     note: 'NS-4 时序事实；candidate=observation/confirmed=canon；stale/source-missing/invalid-range 进入异常审核；时序只存 chapterId 不缓存 order' },
 
+  // ───────────────────── CONSISTENCY-2 角色认知事件账本 ─────────────────────
+  // 角色认知与世界真相分表；事件只追加，章节时点投影实时计算。
+  // 角色/章节删除由 knowledge-ledger/lifecycle.ts 保留记录并降级复核；
+  // 项目/世界生命周期与导出导入由本注册表派生。
+  { table: db.knowledgeLedger, name: 'knowledgeLedger', owner: 'project', worldScoped: true,
+    exportable: true,
+    defaults: { status: 'candidate' },
+    exportRemap: [
+      { field: 'worldGroupId', remapVia: 'worldGroups', exportAs: '_wgExportId' },
+      { field: 'characterId', remapVia: 'characters', exportAs: '_characterExportId' },
+      { field: 'factId', remapVia: 'temporalFacts', exportAs: '_factExportId' },
+      { field: 'sourceChapterId', remapVia: 'chapters', exportAs: '_sourceChapterExportId' },
+    ],
+    note: 'CONSISTENCY-2 认知事件；角色知道/误认/遗忘/纠正与世界 Canon 分离，时点按规范章序实时投影' },
+
   // ───────────────────── NS-5 检索块（可重建派生缓存） ─────────────────────
   // exportable:false —— 从章节正文切块而来、含大体积向量，是可重建缓存，不进 JSON 备份；
   // 导入后由 chapter 正文重建。项目级删除由 owner 覆盖；删章/改章触发该章块重建（在 chunk 写入层处理）。

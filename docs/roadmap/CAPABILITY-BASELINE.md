@@ -83,12 +83,14 @@
 - `temporalFacts`、受控谓词、当前有效事实、事实候选确认、异常状态和 human-readable IO 已有代码基础。
 - `retrievalChunks`、层级叙事摘要和影响分析已有可重建路径。
 - `NS-3` 一致性审查已有 Fast Guard / Deep Audit 和逐字引文回查。
-- 物品重复获得是当前唯一已落地的确定性语义判决样板。
-- `CONSISTENCY-0` 已把 6 个 `R-CANON-*` 反例落入 `tests/canon/`；2 个活动测试和 4 个显式 `todo` 由 `check:canon-coverage` 与覆盖地图双向对齐。
+- 物品重复获得与角色认知边界闭集比对是当前两类确定性判决样板。
+- `knowledgeLedger` 分离世界真相与角色认知，支持获知、误认、遗忘、纠正事件；v39 迁移、三注册表、角色/章节生命周期和导出导入 FK 重映射已覆盖。
+- `characterKnowledge` 按规范章序、世界与角色投影目标章开始前的 confirmed 事件，并进入正文生成上下文；事实库提供角色认知候选、确认/否决和异常复核入口。
+- 一致性审校让 LLM 只从已确认 `characterId + knowledgeKey` 闭集提取正文逐字引用，再由代码比较 unknown/mistaken；确定性比对不等于抽取不会漏。
+- `CONSISTENCY-0` 已把 6 个 `R-CANON-*` 反例落入 `tests/canon/`；3 个活动测试和 3 个显式 `todo` 由 `check:canon-coverage` 与覆盖地图双向对齐。
 
 ### 当前边界 / 尚未完成
 
-- 认知/知识账本尚未形成角色知道、未知、误认的完整闭环。
 - 世界宪法和设定断言冲突检测尚未覆盖世界起源、力量体系等互斥场景。
 - 一致性覆盖地图和 `tests/canon/` 是跨功能的声明基线，`tests/regression/` 继续覆盖具体实现细节；新增 Canon 声明必须先加地图行和可证伪反例，不用删除 `todo` 制造假绿。
 - 故事线动态进度、交叉和角色变化影响尚未形成统一产品出口。
@@ -104,12 +106,14 @@
 
 - `src/lib/consistency/`
 - `src/lib/fact-ledger/`
+- `src/lib/knowledge-ledger/`
 - `src/lib/retrieval/`
 - `src/lib/registry/assemble-context.ts`
 - `tests/regression/R-NS3-consistency-audit.test.ts`
 - `tests/regression/R-NS4-current-facts.test.ts`
 - `tests/regression/R-NS5-retrieval.test.ts`
 - `tests/regression/R-NS6-impact.test.ts`
+- `tests/regression/R-CONSISTENCY2-*`
 - `tests/canon/R-CANON-*`
 - `scripts/check-canon-coverage.mjs`
 

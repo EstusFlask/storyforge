@@ -45,6 +45,7 @@ import type {
 } from '../types'
 import type { AIUsageEntry } from '../ai/usage-log'
 import type { TemporalFact } from '../types/temporal-fact'
+import type { KnowledgeLedgerEntry } from '../types/knowledge-ledger'
 import type { RetrievalChunk } from '../types/retrieval-chunk'
 import type { NarrativeSummaryNode } from '../types/narrative-summary'
 
@@ -123,6 +124,9 @@ class StoryForgeDB extends Dexie {
 
   // NS-4 —— 时序事实账本（双层事实记忆：status candidate=Evidence Observation / confirmed=Canon Assertion）
   temporalFacts!: Table<TemporalFact, number>
+
+  // CONSISTENCY-2 —— 角色认知事件账本（知道 / 误认 / 遗忘 / 纠正）
+  knowledgeLedger!: Table<KnowledgeLedgerEntry, number>
 
   // NS-5 —— 叙事感知混合检索块（可重建派生缓存，不导出）
   retrievalChunks!: Table<RetrievalChunk, number>
@@ -377,6 +381,12 @@ class StoryForgeDB extends Dexie {
       // 迁移必须 fail-closed：任何异常都让 Dexie 回滚版本升级，
       // 不能把缺失归属字段的半迁移数据库标记成 v38。
       await migrateItemLedgerToCharacterOwnership(tx)
+    })
+
+    // v39: CONSISTENCY-2 角色认知事件账本。新增空表，不从 temporalFacts 猜测角色认知；
+    // 旧项目事实原样保留，作者后续明确确认的认知事件才进入本表。
+    this.version(39).stores({
+      knowledgeLedger: '++id, projectId, worldGroupId, characterId, knowledgeKey, factId, sourceChapterId, status',
     })
   }
 }

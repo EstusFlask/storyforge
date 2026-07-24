@@ -20,6 +20,12 @@ import {
 import { assembleContext } from '../../lib/registry/assemble-context'
 import { checkHeldItemAcquisition, readProjectHeldItems } from '../../lib/consistency/held-items'
 import { db } from '../../lib/db/schema'
+import {
+  checkCognitionBoundary,
+  formatCognitionCatalog,
+  parseCognitionReferences,
+  readCognitionAuditSnapshot,
+} from '../../lib/knowledge-ledger/knowledge-ledger'
 
 interface Props {
   projectId: number
@@ -110,6 +116,7 @@ export default function ReviewPanel(props: Props) {
         'previousPlanReconciliation',
         'recentChapterSummaries',
         'currentFacts',        // NS-6 闭环：用生成时遵循的同一套已确认事实核对（canon/observation 证据）
+        'characterKnowledge',  // CONSISTENCY-2：同一时点角色认知投影
         'retrievedPassages',   // NS-6 闭环：召回远距前文，抓几百章前的细节/伏笔矛盾
         'worldRules',
         'characters',
@@ -122,11 +129,13 @@ export default function ReviewPanel(props: Props) {
         'storyArcs',
       ],
     })
+    const cognition = await readCognitionAuditSnapshot(projectId, chapterId, worldGroupId)
     const messages = buildConsistencyAuditPrompt({
       mode: auditMode,
       chapterTitle,
       chapterContent,
       evidenceContext: evidence.text,
+      cognitionCatalog: formatCognitionCatalog(cognition.catalog),
     })
     const output = await ai.start(messages, undefined, {
       category: auditMode === 'fast' ? 'review.consistency.fast' : 'review.consistency.deep',
@@ -144,9 +153,14 @@ export default function ReviewPanel(props: Props) {
       worldGroupId,
       chapterContent,
     })
+    const cognitionFindings = checkCognitionBoundary(
+      chapterContent,
+      parseCognitionReferences(output, chapterContent, cognition.catalog),
+      cognition.projected,
+    )
     const merged: ConsistencyAuditResult = {
       mode: auditMode,
-      findings: [...deterministicFindings, ...(result?.findings ?? [])],
+      findings: [...deterministicFindings, ...cognitionFindings, ...(result?.findings ?? [])],
     }
     setConsistency(chapterId, merged)
   }

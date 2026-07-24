@@ -2,7 +2,7 @@
  * Phase 1.1a 注册表单元测试
  *
  * 验证:
- *   ① 注册表完整性(45 表双向覆盖 + ref target 存在)
+ *   ① 注册表完整性(全部表双向覆盖 + ref target 存在)
  *   ② 派生选择器正确
  *   ③ cascadeDeleteProject / cascadeDeleteGroup / stampPrimaryWorld 与现有手写逻辑等价
  *
@@ -26,8 +26,8 @@ describe('Phase 1.1a · PROJECT_TABLES 注册表', () => {
       expect(result.ok, result.errors.join('; ')).toBe(true)
     })
 
-    it('登记了全部 42 张表', () => {
-      expect(PROJECT_TABLES.length).toBe(42)   // v36 retrievalChunks→41；v37 narrativeSummaryNodes→42
+    it('登记了全部 43 张表', () => {
+      expect(PROJECT_TABLES.length).toBe(43)   // v39 knowledgeLedger→43
     })
 
     it('每张表名唯一', () => {
@@ -43,6 +43,7 @@ describe('Phase 1.1a · PROJECT_TABLES 注册表', () => {
         'worldviews', 'powerSystems', 'geographies', 'histories', 'worldNodes',
         'historicalTimelineEvents', 'historicalKeywords', 'outlineNodes',
         'codexCategories', 'codexEntries', 'worldRulesProfiles',
+        'knowledgeLedger',
       ]) {
         expect(names, `worldScoped 应含 ${t}`).toContain(t)
       }
