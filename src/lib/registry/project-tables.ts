@@ -130,7 +130,31 @@ export const PROJECT_TABLES: TableSpec[] = [
   { table: db.foreshadows, name: 'foreshadows', owner: 'project', exportable: true,
     note: '可跨世界;plant/resolveChapterId 为软引用(删章不强删)' },
 
-  { table: db.storyArcs, name: 'storyArcs', owner: 'project', exportable: true },
+  { table: db.storyArcs, name: 'storyArcs', owner: 'project', exportable: true,
+    exportIdField: true,
+    refs: [
+      { kind: 'simple', field: 'id', target: 'storylineProgress[arcId]', onDelete: 'cascade' },
+      { kind: 'simple', field: 'id', target: 'storylineCrossings[arcIdA]', onDelete: 'cascade' },
+      { kind: 'simple', field: 'id', target: 'storylineCrossings[arcIdB]', onDelete: 'cascade' },
+    ] },
+
+  { table: db.storylineProgress, name: 'storylineProgress', owner: 'project',
+    exportable: true,
+    defaults: { status: 'dormant', involvedEntities: '[]' },
+    exportRemap: [
+      { field: 'arcId', remapVia: 'storyArcs', exportAs: '_arcExportId', onUnmapped: 'require' },
+      { field: 'lastActiveChapterId', remapVia: 'chapters', exportAs: '_lastChapterExportId' },
+    ],
+    note: 'Phase 39 已确认的故事线动态投影；每条 StoryArc 至多一行，删章保留标题并 NULL 化引用' },
+
+  { table: db.storylineCrossings, name: 'storylineCrossings', owner: 'project',
+    exportable: true,
+    exportRemap: [
+      { field: 'arcIdA', remapVia: 'storyArcs', exportAs: '_arcAExportId', onUnmapped: 'require' },
+      { field: 'arcIdB', remapVia: 'storyArcs', exportAs: '_arcBExportId', onUnmapped: 'require' },
+      { field: 'chapterId', remapVia: 'chapters', exportAs: '_chapterExportId' },
+    ],
+    note: 'Phase 39 已确认的两条登记故事线交汇；删章保留证据与章节标题并 NULL 化引用' },
 
   { table: db.stateCards, name: 'stateCards', owner: 'project', exportable: true },
 

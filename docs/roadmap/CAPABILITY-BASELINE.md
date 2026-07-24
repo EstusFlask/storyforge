@@ -92,13 +92,16 @@
 - `canonAssertions` 只回注 confirmed 且来源仍有效的宪法，正文、设定、大纲和一致性审校共用；事实库“世界宪法”视图提供扫描、确认、否决、冲突与来源异常出口。
 - `CONSISTENCY-0` 已把 6 个 `R-CANON-*` 反例落入 `tests/canon/`；6 个活动测试由 `check:canon-coverage` 与覆盖地图双向对齐，当前无显式 todo。
 - 角色存亡以 `temporalFacts.aliveStatus` 为唯一硬事实源：枚举写前归一，confirmed 与时点仍有效的 superseded 历史 Canon 按规范章序投影；审校只接受已死亡角色闭集中的正常活动逐字引用，再由代码硬比对。
+- Phase 39 复用 `StoryArc/StoryStage` 静态注册表，v40 动态层保存每线最新作者确认进度和跨线交汇；模型只能对 arc/stage/status 闭集与正文逐字证据提出候选，新线必须由作者明确创建。
+- 故事线仪表盘支持选择已写章节映射、逐条采纳、当前阶段/状态与交汇节点展示；确认结果按规范章序进入正文、大纲和一致性审校，未来进度不会泄漏给前章。
+- 项目/章节/阶段/故事线删除及 JSON 往返均有明确生命周期：删章保留说明和冗余章名、断 FK；删阶段清悬空指针；删线事务级联动态行；Arc/Chapter 外键导入重映射。
 
 ### 当前边界 / 尚未完成
 
 - 世界宪法硬保证只覆盖已登记、已抽取、来源有效且已确认的单值主题；未登记散文、抽取遗漏和复杂条件规则仍属于软审计范围。
 - 存亡硬保证只覆盖目标章开始前已确认死亡与正文中的闭集正常活动引用；同章内先死后动、倒叙、附身、借尸和未明确登记的复活仍属于软审计。
 - 一致性覆盖地图和 `tests/canon/` 是跨功能的声明基线，`tests/regression/` 继续覆盖具体实现细节；新增 Canon 声明必须先加地图行和可证伪反例，不用删除 `todo` 制造假绿。
-- 故事线动态进度、交叉和角色变化影响尚未形成统一产品出口。
+- 角色变化影响传播与局部重规划尚未形成统一产品出口；故事线动态进度与交汇已完成。
 - 内联编辑器提示尚未把确定性 finding 映射到编辑器装饰层。
 
 ### 禁止重复建设
@@ -112,6 +115,7 @@
 - `src/lib/consistency/`
 - `src/lib/fact-ledger/`
 - `src/lib/knowledge-ledger/`
+- `src/lib/storyline/`
 - `src/lib/fact-ledger/setting-assertions.ts`
 - `src/lib/registry/canon-assertion-source-registry.ts`
 - `src/lib/retrieval/`
@@ -123,6 +127,7 @@
 - `tests/regression/R-CONSISTENCY3-world-constitution.test.ts`
 - `tests/regression/R-CONSISTENCY2-*`
 - `tests/canon/R-CANON-*`
+- `tests/canon/storyline-progress.test.ts`
 - `scripts/check-canon-coverage.mjs`
 
 ## PIPE-1 透明生成与质量工作坊

@@ -194,6 +194,8 @@ export default function OutlinePanel({ project, onOpenChapter }: Props) {
         'historical',
         'locations',
         'foreshadows',
+        'storyArcs',
+        'storylineProgress',
         'existingVolumeOutlines',
         'writtenChapterProgress',
       ],

@@ -42,6 +42,8 @@ import type {
   StoryTimelineEvent,
   CodexCategory,
   CodexEntry,
+  StorylineProgress,
+  StorylineCrossing,
 } from '../types'
 import type { AIUsageEntry } from '../ai/usage-log'
 import type { TemporalFact } from '../types/temporal-fact'
@@ -127,6 +129,10 @@ class StoryForgeDB extends Dexie {
 
   // CONSISTENCY-2 —— 角色认知事件账本（知道 / 误认 / 遗忘 / 纠正）
   knowledgeLedger!: Table<KnowledgeLedgerEntry, number>
+
+  // Phase 39 —— 动态故事线进度与交汇（均须作者确认）
+  storylineProgress!: Table<StorylineProgress, number>
+  storylineCrossings!: Table<StorylineCrossing, number>
 
   // NS-5 —— 叙事感知混合检索块（可重建派生缓存，不导出）
   retrievalChunks!: Table<RetrievalChunk, number>
@@ -387,6 +393,13 @@ class StoryForgeDB extends Dexie {
     // 旧项目事实原样保留，作者后续明确确认的认知事件才进入本表。
     this.version(39).stores({
       knowledgeLedger: '++id, projectId, worldGroupId, characterId, knowledgeKey, factId, sourceChapterId, status',
+    })
+
+    // v40: Phase 39 动态故事线进度与交汇。新增空表，不从既有章节或 StoryArc
+    // 猜测历史进度；只有作者明确采纳的候选才会进入这两张表。
+    this.version(40).stores({
+      storylineProgress: '++id, &arcId, projectId, status, lastActiveChapterId',
+      storylineCrossings: '++id, projectId, arcIdA, arcIdB, chapterId',
     })
   }
 }

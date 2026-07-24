@@ -55,7 +55,35 @@ export async function seedFullProject() {
 
   // ── 下游产物 ──
   await db.foreshadows.add({ projectId, name: '神秘玉佩', type: 'item', status: 'planted', description: '身世之谜', createdAt: now, updatedAt: now } as any)
-  await db.storyArcs.add({ projectId, type: 'main', name: '复仇线', stages: '[]', createdAt: now, updatedAt: now } as any)
+  const storyArc = await db.storyArcs.add({
+    projectId, type: 'main', name: '复仇线', stages: '[]', createdAt: now, updatedAt: now,
+  } as any) as number
+  await db.storylineProgress.add({
+    projectId,
+    arcId: storyArc,
+    currentStageId: null,
+    status: 'active',
+    progressNote: '主角已开始追查旧案',
+    lastActiveChapterId: chapter,
+    lastActiveChapterTitle: '第1章',
+    involvedEntities: JSON.stringify(['林惊羽']),
+    evidenceQuote: '废墟中睁眼',
+    createdAt: now,
+    updatedAt: now,
+  })
+  // 全表 FK 往返种子复用同一 Arc 覆盖 A/B 两个字段；“两端必须不同”的产品约束
+  // 由 storyline-progress 领域解析/采纳测试单独锁定。
+  await db.storylineCrossings.add({
+    projectId,
+    arcIdA: storyArc,
+    arcIdB: storyArc,
+    chapterId: chapter,
+    chapterTitle: '第1章',
+    note: '全表往返 FK 覆盖种子',
+    evidenceQuote: '废墟中睁眼',
+    createdAt: now,
+    updatedAt: now,
+  })
   await db.stateCards.add({ projectId, category: 'character', entityName: '林惊羽', fields: JSON.stringify([{ key: '境界', value: '炼气一层' }]), createdAt: now, updatedAt: now } as any)
   await db.itemLedger.add({ projectId, itemName: '青锋剑', heldByName: '林惊羽', characterId: char1, action: 'gain', quantity: 1, chapterId: chapter, chapterTitle: '第1章', createdAt: now, updatedAt: now } as any)
   await db.storyTimelineEvents.add({ projectId, chapterId: chapter, title: '获得青锋剑', createdAt: now, updatedAt: now } as any)

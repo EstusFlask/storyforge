@@ -74,7 +74,7 @@
 
 ## 二、上下文源清单（CONTEXT_SOURCES · AI 读什么）
 
-共 36 个上下文源。assembleContext({ sourceKeys }) 按 key 装配。
+共 37 个上下文源。assembleContext({ sourceKeys }) 按 key 装配。
 
 | key | 标签 | 作用域 | 层级 | 预算(token) |
 |---|---|---|---|---|
@@ -104,6 +104,7 @@
 | `locations` | 重要地点 | project | L2 | 1200 |
 | `foreshadows` | 伏笔状态 | chapter | L2 | 1200 |
 | `storyArcs` | 故事线 | project | L2 | 1500 |
+| `storylineProgress` | 作者确认的故事线进度与交汇 | project | L1 | 1400 |
 | `emotionBeats` | 情感节拍 | chapter | L1 | 1000 |
 | `stateCards` | 状态卡 | project | L2 | 1800 |
 | `itemLedger` | 物品流水 | project | L2 | 2400 |
@@ -142,6 +143,8 @@ AI 输出经 `adopt({ target, data })` 写回,只有这里登记的字段可写(
 | `storyArcs` | `description` `name` `stages` `type` |
 | `storyCores` | `centralConflict` `concept` `logline` `mainPlot` `plotPattern` `subPlots` `theme` |
 | `storyTimelineEvents` | `chapterId` `chapterTitle` `description` `importance` `order` `storyTime` `title` |
+| `storylineCrossings` | `arcIdA` `arcIdB` `chapterId` `chapterTitle` `evidenceQuote` `note` |
+| `storylineProgress` | `arcId` `currentStageId` `evidenceQuote` `involvedEntities` `lastActiveChapterId` `lastActiveChapterTitle` `progressNote` `status` |
 | `worldviews` | `climateByRegion` `continentLayout` `culture` `divineDesign` `economy` `factionLayout` `geography` `history` `historyLine` `internalConflicts` `itemDesign` `mountainsRivers` `naturalResourceOverview` `naturalResources` `politicsEconomyCulture` `powerHierarchy` `races` `regionDimensions` `rules` `society` `worldDimensions` `worldEvents` `worldOrigin` `worldStructure` |
 
 ### 领域写回扩展（不是第二套通用 adopt）
@@ -151,23 +154,26 @@ AI 输出经 `adopt({ target, data })` 写回,只有这里登记的字段可写(
 | `fact-ledger` | `temporalFacts` | `FACT_PREDICATE_REGISTRY` | `src/lib/fact-ledger/fact-ledger.ts`<br/>`src/lib/fact-ledger/human-readable-io.ts`<br/>`src/lib/fact-ledger/lifecycle.ts`<br/>`src/lib/fact-ledger/setting-assertions.ts`<br/>`src/lib/consistency/impact-analysis.ts` | 2027-01-01 |
 | `character-merge-lifecycle` | `characters` | `PROJECT_TABLES refs + remapCharacterReferences` | `src/lib/import/character-merge.ts` | 2027-01-01 |
 | `knowledge-ledger` | `knowledgeLedger` | `KNOWLEDGE_ACTIONS + ADOPTION_SCHEMAS + PROJECT_TABLES` | `src/lib/knowledge-ledger/knowledge-ledger.ts`<br/>`src/lib/knowledge-ledger/lifecycle.ts` | 2027-01-01 |
+| `storyline-progress-lifecycle` | `storylineProgress` | `ADOPTION_SCHEMAS + PROJECT_TABLES refs` | `src/lib/storyline/lifecycle.ts` | 2027-01-01 |
+| `storyline-crossing-lifecycle` | `storylineCrossings` | `ADOPTION_SCHEMAS + PROJECT_TABLES refs` | `src/lib/storyline/lifecycle.ts` | 2027-01-01 |
+| `story-arc-dynamic-lifecycle` | `storyArcs` | `PROJECT_TABLES refs` | `src/lib/storyline/lifecycle.ts` | 2027-01-01 |
 
 ## 四、AI 调用点（消耗统计 category · 在哪触发)
 
-共 47 个 category。
+共 48 个 category。
 未分类调用: 0 个。动态 category 调用: 3 个。
 
 | category | 触发文件 |
 |---|---|
 | `ai.restructure` | `src/lib/ai/restructure.ts:54` |
 | `canon.setting.extract` | `src/components/facts/WorldConstitutionPanel.tsx:79` |
-| `chapter.content` | `src/components/editor/ChapterEditor.tsx:496` |
+| `chapter.content` | `src/components/editor/ChapterEditor.tsx:497` |
 | `chapter.content.batch` | `src/lib/ai/batch-detail-runner.ts:256` |
-| `chapter.continue` | `src/components/editor/ChapterEditor.tsx:514` |
-| `chapter.deai` | `src/components/editor/ChapterEditor.tsx:551` |
-| `chapter.expand` | `src/components/editor/ChapterEditor.tsx:531` |
+| `chapter.continue` | `src/components/editor/ChapterEditor.tsx:515` |
+| `chapter.deai` | `src/components/editor/ChapterEditor.tsx:552` |
+| `chapter.expand` | `src/components/editor/ChapterEditor.tsx:532` |
 | `chapter.memory` | `src/components/editor/ChapterEditor.tsx:326` |
-| `chapter.polish` | `src/components/editor/ChapterEditor.tsx:523` |
+| `chapter.polish` | `src/components/editor/ChapterEditor.tsx:524` |
 | `chapter.toolbar` | `src/components/editor/FloatingToolbar.tsx:105` |
 | `character.generate` | `src/components/character/CharacterPanel.tsx:160` |
 | `character.structure` | `src/lib/ai/parse-character-output.ts:80` |
@@ -194,12 +200,13 @@ AI 输出经 `adopt({ target, data })` 写回,只有这里登记的字段可写(
 | `review.anti-ai` | `src/components/editor/ReviewPanel.tsx:100` |
 | `review.quality` | `src/components/editor/ReviewPanel.tsx:92` |
 | `review.readability` | `src/components/editor/ReviewPanel.tsx:109` |
-| `review.revise` | `src/components/editor/ChapterEditor.tsx:566` |
+| `review.revise` | `src/components/editor/ChapterEditor.tsx:567` |
 | `rules.generate` | `src/components/rules/CreativeRulesPanel.tsx:80` |
 | `scene.verify` | `src/components/scene/SceneVerifyPanel.tsx:81` |
-| `story-arc.generate` | `src/components/outline/StoryArcPanel.tsx:84` |
+| `story-arc.generate` | `src/components/outline/StoryArcPanel.tsx:85` |
 | `story.generate` | `src/components/worldview/StoryCorePanel.tsx:193` |
 | `story.timeline` | `src/components/timeline/StoryTimelinePanel.tsx:85` |
+| `storyline-progress.map` | `src/components/outline/StorylineProgressPanel.tsx:76` |
 | `style.learn` | `src/components/style/StyleLearningPanel.tsx:79` |
 | `world-group.expand` | `src/components/world-group/WorldGroupDetail.tsx:98` |
 | `world-group.suggest` | `src/components/world-group/WorldGroupOverview.tsx:57` |
@@ -209,10 +216,10 @@ AI 输出经 `adopt({ target, data })` 写回,只有这里登记的字段可写(
 
 ### 动态 category 调用
 
-- `src/components/editor/ReviewPanel.tsx:151 · ai.start`
+- `src/components/editor/ReviewPanel.tsx:152 · ai.start`
 - `src/components/settings/NS0EvalPanel.tsx:50 · chat`
 - `src/components/settings/prompt/WorkflowRunner.tsx:287 · ai.start`
 
 ---
 
-生成时间基准:commit `398c14a`
+生成时间基准:commit `873b68c`

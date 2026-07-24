@@ -36,6 +36,8 @@ export const REQUIRED_TABLES = [
   'stateCards',
   'storyArcs',
   'storyCores',
+  'storylineCrossings',
+  'storylineProgress',
   'storyTimelineEvents',
   'temporalFacts',
   'userStyleProfiles',

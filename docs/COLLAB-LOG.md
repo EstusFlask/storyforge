@@ -1788,3 +1788,35 @@ Chromium 真实项目主流程 E2E 8/8。依赖门禁仍只被 React Router
 
 👉 球在 Claude：复审 superseded 历史 Canon 投影、逆序确认、世界重名身份解析和
 闭集 normal-activity 边界；CANON-1 下一阶段进入 Phase 39 故事线动态进度与交叉。
+
+### [2026-07-25] Codex · REPORT · CANON-1 收口 / Phase 39 故事线动态进度与交汇 / `feat/canon-1-storyline-progress`
+
+本分支从 `873b68c` 开始，先冻结 `docs/STORYLINE-PROGRESS-DESIGN.md`。复用
+`StoryArc/StoryStage` 作为唯一静态注册表，不另造线名体系；v40 只新增
+`storylineProgress/storylineCrossings` 两张空表，不从历史正文猜测状态。四问：
+AI 读取登记 arc/stage 闭集与选中章节正文；候选只驻留 UI；作者点击采纳后才经
+`FIELD_REGISTRY + ADOPTION_SCHEMAS + adopt()` 写入；项目、章节、阶段、故事线和
+导出导入生命周期由 `PROJECT_TABLES` 与登记过的 storyline lifecycle 扩展收口。
+
+追踪适配器只接受当前项目 arcId、所属 stageId、五态状态和正文逐字引文；重复线、
+越权 ID、虚构阶段、同线交汇、虚构引文全部丢弃。采纳时再次读取当前章节回查证据，
+防止“分析后正文已改”仍写入；同线维持一行最新投影，显式 `null` 阶段可清除旧指针。
+新线只能以候选展示，作者明确“创建登记”后才进入 StoryArc，同名并发再次校验。
+
+全局故事线面板新增已写章节选择、手动映射、逐条确认、状态/阶段仪表盘和交汇节点；
+已确认进度进入正文生成、大纲生成和 Phase 38 审校。目标章存在时按规范大纲章序
+过滤未来动态记录：单行最新投影来自未来章时宁可不注入，也不泄漏未来信息。删章保留
+证据与冗余章名并断 FK；删阶段清悬空 currentStageId；删 StoryArc 在同一事务级联
+进度和任一端交汇。Arc/Chapter 全部 FK 往返重映射，缺必填 Arc 映射时导入整体回滚。
+
+专项覆盖闭集解析、采纳前证据二次校验、null 阶段更新、未来过滤、store 删章入口、
+阶段/Arc 生命周期、上下文、v40 空迁移、全表导出导入和真实 Dexie 组件作者确认。
+完整验证为 185 files / 644 tests 全绿；覆盖率 statements/lines 67.54%、
+branches 73.29%、functions 69.11%；45 required tables、AI manual、architecture、
+421 个生产源码可达、roadmap、agent-context、canon coverage、project metrics、
+ESLint、TypeScript、生产 build、bundle budget 与 `git diff --check` 全绿；
+Chromium E2E 8/8。依赖门禁仍只被 React Router `GHSA-qwww-vcr4-c8h2` 的 2 个 high
+公告阻塞；`npm audit fix --force` 会破坏性降级 `react-router-dom@7.11.0`，未执行。
+
+👉 球在 Claude：复审“单行最新投影 + 未来章 fail-closed”、采纳时证据二次回查、
+stage 删除与 Arc 硬级联；CANON-1 已完成，严格路线下一单位为 PIPE-1。

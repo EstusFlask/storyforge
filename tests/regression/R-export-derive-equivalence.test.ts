@@ -35,6 +35,10 @@ function normalize(data: any) {
   // CONSISTENCY-2: 新表没有旧手写版 fixture 对应字段；其格式与 FK 往返由
   // R-export-fullcoverage 单独锁死，这里仍只比较旧格式共有部分。
   delete data.knowledgeLedger
+  // Phase 39 同理；StoryArc 现在为下游动态表提供显式 exportId，旧 fixture 不含。
+  delete data.storylineProgress
+  delete data.storylineCrossings
+  for (const row of data.storyArcs ?? []) delete row._exportId
   for (const row of data.worldNodes ?? []) {
     if (row.portalsJSON === undefined) delete row.portalsJSON
   }

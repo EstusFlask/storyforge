@@ -135,6 +135,7 @@ export default function ReviewPanel(props: Props) {
           'characterRelations',
           'foreshadows',
           'storyArcs',
+          'storylineProgress',
         ],
       }),
       readCognitionAuditSnapshot(projectId, chapterId, worldGroupId),

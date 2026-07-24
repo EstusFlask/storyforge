@@ -99,6 +99,21 @@ describe('R-export-fullcoverage · 全表多世界往返安全网', () => {
     const newSte = await db.storyTimelineEvents.where('projectId').equals(newId).first()
     expect(newSte!.chapterId).toBe(newChapter!.id)
 
+    // Phase 39 动态故事线 → StoryArc / Chapter 全部重映射
+    const newArc = await db.storyArcs.where('projectId').equals(newId).first()
+    const newProgress = await db.storylineProgress.where('projectId').equals(newId).first()
+    const newCrossing = await db.storylineCrossings.where('projectId').equals(newId).first()
+    expect(newProgress).toMatchObject({
+      arcId: newArc!.id,
+      lastActiveChapterId: newChapter!.id,
+      status: 'active',
+    })
+    expect(newCrossing).toMatchObject({
+      arcIdA: newArc!.id,
+      arcIdB: newArc!.id,
+      chapterId: newChapter!.id,
+    })
+
     // knowledgeLedger → 世界/角色/章节/事实全部重映射
     const newKnowledge = await db.knowledgeLedger.where('projectId').equals(newId).first()
     const newFact = await db.temporalFacts.where('projectId').equals(newId).first()

@@ -47,6 +47,9 @@ describe('Phase 1.2a · 统一写回层', () => {
       'fact-ledger',
       'character-merge-lifecycle',
       'knowledge-ledger',
+      'storyline-progress-lifecycle',
+      'storyline-crossing-lifecycle',
+      'story-arc-dynamic-lifecycle',
     ])
     for (const extension of ADOPTION_EXTENSIONS) {
       expect(REGISTRY_BY_NAME.has(extension.target), `ADOPTION_EXTENSION target 缺表:${extension.target}`).toBe(true)

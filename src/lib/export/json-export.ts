@@ -26,6 +26,8 @@ import type {
   ImportantLocation, WorldRulesProfile, CodexCategory, CodexEntry,
   UserStyleProfile,
   KnowledgeLedgerEntry,
+  StorylineProgress,
+  StorylineCrossing,
 } from '../types'
 import type { TemporalFact } from '../types/temporal-fact'
 
@@ -81,6 +83,10 @@ export interface ProjectExportData {
   /** CONSISTENCY-2 角色认知事件账本（全部 FK 由注册表重映射）。 */
   knowledgeLedger?: (Omit<KnowledgeLedgerEntry, 'id' | 'projectId'> & Record<string, unknown>)[]
   storyArcs?: Omit<StoryArc, 'id' | 'projectId'>[]
+  /** Phase 39 作者确认的故事线动态投影（FK 由注册表重映射）。 */
+  storylineProgress?: (Omit<StorylineProgress, 'id' | 'projectId'> & Record<string, unknown>)[]
+  /** Phase 39 作者确认的故事线交汇（FK 由注册表重映射）。 */
+  storylineCrossings?: (Omit<StorylineCrossing, 'id' | 'projectId'> & Record<string, unknown>)[]
   worldNodes?: (Omit<WorldNode, 'id' | 'projectId' | 'worldGroupId'> & WorldGroupExportRef & { _exportId: number; _parentExportId: number | null })[]
   notes?: Omit<Note, 'id' | 'projectId'>[]
   references?: (Omit<Reference, 'id' | 'projectId'> & { _exportId: number })[]

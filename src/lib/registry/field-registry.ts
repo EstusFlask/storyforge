@@ -289,6 +289,30 @@ export const FIELD_REGISTRY: FieldSpec[] = [
   json('storyArcs', 'stages', ['阶段']),
   longtext('storyArcs', 'description', ['描述']),
 
+  // Phase 39：作者确认的动态故事线投影与交汇
+  num('storylineProgress', 'arcId', ['故事线ID']),
+  text('storylineProgress', 'currentStageId', ['当前阶段ID']),
+  enumeration('storylineProgress', 'status', ['dormant', 'active', 'climax', 'resolved', 'abandoned'], {
+    休眠: 'dormant',
+    活跃: 'active',
+    高潮: 'climax',
+    已解决: 'resolved',
+    已完成: 'resolved',
+    已放弃: 'abandoned',
+  }),
+  longtext('storylineProgress', 'progressNote', ['进度说明']),
+  num('storylineProgress', 'lastActiveChapterId', ['最近活跃章节ID']),
+  text('storylineProgress', 'lastActiveChapterTitle', ['最近活跃章节']),
+  json('storylineProgress', 'involvedEntities', ['涉及实体']),
+  longtext('storylineProgress', 'evidenceQuote', ['正文证据']),
+
+  num('storylineCrossings', 'arcIdA', ['故事线A']),
+  num('storylineCrossings', 'arcIdB', ['故事线B']),
+  num('storylineCrossings', 'chapterId', ['章节ID']),
+  text('storylineCrossings', 'chapterTitle', ['章节标题']),
+  longtext('storylineCrossings', 'note', ['交汇说明']),
+  longtext('storylineCrossings', 'evidenceQuote', ['正文证据']),
+
   // codex
   text('codexCategories', 'name', ['分类名']),
   enumeration('codexCategories', 'domain', ['natural', 'humanity', 'origin'], { 自然: 'natural', 自然环境: 'natural', 人文: 'humanity', 人文环境: 'humanity', 起源: 'origin', 世界起源: 'origin' }),

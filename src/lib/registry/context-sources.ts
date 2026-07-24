@@ -31,6 +31,7 @@ import { buildForeshadowTaskContext } from '../foreshadow/context'
 import { formatHeldItemsContext, readProjectHeldItems } from '../consistency/held-items'
 import { formatCharacterKnowledgeContext, readProjectCharacterKnowledge } from '../knowledge-ledger/knowledge-ledger'
 import { formatCanonAssertionsContext, readCanonAssertions } from '../fact-ledger/setting-assertions'
+import { readStorylineProgressContext } from '../storyline/storyline-progress'
 import type { Chapter, Character, OutlineNode, PowerSystem, Worldview } from '../types'
 import type { ContextSource } from './types'
 import { countWords, htmlToPlainText } from '../utils/html'
@@ -679,6 +680,15 @@ export const CONTEXT_SOURCES: ContextSource[] = [
     layer: 'L2',
     budgetTokens: 1500,
     read: input => readStoryArcs(input.projectId),
+  },
+  {
+    key: 'storylineProgress',
+    label: '作者确认的故事线进度与交汇',
+    scope: 'project',
+    layer: 'L1',
+    budgetTokens: 1400,
+    protectedFromTrim: true,
+    read: input => readStorylineProgressContext(input.projectId, input.chapterId),
   },
   {
     key: 'emotionBeats',
