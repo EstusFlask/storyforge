@@ -48,6 +48,7 @@ npm run ci
 | `check:ai-manual` | AI 说明书与代码一致(防 prompt key 漂移) |
 | `check:architecture` | 三注册表铁律(防"屎山复发") |
 | `check:agent-context` | 短入口与按任务路由防回退 |
+| `check:canon-coverage` | 一致性覆盖地图与反例状态对齐 |
 | `check:source-reachability` | 生产源码可达性 |
 | `check:roadmap` | 路线图归属与历史快照 |
 | `check:project-metrics` | Blueprint 实时指标 |

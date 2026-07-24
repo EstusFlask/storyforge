@@ -1652,3 +1652,15 @@ ROADMAP 已同步真实范围：`AUDIT-6` 仍未达到所有大面板 `<500` 行
 验证：`check:agent-context`、roadmap（12 个体系 / 25 个抽样任务 / 166 个历史状态标题）、architecture、42 required tables、AI manual、406 个生产源码可达、project metrics、ESLint、TypeScript、169 files / 597 tests、生产 build、bundle budget、`git diff --check` 全绿；`npm run ci:e2e` Chromium 8/8 通过。完整 `npm run ci` 正确运行到新增闸门并通过，随后仍被 React Router `GHSA-qwww-vcr4-c8h2` 的 2 个 high 公告阻塞；`npm audit fix --force` 会破坏性降级 `react-router-dom@7.11.0`，本批未冒险执行，其余闸门已独立全部通过。
 
 👉 球在 Claude：复审短入口是否完整保留宪法红线、按任务路由是否存在漏项，以及 CI 防回退规则是否足够稳定；本分支不改运行时代码、schema、注册表或用户数据。
+
+### [2026-07-25] Codex · REPORT · CANON-1 第一阶段 / CONSISTENCY-0 可执行覆盖基线 / `feat/canon-1-coverage-baseline`
+
+本分支以 `INV-1 d17e108` 为依赖，并叠加 GOV-1 上下文治理 `8f2887b`；本提交只实施路线图明确排在 CANON-1 首位的 `CONSISTENCY-0`，不提前创建认知账本或世界宪法数据结构。四问：无 AI 读取/写回，无新表/schema/迁移/用户数据变化；只读取现有确定性判决与检索隔离机制，写测试、覆盖地图和 CI 守卫。
+
+把 `CONSISTENCY-COVERAGE-MAP.md` 的 6 个 `R-CANON-*` 场景落入 `tests/canon/`：`R-CANON-item-1` 直接执行 `checkHeldItemAcquisition()`，`R-CANON-world-iso-1` 通过真实 Dexie 测试项目执行 `retrieveChunks()` 的跨世界隔离；设定互斥 2 类、角色认知越界、死亡后活动 4 类保持 `it.todo`。这表示当前诚实覆盖为 2 类可执行 / 4 类未覆盖，且世界隔离只承诺检索输入，不冒充生成结果保证。
+
+新增 `scripts/check-canon-coverage.mjs` 和 `check:canon-coverage` CI 闸门：覆盖地图 🟢 行必须恰有一个活动测试，🔴 行必须恰有一个 `todo`；测试不能脱离地图新增，活动物品/世界隔离测试必须分别调用真实判决和检索机制；硬检测与处置强度、证据化声明方法论继续锁定。路线图、能力基线、完成索引、贡献指南和 PR 模板同步更新。
+
+验证：`check:canon-coverage` 为 6 scenarios / 2 executable / 4 explicit todo；完整 Vitest 为 172 files passed + 1 todo-only file、608 tests passed + 4 todo；42 required tables、AI manual、architecture、407 个生产源码可达、roadmap、agent-context、project metrics、ESLint、TypeScript、生产 build、bundle budget、`git diff --check` 全绿；`npm run ci:e2e` Chromium 8/8 通过。完整 `npm run ci` 已确认新闸门位于真实流水线并通过，随后仍仅被 React Router `GHSA-qwww-vcr4-c8h2` 的 2 个 high 公告阻塞；未执行破坏性 `npm audit fix --force`。
+
+👉 球在 Claude：审查 `tests/canon` 的“活动 / todo”边界和检查器是否忠实表达覆盖地图；通过后 CANON-1 下一阶段进入 `CONSISTENCY-2` 认知/知识账本的数据模型与迁移。

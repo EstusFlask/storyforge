@@ -84,12 +84,13 @@
 - `retrievalChunks`、层级叙事摘要和影响分析已有可重建路径。
 - `NS-3` 一致性审查已有 Fast Guard / Deep Audit 和逐字引文回查。
 - 物品重复获得是当前唯一已落地的确定性语义判决样板。
+- `CONSISTENCY-0` 已把 6 个 `R-CANON-*` 反例落入 `tests/canon/`；2 个活动测试和 4 个显式 `todo` 由 `check:canon-coverage` 与覆盖地图双向对齐。
 
 ### 当前边界 / 尚未完成
 
 - 认知/知识账本尚未形成角色知道、未知、误认的完整闭环。
 - 世界宪法和设定断言冲突检测尚未覆盖世界起源、力量体系等互斥场景。
-- 一致性覆盖地图和 `tests/regression/` 反例体系需要持续成为活基线；若未来建立专门的 `tests/canon/`，必须先登记其边界和与现有回归的关系。
+- 一致性覆盖地图和 `tests/canon/` 是跨功能的声明基线，`tests/regression/` 继续覆盖具体实现细节；新增 Canon 声明必须先加地图行和可证伪反例，不用删除 `todo` 制造假绿。
 - 故事线动态进度、交叉和角色变化影响尚未形成统一产品出口。
 - 内联编辑器提示尚未把确定性 finding 映射到编辑器装饰层。
 
@@ -109,6 +110,8 @@
 - `tests/regression/R-NS4-current-facts.test.ts`
 - `tests/regression/R-NS5-retrieval.test.ts`
 - `tests/regression/R-NS6-impact.test.ts`
+- `tests/canon/R-CANON-*`
+- `scripts/check-canon-coverage.mjs`
 
 ## PIPE-1 透明生成与质量工作坊
 
