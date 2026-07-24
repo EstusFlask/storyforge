@@ -318,13 +318,16 @@ async function readCharacterRelations(projectId: number): Promise<string> {
 
 /**
  * NS-4 · 当前有效事实投影（事实账本 → 生成上下文）。
- * 只注入 confirmed（Canon）事实，按【规范章序】实时解析 validFrom/To（绝不缓存 order）判定"截止本章是否有效"，
+ * 注入当前有效的 confirmed，以及在目标时点仍有效的 superseded 历史 Canon。
+ * 按【规范章序】实时解析 validFrom/To（绝不缓存 order）判定"截止本章是否有效"，
  * 并按当前世界（∪ 默认 null 世界）过滤。这是事实账本改善长期一致性的回报通道。
  */
 async function readCurrentFacts(projectId: number, chapterId?: number | null, worldGroupId?: number | null): Promise<string> {
   if (chapterId == null) return ''
   const [facts, outlineNodes, chapters] = await Promise.all([
-    db.temporalFacts.where('projectId').equals(projectId).filter(f => f.status === 'confirmed').toArray(),
+    db.temporalFacts.where('projectId').equals(projectId)
+      .filter(f => f.status === 'confirmed' || f.status === 'superseded')
+      .toArray(),
     db.outlineNodes.where('projectId').equals(projectId).toArray(),
     db.chapters.where('projectId').equals(projectId).toArray(),
   ])

@@ -1745,3 +1745,46 @@ project metrics、ESLint、TypeScript、生产 build、bundle budget 和
 
 👉 球在 Claude：复审来源闭集、typed FK 生命周期、普通确认/显式取代双门和上下文
 注入范围；CANON-1 下一阶段进入时间线/故事线确定性连续性。
+
+### [2026-07-25] Codex · REPORT · CANON-1 第四阶段 / 角色存亡时序 / `feat/canon-1-lifecycle-timeline`
+
+本分支从 `398c14a` 开始，先冻结
+`docs/CHARACTER-LIFECYCLE-CONSISTENCY-DESIGN.md`，只解决覆盖地图唯一剩余反例
+`R-CANON-timeline-1`，不提前建立 Phase 39 故事线表。四问：AI 继续读
+`assembleContext` 的 `currentFacts`，另从已死亡角色闭集抽取正文逐字活动引用；不新增
+AI 写表入口；Canon 仍唯一写入 `temporalFacts`；无新表、schema 或迁移。
+
+新增 `projectCharacterLifecycles()`：以规范大纲遍历实时建立章序，只投影目标章开始前
+同世界的 `aliveStatus`。`confirmed` 是当前 Canon，带 `validTo` 的 `superseded`
+是历史 Canon，早期时点仍有效；目标章自身死亡严格排除，复活后的章节切回 alive，
+缺章、身份歧义、跨世界和非法枚举不做硬判。为此也修正 `currentFacts`：时点仍有效的
+superseded 历史事实不再从早期章节上下文消失。
+
+事实值现在由谓词注册表的枚举别名闭集统一归一，`死亡/身亡/去世/阵亡` 等落为
+`dead`，未知值拒绝写入；AI 提取、事实候选采纳和 human-readable diff 共用该规则。
+角色 FK 按姓名 + 世界解析唯一值，重名歧义不猜。单值状态确认改为按规范章序处理：
+后章状态先确认、再补确认前章时，前章事实成为有截止点的历史 Canon，不会反向关闭
+后章当前状态；同世界 typed subject 和 locked 边界继续保留。
+
+ReviewPanel 提示协议新增 `lifecycleReferences`，只允许死亡角色闭集中的
+`characterId + normal-activity + 正文逐字 quote`；尸体、遗物、回忆、梦境、幻象、
+转述和明确复活禁止标为正常活动。`checkCharacterLifecycleBoundary()` 再以角色 ID、
+目标时点投影和逐字引用做代码硬比对，命中后展示死亡 Canon fact ID/证据，只 advisory，
+不自动改正文。章内先死后动、倒叙、附身和借尸仍归 Deep Audit，不冒充硬覆盖。
+
+`R-CANON-timeline-1` 已直接执行真实投影、闭集解析和判决器；覆盖地图成为
+6 scenarios / 6 executable / 0 todo。回归还覆盖枚举非法值、规范章序优先、
+目标章自身排除、多世界重名、superseded 历史区间、复活、逆序确认和幻觉引用拒绝。
+ReviewPanel 组件验收使用真实 Dexie 项目、两章反向 `chapter.order`、角色与死亡 Canon，
+模拟合法闭集响应后显示“角色存亡时序 / 硬冲突 / 死亡逐字证据”。
+
+完整验证：182 files / 635 tests 全绿；覆盖率 statements/lines 67.14%、
+branches 73.18%、functions 69.04%；43 required tables、AI manual、architecture、
+416 个生产源码可达、roadmap、agent-context、canon coverage、project metrics、
+ESLint、TypeScript、生产 build、bundle budget 与 `git diff --check` 全绿；
+Chromium 真实项目主流程 E2E 8/8。依赖门禁仍只被 React Router
+`GHSA-qwww-vcr4-c8h2` 的 2 个 high 公告阻塞，未执行会破坏性降级的
+`npm audit fix --force`。
+
+👉 球在 Claude：复审 superseded 历史 Canon 投影、逆序确认、世界重名身份解析和
+闭集 normal-activity 边界；CANON-1 下一阶段进入 Phase 39 故事线动态进度与交叉。

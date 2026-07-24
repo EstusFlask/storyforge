@@ -89,6 +89,7 @@ const mechanisms = {
   'R-CANON-omniscient-1': 'checkCognitionBoundary',
   'R-CANON-setting-clash-1': 'confirmFactCandidate',
   'R-CANON-setting-clash-2': 'checkSettingAssertionClashes',
+  'R-CANON-timeline-1': 'checkCharacterLifecycleBoundary',
 }
 for (const [id, symbol] of Object.entries(mechanisms)) {
   const declaration = declarations.get(id)?.[0]

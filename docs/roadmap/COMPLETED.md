@@ -15,7 +15,7 @@
 |---|---|---|---|
 | **GOV-1 架构与数据安全** | Phase 0/1/2/3 基础；`AUDIT-1/1b/2/3/4`；`HEALTH-2/3/6`；R1-R6 审查；GOV-1 P1；Agent 上下文输入治理 | 三注册表、生命周期派生、参考分析 adopt 收口、领域扩展、真实 AI Manual、依赖/覆盖率/规模/构建发布守卫、按任务上下文路由与固定输入防回退 | `AGENTS.md`、`CLAUDE.md`、`docs/CONTEXT-ROUTING.md`、`MASTER-BLUEPRINT.md`、`scripts/check-agent-context.mjs`、`scripts/check-architecture.mjs`、`scripts/generate-ai-manual.mjs`、`scripts/generate-project-metrics.mjs` |
 | **INV-1 物品与状态** | `INVENTORY-1`；`QUICKWIN-1/2/3/5`；C-3/C-4；按角色物品/状态账本 | 双持有人模型、角色背包切换、状态投影、规范章序提取范围、按角色一致性、历史迁移、删除/合并和导入导出 remap | `R-INV1-*`、`R-QUICKWIN3-inventory-extraction-range`、`R-CONSISTENCY1-held-items`、`R-QUICKWIN2-inventory-edit`、`R-QUICKWIN5-state-inventory-source` |
-| **CANON-1 连续性与记忆** | Phase A/B/C；NS-1/T1-T8、NS-2、NS-3、NS-4/5/6 代码基础；`CONSISTENCY-0/2/3` | 章节记忆、handoff、计划对账、规范章序、temporalFacts、检索、层级摘要、影响分析、事实审查、可执行覆盖基线、角色认知、世界宪法主题/来源/冲突/回注闭环 | `tests/canon/R-CANON-*`、`scripts/check-canon-coverage.mjs`、`tests/regression/R-CONSISTENCY2-*`、`tests/regression/R-CONSISTENCY3-*`、`R-NS1-*`、`R-NS3-*`、`R-NS4-*`、`R-NS5-*`、`R-NS6-*` |
+| **CANON-1 连续性与记忆** | Phase A/B/C；NS-1/T1-T8、NS-2、NS-3、NS-4/5/6 代码基础；`CONSISTENCY-0/2/3`；存亡时序 | 章节记忆、handoff、计划对账、规范章序、temporalFacts、检索、层级摘要、影响分析、事实审查、可执行覆盖基线、角色认知、世界宪法、角色存亡闭集判决 | `tests/canon/R-CANON-*`、`scripts/check-canon-coverage.mjs`、`tests/regression/R-CONSISTENCY2-*`、`tests/regression/R-CONSISTENCY3-*`、`tests/regression/R-CONSISTENCY4-*`、`R-NS1-*`、`R-NS3-*`、`R-NS4-*`、`R-NS5-*`、`R-NS6-*` |
 | **PIPE-1 创作与大纲** | Phase D/F；B 组；`QUICKWIN-4/6`；`EDITOR-1/3/4`；`ENH-OUTLINE-1` | 大纲生成、空节点补全、已写正文进度、跨卷拖动、全文查找替换、对照润色、实体补全 | `R-AUDIT6-*`、`R-EDITOR1-*`、`R-EDITOR3-*`、`R-EDITOR4-*`、`R-QUICKWIN6-*` |
 | **WORLD-1 世界知识** | Phase 20/22/23/25/32；C-1/C-2/C-6/C-7；Phase 36；多世界 25.4/25.5 | Codex、重要地点、地图、世界规则、多世界、历史年表、上游/下游导航 | `R-PHASE36-content-types`、Codex/location 回归、`WORLD-RULES-MULTIWORLD-DESIGN.md` |
 | **AUTHOR-1 作者工具** | Phase E/H；基础文风学习；编辑器基础；`CF-20260702-5/10/11` | 本地模型配置、任务路由、文风基础、富文本、自动保存、对照润色 | `R-EDITOR3-*`、本地模型与任务路由回归 |
@@ -40,7 +40,7 @@
 
 以下内容在历史文档中可能出现“有主链路”“代码已具备”或“设计已完成”，但仍有明确剩余边界，必须回到 [当前能力基线](./CAPABILITY-BASELINE.md) 和 [当前路线图](./README.md) 判断：
 
-- CANON-1 的存亡时序、故事线动态进度与编辑器内联 finding 尚未完成；`CONSISTENCY-0/2/3` 已完成。
+- CANON-1 的故事线动态进度与编辑器内联 finding 尚未完成；覆盖基线、认知账本、世界宪法和存亡时序已完成。
 - `PIPELINE-1/2/3`：透明提示词、章纲工坊和 Agent 节点化未完成。
 - Phase 34/35/37 的完整词条、修炼、力量阶段闭环未完成。
 - `EDITOR-2/5`、`FB-4`、`FB-5` 高级校准、`CM-1` 未完成。

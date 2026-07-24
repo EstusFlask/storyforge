@@ -29,6 +29,21 @@ export const FACT_PREDICATE_REGISTRY: readonly FactPredicateSpec[] = Object.free
     factKind: 'state',
     valueType: 'enum',
     enums: ['alive', 'dead', 'missing', 'unknown'],
+    enumAliases: {
+      '在世': 'alive',
+      '存活': 'alive',
+      '活着': 'alive',
+      '生还': 'alive',
+      '死亡': 'dead',
+      '已死亡': 'dead',
+      '身亡': 'dead',
+      '去世': 'dead',
+      '阵亡': 'dead',
+      '失踪': 'missing',
+      '下落不明': 'missing',
+      '未知': 'unknown',
+      '不明': 'unknown',
+    },
     cardinality: 'single',
     temporal: true,
     aliases: ['存亡', '生死', '是否在世', '死亡', '存活'],
@@ -238,4 +253,18 @@ export function normalizeFactPredicate(raw: string): FactPredicateSpec | null {
   const trimmed = (raw ?? '').trim()
   if (!trimmed) return null
   return BY_ALIAS.get(trimmed) ?? null
+}
+
+/**
+ * 将事实值收口到谓词声明。非枚举值只去首尾空白；枚举必须命中规范值或登记别名。
+ * 返回 null 表示该值不能安全写入事实账本。
+ */
+export function normalizeFactValue(spec: FactPredicateSpec, raw: unknown): string | null {
+  const value = String(raw ?? '').trim()
+  if (!value) return null
+  if (spec.valueType !== 'enum') return value
+  const normalizedKey = value.toLocaleLowerCase('zh-CN')
+  if (spec.enums?.includes(normalizedKey)) return normalizedKey
+  const alias = spec.enumAliases?.[value] ?? spec.enumAliases?.[normalizedKey]
+  return alias && spec.enums?.includes(alias) ? alias : null
 }

@@ -27,6 +27,7 @@ export function buildConsistencyAuditPrompt(args: {
   chapterContent: string
   evidenceContext: string
   cognitionCatalog?: string
+  lifecycleCatalog?: string
 }): ChatMessage[] {
   const focus = args.mode === 'fast'
     ? '只检查地点/世界归属、存亡、持有物数量、力量阶段、明确知识变化、绝对时间先后和直接规则冲突。目标是低误报；证据不足就不要报 hard。'
@@ -37,7 +38,7 @@ export function buildConsistencyAuditPrompt(args: {
       content: `你是小说一致性证据审计器。${focus}
 
 输出严格 JSON：
-{"findings":[{"category":"分类","severity":"hard|risk|unknown","quote":"待审正文逐字引文","evidence":[{"sourceType":"chapter|summary|observation|canon","sourceId":0,"quote":"证据上下文逐字引文"}],"reason":"为何冲突或有风险","suggestion":"可选建议"}],"cognitionReferences":[{"characterId":1,"knowledgeKey":"闭集中的key","quote":"该角色运用或陈述该知识的正文逐字引文"}]}
+{"findings":[{"category":"分类","severity":"hard|risk|unknown","quote":"待审正文逐字引文","evidence":[{"sourceType":"chapter|summary|observation|canon","sourceId":0,"quote":"证据上下文逐字引文"}],"reason":"为何冲突或有风险","suggestion":"可选建议"}],"cognitionReferences":[{"characterId":1,"knowledgeKey":"闭集中的key","quote":"该角色运用或陈述该知识的正文逐字引文"}],"lifecycleReferences":[{"characterId":1,"activityType":"normal-activity","quote":"已死亡角色作为活人正常行动的正文逐字引文"}]}
 
 规则：
 1. quote 必须逐字来自待审正文；
@@ -45,11 +46,12 @@ export function buildConsistencyAuditPrompt(args: {
 3. hard 必须有至少一条正确证据，且只能用于直接矛盾；
 4. 创作选择、信息不足或可能解释得通的内容只能标 risk/unknown；
 5. cognitionReferences 只能从提供的角色认知审计闭集中选择 characterId + knowledgeKey；quote 必须是正文逐字引文；不确定就不输出；
-6. 不输出总分，不自动修改正文；没有问题返回空 findings。`,
+6. lifecycleReferences 只能从角色存亡审计闭集中选择 characterId；仅当该角色在当前场景作为活人正常行动时输出 normal-activity + 正文逐字引文。尸体、遗物、回忆、梦境、幻象、他人转述和明确复活均不得输出；
+7. 不输出总分，不自动修改正文；没有问题返回空 findings。`,
     },
     {
       role: 'user',
-      content: `【章节】${args.chapterTitle}\n\n【待审正文】\n${args.chapterContent}\n\n【只读证据上下文】\n${args.evidenceContext}\n\n${args.cognitionCatalog || '【角色认知审计闭集】无'}\n\n请输出 JSON：`,
+      content: `【章节】${args.chapterTitle}\n\n【待审正文】\n${args.chapterContent}\n\n【只读证据上下文】\n${args.evidenceContext}\n\n${args.cognitionCatalog || '【角色认知审计闭集】无'}\n\n${args.lifecycleCatalog || '【角色存亡审计闭集】无'}\n\n请输出 JSON：`,
     },
   ]
 }

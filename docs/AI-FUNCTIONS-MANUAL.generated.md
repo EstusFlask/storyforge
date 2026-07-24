@@ -191,9 +191,9 @@ AI 输出经 `adopt({ target, data })` 写回,只有这里登记的字段可写(
 | `reference.characters` | `src/components/project/AnalysisReportViewer.tsx:143` |
 | `reference.summary` | `src/components/project/AnalysisReportViewer.tsx:112` |
 | `relation.extract` | `src/components/relations/CharacterRelationPanel.tsx:98` |
-| `review.anti-ai` | `src/components/editor/ReviewPanel.tsx:94` |
-| `review.quality` | `src/components/editor/ReviewPanel.tsx:86` |
-| `review.readability` | `src/components/editor/ReviewPanel.tsx:103` |
+| `review.anti-ai` | `src/components/editor/ReviewPanel.tsx:100` |
+| `review.quality` | `src/components/editor/ReviewPanel.tsx:92` |
+| `review.readability` | `src/components/editor/ReviewPanel.tsx:109` |
 | `review.revise` | `src/components/editor/ChapterEditor.tsx:566` |
 | `rules.generate` | `src/components/rules/CreativeRulesPanel.tsx:80` |
 | `scene.verify` | `src/components/scene/SceneVerifyPanel.tsx:81` |
@@ -209,10 +209,10 @@ AI 输出经 `adopt({ target, data })` 写回,只有这里登记的字段可写(
 
 ### 动态 category 调用
 
-- `src/components/editor/ReviewPanel.tsx:141 · ai.start`
+- `src/components/editor/ReviewPanel.tsx:151 · ai.start`
 - `src/components/settings/NS0EvalPanel.tsx:50 · chat`
 - `src/components/settings/prompt/WorkflowRunner.tsx:287 · ai.start`
 
 ---
 
-生成时间基准:commit `d275231`
+生成时间基准:commit `398c14a`

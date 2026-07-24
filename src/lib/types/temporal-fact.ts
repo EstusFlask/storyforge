@@ -65,6 +65,8 @@ export interface FactPredicateSpec {
   factKind: FactKind
   valueType: FactValueType
   enums?: string[]
+  /** enum 自由输入别名 → 规范枚举值；写入账本前必须归一或拒绝。 */
+  enumAliases?: Readonly<Record<string, string>>
   /** single=同一主体同一时点最多一个有效值；multi=可并存多值 */
   cardinality: 'single' | 'multi'
   temporal: boolean

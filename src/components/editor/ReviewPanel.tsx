@@ -26,6 +26,12 @@ import {
   parseCognitionReferences,
   readCognitionAuditSnapshot,
 } from '../../lib/knowledge-ledger/knowledge-ledger'
+import {
+  checkCharacterLifecycleBoundary,
+  formatLifecycleCatalog,
+  parseLifecycleActivityReferences,
+  readLifecycleAuditSnapshot,
+} from '../../lib/consistency/lifecycle-boundary'
 
 interface Props {
   projectId: number
@@ -106,37 +112,41 @@ export default function ReviewPanel(props: Props) {
   }
 
   const handleRunConsistency = async () => {
-    const evidence = await assembleContext({
-      projectId,
-      chapterId,
-      outlineNodeId: outlineNodeId ?? undefined,
-      worldGroupId,
-      sourceKeys: [
-        'chapterContinuityHandoff',
-        'previousPlanReconciliation',
-        'recentChapterSummaries',
-        'currentFacts',        // NS-6 闭环：用生成时遵循的同一套已确认事实核对（canon/observation 证据）
-        'canonAssertions',     // CONSISTENCY-3：用同一套已确认世界宪法审校
-        'characterKnowledge',  // CONSISTENCY-2：同一时点角色认知投影
-        'retrievedPassages',   // NS-6 闭环：召回远距前文，抓几百章前的细节/伏笔矛盾
-        'worldRules',
-        'characters',
-        'stateCards',
-        'heldItems',
-        'itemLedger',
-        'storyTimeline',
-        'characterRelations',
-        'foreshadows',
-        'storyArcs',
-      ],
-    })
-    const cognition = await readCognitionAuditSnapshot(projectId, chapterId, worldGroupId)
+    const [evidence, cognition, lifecycle] = await Promise.all([
+      assembleContext({
+        projectId,
+        chapterId,
+        outlineNodeId: outlineNodeId ?? undefined,
+        worldGroupId,
+        sourceKeys: [
+          'chapterContinuityHandoff',
+          'previousPlanReconciliation',
+          'recentChapterSummaries',
+          'currentFacts',        // NS-6 闭环：用生成时遵循的同一套已确认事实核对（canon/observation 证据）
+          'canonAssertions',     // CONSISTENCY-3：用同一套已确认世界宪法审校
+          'characterKnowledge',  // CONSISTENCY-2：同一时点角色认知投影
+          'retrievedPassages',   // NS-6 闭环：召回远距前文，抓几百章前的细节/伏笔矛盾
+          'worldRules',
+          'characters',
+          'stateCards',
+          'heldItems',
+          'itemLedger',
+          'storyTimeline',
+          'characterRelations',
+          'foreshadows',
+          'storyArcs',
+        ],
+      }),
+      readCognitionAuditSnapshot(projectId, chapterId, worldGroupId),
+      readLifecycleAuditSnapshot(projectId, chapterId, worldGroupId),
+    ])
     const messages = buildConsistencyAuditPrompt({
       mode: auditMode,
       chapterTitle,
       chapterContent,
       evidenceContext: evidence.text,
       cognitionCatalog: formatCognitionCatalog(cognition.catalog),
+      lifecycleCatalog: formatLifecycleCatalog(lifecycle.catalog),
     })
     const output = await ai.start(messages, undefined, {
       category: auditMode === 'fast' ? 'review.consistency.fast' : 'review.consistency.deep',
@@ -159,9 +169,19 @@ export default function ReviewPanel(props: Props) {
       parseCognitionReferences(output, chapterContent, cognition.catalog),
       cognition.projected,
     )
+    const lifecycleFindings = checkCharacterLifecycleBoundary(
+      chapterContent,
+      parseLifecycleActivityReferences(output, chapterContent, lifecycle.catalog),
+      lifecycle.projected,
+    )
     const merged: ConsistencyAuditResult = {
       mode: auditMode,
-      findings: [...deterministicFindings, ...cognitionFindings, ...(result?.findings ?? [])],
+      findings: [
+        ...deterministicFindings,
+        ...cognitionFindings,
+        ...lifecycleFindings,
+        ...(result?.findings ?? []),
+      ],
     }
     setConsistency(chapterId, merged)
   }

@@ -39,6 +39,31 @@ describe('NS-4 · fact-ledger', () => {
     expect(r2.written).toBe(1)                // 北境新增
   })
 
+  it('枚举值写入前归一，非法值拒绝；相同角色名在不同世界不互相去重', async () => {
+    const { pid, charId, c1 } = await seed()
+    await db.characters.update(charId, { homeWorldGroupId: 7 })
+    const otherWorldCharacterId = await db.characters.add({
+      projectId: pid, name: '林飞', role: 'supporting',
+      homeWorldGroupId: 8, createdAt: now, updatedAt: now,
+    } as any) as number
+    const death = cand({ predicate: 'aliveStatus', value: '身亡' })
+    const invalid = cand({ predicate: 'aliveStatus', value: '半死不活' })
+    const first = await adoptFactCandidates({
+      projectId: pid, sourceChapterId: c1, worldGroupId: 7,
+      candidates: [death, invalid],
+    })
+    const second = await adoptFactCandidates({
+      projectId: pid, sourceChapterId: c1, worldGroupId: 8,
+      candidates: [death],
+    })
+    expect(first).toMatchObject({ written: 1, skippedInvalidValue: 1 })
+    expect(second.written).toBe(1)
+    const facts = await db.temporalFacts.where('projectId').equals(pid).toArray()
+    expect(facts.map(row => row.value)).toEqual(['dead', 'dead'])
+    expect(facts.find(row => row.worldGroupId === 7)?.characterId).toBe(charId)
+    expect(facts.find(row => row.worldGroupId === 8)?.characterId).toBe(otherWorldCharacterId)
+  })
+
   it('确认单值 state 候选 → 关闭旧权威、自身升 confirmed', async () => {
     const { pid, c1, c2 } = await seed()
     // 旧权威:第1章 location=洛阳(confirmed)
@@ -54,6 +79,34 @@ describe('NS-4 · fact-ledger', () => {
     expect(neu.status).toBe('confirmed')      // 自身升权威
     expect(old.status).toBe('superseded')     // 旧权威被关闭
     expect(old.validToChapterId).toBe(c2)     // 有效期截止到新事实生效章
+  })
+
+  it('逆序确认时保留后章当前状态，前章候选成为有截止点的历史 Canon', async () => {
+    const { pid, c1, c2 } = await seed()
+    await adoptFactCandidates({
+      projectId: pid, sourceChapterId: c2,
+      candidates: [cand({ value: '北境' })],
+    })
+    const later = (await db.temporalFacts.where('projectId').equals(pid)
+      .filter(f => f.value === '北境').toArray())[0]
+    await confirmFactCandidate(later.id!)
+
+    await adoptFactCandidates({
+      projectId: pid, sourceChapterId: c1,
+      candidates: [cand({ value: '洛阳' })],
+    })
+    const earlier = (await db.temporalFacts.where('projectId').equals(pid)
+      .filter(f => f.value === '洛阳').toArray())[0]
+    await confirmFactCandidate(earlier.id!)
+
+    expect(await db.temporalFacts.get(later.id!)).toMatchObject({
+      status: 'confirmed',
+      validToChapterId: null,
+    })
+    expect(await db.temporalFacts.get(earlier.id!)).toMatchObject({
+      status: 'superseded',
+      validToChapterId: c2,
+    })
   })
 
   it('locked 旧事实不被自动 supersede', async () => {
