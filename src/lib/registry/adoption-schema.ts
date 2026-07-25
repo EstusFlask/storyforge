@@ -98,7 +98,10 @@ export const ADOPTION_SCHEMAS: CollectionAdoptionSpec[] = [
     duplicatePolicy: 'merge',
     required: ['categoryId', 'name'],
     autoStamps: ['projectId', 'worldGroupId', 'createdAt', 'updatedAt'],
-    fkChecks: [{ field: 'categoryId', target: 'codexCategories' }],
+    fkChecks: [
+      { field: 'categoryId', target: 'codexCategories' },
+      { field: 'importantLocationId', target: 'importantLocations' },
+    ],
   },
   {
     target: 'cultivationSystems',
@@ -278,9 +281,10 @@ export const ADOPTION_EXTENSIONS: readonly AdoptionExtensionSpec[] = Object.free
     entrypoints: [
       'src/lib/codex/references.ts',
       'src/lib/cultivation/lifecycle.ts',
+      'src/lib/location/lifecycle.ts',
     ],
     policyRegistry: 'PROJECT_TABLES refs + cultivation DAG validator',
-    reason: '删除词条、世界、修炼体系或境界节点时必须原子清理词条 JSON 引用及异兽体系/阶段引用。',
+    reason: '删除词条、世界、修炼体系、境界节点或重要地点时，必须原子清理词条 JSON 引用及异兽体系/阶段/城池地点引用。',
     reviewAfter: '2027-01-01',
   },
   {

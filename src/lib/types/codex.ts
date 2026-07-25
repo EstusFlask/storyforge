@@ -47,7 +47,8 @@ export type BuiltInCodexKey =
   | 'artifact'  // 人工器物
   // 世界观各方面的"全貌+词条"分类（每个面板子页一个）
   | 'natStructure' | 'natDimension' | 'natTerrain' | 'natWater' | 'natClimate' // 自然环境各方面
-  | 'humEra' | 'humEvent' | 'humSociety' | 'humConflict'                       // 人文环境各方面
+  | 'humEra' | 'humEvent' | 'humSociety' | 'humPolitics' | 'humEconomy'
+  | 'humCulture' | 'humConflict'                                                // 人文环境各方面
   | 'originPower' | 'originDeity'                                              // 世界起源:力量体系/神明信仰
 
 /** 词条分类（树状，内置 + 用户自定义） */
@@ -101,6 +102,8 @@ export interface CodexEntry {
   cultivationSystemId?: number | null
   /** 该词条在所选体系中的当前境界 stage id。 */
   cultivationStageId?: string | null
+  /** 城池词条对应的空间地点；人文属性与地点树分层，删除地点只断开软引用。 */
+  importantLocationId?: number | null
   order: number
   worldGroupId?: number | null
   createdAt: number
@@ -263,8 +266,7 @@ export const BUILTIN_CATEGORIES: BuiltInCategorySeed[] = [
     domain: 'humanity', builtInKey: 'city', name: '城池重镇', icon: '🏰',
     fields: [
       { key: 'faction', label: '所属势力', type: 'ref', refCategory: 'faction', refMulti: false },
-      // Phase 联动后升级为 ref→importantLocations；当前文本占位
-      { key: 'location', label: '地理位置', type: 'text', placeholder: '可关联「重要地点」（后续升级）' },
+      { key: 'locationNote', label: '位置备注（旧文本）', type: 'text', placeholder: '结构化位置请使用上方「重要地点」关联' },
       { key: 'scale', label: '规模人口', type: 'text' },
       { key: 'ruler', label: '统治者', type: 'text' },
       { key: 'economy', label: '经济特产', type: 'longtext' },
@@ -349,6 +351,33 @@ export const BUILTIN_CATEGORIES: BuiltInCategorySeed[] = [
     fields: [
       { key: 'type', label: '类别', type: 'select', options: ['政体', '货币', '赋税', '阶层制度', '宗教信仰', '风俗节庆', '其他'] },
       { key: 'detail', label: '说明', type: 'longtext' },
+    ],
+  },
+  {
+    domain: 'humanity', builtInKey: 'humPolitics', name: '政治制度', icon: '🏛️',
+    fields: [
+      { key: 'type', label: '制度类型', type: 'select', options: ['政体', '官制', '法律', '军事', '外交', '阶层', '其他'] },
+      { key: 'scope', label: '适用范围', type: 'text' },
+      { key: 'authority', label: '权力主体', type: 'text' },
+      { key: 'detail', label: '制度说明', type: 'longtext' },
+    ],
+  },
+  {
+    domain: 'humanity', builtInKey: 'humEconomy', name: '经济制度', icon: '💰',
+    fields: [
+      { key: 'type', label: '制度类型', type: 'select', options: ['货币', '税赋', '贸易', '产业', '资源分配', '金融', '其他'] },
+      { key: 'scope', label: '流通范围', type: 'text' },
+      { key: 'actors', label: '主要参与者', type: 'text' },
+      { key: 'detail', label: '制度说明', type: 'longtext' },
+    ],
+  },
+  {
+    domain: 'humanity', builtInKey: 'humCulture', name: '文化制度', icon: '🎭',
+    fields: [
+      { key: 'type', label: '文化类型', type: 'select', options: ['语言', '宗教', '教育', '礼仪', '节庆', '艺术', '习俗', '其他'] },
+      { key: 'region', label: '流行区域/群体', type: 'text' },
+      { key: 'taboo', label: '禁忌', type: 'text' },
+      { key: 'detail', label: '文化说明', type: 'longtext' },
     ],
   },
   {

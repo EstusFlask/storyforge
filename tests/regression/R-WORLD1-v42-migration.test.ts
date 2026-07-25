@@ -15,13 +15,13 @@ class LegacyV41 extends Dexie {
 describe('WORLD-1 · v42 修炼进度空迁移', () => {
   afterEach(async () => {
     db.close()
-    await Dexie.delete('StoryForgeDB')
+    await Dexie.delete('storyforge')
   })
 
   it('不从角色卡或旧文本猜测正文修炼历史', async () => {
     db.close()
-    await Dexie.delete('StoryForgeDB')
-    const old = new LegacyV41('StoryForgeDB')
+    await Dexie.delete('storyforge')
+    const old = new LegacyV41('storyforge')
     await old.open()
     await old.table('projects').add({
       name: '旧项目',

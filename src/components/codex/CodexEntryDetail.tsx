@@ -16,6 +16,7 @@ import type {
 } from '../../lib/types/codex'
 import { parseCultivationStages } from '../../lib/types/cultivation'
 import { useCultivationStore } from '../../stores/cultivation'
+import { useLocationStore } from '../../stores/location'
 
 interface Props {
   entry: CodexEntry
@@ -114,6 +115,9 @@ export default function CodexEntryDetail({
       {category.builtInKey === 'beast' && (
         <CodexCultivationLink entry={entry} onChange={onChange} />
       )}
+      {category.builtInKey === 'city' && (
+        <CodexImportantLocationLink entry={entry} onChange={onChange} />
+      )}
 
       {schema.length > 0 && <div className="border-t border-border pt-3 text-xs text-text-muted">专属属性</div>}
       {schema.map(definition => (
@@ -131,6 +135,41 @@ export default function CodexEntryDetail({
         />
       ))}
     </div>
+  )
+}
+
+function CodexImportantLocationLink({
+  entry,
+  onChange,
+}: {
+  entry: CodexEntry
+  onChange: (patch: Partial<CodexEntry>) => void
+}) {
+  const locations = useLocationStore(state => state.locations)
+  const loadAll = useLocationStore(state => state.loadAll)
+  useEffect(() => { void loadAll(entry.projectId) }, [entry.projectId, loadAll])
+  const projectLocations = locations.filter(location => location.projectId === entry.projectId)
+
+  return (
+    <label className="block border-t border-border pt-3">
+      <span className="block text-xs text-text-muted mb-1">结构化重要地点</span>
+      <select
+        aria-label="城池重要地点"
+        value={entry.importantLocationId ?? ''}
+        onChange={event => onChange({
+          importantLocationId: event.target.value ? Number(event.target.value) : null,
+        })}
+        className="w-full px-3 py-1.5 rounded-lg bg-bg-elevated border border-border text-sm"
+      >
+        <option value="">未关联</option>
+        {projectLocations.map(location => (
+          <option key={location.id} value={location.id}>{location.name}</option>
+        ))}
+      </select>
+      <span className="block mt-1 text-[11px] text-text-muted">
+        地点树负责空间层级；这里保留城池的人文属性。删除地点只会断开关联，不会删除词条。
+      </span>
+    </label>
   )
 }
 

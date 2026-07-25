@@ -130,6 +130,7 @@ export async function seedFullProject() {
   const subCat = await db.codexCategories.add({ projectId, worldGroupId: wgA, parentId: cat, name: '宗门', order: 0, createdAt: now, updatedAt: now } as any) as number
   const codexEntry = await db.codexEntries.add({
     projectId, worldGroupId: wgA, categoryId: subCat, name: '青云宗', summary: '正道魁首',
+    importantLocationId: locParent,
     createdAt: now, updatedAt: now,
   } as any) as number
   // 全表 FK 往返只验证 codexEntries ID 重映射；race 类别语义由角色关联测试单独覆盖。

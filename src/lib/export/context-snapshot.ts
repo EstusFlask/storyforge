@@ -17,6 +17,7 @@ export async function generateContextSnapshot(projectId: number): Promise<string
   const [
     project,
     worldviews,
+    histories,
     storyCores,
     powerSystems,
     characters,
@@ -26,6 +27,7 @@ export async function generateContextSnapshot(projectId: number): Promise<string
   ] = await Promise.all([
     db.projects.get(projectId),
     db.worldviews.where('projectId').equals(projectId).toArray(),
+    db.histories.where('projectId').equals(projectId).toArray(),
     db.storyCores.where('projectId').equals(projectId).toArray(),
     db.powerSystems.where('projectId').equals(projectId).toArray(),
     db.characters.where('projectId').equals(projectId).toArray(),
@@ -50,9 +52,12 @@ export async function generateContextSnapshot(projectId: number): Promise<string
       ['世界来源', wv.worldOrigin], ['力量体系', wv.powerHierarchy],
       ['世界结构', wv.worldStructure], ['地貌分布', wv.continentLayout],
       ['气候环境', wv.climateByRegion], ['山川水系', wv.mountainsRivers],
-      ['世界历史线', wv.historyLine], ['世界大事记', wv.worldEvents],
       ['种族民族', wv.races], ['势力分布', wv.factionLayout],
-      ['政经文化', wv.politicsEconomyCulture], ['矛盾冲突', wv.internalConflicts],
+      ['政治制度', wv.politicsOverview], ['经济制度', wv.economyOverview],
+      ['文化制度', wv.cultureOverview],
+      ['政经文化（旧版资料）', !wv.politicsOverview && !wv.economyOverview && !wv.cultureOverview
+        ? wv.politicsEconomyCulture : undefined],
+      ['矛盾冲突', wv.internalConflicts],
     ]
     let hasV3 = false
     for (const [label, val] of v3) {
@@ -64,6 +69,17 @@ export async function generateContextSnapshot(projectId: number): Promise<string
       if (wv.culture) parts.push(`**文化**：${compress(wv.culture, 200)}`)
       if (wv.rules) parts.push(`**规则**：${compress(wv.rules, 200)}`)
     }
+    sections.push(parts.join('\n'))
+  }
+
+  const history = histories.find(row =>
+    (row.worldGroupId ?? null) === (wv?.worldGroupId ?? null)) ?? histories[0]
+  const historyOverview = history?.overview ||
+    [wv?.historyLine, wv?.worldEvents].filter(Boolean).join('\n\n')
+  if (historyOverview || history?.eraSystem) {
+    const parts = ['## 历史']
+    if (historyOverview) parts.push(compress(historyOverview, 500))
+    if (history?.eraSystem) parts.push(`**纪年体系**：${compress(history.eraSystem, 200)}`)
     sections.push(parts.join('\n'))
   }
 

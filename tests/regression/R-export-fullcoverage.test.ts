@@ -158,6 +158,7 @@ describe('R-export-fullcoverage · 全表多世界往返安全网', () => {
     const newEntry = await db.codexEntries.where('projectId').equals(newId).first()
     expect(newEntry!.categoryId).toBe(newSubCat.id)
     expect(newEntry!.worldGroupId).toBe(newWgA)
+    expect(newEntry!.importantLocationId).toBe(newLocParent.id)
 
     // creativeRules 引用 reference 重映射
     const newRefs = await db.references.where('projectId').equals(newId).toArray()

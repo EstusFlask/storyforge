@@ -60,7 +60,9 @@ JSON 字段（按 v3 数据模型）：
 - worldEvents: 世界大事记
 - races: 种族设定
 - factionLayout: 势力分布
-- politicsEconomyCulture: 政治经济文化
+- politicsOverview: 政治制度与权力结构
+- economyOverview: 经济制度、货币、税赋与贸易
+- cultureOverview: 文化、宗教、教育、礼俗与禁忌
 - itemDesign: 道具设计
 
 输出要求：
@@ -143,7 +145,9 @@ D) 以上的混合
     "worldEvents": "",
     "races": "",
     "factionLayout": "",
-    "politicsEconomyCulture": "",
+    "politicsOverview": "",
+    "economyOverview": "",
+    "cultureOverview": "",
     "itemDesign": ""
   },
   "characters": [
@@ -245,7 +249,7 @@ D) 以上的混合
 ═══ 输出 JSON 结构 ═══
 \`\`\`json
 {
-  "worldview": { "worldOrigin":"", "powerHierarchy":"", "worldStructure":"", "continentLayout":"", "mountainsRivers":"", "climateByRegion":"", "historyLine":"", "worldEvents":"", "races":"", "factionLayout":"", "politicsEconomyCulture":"", "itemDesign":"" },
+  "worldview": { "worldOrigin":"", "powerHierarchy":"", "worldStructure":"", "continentLayout":"", "mountainsRivers":"", "climateByRegion":"", "historyLine":"", "worldEvents":"", "races":"", "factionLayout":"", "politicsOverview":"", "economyOverview":"", "cultureOverview":"", "itemDesign":"" },
   "characters": [
     { "name":"", "roleWeight":"main|secondary|npc|extra",
       "moralAxis":"good|neutral|evil", "orderAxis":"lawful|neutral|chaotic",

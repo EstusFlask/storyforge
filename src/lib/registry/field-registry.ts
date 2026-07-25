@@ -138,6 +138,9 @@ export const FIELD_REGISTRY: FieldSpec[] = [
   longtext('worldviews', 'races', ['species', '种族']),
   longtext('worldviews', 'factionLayout', ['factions', '势力分布']),
   longtext('worldviews', 'politicsEconomyCulture', ['politics', 'economyCulture', '政治经济文化']),
+  longtext('worldviews', 'politicsOverview', ['政治概述', '政治制度概述']),
+  longtext('worldviews', 'economyOverview', ['经济概述', '经济制度概述']),
+  longtext('worldviews', 'cultureOverview', ['文化概述', '文化制度概述']),
   longtext('worldviews', 'internalConflicts', ['conflicts', '内部矛盾']),
   longtext('worldviews', 'itemDesign', ['items', 'artifactDesign', '道具设计']),
 
@@ -339,6 +342,7 @@ export const FIELD_REGISTRY: FieldSpec[] = [
   num('codexEntries', 'importance', ['重要度']),
   num('codexEntries', 'cultivationSystemId', ['修炼体系ID']),
   text('codexEntries', 'cultivationStageId', ['境界ID', '当前境界ID']),
+  num('codexEntries', 'importantLocationId', ['重要地点ID', '空间地点ID']),
   num('codexEntries', 'order'),
   num('codexEntries', 'worldGroupId'),
 

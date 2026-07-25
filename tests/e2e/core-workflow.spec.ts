@@ -26,8 +26,12 @@ function sidebarButton(page: Page, name: string) {
 async function openSidebarLeaf(page: Page, branchName: string, leafName: string) {
   const leaf = sidebarButton(page, leafName)
   const branch = sidebarButton(page, branchName)
-  await branch.click()
-  if (await leaf.count() === 0) await branch.click()
+  // 对真实 branch 做一次显式归一：若点击后叶子消失，说明刚才是关闭，再点一次打开。
+  // 「创作区」是 section 标题而非按钮，branch.count() 为 0，叶子本身已常驻渲染。
+  if (await branch.count() > 0) {
+    await branch.click()
+    if (await leaf.count() === 0) await branch.click()
+  }
   await expect(leaf).toHaveCount(1)
   await leaf.scrollIntoViewIfNeeded()
   await leaf.click()
@@ -67,6 +71,55 @@ test('新用户可创建项目并进入工作区', async ({ page }) => {
   await createProject(page, 'E2E 创建项目')
   await expect(page.getByRole('button', { name: '大纲', exact: true })).toBeVisible()
   await expect(page.getByRole('button', { name: '章节', exact: true })).toBeVisible()
+})
+
+test('人文知识主入口可保存拆分概述，并安全关联与断开城池地点', async ({ page }) => {
+  await openCleanHome(page)
+  await createProject(page, 'E2E 世界知识归并')
+
+  await sidebarButton(page, '重要地点').click()
+  await expect(page.getByRole('heading', { name: '📍 重要地点' })).toBeVisible()
+  await page.getByRole('button', { name: '添加地点', exact: true }).click()
+  await page.getByRole('button', { name: '列表', exact: true }).click()
+  await page.locator('input[value="新地点"]').fill('雁门关')
+  await page.getByRole('heading', { name: '📍 重要地点' }).click()
+  await expect(page.getByText('雁门关', { exact: true })).toBeVisible()
+
+  await sidebarButton(page, '人文环境').click()
+  await expect(page.getByRole('heading', { name: '🏛️ 人文环境与社会' })).toBeVisible()
+  await expect(page.getByRole('button', { name: /打开正式历史年表/ })).toBeVisible()
+  await page.getByRole('button', { name: /打开正式历史年表/ }).click()
+  await expect(page.getByRole('heading', { name: '📜 历史年表与时间线' })).toBeVisible()
+  await sidebarButton(page, '人文环境').click()
+  await page.getByRole('button', { name: /政治制度/ }).click()
+  await page.getByText('政体、官制、法律、军事、外交、权力主体与阶层结构').last().click()
+  await page.locator('textarea').last().fill('议政院与六部共同治理')
+
+  await page.getByRole('button', { name: /城池重镇/ }).click()
+  await expect(page.getByRole('button', { name: /新建词条/ })).toBeVisible()
+  await page.getByRole('button', { name: /新建词条/ }).click()
+  await page.getByPlaceholder('名称', { exact: true }).fill('雁门城')
+  await page.getByLabel('城池重要地点').selectOption({ label: '雁门关' })
+
+  await page.reload()
+  await sidebarButton(page, '人文环境').click()
+  await page.getByRole('button', { name: /政治制度/ }).click()
+  await expect(page.getByText('议政院与六部共同治理', { exact: true })).toBeVisible()
+  await page.getByRole('button', { name: /城池重镇/ }).click()
+  await page.getByText('雁门城', { exact: true }).click()
+  await expect(page.getByLabel('城池重要地点')).toHaveValue(/\d+/)
+
+  await sidebarButton(page, '重要地点').click()
+  await page.getByRole('button', { name: '列表', exact: true }).click()
+  await page.getByText('雁门关', { exact: true }).click()
+  await page.getByRole('button', { name: '删除地点', exact: true }).click()
+  await page.getByRole('button', { name: '确认', exact: true }).click()
+  await expect(page.getByText('雁门关', { exact: true })).toHaveCount(0)
+
+  await sidebarButton(page, '人文环境').click()
+  await page.getByRole('button', { name: /城池重镇/ }).click()
+  await page.getByText('雁门城', { exact: true }).click()
+  await expect(page.getByLabel('城池重要地点')).toHaveValue('')
 })
 
 test('建卷建章、保存正文、刷新恢复并导出正文与隐私诊断', async ({ page }) => {
@@ -322,7 +375,7 @@ test('真实世界观入口可维护修炼 DAG 并关联角色境界', async ({ 
                 stageId: stage.id,
                 transition: 'enter',
                 trigger: '生死关头凝成道基',
-                quote: '林舟在生死关头凝成道基，正式踏入筑基境',
+                quote: '在生死关头凝成道基，正式踏入筑基境',
               }] : [],
             }),
           },
@@ -395,7 +448,9 @@ test('真实世界观入口可维护修炼 DAG 并关联角色境界', async ({ 
   await expect(page.getByText('正文当前：筑基境', { exact: true })).toBeVisible()
   await expect(page.getByText('已确认并写入修炼历程。', { exact: true })).toBeVisible()
 
-  await page.getByLabel('反哺后续写作（默认关闭）').check()
+  const feedbackToggle = page.getByLabel('反哺后续写作（默认关闭）')
+  await feedbackToggle.click()
+  await expect(feedbackToggle).toBeChecked()
   await page.reload()
   await openSidebarLeaf(page, '创作区', '修炼进度')
   await expect(page.getByText('正文当前：筑基境', { exact: true })).toBeVisible()

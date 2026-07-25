@@ -9,6 +9,7 @@ function seedDigest(): string {
 describe('AUDIT-6 · 提示词领域拆分完整性', () => {
   it('聚合后的模板数量、顺序和内容保持逐字段一致', () => {
     expect(SYSTEM_PROMPT_SEEDS).toHaveLength(86)
-    expect(seedDigest()).toBe('0813217a41c2a5933f605bc16c70761c1cf71ffb0a1a1d9a3ea574dd4a2f8370')
+    // WORLD-1 Phase 35-b：世界观抽取契约由合并的政经文化字段拆为政治/经济/文化三字段。
+    expect(seedDigest()).toBe('0e48abe9262498a2cc02693a1d827ad91aee1d9bcb2b6476f4ef47024c3e2019')
   })
 })

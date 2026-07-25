@@ -85,8 +85,11 @@ export const PROJECT_TABLES: TableSpec[] = [
 
   { table: db.importantLocations, name: 'importantLocations', owner: 'project',
     exportable: true, tree: { parentField: 'parentId' }, exportIdField: true,
+    refs: [
+      { kind: 'simple', field: 'id', target: 'codexEntries[importantLocationId]', onDelete: 'setNull' },
+    ],
     exportRemap: [{ field: 'parentId', remapVia: 'importantLocations', selfTree: true, exportAs: '_parentExportId' }],
-    note: '⚠️ 无 worldGroupId,当前全局注入写作上下文' },
+    note: '⚠️ 无 worldGroupId,当前全局注入写作上下文；城池词条可通过 importantLocationId 建立软引用' },
 
   { table: db.worldRulesProfiles, name: 'worldRulesProfiles', owner: 'project',
     worldScoped: true, exportable: true,
@@ -233,6 +236,7 @@ export const PROJECT_TABLES: TableSpec[] = [
       { field: 'categoryId', remapVia: 'codexCategories', exportAs: '_categoryExportId', onUnmapped: 'require' },
       { field: 'worldGroupId', remapVia: 'worldGroups', exportAs: '_worldGroupExportId' },
       { field: 'cultivationSystemId', remapVia: 'cultivationSystems', exportAs: '_cultivationSystemExportId' },
+      { field: 'importantLocationId', remapVia: 'importantLocations', exportAs: '_importantLocationExportId' },
     ] },
 
   // ───────────────────── 文风学习（FB-5） ─────────────────────

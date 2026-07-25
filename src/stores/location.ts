@@ -4,6 +4,8 @@
 import { create } from 'zustand'
 import { db } from '../lib/db/schema'
 import type { ImportantLocation } from '../lib/types'
+import { clearImportantLocationReferences } from '../lib/location/lifecycle'
+import { transactionTablesForReferences } from '../lib/registry/lifecycle'
 
 /** 树形节点（带 children，UI 用） */
 export interface LocationTreeNode extends ImportantLocation {
@@ -84,7 +86,14 @@ export const useLocationStore = create<LocationStore>((set, get) => ({
     }
     collect(id)
 
-    await db.importantLocations.bulkDelete([...toDelete])
+    await db.transaction(
+      'rw',
+      transactionTablesForReferences('importantLocations'),
+      async () => {
+        await clearImportantLocationReferences(loc.projectId, toDelete)
+        await db.importantLocations.bulkDelete([...toDelete])
+      },
+    )
     // 局部 set，避免 loading 闪烁
     set({ locations: get().locations.filter(l => l.id != null && !toDelete.has(l.id)) })
   },

@@ -128,7 +128,7 @@ AI 输出经 `adopt({ target, data })` 写回,只有这里登记的字段可写(
 | `chapters` | `content` `continuityHandoff` `notes` `order` `outlineNodeId` `planReconciliation` `status` `summary` `summarySourceTextHash` `summaryTextNormalizationVersion` `title` `wordCount` |
 | `characters` | `abilities` `activeChapterRange` `alignment` `appearance` `arc` `background` `cultivationStageId` `cultivationSystemId` `ending` `exitChapterId` `fears` `firstAppearChapterId` `firstAppearance` `goals` `habits` `homeWorldGroupId` `identity` `innerConflict` `isCrossWorld` `keyEvents` `location` `moralAxis` `motivation` `name` `orderAxis` `personality` `powerLevel` `profile` `raceEntryId` `relationships` `role` `roleWeight` `shortDescription` `signatureItem` `speechStyle` `storyRole` `strengths` `values` `weaknesses` |
 | `codexCategories` | `builtInKey` `domain` `fieldSchema` `hidden` `icon` `name` `order` `parentId` `worldGroupId` |
-| `codexEntries` | `categoryId` `cultivationStageId` `cultivationSystemId` `description` `fields` `icon` `importance` `name` `order` `refs` `summary` `tags` `worldGroupId` |
+| `codexEntries` | `categoryId` `cultivationStageId` `cultivationSystemId` `description` `fields` `icon` `importance` `importantLocationId` `name` `order` `refs` `summary` `tags` `worldGroupId` |
 | `creativeRules` | `atmosphere` `citedInsightIds` `citedReferenceIds` `consistencyRules` `narrativePOV` `prohibitions` `referenceWorksV2` `specialRequirements` `writingStyle` |
 | `cultivationProgress` | `characterId` `characterName` `cultivationSystemId` `cultivationSystemName` `sourceChapterId` `sourceChapterTitle` `sourceOffset` `sourceQuote` `stageId` `stageName` `status` `transition` `trigger` `worldGroupId` |
 | `cultivationSystems` | `description` `name` `stages` `worldGroupId` |
@@ -148,7 +148,7 @@ AI 输出经 `adopt({ target, data })` 写回,只有这里登记的字段可写(
 | `storyTimelineEvents` | `chapterId` `chapterTitle` `description` `importance` `order` `storyTime` `title` |
 | `storylineCrossings` | `arcIdA` `arcIdB` `chapterId` `chapterTitle` `evidenceQuote` `note` |
 | `storylineProgress` | `arcId` `currentStageId` `evidenceQuote` `involvedEntities` `lastActiveChapterId` `lastActiveChapterTitle` `progressNote` `status` |
-| `worldviews` | `climateByRegion` `continentLayout` `culture` `divineDesign` `economy` `factionLayout` `geography` `history` `historyLine` `internalConflicts` `itemDesign` `mountainsRivers` `naturalResourceOverview` `naturalResources` `politicsEconomyCulture` `powerHierarchy` `races` `regionDimensions` `rules` `society` `worldDimensions` `worldEvents` `worldOrigin` `worldStructure` |
+| `worldviews` | `climateByRegion` `continentLayout` `culture` `cultureOverview` `divineDesign` `economy` `economyOverview` `factionLayout` `geography` `history` `historyLine` `internalConflicts` `itemDesign` `mountainsRivers` `naturalResourceOverview` `naturalResources` `politicsEconomyCulture` `politicsOverview` `powerHierarchy` `races` `regionDimensions` `rules` `society` `worldDimensions` `worldEvents` `worldOrigin` `worldStructure` |
 
 ### 领域写回扩展（不是第二套通用 adopt）
 
@@ -160,7 +160,7 @@ AI 输出经 `adopt({ target, data })` 写回,只有这里登记的字段可写(
 | `storyline-progress-lifecycle` | `storylineProgress` | `ADOPTION_SCHEMAS + PROJECT_TABLES refs` | `src/lib/storyline/lifecycle.ts` | 2027-01-01 |
 | `storyline-crossing-lifecycle` | `storylineCrossings` | `ADOPTION_SCHEMAS + PROJECT_TABLES refs` | `src/lib/storyline/lifecycle.ts` | 2027-01-01 |
 | `story-arc-dynamic-lifecycle` | `storyArcs` | `PROJECT_TABLES refs` | `src/lib/storyline/lifecycle.ts` | 2027-01-01 |
-| `cultivation-codex-reference-lifecycle` | `codexEntries` | `PROJECT_TABLES refs + cultivation DAG validator` | `src/lib/codex/references.ts`<br/>`src/lib/cultivation/lifecycle.ts` | 2027-01-01 |
+| `cultivation-codex-reference-lifecycle` | `codexEntries` | `PROJECT_TABLES refs + cultivation DAG validator` | `src/lib/codex/references.ts`<br/>`src/lib/cultivation/lifecycle.ts`<br/>`src/lib/location/lifecycle.ts` | 2027-01-01 |
 | `cultivation-progress-lifecycle` | `cultivationProgress` | `ADOPTION_SCHEMAS + PROJECT_TABLES + cultivation DAG validator + canonical chapter sequence` | `src/lib/cultivation/progress.ts`<br/>`src/lib/cultivation/progress-lifecycle.ts` | 2027-01-01 |
 | `codex-category-scope-lifecycle` | `codexCategories` | `PROJECT_TABLES lifecycle` | `src/lib/registry/lifecycle.ts` | 2027-01-01 |
 
@@ -216,15 +216,15 @@ AI 输出经 `adopt({ target, data })` 写回,只有这里登记的字段可写(
 | `rules.generate` | `src/components/rules/CreativeRulesPanel.tsx:80` |
 | `scene.verify` | `src/components/scene/SceneVerifyPanel.tsx:81` |
 | `story-arc.generate` | `src/components/outline/StoryArcPanel.tsx:85` |
-| `story.generate` | `src/components/worldview/StoryCorePanel.tsx:193` |
+| `story.generate` | `src/components/worldview/StoryCorePanel.tsx:200` |
 | `story.timeline` | `src/components/timeline/StoryTimelinePanel.tsx:85` |
 | `storyline-progress.map` | `src/components/outline/StorylineProgressPanel.tsx:76` |
 | `style.learn` | `src/components/style/StyleLearningPanel.tsx:79` |
 | `world-group.expand` | `src/components/world-group/WorldGroupDetail.tsx:98` |
 | `world-group.suggest` | `src/components/world-group/WorldGroupOverview.tsx:57` |
-| `worldview.dimension` | `src/components/worldview/WorldviewHumanityPanel.tsx:252`<br/>`src/components/worldview/WorldviewNaturalPanel.tsx:281`<br/>`src/components/worldview/WorldviewOriginPanel.tsx:259` |
-| `worldview.divine` | `src/components/worldview/WorldviewOriginPanel.tsx:358` |
-| `worldview.divine.split` | `src/components/worldview/WorldviewOriginPanel.tsx:382` |
+| `worldview.dimension` | `src/components/worldview/WorldviewHumanityPanel.tsx:352`<br/>`src/components/worldview/WorldviewNaturalPanel.tsx:284`<br/>`src/components/worldview/WorldviewOriginPanel.tsx:262` |
+| `worldview.divine` | `src/components/worldview/WorldviewOriginPanel.tsx:361` |
+| `worldview.divine.split` | `src/components/worldview/WorldviewOriginPanel.tsx:385` |
 
 ### 动态 category 调用
 
@@ -234,4 +234,4 @@ AI 输出经 `adopt({ target, data })` 写回,只有这里登记的字段可写(
 
 ---
 
-生成时间基准:commit `8afc5c2`
+生成时间基准:commit `1d75df3`

@@ -190,7 +190,7 @@ export default function WorkspacePage() {
       case 'worldview-natural':
         return <WorldviewNaturalPanel project={project} />
       case 'worldview-humanity':
-        return <WorldviewHumanityPanel project={project} />
+        return <WorldviewHumanityPanel project={project} onOpenHistory={() => setActiveModule('history')} />
       case 'geography':
         return <GeographyPanel project={project} />
       case 'world-map':

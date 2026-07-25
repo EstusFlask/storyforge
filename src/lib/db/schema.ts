@@ -3,6 +3,7 @@ import { migrateLegacyTablesToCodex } from '../migrations/legacy-to-codex-upgrad
 import { migrateCharactersToAxes } from '../migrations/character-axes-upgrade'
 import { migrateStateCardsToTemporalFactCandidates } from '../migrations/state-cards-to-temporal-facts'
 import { migrateItemLedgerToCharacterOwnership } from '../migrations/item-ledger-character-ownership'
+import { migrateWorldHistoryConsolidation } from '../migrations/world-history-consolidation'
 import type {
   Project,
   Worldview,
@@ -419,6 +420,13 @@ class StoryForgeDB extends Dexie {
     // v42: Phase 34 修炼进度。新增空事件表，不从角色卡设定境界或旧自由文本猜正文历史。
     this.version(42).stores({
       cultivationProgress: '++id, projectId, worldGroupId, characterId, cultivationSystemId, sourceChapterId, status',
+    })
+
+    // v43: Phase 35-b 历史归并。只把旧 Worldview 历史文本桥接到同世界的空 History 总述；
+    // 已有正式历史绝不覆盖，旧字段不删除，迁移异常由 Dexie 整体回滚。
+    this.version(43).stores({
+    }).upgrade(async (tx) => {
+      await migrateWorldHistoryConsolidation(tx)
     })
   }
 }
