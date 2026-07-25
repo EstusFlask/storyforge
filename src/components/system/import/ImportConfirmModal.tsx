@@ -202,6 +202,10 @@ export default function ImportConfirmModal({
             </div>
             <div className="flex items-start gap-1.5">
               <Info className="w-3.5 h-3.5 text-accent mt-0.5 flex-shrink-0" />
+              <span><strong className="text-text-primary">词条先审后写</strong>：Codex 实体只形成带原文证据的候选，任务结束后由你逐条选择、改名或改分类，确认前不会进入词条库。</span>
+            </div>
+            <div className="flex items-start gap-1.5">
+              <Info className="w-3.5 h-3.5 text-accent mt-0.5 flex-shrink-0" />
               <span><strong className="text-text-primary">自动重试</strong>：单块失败最多自动重 3 次。仍失败的块可在结束后单独再试。</span>
             </div>
             <div className="flex items-start gap-1.5">

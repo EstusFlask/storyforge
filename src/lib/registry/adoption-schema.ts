@@ -94,7 +94,7 @@ export const ADOPTION_SCHEMAS: CollectionAdoptionSpec[] = [
   },
   {
     target: 'codexEntries',
-    identity: { kind: 'composite', fields: ['categoryId', 'name'] },
+    identity: { kind: 'composite', fields: ['worldGroupId', 'categoryId', 'name'] },
     duplicatePolicy: 'merge',
     required: ['categoryId', 'name'],
     autoStamps: ['projectId', 'worldGroupId', 'createdAt', 'updatedAt'],

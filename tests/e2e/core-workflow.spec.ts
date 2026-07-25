@@ -308,6 +308,72 @@ test('本地 OpenAI 兼容服务可刷新并保存模型列表', async ({ page }
   await expect(baseUrl).toHaveValue('http://localhost:1234/v1')
 })
 
+test('外部文档词条先形成带证据候选，作者确认后才进入 Codex', async ({ page }) => {
+  await page.addInitScript(() => {
+    localStorage.setItem('storyforge-ai-config', JSON.stringify({
+      provider: 'ollama',
+      apiKey: '',
+      model: 'codex-import-e2e',
+      baseUrl: 'http://localhost:1234/v1',
+      temperature: 0,
+      maxTokens: 0,
+      contextWindow: 100000,
+    }))
+  })
+  await page.route('http://localhost:1234/v1/chat/completions', async route => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        choices: [{
+          message: {
+            content: JSON.stringify({
+              worldview: {},
+              characters: [],
+              outline: [],
+              codexCandidates: [{
+                categoryRef: 'builtin:city',
+                name: '临渊城',
+                summary: '扼守海峡的贸易重镇',
+                description: '常住十万人，万舟汇聚。',
+                fields: { scale: '十万人', economy: '海贸' },
+                tags: ['港城', '贸易'],
+                confidence: 0.94,
+                evidenceQuote: '临渊城扼守海峡',
+              }],
+              writingTechniques: {},
+            }),
+          },
+        }],
+        usage: { prompt_tokens: 200, completion_tokens: 80, total_tokens: 280 },
+      }),
+    })
+  })
+  await openCleanHome(page)
+  await createProject(page, 'E2E 词条导入审查')
+
+  await sidebarButton(page, '文档解析').click()
+  await page.getByPlaceholder(/把文档内容粘贴在这里/).fill(
+    '临渊城扼守海峡，常住十万人，万舟汇聚，是北境最大的贸易港。',
+  )
+  await page.getByRole('button', { name: '开始解析', exact: true }).click()
+  await page.getByRole('button', { name: /导入当前项目（1 块）/ }).click()
+
+  await expect(page.getByRole('heading', { name: '✓ 全部解析完成' })).toBeVisible()
+  await expect(page.getByText('1 条 Codex 候选等待作者审查')).toBeVisible()
+  await page.getByRole('button', { name: '审查并选择', exact: true }).click()
+  await expect(page.getByText('逐字证据：')).toBeVisible()
+  await expect(page.getByText(/第 1 块“临渊城扼守海峡”/)).toBeVisible()
+  await page.locator('input[value="临渊城"]').fill('新临渊城')
+  await page.getByRole('button', { name: '确认导入 1 条', exact: true }).click()
+
+  await expect(page.getByText(/词条审查已完成：新增 1/)).toBeVisible()
+  await page.getByRole('button', { name: '完成', exact: true }).click()
+  await sidebarButton(page, '人文环境').click()
+  await page.getByRole('button', { name: /城池重镇/ }).click()
+  await expect(page.getByText('新临渊城', { exact: true })).toBeVisible()
+})
+
 test('真实章节入口可打开五阶段工坊并预览首节点最终提示词', async ({ page }) => {
   await createBookWithSavedChapter(
     page,

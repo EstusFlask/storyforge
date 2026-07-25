@@ -60,6 +60,8 @@ export interface ImportedReferenceData {
   outline?: Array<Record<string, unknown>>
   /** 写作技法分析 */
   writingTechniques?: import('./import-session-data').WritingTechniques
+  /** Phase 35-c：保留待作者审查的词条候选，不会自动写入当前项目。 */
+  codexCandidates?: import('./import-session-data').CodexImportCandidate[]
   /** 原始文件名 */
   sourceFilename?: string
   /** 导入时间 */

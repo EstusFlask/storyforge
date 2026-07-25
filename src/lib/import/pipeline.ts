@@ -46,6 +46,11 @@ import {
 } from '../reference-analysis/pipeline'
 import { chatWithAbort } from './chat-with-abort'
 import { runCharacterMerge } from './character-merge'
+import {
+  formatCodexImportCatalog,
+  loadCodexImportCategoryOptions,
+  type CodexImportCategoryOption,
+} from './codex-classification'
 
 // 保留原有 API：UI / 其他模块一直从 pipeline 引入这三个函数。
 export const registerChunkTexts = _registerChunkTexts
@@ -117,6 +122,8 @@ export async function runSession(args: {
 
   try {
     let processedSinceMerge = 0
+    // 目录在本次 session 内固定，避免每块重复查库；确认写回时仍会重新解析当前目录。
+    const codexOptions = await loadCodexImportCategoryOptions(projectId)
 
     for (const chunk of session.chunks) {
       // 已完成的跳过
@@ -131,7 +138,7 @@ export async function runSession(args: {
       session = await sessionStore.load(sessionId) // 重新读一次（防外部修改）
       if (!session) return
 
-      const ok = await runChunk(session, chunk.index, projectId)
+      const ok = await runChunk(session, chunk.index, projectId, codexOptions)
       if (ok) processedSinceMerge++
 
       // 每 N 块跑一次合并
@@ -210,6 +217,7 @@ async function runChunk(
   session: ImportSession,
   chunkIndex: number,
   projectId: number,
+  codexOptions: readonly CodexImportCategoryOption[],
 ): Promise<boolean> {
   const sessionStore = useImportSessionStore.getState()
   const statusStore = useImportStatusStore.getState()
@@ -257,6 +265,7 @@ async function runChunk(
         totalChunks: session.totalChunks,
         knownContext: session.rollingContext || '（尚无已识别上下文）',
         rawDocument: text,
+        codexOptions,
         signal: activeController?.signal,
       })
 
@@ -271,6 +280,7 @@ async function runChunk(
           worldviewFields: wvFields,
           characters: Array.isArray(result.characters) ? result.characters.length : 0,
           outlineNodes: Array.isArray(result.outline) ? result.outline.length : 0,
+          codexCandidates: result.codexCandidates?.length || 0,
         }
       } else {
         counts = await applyChunkResult(projectId, result, session.targetWorldGroupId ?? null)
@@ -290,10 +300,10 @@ async function runChunk(
 
       statusStore.markChunkFinished({ success: true })
       statusStore.pushActivity('success',
-        `✓ 块 ${chunkIndex + 1} 完成 · 入库 世界观${counts.worldviewFields}/角色${counts.characters}/大纲${counts.outlineNodes}`,
+        `✓ 块 ${chunkIndex + 1} 完成 · 入库 世界观${counts.worldviewFields}/角色${counts.characters}/大纲${counts.outlineNodes} · 词条候选${counts.codexCandidates || 0}`,
         chunkIndex)
       await sessionStore.log(session.id!, chunkIndex, 'success',
-        `成功：世界观+${counts.worldviewFields} 角色+${counts.characters} 大纲+${counts.outlineNodes}`)
+        `成功：世界观+${counts.worldviewFields} 角色+${counts.characters} 大纲+${counts.outlineNodes} 词条候选+${counts.codexCandidates || 0}`)
       return true
     } catch (err) {
       if ((err as Error).name === 'AbortError') return false
@@ -334,6 +344,7 @@ async function parseChunkOnce(args: {
   totalChunks: number
   knownContext: string
   rawDocument: string
+  codexOptions: readonly CodexImportCategoryOption[]
   signal?: AbortSignal
 }): Promise<UnifiedParseResult> {
   const tpl = usePromptStore.getState().getActive('import.parse-chunk')
@@ -341,6 +352,7 @@ async function parseChunkOnce(args: {
     chunkIndex: args.chunkIndex + 1,
     totalChunks: args.totalChunks,
     knownContext: args.knownContext.slice(0, 2000),
+    codexCategoryCatalog: formatCodexImportCatalog(args.codexOptions),
     rawDocument: args.rawDocument,
   })
   const baseConfig = useAIConfigStore.getState().config
@@ -356,7 +368,11 @@ async function parseChunkOnce(args: {
 
   const output = await chatWithAbort(messages, config, args.signal, meta)
   const obj = extractJSON(output) as UnifiedParseResult
-  return normalizeUnified(obj)
+  return normalizeUnified(obj, {
+    sourceText: args.rawDocument,
+    chunkIndex: args.chunkIndex,
+    options: args.codexOptions,
+  })
 }
 
 function sleep(ms: number) {
@@ -392,6 +408,7 @@ export async function applyReferenceFromSession(
       characters: session.merged?.characters,
       outline: session.merged?.outline,
       writingTechniques: session.merged?.writingTechniques,
+      codexCandidates: session.merged?.codexCandidates,
       sourceFilename: session.filename,
       importedAt: Date.now(),
     },

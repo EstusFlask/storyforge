@@ -1208,7 +1208,7 @@ flowchart LR
         TM4["autoTrimToFit 真裁剪<br/>token-aware 降级"]
         TM5["Phase 34 力量阶段追踪"]
         TM6["Phase 35-b 词条迁移落地<br/>势力合并 物产 器物"]
-        TM7["Phase 35-c 导入 AI 分类"]
+        TM7["✅ Phase 35-c 导入 AI 分类<br/>证据候选 + 作者确认"]
         TM8["Phase 36 上下游标记"]
         TM9["Phase 37 修炼体系 DAG"]
     end

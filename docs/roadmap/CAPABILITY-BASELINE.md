@@ -175,11 +175,14 @@
   唯一主入口，DB v43 对旧历史做空目标无损桥接；城池词条通过可移植软 FK 关联地点，
   删除地点子树只断引用不删词条。旧历史、`humEra/humEvent`、`humSociety` 和合并字段
   都保留在兼容区，不自动猜测重分类。
+- Phase 35-c 已交付：外部文档分块解析会生成带本块逐字证据的 Codex 候选，使用稳定
+  分类引用而非数据库 ID；未知分类、非法字段和伪造证据在本地拒绝。候选跨块归并后
+  必须由作者逐条选择、改名或改分类，再通过 `adopt()` 写回；同名词条只补空内容，
+  多世界严格使用导入目标世界。
 
 ### 当前边界 / 尚未完成
 
-- Phase 35-c 的外部导入 AI 分类仍需完整端到端交付；不得复建平行面板或直接写库。
-- 旧自由文本不会自动语义拆成实体，只有作者主动导入并确认后才进入结构化分类。
+- 旧自由文本不会后台自动语义拆成实体；作者主动走文档解析并确认后才进入结构化分类。
 - 地图的距离、规模和相对位置增强仍待设计确认。
 
 ### 代码与设计入口
@@ -192,6 +195,7 @@
 - `src/components/cultivation/CultivationProgressPanel.tsx`
 - `src/lib/registry/project-tables.ts`
 - `docs/CULTIVATION-PROGRESS-DESIGN.md`
+- `docs/CODEX-IMPORT-CLASSIFICATION-DESIGN.md`
 - `docs/CODEX-REDESIGN.md`
 - `docs/WORLD-RULES-MULTIWORLD-DESIGN.md`
 

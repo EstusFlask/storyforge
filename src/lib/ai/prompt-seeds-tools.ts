@@ -232,16 +232,24 @@ D) 以上的混合
     promptType: 'parse',
     name: '内置-分块解析（大文档流水线）',
     description: '针对百万字级小说，把原文切成多块后逐块抽取世界观 / 角色 / 大纲，可带已识别上下文。',
-    systemPrompt: `你是一位顶级的小说结构化分析师，正在处理一部大型长篇小说的**第 {{chunkIndex}} / {{totalChunks}} 块**原文。
+    systemPrompt: `你是一位顶级的小说结构化分析师，正在分块处理一部大型长篇小说。
 
 ═══ 你的任务 ═══
-只针对"本块"内容抽取三类数据：世界观 / 角色 / 大纲章节；输出 JSON。
+只针对"本块"内容抽取四类数据：世界观 / 角色 / 大纲章节 / Codex 实体候选；输出 JSON。
 整本书的汇总由程序跨块合并，你**不需要**考虑"其他块"会写什么，也**不要**重复输出上下文里已给你的已知角色（如果一个人本块没新信息、也没新行为，就不要重新输出；反之有新描写就输出增量信息即可）。
 
 ═══ 重要分类边界 ═══
 - "金手指 / 系统 / 外挂 / 天赋 / 特殊能力"若绑定某个角色,写进该角色的 abilities,不要单独生成名为"金手指"或"系统"的角色。
 - "宝物 / 道具 / 法器 / 装备 / 器物"等非人物设定写进 worldview.itemDesign。
 - 只有"系统精灵 / 器灵 / 助手"等被拟人化、有姓名、性格和行动的存在,才可进入 characters。
+
+═══ 当前项目允许的 Codex 分类 ═══
+每行格式为 categoryRef｜分类路径｜允许的普通字段。只能逐字选用这里的 categoryRef；
+禁止输出 categoryId、地点 ID、词条引用 ID、修炼体系 ID。
+{{codexCategoryCatalog}}
+
+═══ 本次分块位置 ═══
+第 {{chunkIndex}} / {{totalChunks}} 块
 
 ═══ 已识别上下文（来自之前块的摘要）═══
 {{knownContext}}
@@ -258,6 +266,18 @@ D) 以上的混合
   ],
   "outline": [
     { "type":"volume|chapter", "title":"", "summary":"", "children":[] }
+  ],
+  "codexCandidates": [
+    {
+      "categoryRef":"从上方目录逐字选择",
+      "name":"实体专名",
+      "summary":"一句话简介",
+      "description":"本块明确给出的详细设定",
+      "fields":{"上方分类允许的字段key":"原文可证实的值"},
+      "tags":["标签"],
+      "confidence":0.0,
+      "evidenceQuote":"本块原文中的短小逐字引文"
+    }
   ],
   "writingTechniques": {
     "narrativeStyle":"", "proseStyle":"", "openingTechnique":"",
@@ -279,8 +299,13 @@ D) 以上的混合
    - 如果本块含高潮段落 → 分析高潮铺垫与引爆方式
    - 分析本块的叙事节奏、情绪节拍、对话技巧、冲突设计等
    - 只写本块观察到的技法，没有的留空字符串
-5. 严禁编造文档外的信息。
-6. 只输出 JSON、用 \`\`\`json 包裹，不要任何前言或解释。`,
+5. **Codex 候选**：
+   - 只抽取有明确专名、可作为设定实体长期复用的地点、地貌、水系、物产、异兽、种族、势力、城池、器物、制度、文化、冲突、神明或力量概念；泛称和修辞不抽取。
+   - categoryRef 必须来自上方目录；fields 只能用该行允许的 key；ref/FK 字段一律不输出。
+   - evidenceQuote 必须是本块原文中能逐字搜索到的 2~240 字短引文；没有逐字证据就不要输出候选。
+   - 同一实体在本块只输出一次；confidence 是 0~1 的分类置信度。
+6. 严禁编造文档外的信息。
+7. 只输出 JSON、用 \`\`\`json 包裹，不要任何前言或解释。`,
     userPromptTemplate: `下面是第 {{chunkIndex}} / {{totalChunks}} 块原文：
 
 ---CHUNK START---
@@ -288,7 +313,7 @@ D) 以上的混合
 ---CHUNK END---
 
 请按上述 schema 输出本块的解析结果。`,
-    variables: ['chunkIndex', 'totalChunks', 'knownContext', 'rawDocument'],
+    variables: ['chunkIndex', 'totalChunks', 'knownContext', 'codexCategoryCatalog', 'rawDocument'],
     isActive: true,
   },
 
