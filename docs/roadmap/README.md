@@ -45,8 +45,8 @@
 | 3 | **PIPE-1 透明生成与质量工作坊** | 让作者看得见、改得动、能分阶段确认 AI 如何生成卷纲、章纲和正文 | `PIPELINE-1`、`PIPELINE-2`、`PIPELINE-3`、`CF-20260702-7`、Phase 38 大纲评估和改进闭环、全局骨架 | 一次性生成与 `GenerationNode` 共用一条管线；提示词、上下文、预算、gate、采纳透明 | **COMPLETE（2026-07-25）** |
 | 4 | **WORLD-1 世界知识、词条、地图与修炼** | 把散文设定升级成可关联、可计算、可供创作和运行时共用的知识库 | Codex 世界隔离、Phase 37-a、Phase 34、Phase 35-b/c、`ENH-WORLDMAP-2` 已完成 | Codex/自然/人文无重复入口；地点、势力、物产、器物、修炼、力量阶段与地图关系一致 | **COMPLETE（2026-07-25）** |
 | 5 | **STORY-1 角色驱动与动态故事规划** | 让角色变化、角色弧光和主线/支线影响后续大纲 | `CF-20260702-9` 持久化工作区与 `CF-20260702-12` 中途重规划均已完成 | 影响分析 → 作者选择 → 目标范围重规划；不静默修改既有正文 | **COMPLETE（2026-07-25）** |
-| 6 | **AUTHOR-1 长篇编辑与作者风格智能** | 提高长篇改稿、个人风格保持和既有作品续写能力 | `EDITOR-5` 与 `FB-5` 高级校准已完成；下一步审慎评估 `FB-4`，TipTap 长期优化独立登记 | 实体引用安全重映射；批量改稿预览/快照/撤销；有界改稿样本与作者确认式风格校准 | **IN PROGRESS；EDITOR-5 / FB-5 COMPLETE（2026-07-25）** |
-| 7 | **IDEA-1 灵感与参考资料演化** | 让灵感和参考资料持续融合、更新、追溯 | `CM-1`、参考作品分析后续能力；与风格画像共享底座 | 增量输入、差异预览、版本和来源可追溯；参考分析统一走宪法路径 | **DEPENDENT；GOV-1** |
+| 6 | **AUTHOR-1 长篇编辑与作者风格智能** | 提高长篇改稿、个人风格保持和既有作品续写能力 | `EDITOR-5` 与 `FB-5` 高级校准已完成；`FB-4` 已完成可行性审查并在来源/版本/剧情记忆地基就绪前设计暂缓，TipTap 长期优化独立登记 | 实体引用安全重映射；批量改稿预览/快照/撤销；有界改稿样本与作者确认式风格校准；原稿续写不以低保真摘要冒充剧情事实 | **CURRENT SCOPE COMPLETE；FB-4 DESIGN DEFERRED（2026-07-25）** |
+| 7 | **IDEA-1 灵感与参考资料演化** | 让灵感和参考资料持续融合、更新、追溯 | `CM-1`、参考作品分析后续能力；与风格画像共享底座，并为 FB-4 提供来源与版本地基 | 增量输入、差异预览、版本和来源可追溯；参考分析统一走宪法路径 | **READY；GOV-1 COMPLETE** |
 | 8 | **AGENT-1 对话副驾与 Agent 团队** | 用对话组合调用现有能力，不重写面板业务 | Phase 27.1-a~e、27.2b、整理本章 Agent、一致性 Agent、per-role 模型和预算 | Tool Registry 薄封装；前台写入必确认；后台默认只读；Canon 负责校验 | **DEPENDENT；CANON + PIPE** |
 | 9 | **SIM-1 世界模拟与互动叙事** | 通向跑团、文字游戏、陪伴角色和大型游戏运行时 | Phase 27.3 NPC 演进、世界时间线、位置/状态/能力/生命周期、角色碰撞 | 创作 Canon 与运行时状态分层；模拟不得污染作者原稿 | **LONG-TERM；WORLD + CANON + AGENT** |
 | 10 | **PRODUCT-1 新手转化、数据主权与开源信任** | 让新用户快速得到成果，成熟用户敢托付手稿，贡献者能参与 | `AUDIT-5/8/9/10/11`、升级前快照、加密备份、帮助系统、i18n、安全/贡献/发布政策 | 首次成果闭环、Labs 隐藏、备份恢复可信、隐私和贡献流程清楚 | **DESIGN；可错峰** |
@@ -141,6 +141,8 @@
 - 文风学习一次最多读取 6 章、每章 2500 字符；互动校准执行“短文重写 → 作者编辑/判断 → 显式保存样本”，未经确认的 AI 输出不自动学习。
 - `style.learn` 继续走分析模型，`style.calibrate` 走创作模型；关闭或不存在非空画像时，画像、样本和反馈均不进入下游上下文。
 - `R-FB5-advanced-style`、`R-FB5-style-calibration-ui` 和 Chromium 真实流程覆盖样本边界、导出导入、画像学习、校准反馈、刷新恢复与 TipTap 双栏生命周期。完整边界见 `STYLE-CALIBRATION-DESIGN.md`。
+- `FB-4` 审查确认历史方案依赖的 `master-study` 已删除，现有 13 维参考分析只有方法论、没有角色终态/事件因果/结局状态等可校验剧情记忆，上传链也没有来源授权记录。
+- 原稿续写因此设计暂缓：不得整本回灌、不得把参考分析摘要当 Canon、不得默认仿写原作者声音；重新立项前必须先具备可追溯来源、版本化剧情胶囊、有界上下文和持久化断点续跑。完整结论见 `FB4-CONTINUATION-FEASIBILITY.md`。
 
 ## 四、原任务唯一归属
 
@@ -172,7 +174,7 @@
 | 透明生成 | [`TRANSPARENT-GENERATION-PIPELINE.md`](../TRANSPARENT-GENERATION-PIPELINE.md) |
 | 世界知识 | [`CODEX-REDESIGN.md`](../CODEX-REDESIGN.md)、[`WORLD-RULES-MULTIWORLD-DESIGN.md`](../WORLD-RULES-MULTIWORLD-DESIGN.md) |
 | 动态故事规划 | [`CHARACTER-DRIVEN-WORKSPACE-DESIGN.md`](../CHARACTER-DRIVEN-WORKSPACE-DESIGN.md)、[`CHARACTER-REVISION-WORKFLOW-DESIGN.md`](../CHARACTER-REVISION-WORKFLOW-DESIGN.md) |
-| 作者工具 | [`ENTITY-RENAME-DESIGN.md`](../ENTITY-RENAME-DESIGN.md)、[`STYLE-CALIBRATION-DESIGN.md`](../STYLE-CALIBRATION-DESIGN.md) |
+| 作者工具 | [`ENTITY-RENAME-DESIGN.md`](../ENTITY-RENAME-DESIGN.md)、[`STYLE-CALIBRATION-DESIGN.md`](../STYLE-CALIBRATION-DESIGN.md)、[`FB4-CONTINUATION-FEASIBILITY.md`](../FB4-CONTINUATION-FEASIBILITY.md) |
 | Agent | [`AI-COPILOT-DESIGN.md`](../AI-COPILOT-DESIGN.md) |
 
 设计文档提供方案细节，`README.md` 提供当前归属和施工顺序；两者冲突时，先停止开发并回到 `CLAUDE.md`、`MASTER-BLUEPRINT.md` 和本路线图裁决。
