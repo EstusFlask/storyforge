@@ -16,7 +16,8 @@ import { checkRegistry } from '../../src/lib/registry/validate'
 import { parseEntryRefs } from '../../src/lib/types/codex'
 import {
   projectScopedTables, worldScopedTables, exportableTables,
-  transactionTablesFor, cascadeDeleteProject, cascadeDeleteGroup, stampPrimaryWorld,
+  transactionTablesFor, transactionTablesForReferences,
+  cascadeDeleteProject, cascadeDeleteGroup, stampPrimaryWorld,
 } from '../../src/lib/registry/lifecycle'
 
 describe('Phase 1.1a · PROJECT_TABLES 注册表', () => {
@@ -27,8 +28,8 @@ describe('Phase 1.1a · PROJECT_TABLES 注册表', () => {
       expect(result.ok, result.errors.join('; ')).toBe(true)
     })
 
-    it('登记了全部 46 张表', () => {
-      expect(PROJECT_TABLES.length).toBe(46)   // v41 cultivationSystems→46
+    it('登记了全部 47 张表', () => {
+      expect(PROJECT_TABLES.length).toBe(47)   // v42 cultivationProgress→47
     })
 
     it('每张表名唯一', () => {
@@ -83,6 +84,17 @@ describe('Phase 1.1a · PROJECT_TABLES 注册表', () => {
       expect(importNames).toContain('projects')
       expect(importNames).toContain('codexEntries')
       expect(importNames).not.toContain('promptTemplates')
+    })
+
+    it('领域生命周期事务从根表 refs 派生全部直接引用方', () => {
+      expect(transactionTablesForReferences('cultivationSystems').map(table => table.name))
+        .toEqual([
+          'cultivationSystems',
+          'characters',
+          'codexEntries',
+          'temporalFacts',
+          'cultivationProgress',
+        ])
     })
   })
 

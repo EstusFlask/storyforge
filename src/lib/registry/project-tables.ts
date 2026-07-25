@@ -35,12 +35,25 @@ export const PROJECT_TABLES: TableSpec[] = [
     refs: [
       { kind: 'simple', field: 'id', target: 'characters[cultivationSystemId]', onDelete: 'setNull' },
       { kind: 'simple', field: 'id', target: 'codexEntries[cultivationSystemId]', onDelete: 'setNull' },
+      { kind: 'simple', field: 'id', target: 'temporalFacts[sourceCultivationSystemId]', onDelete: 'setNull' },
+      { kind: 'simple', field: 'id', target: 'cultivationProgress[cultivationSystemId]', onDelete: 'setNull' },
     ],
     exportRemap: [
       { field: 'worldGroupId', remapVia: 'worldGroups', exportAs: '_worldGroupExportId' },
     ],
     defaults: { description: '', stages: '[]' },
     note: 'Phase 37 修炼流派；stages 为已校验 DAG，区别于世界底层 powerSystems' },
+
+  { table: db.cultivationProgress, name: 'cultivationProgress', owner: 'project', worldScoped: true,
+    exportable: true,
+    exportRemap: [
+      { field: 'worldGroupId', remapVia: 'worldGroups', exportAs: '_worldGroupExportId' },
+      { field: 'characterId', remapVia: 'characters', exportAs: '_characterExportId' },
+      { field: 'cultivationSystemId', remapVia: 'cultivationSystems', exportAs: '_cultivationSystemExportId' },
+      { field: 'sourceChapterId', remapVia: 'chapters', exportAs: '_sourceChapterExportId' },
+    ],
+    defaults: { status: 'confirmed', sourceOffset: 0, trigger: '' },
+    note: 'Phase 34 作者确认的正文修炼事件；当前境界与实际路径按规范章序实时投影，软引用缺失时保留冗余名称与证据' },
 
   { table: db.geographies, name: 'geographies', owner: 'project', worldScoped: true,
     exportable: true,

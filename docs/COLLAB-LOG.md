@@ -1907,3 +1907,44 @@ metadata、ESLint、TypeScript、生产 build、bundle budget 与 `git diff --ch
 
 👉 WORLD-1 下一阶段按路线进入 Phase 34：把当前角色卡“设定境界”与正文逐章派生的
 修炼进度严格分层，先冻结候选提取、作者确认、章节时点和删除/导出生命周期，再施工。
+
+### [2026-07-25] Codex · REPORT · WORLD-1 第二阶段 / Phase 34 正文修炼进度 / `feat/world-1-model`
+
+本阶段先冻结 `docs/CULTIVATION-PROGRESS-DESIGN.md`，明确角色卡
+`cultivationStageId` 是作者预设的上游设定，`cultivationProgress` 才是正文已经发生、
+有逐字证据且经作者确认的下游事件流。临时压制、封印、伪装、跨世界削弱、借力爆发和
+接近突破均不写事件；AI 只负责从当前项目角色/体系/境界闭集提出候选，候选留在内存，
+作者逐条确认后才经 `FIELD_REGISTRY + ADOPTION_SCHEMAS + adopt()` 写入。
+
+DB v42 新增 `cultivationProgress` 空表，不从角色卡或旧自由文本猜测历史。每条事件保存
+角色、体系、境界、来源章节、唯一逐字引文、章内偏移、变化类型和冗余名称；当前境界、
+实际路径和时间线按规范大纲章序实时投影，不另存一份易漂移当前值。采纳前会重新读取
+章节、角色和体系，核对正文证据、世界作用域、体系归属、境界闭集和 DAG 变化类型；
+逆序补录会重算后续事件的确定性 transition。
+
+创作区新增正式“修炼进度”下游入口：可选择已写章节分析、逐条确认/忽略候选，按所有
+已关联体系角色查看当前正文境界、DAG 已走路径和事件时间线，并删除误确认。页面同时
+显示角色卡设定境界，避免两者混淆。`cultivationProgress` 作为世界级 L1 上下文源接入
+正文、大纲、场景、故事线、伏笔和 Workflow 生成，但项目开关默认关闭；开启后严格只
+读取目标章之前的 confirmed 事件，不注入目标章自身、未来、stale 或 source-missing。
+
+章节/角色删除保留证据与冗余名称、断开软 FK 并降级；体系删除保留体系/境界名，阶段
+删除清 stageId，阶段名称或父关系变化把旧事件标 stale。世界/项目生命周期、角色合并、
+体系引用事务和四类导出导入 FK 全部进入三注册表。体系领域事务不再手写五表清单，而是
+由 `PROJECT_TABLES.refs` 派生，新增引用方会自动扩展事务边界。
+
+真实 Chromium 路径在现有 Phase 37-a E2E 上继续完成：配置本地兼容 mock API、建立
+剑修 DAG 与角色、建卷建章并保存突破正文、进入“修炼进度”、收到闭集候选、作者确认、
+刷新恢复事件，并验证默认关闭的后续写作开关可显式开启且持久化。
+
+完整验证：200 files / 686 tests 全绿；覆盖率 statements/lines 68.48%、branches
+73.13%、functions 69.53%；47 required tables、AI manual、architecture、442 个生产
+源码可达、roadmap、agent-context、canon coverage、project metrics、ESLint、
+TypeScript、生产 build、bundle budget 与 `git diff --check` 全绿；Chromium E2E
+10/10。`check:release-metadata` 在本地因没有 Release tag 收到 empty，仅用于真实发布
+环境，不是代码失败。依赖审计仍报告 React Router `GHSA-qwww-vcr4-c8h2` 的 2 个 high；
+`npm audit fix --force` 会破坏性降级 `react-router-dom@7.11.0`，未执行。
+
+👉 Phase 34 已完成；WORLD-1 下一阶段按路线进入 Phase 35-b 分类落地与合并，先盘点
+自然/人文现有入口、Codex 内置分类、旧自由文本与重要地点/物品/势力/历史线重叠，再冻结
+无损兼容和逐入口下线顺序。

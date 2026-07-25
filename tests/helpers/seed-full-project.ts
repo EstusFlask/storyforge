@@ -1,7 +1,7 @@
 /**
  * 全量项目种子 · 测试共享 helper
  *
- * 覆盖全部 31 张 exportable 表 + 双世界组 + 树 + 各类外键。
+ * 覆盖全部 exportable 表 + 双世界组 + 树 + 各类外键。
  * 供 R-export-fullcoverage(往返安全网)与 R-export-derive-equivalence(派生等价性)共用。
  */
 import { db } from '../../src/lib/db/schema'
@@ -64,6 +64,25 @@ export async function seedFullProject() {
   const chapter = await db.chapters.add({ projectId, outlineNodeId: chapNode, title: '第1章', content: '<p>废墟中睁眼</p>', wordCount: 6, status: 'draft', order: 0, createdAt: now, updatedAt: now } as any) as number
   await db.detailedOutlines.add({ projectId, outlineNodeId: chapNode, openingHook: '承接', endingCliffhanger: '黑影', appearingCharacterIds: [char1], scenes: [{ sceneId: 's1', title: '苏醒', summary: '醒来', characterIds: [char1], location: '废墟', conflict: '失忆' }], createdAt: now, updatedAt: now } as any)
   await db.emotionBeatCards.add({ projectId, chapterId: chapter, overallArc: '低落→振奋', beats: '[]', createdAt: now, updatedAt: now } as any)
+  await db.cultivationProgress.add({
+    projectId,
+    worldGroupId: wgA,
+    characterId: char1,
+    characterName: '林惊羽',
+    cultivationSystemId: cultivationSystem,
+    cultivationSystemName: '青云剑修',
+    stageId: 'qi',
+    stageName: '炼气',
+    transition: 'enter',
+    sourceChapterId: chapter,
+    sourceChapterTitle: '第1章',
+    sourceQuote: '废墟中睁眼',
+    sourceOffset: 0,
+    trigger: '苏醒',
+    status: 'confirmed',
+    createdAt: now,
+    updatedAt: now,
+  })
 
   // ── 下游产物 ──
   await db.foreshadows.add({ projectId, name: '神秘玉佩', type: 'item', status: 'planted', description: '身世之谜', createdAt: now, updatedAt: now } as any)

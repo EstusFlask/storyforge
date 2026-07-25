@@ -61,6 +61,7 @@ function normalize(data: any) {
   // WORLD-1:修炼体系及角色/词条的新便携 FK 没有旧 fixture 对应字段；
   // 新表和这些 FK 的往返由 R-export-fullcoverage 锁定。
   delete data.cultivationSystems
+  delete data.cultivationProgress
   for (const row of data.characters ?? []) {
     delete row._raceEntryExportId
     delete row._cultivationSystemExportId

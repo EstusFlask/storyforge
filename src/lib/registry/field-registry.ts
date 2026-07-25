@@ -348,6 +348,27 @@ export const FIELD_REGISTRY: FieldSpec[] = [
   json('cultivationSystems', 'stages', ['境界阶梯', '境界图谱']),
   num('cultivationSystems', 'worldGroupId'),
 
+  // WORLD-1 / Phase 34 cultivationProgress
+  num('cultivationProgress', 'worldGroupId'),
+  num('cultivationProgress', 'characterId', ['角色ID']),
+  text('cultivationProgress', 'characterName', ['角色名']),
+  num('cultivationProgress', 'cultivationSystemId', ['修炼体系ID']),
+  text('cultivationProgress', 'cultivationSystemName', ['修炼体系名']),
+  text('cultivationProgress', 'stageId', ['境界ID']),
+  text('cultivationProgress', 'stageName', ['境界名']),
+  enumeration('cultivationProgress', 'transition', ['enter', 'advance', 'regress', 'switch'], {
+    初次确认: 'enter',
+    突破: 'advance',
+    倒退: 'regress',
+    改道: 'switch',
+  }),
+  num('cultivationProgress', 'sourceChapterId', ['来源章节ID']),
+  text('cultivationProgress', 'sourceChapterTitle', ['来源章节']),
+  longtext('cultivationProgress', 'sourceQuote', ['正文证据', '逐字引文']),
+  num('cultivationProgress', 'sourceOffset', ['正文位置']),
+  longtext('cultivationProgress', 'trigger', ['突破触发', '变化原因']),
+  enumeration('cultivationProgress', 'status', ['confirmed', 'stale', 'source-missing']),
+
   // importantLocations / downstream extraction products
   text('importantLocations', 'name', ['地点名']),
   json('importantLocations', 'tags', ['地点标签']),

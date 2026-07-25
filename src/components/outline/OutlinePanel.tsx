@@ -187,6 +187,7 @@ export default function OutlinePanel({ project, onOpenChapter }: Props) {
         'worldview',
         'storyCore',
         'powerSystem',
+        'cultivationProgress',
         'codex',
         'characters',
         'creativeRules',

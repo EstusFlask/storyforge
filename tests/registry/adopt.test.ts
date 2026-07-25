@@ -51,6 +51,7 @@ describe('Phase 1.2a · 统一写回层', () => {
       'storyline-crossing-lifecycle',
       'story-arc-dynamic-lifecycle',
       'cultivation-codex-reference-lifecycle',
+      'cultivation-progress-lifecycle',
       'codex-category-scope-lifecycle',
     ])
     for (const extension of ADOPTION_EXTENSIONS) {

@@ -129,6 +129,7 @@ export default function ChapterOutlineWorkshop({
             'storylineProgress',
             'worldview',
             'powerSystem',
+            'cultivationProgress',
             'creativeRules',
             'worldRules',
             'historical',

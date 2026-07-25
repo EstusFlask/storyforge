@@ -1,6 +1,10 @@
 import { db } from '../db/schema'
+import {
+  detachCultivationProgressSystems,
+  refreshCultivationProgressStageSources,
+} from './progress-lifecycle'
 
-/** 必须在包含 cultivationSystems/characters/codexEntries 的 rw 事务中调用。 */
+/** 必须在 transactionTablesForReferences('cultivationSystems') 的 rw 事务中调用。 */
 export async function clearCultivationSystemReferences(
   projectId: number,
   systemIds: ReadonlySet<number>,
@@ -43,6 +47,7 @@ export async function clearCultivationSystemReferences(
       })
     }
   }
+  await detachCultivationProgressSystems(projectId, systemIds)
 }
 
 /** 阶段从图谱删除时，只清该阶段引用，保留仍有效的体系关联。 */
@@ -69,3 +74,5 @@ export async function clearRemovedCultivationStageReferences(
     }
   }
 }
+
+export { refreshCultivationProgressStageSources }

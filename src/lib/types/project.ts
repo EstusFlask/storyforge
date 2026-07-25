@@ -109,6 +109,9 @@ export interface Project {
   /** 是否启用多世界模式（默认 false） */
   enableMultiWorld?: boolean
 
+  /** Phase 34：把作者确认的正文修炼进度注入后续 AI 写作；默认关闭。 */
+  includeCultivationProgressInAI?: boolean
+
   createdAt: number        // timestamp
   updatedAt: number        // timestamp
 }

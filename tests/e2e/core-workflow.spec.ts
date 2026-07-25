@@ -284,6 +284,53 @@ test('真实章节入口可打开五阶段工坊并预览首节点最终提示�
 })
 
 test('真实世界观入口可维护修炼 DAG 并关联角色境界', async ({ page }) => {
+  await page.addInitScript(() => {
+    localStorage.setItem('storyforge-ai-config', JSON.stringify({
+      provider: 'ollama',
+      apiKey: '',
+      model: 'cultivation-e2e',
+      baseUrl: 'http://localhost:1234/v1',
+      temperature: 0,
+      maxTokens: 0,
+    }))
+  })
+  await page.route('http://localhost:1234/v1/chat/completions', async route => {
+    const request = route.request().postDataJSON() as {
+      messages?: Array<{ role: string; content: string }>
+    }
+    const userMessage = request.messages?.find(message => message.role === 'user')?.content ?? ''
+    const registryText = userMessage.match(
+      /【角色与修炼体系闭集】\n([\s\S]*?)\n\n【章节】/,
+    )?.[1]
+    const registry = registryText ? JSON.parse(registryText) as Array<{
+      characterId: number
+      cultivationSystemId: number
+      stages: Array<{ id: string; name: string }>
+    }> : []
+    const subject = registry[0]
+    const stage = subject?.stages.find(item => item.name === '筑基境')
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        choices: [{
+          message: {
+            content: JSON.stringify({
+              events: subject && stage ? [{
+                characterId: subject.characterId,
+                cultivationSystemId: subject.cultivationSystemId,
+                stageId: stage.id,
+                transition: 'enter',
+                trigger: '生死关头凝成道基',
+                quote: '林舟在生死关头凝成道基，正式踏入筑基境',
+              }] : [],
+            }),
+          },
+        }],
+        usage: { prompt_tokens: 100, completion_tokens: 30, total_tokens: 130 },
+      }),
+    })
+  })
   await openCleanHome(page)
   await createProject(page, 'E2E 修炼体系闭环')
 
@@ -325,4 +372,32 @@ test('真实世界观入口可维护修炼 DAG 并关联角色境界', async ({ 
   await page.getByRole('button', { name: /新角色/ }).last().click()
   await expect(page.getByLabel('主修体系').locator('option:checked')).toHaveText('剑修')
   await expect(page.getByLabel('当前设定境界').locator('option:checked')).toHaveText('筑基境')
+
+  await page.getByRole('button', { name: '大纲', exact: true }).click()
+  await page.getByRole('button', { name: '添加卷', exact: true }).click()
+  await expectInputValue(page, '第1卷')
+  await page.getByRole('button', { name: '添加章节', exact: true }).click()
+  await expectInputValue(page, '第1章')
+  await page.getByTitle('编辑章节').click()
+  const editor = page.locator('.tiptap-editor')
+  await editor.fill('林舟与强敌鏖战三日，最终在生死关头凝成道基，正式踏入筑基境，剑气照亮整座山谷。')
+  await page.getByRole('button', { name: '保存', exact: true }).click()
+  await expect(page.getByRole('button', { name: '已保存', exact: true })).toBeVisible()
+
+  await openSidebarLeaf(page, '创作区', '修炼进度')
+  await expect(page.getByRole('heading', { name: '修炼进度', exact: true })).toBeVisible()
+  await expect(page.getByText('正文尚无已确认境界', { exact: true })).toBeVisible()
+  await expect(page.getByText('角色卡设定：筑基境', { exact: true })).toBeVisible()
+  await page.getByRole('button', { name: '分析本章', exact: true }).click()
+  await expect(page.getByText('发现 1 条可靠候选，请逐条确认。', { exact: true })).toBeVisible()
+  await expect(page.getByText('生死关头凝成道基', { exact: true })).toBeVisible()
+  await page.getByLabel('确认修炼候选').click()
+  await expect(page.getByText('正文当前：筑基境', { exact: true })).toBeVisible()
+  await expect(page.getByText('已确认并写入修炼历程。', { exact: true })).toBeVisible()
+
+  await page.getByLabel('反哺后续写作（默认关闭）').check()
+  await page.reload()
+  await openSidebarLeaf(page, '创作区', '修炼进度')
+  await expect(page.getByText('正文当前：筑基境', { exact: true })).toBeVisible()
+  await expect(page.getByLabel('反哺后续写作（默认关闭）')).toBeChecked()
 })

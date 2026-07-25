@@ -16,7 +16,7 @@ import type { Table } from 'dexie'
 import { db } from '../db/schema'
 import { removeCodexEntryReferences } from '../codex/references'
 import { clearCultivationSystemReferences } from '../cultivation/lifecycle'
-import { PROJECT_TABLES } from './project-tables'
+import { PROJECT_TABLES, REGISTRY_BY_NAME } from './project-tables'
 import type { TableSpec } from './types'
 
 // ─────────────────────────────────────────────────────────────
@@ -62,6 +62,26 @@ export function transactionTablesFor(
   }
   // migrate:所有 worldScoped 表
   return worldScopedTables().map(s => s.table)
+}
+
+/**
+ * 根记录及其在 PROJECT_TABLES.refs 中声明的直接引用方。
+ * 供领域级生命周期事务使用；新增引用表时只改注册表，事务边界会自动扩展。
+ */
+export function transactionTablesForReferences(sourceTableName: string): Table[] {
+  const source = REGISTRY_BY_NAME.get(sourceTableName)
+  if (!source) throw new Error(`未知 PROJECT_TABLES 表: ${sourceTableName}`)
+  const names = new Set([sourceTableName])
+  for (const ref of source.refs ?? []) {
+    if (ref.kind !== 'simple' && ref.kind !== 'json') continue
+    const targetName = ref.target.match(/^([^[]+)\[/)?.[1]
+    if (targetName) names.add(targetName)
+  }
+  return [...names].map(name => {
+    const spec = REGISTRY_BY_NAME.get(name)
+    if (!spec) throw new Error(`PROJECT_TABLES 引用目标未登记: ${sourceTableName} → ${name}`)
+    return spec.table
+  })
 }
 
 // ─────────────────────────────────────────────────────────────

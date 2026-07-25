@@ -59,6 +59,7 @@ const LocationPanel = lazy(() => import('../components/location/LocationPanel'))
 const InventoryPanel = lazy(() => import('../components/items/InventoryPanel'))
 const FactLibraryPanel = lazy(() => import('../components/facts/FactLibraryPanel'))
 const StoryTimelinePanel = lazy(() => import('../components/timeline/StoryTimelinePanel'))
+const CultivationProgressPanel = lazy(() => import('../components/cultivation/CultivationProgressPanel'))
 const SceneVerifyPanel = lazy(() => import('../components/scene/SceneVerifyPanel'))
 const WorldGroupOverview = lazy(() => import('../components/world-group/WorldGroupOverview'))
 import { useLocationStore } from '../stores/location'
@@ -253,6 +254,8 @@ export default function WorkspacePage() {
             if (chapter) handleOpenChapter(chapter.outlineNodeId)
           }}
         />
+      case 'cultivation-progress':
+        return <CultivationProgressPanel project={project} />
       case 'scene-verify':
         return <SceneVerifyPanel project={project} />
 

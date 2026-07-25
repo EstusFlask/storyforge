@@ -45,6 +45,7 @@ import type {
   StorylineProgress,
   StorylineCrossing,
   CultivationSystem,
+  CultivationProgress,
 } from '../types'
 import type { AIUsageEntry } from '../ai/usage-log'
 import type { TemporalFact } from '../types/temporal-fact'
@@ -121,6 +122,9 @@ class StoryForgeDB extends Dexie {
 
   // WORLD-1 / Phase 37 —— 世界级修炼流派与境界 DAG
   cultivationSystems!: Table<CultivationSystem, number>
+
+  // WORLD-1 / Phase 34 —— 作者确认的逐章修炼进度事件
+  cultivationProgress!: Table<CultivationProgress, number>
 
   // FB-5 —— 自适应文风学习（每项目一份 AI 文风画像）
   userStyleProfiles!: Table<UserStyleProfile, number>
@@ -410,6 +414,11 @@ class StoryForgeDB extends Dexie {
     // 旧项目保持 null/undefined，不从自由文本 powerLevel 猜测结构化归属。
     this.version(41).stores({
       cultivationSystems: '++id, projectId, worldGroupId, name',
+    })
+
+    // v42: Phase 34 修炼进度。新增空事件表，不从角色卡设定境界或旧自由文本猜正文历史。
+    this.version(42).stores({
+      cultivationProgress: '++id, projectId, worldGroupId, characterId, cultivationSystemId, sourceChapterId, status',
     })
   }
 }

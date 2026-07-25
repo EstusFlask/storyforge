@@ -108,6 +108,25 @@ export const ADOPTION_SCHEMAS: CollectionAdoptionSpec[] = [
     autoStamps: ['projectId', 'worldGroupId', 'createdAt', 'updatedAt'],
   },
   {
+    target: 'cultivationProgress',
+    identity: {
+      kind: 'composite',
+      fields: ['characterId', 'sourceChapterId', 'stageId', 'sourceQuote'],
+    },
+    duplicatePolicy: 'skip',
+    required: [
+      'characterId', 'characterName', 'cultivationSystemId', 'cultivationSystemName',
+      'stageId', 'stageName', 'transition', 'sourceChapterId', 'sourceChapterTitle',
+      'sourceQuote', 'sourceOffset', 'status',
+    ],
+    autoStamps: ['projectId', 'worldGroupId', 'createdAt', 'updatedAt'],
+    fkChecks: [
+      { field: 'characterId', target: 'characters' },
+      { field: 'cultivationSystemId', target: 'cultivationSystems' },
+      { field: 'sourceChapterId', target: 'chapters' },
+    ],
+  },
+  {
     target: 'importantLocations',
     identity: 'name',
     duplicatePolicy: 'merge',
@@ -212,6 +231,7 @@ export const ADOPTION_EXTENSIONS: readonly AdoptionExtensionSpec[] = Object.free
       'src/lib/import/character-merge.ts',
       'src/lib/codex/references.ts',
       'src/lib/cultivation/lifecycle.ts',
+      'src/lib/cultivation/progress-lifecycle.ts',
     ],
     policyRegistry: 'PROJECT_TABLES refs + remapCharacterReferences + cultivation DAG validator',
     reason: '角色合并及上游实体删除都需要在事务内重映射或置空跨表引用；普通角色新增和更新仍必须走 adopt。',
@@ -261,6 +281,17 @@ export const ADOPTION_EXTENSIONS: readonly AdoptionExtensionSpec[] = Object.free
     ],
     policyRegistry: 'PROJECT_TABLES refs + cultivation DAG validator',
     reason: '删除词条、世界、修炼体系或境界节点时必须原子清理词条 JSON 引用及异兽体系/阶段引用。',
+    reviewAfter: '2027-01-01',
+  },
+  {
+    id: 'cultivation-progress-lifecycle',
+    target: 'cultivationProgress',
+    entrypoints: [
+      'src/lib/cultivation/progress.ts',
+      'src/lib/cultivation/progress-lifecycle.ts',
+    ],
+    policyRegistry: 'ADOPTION_SCHEMAS + PROJECT_TABLES + cultivation DAG validator + canonical chapter sequence',
+    reason: '修炼进度候选须经正文逐字证据、闭集 ID、DAG 路径和规范章序校验；角色、章节、体系与阶段删除需保留历史证据并降级软引用。',
     reviewAfter: '2027-01-01',
   },
   {

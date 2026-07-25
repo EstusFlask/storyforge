@@ -128,6 +128,7 @@ export async function deriveImportProjectJSON(data: ProjectExportData): Promise<
         let dropRow = false
         let hasUnmappedKnowledgeRef = false
         let hasUnmappedTemporalSourceRef = false
+        let hasUnmappedCultivationProgressRef = false
         for (const rm of spec.exportRemap ?? []) {
           const exportVal = obj[rm.exportAs]
           delete obj[rm.exportAs]
@@ -137,6 +138,7 @@ export async function deriveImportProjectJSON(data: ProjectExportData): Promise<
             const got = m?.get(exportVal)
             if (got == null) {
               if (spec.name === 'knowledgeLedger') hasUnmappedKnowledgeRef = true
+              if (spec.name === 'cultivationProgress') hasUnmappedCultivationProgressRef = true
               if (spec.name === 'temporalFacts' && rm.field.startsWith('source')) {
                 hasUnmappedTemporalSourceRef = true
               }
@@ -151,6 +153,9 @@ export async function deriveImportProjectJSON(data: ProjectExportData): Promise<
         }
         if (dropRow) continue
         if (spec.name === 'knowledgeLedger' && hasUnmappedKnowledgeRef && obj.status !== 'rejected') {
+          obj.status = 'source-missing'
+        }
+        if (spec.name === 'cultivationProgress' && hasUnmappedCultivationProgressRef) {
           obj.status = 'source-missing'
         }
         if (spec.name === 'temporalFacts' && hasUnmappedTemporalSourceRef

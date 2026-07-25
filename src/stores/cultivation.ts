@@ -8,8 +8,10 @@ import {
 import {
   clearCultivationSystemReferences,
   clearRemovedCultivationStageReferences,
+  refreshCultivationProgressStageSources,
 } from '../lib/cultivation/lifecycle'
 import { refreshSettingAssertionSourceStatus } from '../lib/fact-ledger/setting-assertions'
+import { transactionTablesForReferences } from '../lib/registry/lifecycle'
 
 interface CultivationStore {
   systems: CultivationSystem[]
@@ -56,9 +58,17 @@ export const useCultivationStore = create<CultivationStore>((set, get) => ({
         .filter(stageId => !nextIds.has(stageId)))
     }
     const next = { ...patch, updatedAt: now() }
-    await db.transaction('rw', db.cultivationSystems, db.characters, db.codexEntries, db.temporalFacts, async () => {
+    await db.transaction('rw', transactionTablesForReferences('cultivationSystems'), async () => {
       await db.cultivationSystems.update(id, next)
       await clearRemovedCultivationStageReferences(current.projectId, id, removedStageIds)
+      if (patch.stages !== undefined) {
+        await refreshCultivationProgressStageSources({
+          projectId: current.projectId,
+          systemId: id,
+          previousStages: current.stages,
+          nextStages: patch.stages,
+        })
+      }
     })
     await refreshSettingAssertionSourceStatus({
       projectId: current.projectId,
@@ -72,7 +82,7 @@ export const useCultivationStore = create<CultivationStore>((set, get) => ({
   deleteSystem: async (id) => {
     const current = get().systems.find(system => system.id === id) ?? await db.cultivationSystems.get(id)
     if (!current) return
-    await db.transaction('rw', db.cultivationSystems, db.characters, db.codexEntries, db.temporalFacts, async () => {
+    await db.transaction('rw', transactionTablesForReferences('cultivationSystems'), async () => {
       await clearCultivationSystemReferences(current.projectId, new Set([id]))
       await db.cultivationSystems.delete(id)
     })

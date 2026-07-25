@@ -119,6 +119,7 @@ export async function buildCharacterDrivenPlotPrompt(
       'worldview',
       'storyCore',
       'powerSystem',
+      'cultivationProgress',
       'codex',
       'characters',
       'worldRules',

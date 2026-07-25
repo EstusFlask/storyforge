@@ -3,6 +3,7 @@ import { db } from '../lib/db/schema'
 import { detachTemporalFactsForDeletedChapters } from '../lib/fact-ledger/lifecycle'
 import { detachKnowledgeForDeletedChapters } from '../lib/knowledge-ledger/lifecycle'
 import { detachStorylineForDeletedChapters } from '../lib/storyline/lifecycle'
+import { detachCultivationProgressForDeletedChapters } from '../lib/cultivation/progress-lifecycle'
 import { pickBestChapterForOutline } from '../lib/chapters/selectors'
 import { transactionTablesFor } from '../lib/registry/lifecycle'
 import type { Chapter } from '../lib/types'
@@ -138,6 +139,7 @@ export const useChapterStore = create<ChapterStore>((set, get) => ({
       await detachTemporalFactsForDeletedChapters(ids)
       await detachKnowledgeForDeletedChapters(ids)
       await detachStorylineForDeletedChapters(ids)
+      await detachCultivationProgressForDeletedChapters(ids)
       await db.chapters.bulkDelete(ids)
       const beatKeys = (await db.emotionBeatCards
         .where('chapterId').anyOf(ids).primaryKeys()) as number[]

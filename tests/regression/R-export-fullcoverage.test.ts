@@ -2,7 +2,7 @@
  * R-export-fullcoverage · 全部 exportable 表 · 多世界全量导出/导入安全网
  *
  * 目的(AUDIT-1 重构安全网):在把 json-export 从「手写枚举」重构为「注册表派生」之前,
- * 先用一个**覆盖全部 31 张 exportable 表 + 双世界组**的种子做往返,锁死当前手写版的正确行为。
+ * 先用一个**覆盖全部 exportable 表 + 双世界组**的种子做往返,锁死当前手写版的正确行为。
  * 重构后此测试必须保持全绿——任何外键重映射/树重建/世界组重映射的行为漂移都会被它抓到。
  *
  * 比 R-export-import-roundtrip 更严:那条是单世界(worldGroupId 全 null),本条是**双世界组**,
@@ -86,6 +86,17 @@ describe('R-export-fullcoverage · 全表多世界往返安全网', () => {
     const newChapter = await db.chapters.where('projectId').equals(newId).first()
     expect(newChapter!.outlineNodeId).toBe(newChapNode.id)
     expect(newChapter!.content).toContain('废墟中睁眼')
+
+    // Phase 34 修炼进度 → 世界/角色/体系/章节全部重映射
+    const newCultivationProgress = await db.cultivationProgress.where('projectId').equals(newId).first()
+    expect(newCultivationProgress).toMatchObject({
+      worldGroupId: newWgA,
+      characterId: newChar1.id,
+      cultivationSystemId: newCultivation!.id,
+      sourceChapterId: newChapter!.id,
+      stageId: 'qi',
+      status: 'confirmed',
+    })
 
     // 细纲外键(outlineNodeId 重映射正确)
     const newDetail = await db.detailedOutlines.where('projectId').equals(newId).first()

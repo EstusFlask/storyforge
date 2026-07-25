@@ -29,6 +29,7 @@ import type {
   StorylineProgress,
   StorylineCrossing,
   CultivationSystem,
+  CultivationProgress,
 } from '../types'
 import type { TemporalFact } from '../types/temporal-fact'
 
@@ -114,6 +115,8 @@ export interface ProjectExportData {
   codexEntries?: (Omit<CodexEntry, 'id' | 'projectId' | 'categoryId' | 'worldGroupId'> & WorldGroupExportRef & { _categoryExportId: number })[]
   /** WORLD-1 / Phase 37 修炼流派与境界 DAG（角色/异兽 FK 由注册表重映射）。 */
   cultivationSystems?: (Omit<CultivationSystem, 'id' | 'projectId' | 'worldGroupId'> & WorldGroupExportRef & { _exportId: number })[]
+  /** WORLD-1 / Phase 34 作者确认的正文修炼事件（四类 FK 由注册表重映射）。 */
+  cultivationProgress?: (Omit<CultivationProgress, 'id' | 'projectId'> & Record<string, unknown>)[]
 }
 
 /** 导出项目为 JSON(注册表派生) */

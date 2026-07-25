@@ -5,7 +5,7 @@ import {
   Ruler, BookOpen, FilePen, Eye,
   FileCog, History, Upload, Download, Settings,
   Map, ClipboardList, GitBranch, Clock, MapPin, Scale,
-  Drama, Package, CalendarClock, ScanSearch, Coins, Feather, Database,
+  Drama, Package, CalendarClock, ScanSearch, Coins, Feather, Database, TrendingUp,
 } from 'lucide-react'
 
 /**
@@ -71,6 +71,9 @@ export type SidebarModule =
 
   // 故事进程年表（Phase 25.5.2-a）
   | 'story-timeline'
+
+  // Phase 34 正文修炼阶段追踪
+  | 'cultivation-progress'
 
   // 场景考证（Phase 27.2a）
   | 'scene-verify'
@@ -157,6 +160,7 @@ export const MODULE_CONTENT_TYPES: Record<SidebarModule, ModuleContentType> = {
   inventory: 'downstream',
   'fact-library': 'downstream',
   'story-timeline': 'downstream',
+  'cultivation-progress': 'downstream',
   'scene-verify': 'tool',
   'story-arc': 'upstream',
   'world-map': 'upstream',
@@ -268,6 +272,7 @@ export const NAV_TREE: TreeSection[] = [
       leaf('inventory',        '物品栏',   Package),
       leaf('fact-library',     '事实库',   Database),
       leaf('story-timeline',   '故事年表', CalendarClock),
+      leaf('cultivation-progress', '修炼进度', TrendingUp),
       leaf('scene-verify',     '场景考证', ScanSearch),
     ],
   },

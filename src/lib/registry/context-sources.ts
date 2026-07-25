@@ -33,6 +33,7 @@ import { formatHeldItemsContext, readProjectHeldItems } from '../consistency/hel
 import { formatCharacterKnowledgeContext, readProjectCharacterKnowledge } from '../knowledge-ledger/knowledge-ledger'
 import { formatCanonAssertionsContext, readCanonAssertions } from '../fact-ledger/setting-assertions'
 import { readStorylineProgressContext } from '../storyline/storyline-progress'
+import { readCultivationProgressContext } from '../cultivation/progress'
 import type { Chapter, Character, OutlineNode, PowerSystem, Worldview } from '../types'
 import type { ContextSource } from './types'
 import { countWords, htmlToPlainText } from '../utils/html'
@@ -714,6 +715,21 @@ export const CONTEXT_SOURCES: ContextSource[] = [
     budgetTokens: 1400,
     protectedFromTrim: true,
     read: input => readStorylineProgressContext(input.projectId, input.chapterId),
+  },
+  {
+    key: 'cultivationProgress',
+    label: '作者确认的正文修炼进度',
+    scope: 'world',
+    layer: 'L1',
+    budgetTokens: 1000,
+    protectedFromTrim: true,
+    requiresWorldGroupId: true,
+    read: input => readCultivationProgressContext(
+      input.projectId,
+      input.worldGroupId,
+      input.chapterId,
+      input.outlineNodeId,
+    ),
   },
   {
     key: 'emotionBeats',
