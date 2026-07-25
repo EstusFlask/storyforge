@@ -53,6 +53,12 @@ import {
   parseInspirationFragments,
   parseInspirationVersions,
 } from '../inspiration/workspace'
+import {
+  readAgentOutlineTree,
+  readAgentProjectStatus,
+  readAgentSearchResults,
+  readAgentWorldGroups,
+} from '../agent/read-sources'
 
 async function readWorldview(projectId: number, worldGroupId?: number | null): Promise<Worldview | null> {
   const rows = await db.worldviews.where('projectId').equals(projectId).toArray()
@@ -402,16 +408,24 @@ async function readStoryTimeline(projectId: number): Promise<string> {
   ].join('\n')
 }
 
-async function readCharacterRelations(projectId: number): Promise<string> {
+async function readCharacterRelations(projectId: number, worldGroupId?: number | null): Promise<string> {
   const [rows, characters] = await Promise.all([
     db.characterRelations.where('projectId').equals(projectId).toArray(),
     db.characters.where('projectId').equals(projectId).toArray(),
   ])
-  if (!rows.length) return ''
-  const names = new Map(characters.filter(item => item.id != null).map(item => [item.id!, item.name]))
+  const visibleCharacters = worldGroupId === undefined
+    ? characters
+    : characters.filter(character => (
+        character.isCrossWorld || (character.homeWorldGroupId ?? null) === (worldGroupId ?? null)
+      ))
+  const names = new Map(visibleCharacters.filter(item => item.id != null).map(item => [item.id!, item.name]))
+  const visibleRows = worldGroupId === undefined
+    ? rows
+    : rows.filter(row => names.has(row.fromCharacterId) && names.has(row.toCharacterId))
+  if (!visibleRows.length) return ''
   return [
     '【角色关系证据】',
-    ...rows.slice(0, 160).map(row =>
+    ...visibleRows.slice(0, 160).map(row =>
       `#${row.id ?? 0} ${names.get(row.fromCharacterId) ?? `角色#${row.fromCharacterId}`} → ${names.get(row.toCharacterId) ?? `角色#${row.toCharacterId}`}：${row.label}${row.description ? `（${row.description}）` : ''}`),
   ].join('\n')
 }
@@ -535,6 +549,45 @@ async function readCharacterPassages(projectId: number, name?: string, worldGrou
 }
 
 export const CONTEXT_SOURCES: ContextSource[] = [
+  {
+    // AGENT-1: 对话副驾只读工具使用的紧凑项目摘要，不返回整表原始数据。
+    key: 'projectStatus',
+    label: '项目概况',
+    scope: 'project',
+    layer: 'L2',
+    budgetTokens: 1200,
+    read: readAgentProjectStatus,
+  },
+  {
+    // AGENT-1: 世界组与连接关系的有界目录。
+    key: 'worldGroups',
+    label: '世界组目录',
+    scope: 'project',
+    layer: 'L2',
+    budgetTokens: 1500,
+    read: readAgentWorldGroups,
+  },
+  {
+    // AGENT-1: 按当前执行世界过滤的有界大纲树。
+    key: 'outlineTree',
+    label: '大纲树',
+    scope: 'world',
+    layer: 'L2',
+    budgetTokens: 6000,
+    requiresWorldGroupId: true,
+    read: readAgentOutlineTree,
+  },
+  {
+    // AGENT-1: 零网络、零 embedding 的本地包含匹配，仅返回短摘。
+    key: 'searchResults',
+    label: '项目内搜索结果',
+    scope: 'world',
+    layer: 'L2',
+    budgetTokens: 2200,
+    requiresWorldGroupId: true,
+    enabled: input => !!input.searchQuery?.trim(),
+    read: readAgentSearchResults,
+  },
   {
     key: 'manualText',
     label: '用户指定内容',
@@ -878,7 +931,7 @@ export const CONTEXT_SOURCES: ContextSource[] = [
     scope: 'project',
     layer: 'L2',
     budgetTokens: 2200,
-    read: input => readCharacterRelations(input.projectId),
+    read: input => readCharacterRelations(input.projectId, input.worldGroupId),
   },
   {
     key: 'references',

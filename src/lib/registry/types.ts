@@ -293,6 +293,12 @@ export interface AssembleContextInput {
   inspirationFragmentIds?: string[]
   /** CM-1: 单世界与多世界各自维护最近确认版本。 */
   inspirationMode?: InspirationResultMode
+  /** AGENT-1: 本地确定性项目搜索；只由 searchResults 上下文源消费。 */
+  searchQuery?: string
+  /** AGENT-1: 搜索最多返回 10 条短摘。 */
+  searchLimit?: number
+  /** AGENT-1: 搜索限定的数据类型。 */
+  searchKinds?: string[]
   /** assembleContext 内部批量预取；调用方无需传。 */
   continuitySnapshot?: PreparedContinuityContext
 }

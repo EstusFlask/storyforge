@@ -135,8 +135,13 @@ Agent 编排不是从零开始做一个新的一致性系统。它站在“收�
 
 ## 三、工具层（Tool Registry）—— 与现有代码精确对应
 
-每个工具 = `{ name, description, parameters(JSON schema), execute(args) }`。
+每个工具 = `{ name, description, parameters(JSON schema), execute(context, args) }`。
 工具分三类：**只读 / 生成 / 写入**。写入类与生成类全部**复用现有 store 方法和 adapter**，不重写业务逻辑。
+
+> 2026-07-25 实施校正：Phase 27.1-a 已按
+> [`AGENT-TOOL-REGISTRY-DESIGN.md`](./AGENT-TOOL-REGISTRY-DESIGN.md) 落地。旧表中“直接读
+> store state”只表达能力映射，不再是运行时路径；实际读取统一经过
+> `CONTEXT_SOURCES → assembleContext()`，以保留预算、作用域与审计单一入口。
 
 ### 3.1 只读工具（查询项目，零风险，先做）
 
@@ -380,9 +385,9 @@ loop（受步数/Token 上限约束）:
 
 ## 八、分期实施
 
-**Phase 27.1-a 工具层地基（只读工具优先）**
-- 定义 Tool 接口 + 注册表；先实现全部**只读工具**（零风险）
-- 验证：能让 AI 通过工具"看懂"整个项目
+**Phase 27.1-a 工具层地基（2026-07-25 已完成）**
+- 已定义 Tool 接口 + 注册表并实现全部 13 个只读工具
+- 已验证注册表读取、项目/世界隔离、有界搜索、总预算与零写入；当前为 headless 地基，尚未宣称 AI tool calling 已接通
 
 **Phase 27.1-b Agent 执行引擎 + 提供商适配**
 - AgentRunner 多步循环 + `client.ts` tools 注入 + 兼容/降级

@@ -21,6 +21,9 @@ const entrypoints = [
   'src/main.tsx',
   // Product-approved i18n scaffold: retained until the English milestone is decided.
   'src/i18n/index.ts',
+  // AGENT-1 Phase 27.1-a is a headless public boundary consumed by the next AgentRunner phase.
+  // Keep it independently testable without eagerly bundling the future copilot into the current UI.
+  'src/lib/agent/tool-registry.ts',
 ].map(file => path.resolve(root, file))
 
 const graph = new Map()

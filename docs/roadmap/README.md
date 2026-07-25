@@ -47,7 +47,7 @@
 | 5 | **STORY-1 角色驱动与动态故事规划** | 让角色变化、角色弧光和主线/支线影响后续大纲 | `CF-20260702-9` 持久化工作区与 `CF-20260702-12` 中途重规划均已完成 | 影响分析 → 作者选择 → 目标范围重规划；不静默修改既有正文 | **COMPLETE（2026-07-25）** |
 | 6 | **AUTHOR-1 长篇编辑与作者风格智能** | 提高长篇改稿、个人风格保持和既有作品续写能力 | `EDITOR-5` 与 `FB-5` 高级校准已完成；`FB-4` 已完成可行性审查并在来源/版本/剧情记忆地基就绪前设计暂缓，TipTap 长期优化独立登记 | 实体引用安全重映射；批量改稿预览/快照/撤销；有界改稿样本与作者确认式风格校准；原稿续写不以低保真摘要冒充剧情事实 | **CURRENT SCOPE COMPLETE；FB-4 DESIGN DEFERRED（2026-07-25）** |
 | 7 | **IDEA-1 灵感与参考资料演化** | 让灵感和参考资料持续融合、更新、追溯 | `CM-1` 与参考分析版本演化已完成；剧情连续性胶囊仍唯一归未来 `FB-4A` | 灵感与参考分析均具备来源、版本、差异和作者确认边界；失败分析不覆盖当前上下文，原文断点不进入便携备份 | **CURRENT SCOPE COMPLETE（2026-07-25）** |
-| 8 | **AGENT-1 对话副驾与 Agent 团队** | 用对话组合调用现有能力，不重写面板业务 | Phase 27.1-a~e、27.2b、整理本章 Agent、一致性 Agent、per-role 模型和预算 | Tool Registry 薄封装；前台写入必确认；后台默认只读；Canon 负责校验 | **READY；CANON + PIPE 已完成** |
+| 8 | **AGENT-1 对话副驾与 Agent 团队** | 用对话组合调用现有能力，不重写面板业务 | Phase 27.1-a 只读 Tool Registry 已完成；继续 27.1-b~e、27.2b、整理本章 Agent、一致性 Agent、per-role 模型和预算 | Tool Registry 薄封装；前台写入必确认；后台默认只读；Canon 负责校验 | **IN PROGRESS；27.1-a COMPLETE（2026-07-25）** |
 | 9 | **SIM-1 世界模拟与互动叙事** | 通向跑团、文字游戏、陪伴角色和大型游戏运行时 | Phase 27.3 NPC 演进、世界时间线、位置/状态/能力/生命周期、角色碰撞 | 创作 Canon 与运行时状态分层；模拟不得污染作者原稿 | **LONG-TERM；WORLD + CANON + AGENT** |
 | 10 | **PRODUCT-1 新手转化、数据主权与开源信任** | 让新用户快速得到成果，成熟用户敢托付手稿，贡献者能参与 | `AUDIT-5/8/9/10/11`、升级前快照、加密备份、帮助系统、i18n、安全/贡献/发布政策 | 首次成果闭环、Labs 隐藏、备份恢复可信、隐私和贡献流程清楚 | **DESIGN；可错峰** |
 | 11 | **PLATFORM-1 协作与社区广场** | 支撑作品发布、发现、讨论、协作和社区治理 | 协同编辑、账号/权限、云同步、发布发现、评论社群、内容治理 | 先完成后端、身份、同步冲突、隐私和治理架构；不在纯前端上硬叠 | **LONG-TERM；独立架构立项** |
@@ -63,6 +63,14 @@
 7. ✅ AUTHOR-1 当前范围与 IDEA-1 / CM-1（2026-07-25）：安全实体改名、互动文风校准、FB-4 可行性审查和增量灵感融合已收口。
 8. ✅ IDEA-1 参考资料演化（2026-07-25）：来源声明、分析版本、失败隔离、持久化续跑、差异、激活、回滚和便携生命周期已收口；不冒充剧情连续性胶囊。
 9. 🔄 AGENT-1 → SIM-1 → PRODUCT-1 / PLATFORM-1：按上表依赖和设计状态继续，不越过需要先收敛方案的开发单位。
+
+### AGENT-1 当前阶段交付证据
+
+- Phase 27.1-a 已登记 13 个只读工具；工具只做参数/作用域校验和 `CONTEXT_SOURCES → assembleContext()` 选择，不直接扫描 store、不开第二条 AI 读取路径。
+- `projectStatus/worldGroups/outlineTree/searchResults` 四类新读取也进入上下文源注册表；项目搜索零网络、零 embedding，最多 10 条、每条 180 字短摘。
+- `projectId/worldGroupId` 只来自执行上下文；多世界未选世界、跨项目章节/节点/角色/世界组、跨世界章节和角色均显式拒绝。
+- 每个工具公开 source、预算、included/omitted/trimmed 和估算 token；单一 L0/protected 源也不能突破请求总预算，超长章会显式截断。
+- 当前仍无 `AgentRunner`、ChatCopilot、生成/写入工具、聊天持久化或后台 Agent；下一步唯一进入 Phase 27.1-b 的只读执行链。
 
 ### GOV-1 第一阶段交付证据
 
@@ -188,6 +196,7 @@
 |---|---|
 | Canon / 一致性 | [`CONSISTENCY-ENGINEERING-ROUTE.md`](../CONSISTENCY-ENGINEERING-ROUTE.md)、[`CONSISTENCY-COVERAGE-MAP.md`](../CONSISTENCY-COVERAGE-MAP.md)、[`CONSISTENCY-CHECK-DESIGN.md`](../CONSISTENCY-CHECK-DESIGN.md) |
 | 透明生成 | [`TRANSPARENT-GENERATION-PIPELINE.md`](../TRANSPARENT-GENERATION-PIPELINE.md) |
+| 对话副驾 / Agent | [`AGENT-TOOL-REGISTRY-DESIGN.md`](../AGENT-TOOL-REGISTRY-DESIGN.md)、[`AI-COPILOT-DESIGN.md`](../AI-COPILOT-DESIGN.md) |
 | 世界知识 | [`CODEX-REDESIGN.md`](../CODEX-REDESIGN.md)、[`WORLD-RULES-MULTIWORLD-DESIGN.md`](../WORLD-RULES-MULTIWORLD-DESIGN.md) |
 | 动态故事规划 | [`CHARACTER-DRIVEN-WORKSPACE-DESIGN.md`](../CHARACTER-DRIVEN-WORKSPACE-DESIGN.md)、[`CHARACTER-REVISION-WORKFLOW-DESIGN.md`](../CHARACTER-REVISION-WORKFLOW-DESIGN.md) |
 | 作者工具 / 灵感 | [`ENTITY-RENAME-DESIGN.md`](../ENTITY-RENAME-DESIGN.md)、[`STYLE-CALIBRATION-DESIGN.md`](../STYLE-CALIBRATION-DESIGN.md)、[`FB4-CONTINUATION-FEASIBILITY.md`](../FB4-CONTINUATION-FEASIBILITY.md)、[`INCREMENTAL-INSPIRATION-DESIGN.md`](../INCREMENTAL-INSPIRATION-DESIGN.md) |
