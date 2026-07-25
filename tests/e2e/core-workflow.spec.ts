@@ -157,6 +157,55 @@ test('建卷建章、保存正文、刷新恢复并导出正文与隐私诊断',
   expect(diagnosticText).not.toContain(chapterText)
 })
 
+test('智能实体改名先预览，再原子同步正文与角色主档并可撤销', async ({ page }) => {
+  await createBookWithSavedChapter(
+    page,
+    'E2E 智能实体改名',
+    '顾临川踏入山门。顾临川望见远处灯火。',
+  )
+
+  await sidebarButton(page, '角色生成').click()
+  await page.getByRole('button', { name: '新建角色', exact: true }).click()
+  await page.getByRole('button', { name: '主要', exact: true }).click()
+  await page.getByRole('button', { name: '绝对中立', exact: true }).click()
+  await page.getByRole('button', { name: '创建并分流', exact: true }).click()
+  await page.locator('div.cursor-text.text-2xl').click()
+  await page.locator('input.text-2xl').fill('顾临川')
+  await page.locator('input.text-2xl').press('Enter')
+  await expect(page.locator('div.cursor-text.text-2xl')).toHaveText('顾临川')
+
+  await sidebarButton(page, '章节').click()
+  await page.getByRole('button', { name: '查找替换', exact: true }).click()
+  await page.getByRole('button', { name: '智能实体改名', exact: true }).click()
+  await page.getByRole('combobox', { name: '选择稳定实体' }).selectOption({
+    label: '角色 · 顾临川（角色 · 主世界/未分组）',
+  })
+  await page.getByRole('textbox', { name: '新名称' }).fill('沈照野')
+  await page.getByRole('button', { name: '预览影响范围', exact: true }).click()
+
+  await expect(page.getByText('未发现名称归属冲突，可按本预览安全执行。')).toBeVisible()
+  await expect(page.getByText('2 处 / 1 章', { exact: true })).toBeVisible()
+  await expect(page.getByText('角色主档 · 1 条', { exact: true })).toBeVisible()
+
+  await page.getByRole('button', { name: '创建快照并改名', exact: true }).click()
+  const confirmRename = page.locator('div.fixed.inset-0').filter({ hasText: '确认将「顾临川」改为「沈照野」？' })
+  await confirmRename.getByRole('button', { name: '创建快照并改名', exact: true }).click()
+  await expect(page.locator('.tiptap-editor')).toContainText('沈照野踏入山门。沈照野望见远处灯火。')
+  await expect(page.getByRole('combobox', { name: '选择稳定实体' }).locator('option')).toContainText([
+    '选择角色、地点或词条',
+    '角色 · 沈照野（角色 · 主世界/未分组）',
+  ])
+
+  await page.getByRole('button', { name: '撤销上次实体改名', exact: true }).click()
+  const confirmUndo = page.locator('div.fixed.inset-0').filter({ hasText: '撤销上次实体改名？' })
+  await confirmUndo.getByRole('button', { name: '原子撤销', exact: true }).click()
+  await expect(page.locator('.tiptap-editor')).toContainText('顾临川踏入山门。顾临川望见远处灯火。')
+  await expect(page.getByRole('combobox', { name: '选择稳定实体' }).locator('option')).toContainText([
+    '选择角色、地点或词条',
+    '角色 · 顾临川（角色 · 主世界/未分组）',
+  ])
+})
+
 test('完整 JSON 导出后可重新导入且正文不丢', async ({ page }) => {
   const projectName = 'E2E JSON 往返'
   const chapterText = '这段正文必须跟随完整 JSON 备份恢复。'

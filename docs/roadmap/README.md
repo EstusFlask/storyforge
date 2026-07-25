@@ -45,7 +45,7 @@
 | 3 | **PIPE-1 透明生成与质量工作坊** | 让作者看得见、改得动、能分阶段确认 AI 如何生成卷纲、章纲和正文 | `PIPELINE-1`、`PIPELINE-2`、`PIPELINE-3`、`CF-20260702-7`、Phase 38 大纲评估和改进闭环、全局骨架 | 一次性生成与 `GenerationNode` 共用一条管线；提示词、上下文、预算、gate、采纳透明 | **COMPLETE（2026-07-25）** |
 | 4 | **WORLD-1 世界知识、词条、地图与修炼** | 把散文设定升级成可关联、可计算、可供创作和运行时共用的知识库 | Codex 世界隔离、Phase 37-a、Phase 34、Phase 35-b/c、`ENH-WORLDMAP-2` 已完成 | Codex/自然/人文无重复入口；地点、势力、物产、器物、修炼、力量阶段与地图关系一致 | **COMPLETE（2026-07-25）** |
 | 5 | **STORY-1 角色驱动与动态故事规划** | 让角色变化、角色弧光和主线/支线影响后续大纲 | `CF-20260702-9` 持久化工作区与 `CF-20260702-12` 中途重规划均已完成 | 影响分析 → 作者选择 → 目标范围重规划；不静默修改既有正文 | **COMPLETE（2026-07-25）** |
-| 6 | **AUTHOR-1 长篇编辑与作者风格智能** | 提高长篇改稿、个人风格保持和既有作品续写能力 | `EDITOR-5`、`FB-4`、`FB-5` 高级校准、TipTap 长期优化 | 实体引用安全重映射；批量改稿预览/快照/撤销；风格画像可解释 | **DESIGN；EDITOR-5 可先独立** |
+| 6 | **AUTHOR-1 长篇编辑与作者风格智能** | 提高长篇改稿、个人风格保持和既有作品续写能力 | `EDITOR-5` 已完成；下一步 `FB-5` 高级校准，再评估 `FB-4`，TipTap 长期优化独立登记 | 实体引用安全重映射；批量改稿预览/快照/撤销；风格画像可解释 | **IN PROGRESS；EDITOR-5 COMPLETE（2026-07-25）** |
 | 7 | **IDEA-1 灵感与参考资料演化** | 让灵感和参考资料持续融合、更新、追溯 | `CM-1`、参考作品分析后续能力；与风格画像共享底座 | 增量输入、差异预览、版本和来源可追溯；参考分析统一走宪法路径 | **DEPENDENT；GOV-1** |
 | 8 | **AGENT-1 对话副驾与 Agent 团队** | 用对话组合调用现有能力，不重写面板业务 | Phase 27.1-a~e、27.2b、整理本章 Agent、一致性 Agent、per-role 模型和预算 | Tool Registry 薄封装；前台写入必确认；后台默认只读；Canon 负责校验 | **DEPENDENT；CANON + PIPE** |
 | 9 | **SIM-1 世界模拟与互动叙事** | 通向跑团、文字游戏、陪伴角色和大型游戏运行时 | Phase 27.3 NPC 演进、世界时间线、位置/状态/能力/生命周期、角色碰撞 | 创作 Canon 与运行时状态分层；模拟不得污染作者原稿 | **LONG-TERM；WORLD + CANON + AGENT** |
@@ -130,6 +130,14 @@
 - 轻量、中度、深度三档方案支持逐项前后对照；作者二次确认后只经 `adopt(target=outlineNodes)` 写未来标题/摘要，应用前会重读项目并拒绝过期预览。
 - `R-CF12-character-revision` 与 Chromium 真实流程验证了已写正文保护、未来 patch、流式兼容 API 和刷新持久化；完整边界见 `CHARACTER-REVISION-WORKFLOW-DESIGN.md`。
 
+### AUTHOR-1 当前阶段证据
+
+- `EDITOR-5` 在既有全文查找替换中新增“智能实体改名”：只对角色、重要地点和词条三类稳定实体开放，物品因缺少独立稳定身份继续阻断。
+- 预览同时公开 canonical 正文命中、稳定 FK 冗余名同步、名称冲突和自由文本人工复核；跨类型旧名冲突或新名已被实体/物品占用时不允许执行。
+- 执行前创建完整项目快照；主档、正文、状态卡、事实显示名、角色认知、修炼进度和物品持有人在单一事务中提交，失败整批回滚。
+- 本次会话撤销覆盖相同多表 patch，并在任何记录发生后续修改时拒绝局部恢复；历史角色驱动方案与证据引文不被盲改。
+- `R-EDITOR5-entity-rename` 覆盖三类实体、富文本、同名反例、快照/事务失败、过期预览、原子撤销与新名称状态召回；真实浏览器项目验证 2 处正文与主档同步改名及完整撤销。完整边界见 `ENTITY-RENAME-DESIGN.md`。
+
 ## 四、原任务唯一归属
 
 | 原任务 | 主归属 | 迁移规则 |
@@ -160,6 +168,7 @@
 | 透明生成 | [`TRANSPARENT-GENERATION-PIPELINE.md`](../TRANSPARENT-GENERATION-PIPELINE.md) |
 | 世界知识 | [`CODEX-REDESIGN.md`](../CODEX-REDESIGN.md)、[`WORLD-RULES-MULTIWORLD-DESIGN.md`](../WORLD-RULES-MULTIWORLD-DESIGN.md) |
 | 动态故事规划 | [`CHARACTER-DRIVEN-WORKSPACE-DESIGN.md`](../CHARACTER-DRIVEN-WORKSPACE-DESIGN.md)、[`CHARACTER-REVISION-WORKFLOW-DESIGN.md`](../CHARACTER-REVISION-WORKFLOW-DESIGN.md) |
+| 作者工具 | [`ENTITY-RENAME-DESIGN.md`](../ENTITY-RENAME-DESIGN.md) |
 | Agent | [`AI-COPILOT-DESIGN.md`](../AI-COPILOT-DESIGN.md) |
 
 设计文档提供方案细节，`README.md` 提供当前归属和施工顺序；两者冲突时，先停止开发并回到 `CLAUDE.md`、`MASTER-BLUEPRINT.md` 和本路线图裁决。

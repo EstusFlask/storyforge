@@ -156,7 +156,7 @@ AI 输出经 `adopt({ target, data })` 写回,只有这里登记的字段可写(
 
 | ID | 目标表 | 领域策略注册表 | 唯一入口 | 复审日期 |
 |---|---|---|---|---|
-| `fact-ledger` | `temporalFacts` | `FACT_PREDICATE_REGISTRY` | `src/lib/fact-ledger/fact-ledger.ts`<br/>`src/lib/fact-ledger/human-readable-io.ts`<br/>`src/lib/fact-ledger/lifecycle.ts`<br/>`src/lib/fact-ledger/setting-assertions.ts`<br/>`src/lib/consistency/impact-analysis.ts`<br/>`src/lib/cultivation/lifecycle.ts` | 2027-01-01 |
+| `fact-ledger` | `temporalFacts` | `FACT_PREDICATE_REGISTRY` | `src/lib/fact-ledger/fact-ledger.ts`<br/>`src/lib/fact-ledger/human-readable-io.ts`<br/>`src/lib/fact-ledger/lifecycle.ts`<br/>`src/lib/fact-ledger/setting-assertions.ts`<br/>`src/lib/consistency/impact-analysis.ts`<br/>`src/lib/cultivation/lifecycle.ts`<br/>`src/lib/editor/entity-rename.ts` | 2027-01-01 |
 | `character-merge-lifecycle` | `characters` | `PROJECT_TABLES refs + remapCharacterReferences + cultivation DAG validator` | `src/lib/import/character-merge.ts`<br/>`src/lib/codex/references.ts`<br/>`src/lib/cultivation/lifecycle.ts`<br/>`src/lib/cultivation/progress-lifecycle.ts` | 2027-01-01 |
 | `knowledge-ledger` | `knowledgeLedger` | `KNOWLEDGE_ACTIONS + ADOPTION_SCHEMAS + PROJECT_TABLES` | `src/lib/knowledge-ledger/knowledge-ledger.ts`<br/>`src/lib/knowledge-ledger/lifecycle.ts` | 2027-01-01 |
 | `storyline-progress-lifecycle` | `storylineProgress` | `ADOPTION_SCHEMAS + PROJECT_TABLES refs` | `src/lib/storyline/lifecycle.ts` | 2027-01-01 |
@@ -237,4 +237,4 @@ AI 输出经 `adopt({ target, data })` 写回,只有这里登记的字段可写(
 
 ---
 
-生成时间基准:commit `3c1d1e8`
+生成时间基准:commit `d78f87a`

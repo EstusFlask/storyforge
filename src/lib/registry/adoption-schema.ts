@@ -222,6 +222,7 @@ export const ADOPTION_EXTENSIONS: readonly AdoptionExtensionSpec[] = Object.free
       'src/lib/fact-ledger/setting-assertions.ts',
       'src/lib/consistency/impact-analysis.ts',
       'src/lib/cultivation/lifecycle.ts',
+      'src/lib/editor/entity-rename.ts',
     ],
     policyRegistry: 'FACT_PREDICATE_REGISTRY',
     reason: '事实候选需要谓词、时序、证据、确认与 supersede 领域约束；它是 adopt 的受控领域扩展，不是第二套通用写回层。',
