@@ -490,6 +490,107 @@ pace 只能取 slow / medium / fast / climax 四个值之一；estimatedWords �
     isActive: true,
   },
 
+  // ── STORY-1 / CF-12：角色变更影响分析 ───────────────────────────────
+  {
+    scope: 'system',
+    moduleKey: 'plot.character-revision',
+    promptType: 'analyze',
+    name: '内置-角色变更影响分析',
+    description: '分析创作中途的角色变化，把已写区、过渡区和未写区分开，并输出可审查的大纲 patch。',
+    systemPrompt: `你是一位长篇小说连续性编辑和结构策划师。你的任务是分析“创作中途发生的角色变化”，先保护已经写成的正文，再为未写大纲提出修订方案。
+
+硬性安全规则：
+1. 只输出纯 JSON 对象，不要 markdown 或解释文字。
+2. 已写正文区只能列冲突、证据、人工修改建议和补伏笔建议；绝不能为该区输出 patches。
+3. 近期过渡区只允许自然切入和小修；未写规划区才允许结构性调整。
+4. 用户标记的锚点不能删除、反转或改名；只能调整参与角色、铺垫和动机。
+5. 事实判断必须引用上下文里的真实证据。没有证据就明确写“证据不足”，不得编造引文。
+6. 不得要求自动覆盖正文。mainPlotSuggestion 只能是建议，不是写回命令。
+7. patches 只允许引用输入中明确列出的 outlineNodeId，只能给 proposedTitle / proposedSummary；不能生成数据库 ID。
+8. 必须输出 light / balanced / deep 三档方案。
+
+输出结构：
+{
+  "changeSummary": "角色变化摘要",
+  "scopeSummary": "保护区、过渡区、未写区摘要",
+  "affectedWrittenChapters": [
+    {
+      "ordinal": 12,
+      "title": "章节名",
+      "severity": "low|medium|high|critical",
+      "reason": "为什么受影响",
+      "evidenceQuotes": ["上下文逐字证据"],
+      "recommendation": "protect|manual-review|optional-draft"
+    }
+  ],
+  "immutableFacts": [
+    {
+      "statement": "不可破坏的事实",
+      "sourceChapterOrdinal": 8,
+      "evidenceQuote": "逐字证据；没有则留空"
+    }
+  ],
+  "conflicts": [
+    {
+      "severity": "low|medium|high|critical",
+      "source": "正文/大纲/事实/设定",
+      "title": "冲突标题",
+      "reason": "冲突说明",
+      "evidenceQuote": "证据；没有则留空"
+    }
+  ],
+  "foreshadowSuggestions": [
+    {
+      "chapterOrdinal": 20,
+      "title": "建议位置",
+      "suggestion": "补伏笔或切入方式"
+    }
+  ],
+  "mainPlotSuggestion": "是否需要修订主线以及建议草案；不需要则写明不需要",
+  "options": [
+    {
+      "id": "light",
+      "intensity": "light",
+      "label": "轻量融入",
+      "summary": "方案摘要",
+      "risks": ["风险"],
+      "patches": [
+        {
+          "outlineNodeId": 123,
+          "proposedTitle": "保留原名或建议的新名",
+          "proposedSummary": "完整的新摘要",
+          "reason": "为什么调整"
+        }
+      ]
+    },
+    {
+      "id": "balanced",
+      "intensity": "balanced",
+      "label": "中度改线",
+      "summary": "方案摘要",
+      "risks": ["风险"],
+      "patches": []
+    },
+    {
+      "id": "deep",
+      "intensity": "deep",
+      "label": "深度重构",
+      "summary": "方案摘要",
+      "risks": ["风险"],
+      "patches": []
+    }
+  ],
+  "warnings": ["证据或数据不足时的诚实说明"]
+}`,
+    userPromptTemplate: `请分析以下角色变化，并给出作者可审查的修订计划。
+
+{{revisionContext}}
+
+再次确认：已写正文区不输出 patch；三档方案都必须存在；patch 只能指向输入列出的未写 outlineNodeId。`,
+    variables: ['revisionContext'],
+    isActive: true,
+  },
+
   // ── Phase 26.4：灵感反推 ───────────────────────────────────────────
   {
     scope: 'system',

@@ -686,3 +686,158 @@ test('角色驱动方案可持久化、复制版本并显式设为后续 AI 参�
   await expect(hint).toHaveValue('必须服务既有主线')
   await expect(page.getByRole('button', { name: '后续 AI 正在参考', exact: true })).toBeVisible()
 })
+
+test('角色中途重规划保护已写正文，只把审查后的 patch 应用到未来大纲', async ({ page }) => {
+  await page.addInitScript(() => {
+    localStorage.setItem('storyforge-ai-config', JSON.stringify({
+      provider: 'ollama',
+      apiKey: '',
+      model: 'character-revision-e2e',
+      baseUrl: 'http://localhost:1234/v1',
+      temperature: 0,
+      maxTokens: 0,
+    }))
+  })
+  await page.route('http://localhost:1234/v1/chat/completions', async route => {
+    const request = route.request().postDataJSON() as {
+      messages?: Array<{ role: string; content: string }>
+    }
+    const source = request.messages?.find(message => message.role === 'user')?.content ?? ''
+    expect(source).toContain('第 1-1 章')
+    expect(source).toContain('已写保护区')
+    expect(source).toContain('旧线索浮现')
+    expect(source).toContain('终局会师')
+    const nodeIds = [...source.matchAll(/\[node:(\d+)\]/g)].map(match => Number(match[1]))
+    expect(nodeIds).toHaveLength(3)
+    const [writtenNodeId, futureNodeId, endingNodeId] = nodeIds
+    const content = JSON.stringify({
+      changeSummary: '让新角色在既有正文之后加入归途线。',
+      scopeSummary: '第1章保持不动，第2章自然切入，第3章承接终局。',
+      affectedWrittenChapters: [{
+        ordinal: 1,
+        title: '第1章',
+        severity: 'medium',
+        reason: '正文已成立，只能人工复核，不能自动覆盖。',
+        evidenceQuotes: ['旧城门后的承诺已经写入正文'],
+        recommendation: 'protect',
+      }],
+      immutableFacts: [{
+        statement: '主角已经推开旧城门。',
+        sourceChapterOrdinal: 1,
+        evidenceQuote: '主角推开旧城门并立下承诺',
+      }],
+      conflicts: [],
+      foreshadowSuggestions: [{
+        chapterOrdinal: 2,
+        title: '旧线索浮现',
+        suggestion: '让新角色以线索提供者身份出现。',
+      }],
+      mainPlotSuggestion: '主线目标保持不变，只调整参与角色。',
+      options: [
+        {
+          id: 'light',
+          intensity: 'light',
+          label: '轻量融入',
+          summary: '只补充未来章摘要。',
+          risks: [],
+          patches: [{
+            outlineNodeId: writtenNodeId,
+            proposedTitle: '被拒绝的正文改名',
+            proposedSummary: '不得写回。',
+            reason: '用于验证保护边界。',
+          }],
+        },
+        {
+          id: 'balanced',
+          intensity: 'balanced',
+          label: '中度改线',
+          summary: '从第二章开始重排角色切入。',
+          risks: ['需要复核终局衔接'],
+          patches: [{
+            outlineNodeId: futureNodeId,
+            proposedTitle: '归途重排',
+            proposedSummary: '新角色带来旧案证据，与主角共同踏上归途。',
+            reason: '在已写正文之后自然切入。',
+          }],
+        },
+        {
+          id: 'deep',
+          intensity: 'deep',
+          label: '深度重构',
+          summary: '连同终局铺垫一起调整。',
+          risks: ['调整范围较大'],
+          patches: [{
+            outlineNodeId: endingNodeId,
+            proposedTitle: '终局会师',
+            proposedSummary: '多方角色在终局前完成会师。',
+            reason: '保留终局锚点标题，只调整摘要。',
+          }],
+        },
+      ],
+      warnings: [],
+    })
+    await route.fulfill({
+      status: 200,
+      contentType: 'text/event-stream',
+      body: [
+        `data: ${JSON.stringify({ choices: [{ delta: { content } }] })}`,
+        `data: ${JSON.stringify({
+          choices: [{ delta: {} }],
+          usage: { prompt_tokens: 240, completion_tokens: 120, total_tokens: 360 },
+        })}`,
+        'data: [DONE]',
+        '',
+      ].join('\n\n'),
+    })
+  })
+
+  await createBookWithSavedChapter(
+    page,
+    'E2E 角色中途重规划',
+    '主角推开旧城门并立下承诺，旧城门后的承诺已经写入正文。',
+  )
+  await page.getByRole('button', { name: '大纲', exact: true }).click()
+  await page.getByRole('button', { name: '添加章节', exact: true }).click()
+  const secondTitle = page.locator('input[value="第2章"]')
+  await expect(secondTitle).toBeVisible()
+  await secondTitle.fill('旧线索浮现')
+  const renamedSecondTitle = page.locator('input[value="旧线索浮现"]')
+  await renamedSecondTitle.blur()
+  await renamedSecondTitle.locator('xpath=..').getByPlaceholder('章节摘要（可编辑，失焦自动保存）')
+    .fill('主角发现旧案仍有缺口。')
+  await renamedSecondTitle.locator('xpath=..').getByPlaceholder('章节摘要（可编辑，失焦自动保存）').blur()
+
+  await page.getByRole('button', { name: '添加章节', exact: true }).click()
+  const thirdTitle = page.locator('input[value="第3章"]')
+  await expect(thirdTitle).toBeVisible()
+  await thirdTitle.fill('终局会师')
+  const renamedThirdTitle = page.locator('input[value="终局会师"]')
+  await renamedThirdTitle.blur()
+  await renamedThirdTitle.locator('xpath=..').getByPlaceholder('章节摘要（可编辑，失焦自动保存）')
+    .fill('各方在终局前会师。')
+  await renamedThirdTitle.locator('xpath=..').getByPlaceholder('章节摘要（可编辑，失焦自动保存）').blur()
+
+  await openSidebarLeaf(page, '创作区', '角色驱动')
+  await page.getByRole('button', { name: '中途重规划', exact: true }).click()
+  await expect(page.getByRole('heading', { name: '角色变更影响分析', exact: true })).toBeVisible()
+  await expect(page.getByText('已有正文但缺少章节记忆；系统会使用有限证据，结论需重点人工复核。')).toBeVisible()
+  await page.getByPlaceholder('写清新旧弧光差异、关键转折和与主线的关系...')
+    .fill('新增一名掌握旧案证据的角色，但不得推翻第一章已经成立的承诺。')
+  await page.getByRole('button', { name: '分析影响并生成三档方案', exact: true }).click()
+
+  await expect(page.getByRole('heading', { name: '影响分析结果', exact: true })).toBeVisible()
+  await expect(page.getByText('已拒绝第 1 章 patch：属于已写保护区', { exact: false })).toBeVisible()
+  await expect(page.getByRole('button', { name: '采纳', exact: true })).toHaveCount(0)
+  await expect(page.getByText('归途重排', { exact: false }).first()).toBeVisible()
+  await page.getByRole('button', { name: '应用选中 patch 到未写大纲', exact: true }).click()
+  await page.getByRole('button', { name: '应用到大纲', exact: true }).click()
+  await expect(page.getByText('已应用 1 项', { exact: true })).toBeVisible()
+
+  await page.getByRole('button', { name: '大纲', exact: true }).click()
+  await expect(page.locator('input[value="第1章"]')).toBeVisible()
+  await expect(page.locator('input[value="归途重排"]')).toBeVisible()
+  await page.reload()
+  await page.getByRole('button', { name: '大纲', exact: true }).click()
+  await expect(page.locator('input[value="第1章"]')).toBeVisible()
+  await expect(page.locator('input[value="归途重排"]')).toBeVisible()
+})

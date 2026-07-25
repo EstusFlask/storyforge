@@ -30,6 +30,7 @@ import {
 } from '../../lib/types'
 import { characterAxesLabel } from '../../lib/character/character-axes'
 import { adoptCharacterDrivenVolumes } from '../../lib/story-planning/character-driven-adoption'
+import CharacterRevisionPanel from './CharacterRevisionPanel'
 
 interface Props {
   project: Project
@@ -69,6 +70,7 @@ export default function CharacterDrivenPlotPanel({ project }: Props) {
   const dialog = useDialog()
   const generationPlanId = useRef<number | null>(null)
 
+  const [mode, setMode] = useState<'planning' | 'revision'>('planning')
   const [arcs, setArcs] = useState<CharacterArcInput[]>([])
   const [userHint, setUserHint] = useState('')
   const [parsedVolumes, setParsedVolumes] = useState<PlotVolume[] | null>(null)
@@ -286,6 +288,16 @@ export default function CharacterDrivenPlotPanel({ project }: Props) {
     await deletePlan(currentPlan.id)
   }
 
+  if (mode === 'revision') {
+    return (
+      <CharacterRevisionPanel
+        project={project}
+        plan={currentPlan}
+        onSwitchToPlanning={() => setMode('planning')}
+      />
+    )
+  }
+
   if (!currentPlan) {
     return (
       <div className="h-full flex flex-col overflow-hidden">
@@ -293,6 +305,12 @@ export default function CharacterDrivenPlotPanel({ project }: Props) {
           <Users className="w-5 h-5 text-accent" />
           <h2 className="text-lg font-semibold text-text-primary">角色驱动剧情</h2>
           <span className="text-xs text-text-muted ml-2">持久化角色弧光设计工作区</span>
+          <div className="ml-auto flex rounded-lg border border-border bg-bg-base p-0.5">
+            <button className="px-3 py-1.5 text-xs bg-accent text-white rounded">开书规划</button>
+            <button onClick={() => setMode('revision')} className="px-3 py-1.5 text-xs text-text-muted rounded">
+              中途重规划
+            </button>
+          </div>
         </div>
         <div className="flex-1 grid place-items-center p-6">
           <div className="max-w-md text-center border border-dashed border-border rounded-xl p-8">
@@ -322,6 +340,12 @@ export default function CharacterDrivenPlotPanel({ project }: Props) {
         <Users className="w-5 h-5 text-accent" />
         <h2 className="text-lg font-semibold text-text-primary">角色驱动剧情</h2>
         <span className="text-xs text-text-muted ml-2">持久化角色弧光设计工作区</span>
+        <div className="ml-auto flex rounded-lg border border-border bg-bg-base p-0.5">
+          <button className="px-3 py-1.5 text-xs bg-accent text-white rounded">开书规划</button>
+          <button onClick={() => setMode('revision')} className="px-3 py-1.5 text-xs text-text-muted rounded">
+            中途重规划
+          </button>
+        </div>
       </div>
 
       <div className="flex flex-wrap items-center gap-2 px-4 py-2 border-b border-border bg-bg-base">

@@ -217,12 +217,16 @@
 - 角色改名时使用当前名并提示方案快照名；角色删除时软 ID 置空、文本快照保留，方案不级联删除。
 - DB v44、`PROJECT_TABLES`、必需表、项目删除、便携导出导入均已收口；active、父版本和弧光角色引用会在导入后重映射。
 - 勾选生成卷后只经统一 `adopt(target=outlineNodes)` 写入卷/章，并保留 `【角色弧光推进】`；重复采纳幂等。
+- CF-12 在同一入口提供“开书规划 / 中途重规划”：规范章序和真实正文划分已写保护、近期过渡和未写规划区，保护值不能低于最后已写章。
+- 影响分析复用 active 方案、角色、Canon、故事线、现有大纲和章节连续性等登记上下文；章节记忆不足时明确降级为有限证据分析。
+- AI 必须给轻量、中度、深度三档方案；本地拒绝未知/重复节点、正文或保护区 patch 和锚点改名，作者可逐项预览后确认。
+- 应用前重读项目并拒绝过期预览；合法 patch 只经 `adopt(target=outlineNodes)` 写未来标题/摘要，空 Chapter 仅同步标题，正文和主线不写。
 
 ### 当前边界 / 尚未完成
 
-- CF-12 尚未完成：已写到中途后新增或修改角色弧光，还没有“已写区保护 → 影响分析 → 作者选择 → 未写区局部重规划”的正式出口。
-- 当前方案激活不会自动修改 `storyCore.mainPlot`、既有大纲或正文；这是刻意的数据安全边界。
-- 不应另造 `StorylineProgress` 之外的第二套线索概念；CF-12 必须复用 active 方案、Canon、故事线与现有大纲。
+- 当前方案激活和 CF-12 都不会自动修改 `storyCore.mainPlot` 或既有正文；主线影响只生成只读建议，这是刻意的数据安全边界。
+- 第一版不保存独立修订计划历史，也不自动补写受影响正文；需要持久化修订审计或安全批量改稿时统一归 AUTHOR-1。
+- 证据质量受章节记忆和已确认 Canon 覆盖影响；缺失时界面会警告，不把大纲推断冒充正文事实。
 
 ### 代码与测试入口
 
@@ -230,8 +234,12 @@
 - `src/lib/types/character-driven-plan.ts`
 - `src/lib/story-planning/character-driven-adoption.ts`
 - `src/components/outline/CharacterDrivenPlotPanel.tsx`
+- `src/components/outline/CharacterRevisionPanel.tsx`
+- `src/lib/story-planning/character-revision.ts`
 - `tests/regression/R-CF9C-*.test.ts`
+- `tests/regression/R-CF12-character-revision.test.ts`
 - `docs/CHARACTER-DRIVEN-WORKSPACE-DESIGN.md`
+- `docs/CHARACTER-REVISION-WORKFLOW-DESIGN.md`
 
 ## AUTHOR-1 / IDEA-1 长篇编辑、风格与灵感
 

@@ -8,7 +8,7 @@
 
 ## 一、Prompt 模板清单（PromptModuleKey 事实源）
 
-共 59 个唯一 moduleKey，204 条内置模板定义。
+共 60 个唯一 moduleKey，205 条内置模板定义。
 
 | moduleKey | 模板数 | 代表名称 | 说明 | 读取变量 |
 |---|---:|---|---|---|
@@ -59,6 +59,7 @@
 | `import.merge-characters` | 1 | 内置-角色跨块合并 | 检查分块导出的角色清单，判断哪些是同一人（别名 / 尊称 / 昵称）应合并。 | `characterList` |
 | `relation.extract` | 1 | 内置-角色关系提取 | 从大纲摘要和章节正文中自动提取角色间的关系。 | `projectName` `characterList` `outlineSummary` `chapterContent` |
 | `plot.character-driven` | 1 | 内置-角色驱动剧情 | 根据角色初始状态与目标状态，AI 生成中间情节推演（卷/章大纲结构）。 | `projectName` `genres` `worldContext` `storyCore` `existingOutline` `characterArcs` `userHint` `worldRulesContext` |
+| `plot.character-revision` | 1 | 内置-角色变更影响分析 | 分析创作中途的角色变化，把已写区、过渡区和未写区分开，并输出可审查的大纲 patch。 | `revisionContext` |
 | `inspiration.reverse` | 1 | 内置-灵感反推 | 用户写碎片想法，AI 反向生成世界观草稿、故事核心、初始角色卡。 | `projectName` `genres` `inspiration` `userHint` |
 | `inspiration.reverse.multiworld` | 1 | 内置-多世界灵感反推 | 多世界题材：用户给出带有多个世界意图的灵感，AI 顺着思路反推故事主线 + 多个世界 + 角色。 | `projectName` `genres` `inspiration` `userHint` |
 | `world-group.suggest` | 1 | 内置-AI建议世界 | 诸天流/无限流等多世界题材，根据故事概念和已有世界建议新的世界组。 | `projectName` `genres` `concept` `existingWorlds` `userHint` |
@@ -167,7 +168,7 @@ AI 输出经 `adopt({ target, data })` 写回,只有这里登记的字段可写(
 
 ## 四、AI 调用点（消耗统计 category · 在哪触发)
 
-共 54 个 category。
+共 55 个 category。
 未分类调用: 0 个。动态 category 调用: 3 个。
 
 | category | 触发文件 |
@@ -199,7 +200,8 @@ AI 输出经 `adopt({ target, data })` 写回,只有这里登记的字段可写(
 | `inventory.extract` | `src/components/items/InventoryPanel.tsx:150` |
 | `location.extract` | `src/components/location/LocationPanel.tsx:106` |
 | `outline.chapter` | `src/lib/ai/batch-outline-runner.ts:123`<br/>`src/lib/outline/generation-node.ts:55` |
-| `outline.character-driven` | `src/components/outline/CharacterDrivenPlotPanel.tsx:196` |
+| `outline.character-driven` | `src/components/outline/CharacterDrivenPlotPanel.tsx:198` |
+| `outline.character-revision` | `src/components/outline/CharacterRevisionPanel.tsx:169` |
 | `outline.volume` | `src/lib/outline/generation-node.ts:51` |
 | `outline.workshop.collision` | `src/lib/outline/workshop.ts:448` |
 | `outline.workshop.motivation` | `src/lib/outline/workshop.ts:445` |
@@ -235,4 +237,4 @@ AI 输出经 `adopt({ target, data })` 写回,只有这里登记的字段可写(
 
 ---
 
-生成时间基准:commit `1c1987e`
+生成时间基准:commit `3c1d1e8`
