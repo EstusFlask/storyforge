@@ -37,6 +37,7 @@ const ANALYSIS_PREFIXES = [
 ]
 
 const REVIEW_PREFIXES = [
+  'agent.',
   'review.',
   'scene.verify',
   'history.consult',

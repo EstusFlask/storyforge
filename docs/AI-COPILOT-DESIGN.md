@@ -389,9 +389,11 @@ loop（受步数/Token 上限约束）:
 - 已定义 Tool 接口 + 注册表并实现全部 13 个只读工具
 - 已验证注册表读取、项目/世界隔离、有界搜索、总预算与零写入；当前为 headless 地基，尚未宣称 AI tool calling 已接通
 
-**Phase 27.1-b Agent 执行引擎 + 提供商适配**
-- AgentRunner 多步循环 + `client.ts` tools 注入 + 兼容/降级
-- 验证：拿"一致性检查"（纯只读 Agent）跑通整条 tool calling 链路，验证成本
+**Phase 27.1-b Agent 执行引擎 + 提供商适配（2026-07-25 已完成）**
+- AgentRunner 多步循环 + provider-neutral 严格 JSON 动作协议；协议与 transport 分离，
+  原生 `tool_calls` 保留为后续能力探测优化，不复制执行内核
+- 已用纯只读项目巡检跑通“模型 → 工具 → 证据 → 最终答复”，验证预算、取消、循环、
+  作用域、消息裁剪拒绝、消耗统计和内容表零写入
 
 **Phase 27.1-c 对话副驾 MVP（前台）**
 - 右侧对话栏 UI + 意图识别 + 确认卡片 + 面板同步
