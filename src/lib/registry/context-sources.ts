@@ -41,6 +41,12 @@ import {
 } from '../types/character-driven-plan'
 import type { ContextSource } from './types'
 import { countWords, htmlToPlainText } from '../utils/html'
+import {
+  formatStyleCalibrationFeedback,
+  formatStyleFewShotPairs,
+  parseStyleCalibrationFeedback,
+  parseStyleRevisionPairs,
+} from '../style/style-learning'
 
 async function readWorldview(projectId: number, worldGroupId?: number | null): Promise<Worldview | null> {
   const rows = await db.worldviews.where('projectId').equals(projectId).toArray()
@@ -82,7 +88,17 @@ async function readForeshadows(projectId: number, chapterId?: number | null): Pr
 async function readUserStyleProfile(projectId: number): Promise<string> {
   const profile = await db.userStyleProfiles.where('projectId').equals(projectId).first()
   if (!profile || !profile.enabled || !profile.profile.trim()) return ''
-  return `【作者文风偏好】\n请在本次写作中尽量贴合作者一贯的文风习惯:\n${profile.profile.trim()}`
+  const pairExamples = formatStyleFewShotPairs(parseStyleRevisionPairs(profile.revisionPairs))
+  const feedback = formatStyleCalibrationFeedback(
+    parseStyleCalibrationFeedback(profile.calibrationFeedback),
+  )
+  return [
+    '【作者文风偏好】',
+    '请在本次写作中贴合作者一贯的表达习惯，但不要照搬样本中的剧情、人物名、地点名或专有名词。',
+    profile.profile.trim(),
+    pairExamples ? `【作者改稿对照（仅学习改写方向）】\n${pairExamples}` : '',
+    feedback ? `【最近校准反馈】\n${feedback}` : '',
+  ].filter(Boolean).join('\n\n')
 }
 
 export async function readActiveCharacterDrivenPlanContext(projectId: number): Promise<string> {
@@ -856,7 +872,7 @@ export const CONTEXT_SOURCES: ContextSource[] = [
     label: '我的文风',
     scope: 'project',
     layer: 'L2',
-    budgetTokens: 700,
+    budgetTokens: 1800,
     read: input => readUserStyleProfile(input.projectId),
   },
   {

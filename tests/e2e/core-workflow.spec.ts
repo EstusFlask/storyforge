@@ -206,6 +206,74 @@ test('智能实体改名先预览，再原子同步正文与角色主档并可�
   ])
 })
 
+test('对照润色沉淀有界样本，并完成文风画像与互动校准闭环', async ({ page }) => {
+  await page.addInitScript(() => {
+    localStorage.setItem('storyforge-ai-config', JSON.stringify({
+      provider: 'ollama',
+      apiKey: '',
+      model: 'style-e2e',
+      baseUrl: 'http://localhost:1234/v1',
+      temperature: 0,
+      maxTokens: 0,
+      contextWindow: 100000,
+    }))
+  })
+  await page.route('http://localhost:1234/v1/chat/completions', async route => {
+    const body = route.request().postDataJSON() as {
+      messages?: Array<{ role: string; content: string }>
+    }
+    const system = body.messages?.find(message => message.role === 'system')?.content ?? ''
+    const content = system.includes('克制的文学改稿助手')
+      ? '他掠过长街，雨声在身后收紧。'
+      : '## 用词习惯\n- 偏爱克制动词\n## 句式与节奏\n- 短句推进\n## 对话风格\n- 少解释\n## 描写与画面\n- 以动作带景\n## 标志性表达\n- 收束干净\n## 倾向与禁忌\n- 避免冗余副词'
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        choices: [{ message: { content } }],
+        usage: { prompt_tokens: 120, completion_tokens: 40, total_tokens: 160 },
+      }),
+    })
+  })
+
+  await createBookWithSavedChapter(
+    page,
+    'E2E 文风高级校准',
+    '他非常快速地跑过长街，雨水不断落在他的肩上。',
+  )
+  await page.getByLabel('章节状态').selectOption('polished')
+  await page.getByRole('button', { name: '对照润色', exact: true }).click()
+  await expect(page.getByRole('region', { name: '对照润色' })).toBeVisible()
+  await page.locator('.tiptap-editor').last().fill('他掠过长街，雨水敲肩。')
+  await page.getByRole('button', { name: '创建快照并保存', exact: true }).click()
+  await expect(page.getByRole('region', { name: '对照润色' })).toHaveCount(0)
+
+  await sidebarButton(page, '文风学习').click()
+  await expect(page.getByRole('heading', { name: '文风学习', exact: true })).toBeVisible()
+  await expect(page.getByText('已保存 1 / 8 组', { exact: false })).toBeVisible()
+  await expect(page.getByText('他非常快速地跑过长街', { exact: false })).toBeVisible()
+  await page.getByRole('button', { name: '一键学习我的文风', exact: true }).click()
+  await expect(page.getByText('我的文风画像', { exact: true })).toBeVisible()
+  await expect(page.locator('textarea[placeholder*="文风画像"]')).toContainText('偏爱克制动词')
+  await expect(page.getByRole('button', { name: /注入中/ })).toBeVisible()
+
+  await page.getByPlaceholder('粘贴一段待校准短文（最多 1600 字符）')
+    .fill('他很快地跑过长街，身后是连绵的雨。')
+  await page.getByRole('button', { name: '生成校准稿', exact: true }).click()
+  const result = page.locator('#style-calibration-result')
+  await expect(result).toHaveValue('他掠过长街，雨声在身后收紧。')
+  await result.fill('他掠过长街，雨声在身后收紧。')
+  await page.getByPlaceholder('可选：具体哪里像 / 哪里还不对').fill('动作更克制，收束更干净')
+  await page.getByRole('button', { name: '接近我的风格', exact: true }).click()
+  await page.getByRole('button', { name: '保存为改稿样本', exact: true }).click()
+  await expect(page.getByText('已保存 2 / 8 组', { exact: false })).toBeVisible()
+
+  await page.reload()
+  await sidebarButton(page, '文风学习').click()
+  await expect(page.getByText('已保存 2 / 8 组', { exact: false })).toBeVisible()
+  await expect(page.locator('textarea[placeholder*="文风画像"]')).toContainText('偏爱克制动词')
+})
+
 test('完整 JSON 导出后可重新导入且正文不丢', async ({ page }) => {
   const projectName = 'E2E JSON 往返'
   const chapterText = '这段正文必须跟随完整 JSON 备份恢复。'

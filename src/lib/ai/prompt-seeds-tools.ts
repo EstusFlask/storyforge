@@ -1060,16 +1060,57 @@ type 含义：traversal=穿越目标，instance=副本，parallel=平行世界�
 - 每个小节用 2-5 条要点(bullet),要点要具体到能直接照着写,避免"语言流畅""节奏不错"这类空话。
 - 如果样本不足以判断某一项,如实写"样本中体现不明显",不要编造。
 - 直接输出 Markdown 画像正文,不要用代码块包裹整体。`,
-    userPromptTemplate: `以下是作者已定稿/润色的章节样本(共 {{sampleCount}} 章、约 {{sampleWords}} 字),请据此提炼这位作者的个人文风画像。
+    userPromptTemplate: `以下是作者已定稿/润色的章节样本与改稿对照，请据此提炼这位作者的个人文风画像。改稿对照反映作者主动修改的方向，判断优先级高于未经对照的章节样本。
 
+{{#if samples}}
 ═══ 章节样本 ═══
 {{samples}}
+（共 {{sampleCount}} 章、约 {{sampleWords}} 字）
+{{/if}}
+{{#if revisionPairs}}
+═══ 作者改稿对照 ═══
+{{revisionPairs}}
+只学习改前到改后的表达变化，不得把样本剧情、人物名或专有名词写进画像。
+{{/if}}
+{{#if calibrationFeedback}}
+═══ 最近互动校准反馈 ═══
+{{calibrationFeedback}}
+{{/if}}
 {{#if userHint}}
 ═══ 作者补充说明 ═══
 {{userHint}}
 {{/if}}
 请输出该作者的文风画像(按规定的六个小节)。`,
-    variables: ['sampleCount', 'sampleWords', 'samples', 'userHint'],
+    variables: ['sampleCount', 'sampleWords', 'samples', 'revisionPairs', 'calibrationFeedback', 'userHint'],
+    isActive: true,
+  },
+  {
+    scope: 'system',
+    moduleKey: 'style.calibrate',
+    promptType: 'generate',
+    name: '内置-文风互动校准',
+    description: '按现有文风画像和作者认可的改稿对照重写一段短文，供作者比较、反馈并沉淀新样本。',
+    systemPrompt: `你是一位克制的文学改稿助手。请把作者提供的短文改写得更接近其个人文风。
+
+硬性规则:
+1. 保留原文事实、人物关系、事件顺序、视角和信息量，不续写，不引入新设定。
+2. 文风画像决定总体方向；作者改稿对照决定具体修改手法；最近反馈用于纠偏。
+3. 改稿对照只可学习句式、节奏、用词和描写手法，不得复制其中的剧情、人物名、地点名或专有名词。
+4. 只输出改写后的正文，不解释、不加标题、不使用 Markdown 代码块。`,
+    userPromptTemplate: `═══ 当前文风画像 ═══
+{{profile}}
+
+{{#if revisionPairs}}═══ 作者改稿对照 ═══
+{{revisionPairs}}
+
+{{/if}}{{#if calibrationFeedback}}═══ 最近互动校准反馈 ═══
+{{calibrationFeedback}}
+
+{{/if}}═══ 待校准短文 ═══
+{{sourceText}}
+
+请在不改变事实含义的前提下重写。`,
+    variables: ['profile', 'revisionPairs', 'calibrationFeedback', 'sourceText'],
     isActive: true,
   },
 

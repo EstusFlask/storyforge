@@ -42,6 +42,7 @@ describe('R-CF20260702-10 · task classification and resolution', () => {
     ['import.parse-chunk', 'extraction'],
     ['reference.analysis', 'analysis'],
     ['style.learn', 'analysis'],
+    ['style.calibrate', 'creation'],
     ['review.quality', 'review'],
     ['chapter.deai', 'review'],
     ['scene.verify', 'review'],

@@ -75,6 +75,8 @@ describe('R-EDITOR3 · compare polish workflow', () => {
     expect(panel).toContain('value={draftHtml}')
     expect(panel).toContain('createSnapshot')
     expect(panel).toContain('updateChapter')
+    expect(panel).toContain('captureRevisionPair')
+    expect(panel).toContain('失败不得回滚已经完成的章节保存')
     expect(chapterEditor).toContain('saveDisabled={compareSourceHtml != null}')
     expect(chapterEditor).toContain('saving={manualSaving}')
     expect(editorHeader).toContain('disabled={saveDisabled || saving}')

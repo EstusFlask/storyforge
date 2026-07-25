@@ -60,6 +60,7 @@ const CREATION_PREFIXES = [
   'technology',
   'emotion.beat',
   'inspiration.',
+  'style.calibrate',
 ]
 
 function matchesPrefix(category: string, prefixes: readonly string[]): boolean {

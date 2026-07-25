@@ -86,6 +86,7 @@ export type PromptModuleKey =
   | 'history.storm'
   // —— FB-5 自适应文风学习 ——
   | 'style.learn'
+  | 'style.calibrate'
 
 export type PromptProjectField =
   | 'name'

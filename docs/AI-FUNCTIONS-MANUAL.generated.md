@@ -8,7 +8,7 @@
 
 ## 一、Prompt 模板清单（PromptModuleKey 事实源）
 
-共 60 个唯一 moduleKey，205 条内置模板定义。
+共 61 个唯一 moduleKey，206 条内置模板定义。
 
 | moduleKey | 模板数 | 代表名称 | 说明 | 读取变量 |
 |---|---:|---|---|---|
@@ -71,7 +71,8 @@
 | `scene.verify` | 1 | 内置-场景考证 | 用户描述当前场景，AI 结合世界观/历史年表/世界规则给出符合背景的细节、时代错乱警示与情节灵感。 | `worldContext` `historyContext` `worldRulesContext` `scene` `sceneEra` `sceneLocation` |
 | `history.consult` | 1 | 内置-历史考据 agent | 历史年表条目的考据 agent。挑剔但合作，绝不顺着作者的错误假设编造细节；尊重作者已声明的艺术改造/架空范围。 | `itemMeta` `finalText` `conceptNote` `consultPrompt` `worldContext` |
 | `history.storm` | 1 | 内置-头脑风暴 agent | 历史年表条目的头脑风暴 agent。围绕作者已设定的方向发散可写素材，尊重作者声明的艺术改造范围。 | `itemMeta` `finalText` `conceptNote` `stormPrompt` `worldContext` |
-| `style.learn` | 1 | 内置-文风学习 | 从用户已定稿/润色的章节中,总结出其个人写作文风画像,供后续章节生成参考。 | `sampleCount` `sampleWords` `samples` `userHint` |
+| `style.learn` | 1 | 内置-文风学习 | 从用户已定稿/润色的章节中,总结出其个人写作文风画像,供后续章节生成参考。 | `sampleCount` `sampleWords` `samples` `revisionPairs` `calibrationFeedback` `userHint` |
+| `style.calibrate` | 1 | 内置-文风互动校准 | 按现有文风画像和作者认可的改稿对照重写一段短文，供作者比较、反馈并沉淀新样本。 | `profile` `revisionPairs` `calibrationFeedback` `sourceText` |
 
 ## 二、上下文源清单（CONTEXT_SOURCES · AI 读什么）
 
@@ -115,7 +116,7 @@
 | `storyTimeline` | 故事年表 | project | L2 | 2600 |
 | `characterRelations` | 角色关系 | project | L2 | 2200 |
 | `references` | 引用手法 | project | L3 | 2000 |
-| `userStyleProfile` | 我的文风 | project | L2 | 700 |
+| `userStyleProfile` | 我的文风 | project | L2 | 1800 |
 | `characterFacts` | 该角色的剧情事实 | project | L1 | 1500 |
 | `characterPassages` | 该角色的正文表现 | project | L1 | 2500 |
 
@@ -168,7 +169,7 @@ AI 输出经 `adopt({ target, data })` 写回,只有这里登记的字段可写(
 
 ## 四、AI 调用点（消耗统计 category · 在哪触发)
 
-共 55 个 category。
+共 56 个 category。
 未分类调用: 0 个。动态 category 调用: 3 个。
 
 | category | 触发文件 |
@@ -222,7 +223,8 @@ AI 输出经 `adopt({ target, data })` 写回,只有这里登记的字段可写(
 | `story.generate` | `src/components/worldview/StoryCorePanel.tsx:200` |
 | `story.timeline` | `src/components/timeline/StoryTimelinePanel.tsx:85` |
 | `storyline-progress.map` | `src/components/outline/StorylineProgressPanel.tsx:76` |
-| `style.learn` | `src/components/style/StyleLearningPanel.tsx:79` |
+| `style.calibrate` | `src/components/style/StyleCalibrationPanel.tsx:63` |
+| `style.learn` | `src/components/style/StyleLearningPanel.tsx:125` |
 | `world-group.expand` | `src/components/world-group/WorldGroupDetail.tsx:98` |
 | `world-group.suggest` | `src/components/world-group/WorldGroupOverview.tsx:57` |
 | `worldview.dimension` | `src/components/worldview/WorldviewHumanityPanel.tsx:352`<br/>`src/components/worldview/WorldviewNaturalPanel.tsx:284`<br/>`src/components/worldview/WorldviewOriginPanel.tsx:262` |
@@ -237,4 +239,4 @@ AI 输出经 `adopt({ target, data })` 写回,只有这里登记的字段可写(
 
 ---
 
-生成时间基准:commit `d78f87a`
+生成时间基准:commit `9fa39c1`
