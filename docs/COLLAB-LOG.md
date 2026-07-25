@@ -1979,3 +1979,36 @@ Chromium 13/13 包含真实页面“填写世界尺寸/山川关系 → 兼容 A
 
 👉 WORLD-1 已完整收口；严格路线下一单位为 STORY-1，先冻结角色变更影响范围、
 作者选择、目标章节/故事线重规划和不得静默覆盖既有正文的事务边界。
+
+### [2026-07-25] Codex · REPORT · AGENT-1 Phase 27.1-b/c / `feat/world-1-model`
+
+Phase 27.1-b 先交付受预算约束的只读 `AgentRunner`：provider-neutral 严格 JSON 动作
+协议与模型 transport 分离，默认最多 8 轮、8 个工具、48K 模型 token 和 24K 工具结果，
+并对协议修正、重复调用、循环、异常 usage、上下文裁剪和取消设置代码硬停止。真实项目
+用当前已配置提供商在 2 轮内完成 2 个正式只读工具和最终答复，只有标准
+`aiUsageLog` 增长，全部项目内容表零变化。
+
+Phase 27.1-c 只交付一个不夸大的 ChatCopilot 闭环：工作区右栏显示当前项目/世界，
+`read_project_status + read_worldview` 经正式注册表装配上下文，复用
+`worldview.dimension` 生成“世界来源”候选。候选留在内存并允许作者编辑；新增
+`adoptGenerationNodeOutput()` 对作者眼前文本重新执行 gate 后直接采纳，不在确认瞬间
+再次调用模型。空、过短、过长、无变化、作用域缺失、来源过期和注册表异常均阻断。
+写回只经 `adopt(worldviews.worldOrigin)`，成功后重载同一个 worldview store。
+
+真实 Chromium 项目先生成并拒绝一份候选，`worldviews` 仍为 0 行；第二次生成后把候选
+编辑为固定文本再采纳，usage 只在生成时从 8 增至 9，确认时保持 9，写回内容与可见文本
+逐字一致且世界来源面板即时同步。临时世界观行已按精确标记清理，内容表恢复原计数；
+真实生成产生的标准 usage 日志保留。800px 左右窗口的副驾改为覆盖式右栏，宽屏仍使用
+固定侧栏，避免挤碎主面板。
+
+完整验证：222 个 Vitest 文件 / 777 项测试全绿；coverage statements/lines 71.18%、
+branches 72.88%、functions 72.8%；51 required tables、AI Manual、architecture、
+476 个生产源码可达、roadmap、agent context、canon coverage、project metrics、ESLint、
+TypeScript、生产 build、bundle budget 与 `git diff --check` 全绿；Chromium E2E 18/18，
+其中 ChatCopilot 正式用例验证拒绝零写入、可见编辑精确采纳且采纳不追加模型调用。
+依赖门禁仍只被 React Router `GHSA-qwww-vcr4-c8h2` 的 2 个 high 公告阻塞；
+`npm audit fix --force` 会破坏性降级 `react-router-dom@7.11.0`，未执行。
+
+👉 Phase 27.1-a/b/c 已完成。AGENT-1 仍没有泛化意图识别、其它领域写入工具、聊天持久化、
+多 Agent、后台 Agent 或 NPC 演进；下一阶段进入 27.1-d 前应逐领域冻结独立候选闭环，
+不能把世界来源单点 MVP 扩写成通用代理。

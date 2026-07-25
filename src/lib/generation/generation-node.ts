@@ -43,6 +43,9 @@ export interface GenerationNodeRunResult<TOutput, TAdoption> {
   adoption: TAdoption | null
 }
 
+export type GenerationNodeAdoptionResult<TOutput, TAdoption> =
+  GenerationNodeRunResult<TOutput, TAdoption>
+
 function cloneMessages(messages: ChatMessage[]): ChatMessage[] {
   return messages.map(message => ({ ...message }))
 }
@@ -96,4 +99,22 @@ export async function runGenerationNode<TInput, TOutput, TAdoption>(
     return { output, gate, adopted: true, adoption }
   }
   return { output, gate, adopted: false, adoption: null }
+}
+
+/**
+ * 采纳作者眼前已经确认的候选，不再次调用模型。
+ *
+ * 对话副驾等“先预览、后确认”入口必须使用本函数，避免在确认瞬间重新生成一份
+ * 作者没有看过的输出。gate 会针对可能被作者编辑过的最终候选重新执行。
+ */
+export async function adoptGenerationNodeOutput<TInput, TOutput, TAdoption>(
+  node: GenerationNode<TInput, TOutput, TAdoption>,
+  output: TOutput,
+): Promise<GenerationNodeAdoptionResult<TOutput, TAdoption>> {
+  const gate = node.gate ? await node.gate(output) : null
+  if (gate?.status === 'blocked' || !node.adopt) {
+    return { output, gate, adopted: false, adoption: null }
+  }
+  const adoption = await node.adopt(output)
+  return { output, gate, adopted: true, adoption }
 }

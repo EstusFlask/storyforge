@@ -240,7 +240,7 @@ AI 输出经 `adopt({ target, data })` 写回,只有这里登记的字段可写(
 | `style.learn` | `src/components/style/StyleLearningPanel.tsx:125` |
 | `world-group.expand` | `src/components/world-group/WorldGroupDetail.tsx:98` |
 | `world-group.suggest` | `src/components/world-group/WorldGroupOverview.tsx:57` |
-| `worldview.dimension` | `src/components/worldview/WorldviewHumanityPanel.tsx:352`<br/>`src/components/worldview/WorldviewNaturalPanel.tsx:284`<br/>`src/components/worldview/WorldviewOriginPanel.tsx:262` |
+| `worldview.dimension` | `src/components/worldview/WorldviewHumanityPanel.tsx:352`<br/>`src/components/worldview/WorldviewNaturalPanel.tsx:284`<br/>`src/components/worldview/WorldviewOriginPanel.tsx:262`<br/>`src/lib/agent/world-origin-copilot.ts:166` |
 | `worldview.divine` | `src/components/worldview/WorldviewOriginPanel.tsx:361` |
 | `worldview.divine.split` | `src/components/worldview/WorldviewOriginPanel.tsx:385` |
 
@@ -252,4 +252,4 @@ AI 输出经 `adopt({ target, data })` 写回,只有这里登记的字段可写(
 
 ---
 
-生成时间基准:commit `a7be0c0`
+生成时间基准:commit `d1307fc`

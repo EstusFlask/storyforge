@@ -89,7 +89,8 @@ usage 时会按既有规则增加一条 `aiUsageLog(category=agent.readonly)`；
 1. 用纯只读“一致性项目巡检”验证当前已配置提供商的实际输出稳定性和成本；
 2. 对明确支持 Chat Completions tools 的 provider 增加会话内能力探测；
 3. 原生 tool transport 复用同一 action/registry/limits，不复制 Runner；
-4. 进入 Phase 27.1-c 前才设计 ChatCopilot UI 与首个生成候选确认卡；
+4. Phase 27.1-c 已用首个世界来源确认卡验证 `GenerationNode + gate + adopt`，不把
+   候选写回能力混入只读 Runner；
 5. 写入仍必须走 `GenerationNode + gate + adopt`，后台保持只读。
 
 ## 6. 验收证据

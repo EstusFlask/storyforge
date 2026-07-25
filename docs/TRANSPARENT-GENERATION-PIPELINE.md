@@ -81,7 +81,9 @@ Pipeline = GenerationNode[]       // 静态数组(工坊)或由编排器动态�
 4. **兼容路径**：透明模式每次请求默认关闭。关闭时 `prepare → confirm → runNode` 与现有一键调用等价；开启时只在 confirm 与 run 之间插入 `PromptPreviewGate`。
 5. **并发与失效**：沿用控制器 request id；切换请求、取消或重新发起时，旧上下文和旧编辑草稿同时失效，禁止跨请求复用。
 6. **首个收口入口**：先完整接入卷纲/章纲四类请求并用回归证明等价，再接正文生成；章纲工坊只复用同一个节点运行器，不另写编排系统。
-7. **编排兼容层**：仓库当前没有可运行的 `AgentRunner`，只有 `PromptWorkflow` 顺序执行器。因此本轮先把每个 Workflow step 适配为 `GenerationNode`；未来 AgentRunner 只负责编排同一接口，不提前制造第二套 agent 运行时。
+7. **编排兼容层**：PIPE-1 当时先把每个 Workflow step 适配为 `GenerationNode`；后续
+   AGENT-1 27.1-b 已交付只读 `AgentRunner`，27.1-c 再用同一节点接口交付首个确认写回，
+   没有为 Agent 制造第二套生成或采纳运行时。
 
 ---
 
@@ -203,7 +205,7 @@ Pipeline = GenerationNode[]       // 静态数组(工坊)或由编排器动态�
 - **回归(重构不改行为)**:重构 `outline.chapter` 走 GenerationNode 后,现有 outline 相关回归测试全绿(证明泛化无副作用)。
 - **PIPELINE-1**:`R-PIPELINE1` — 不开高级时行为与现状一致;开高级并编辑最终提示词 → `ai.start` 收到的是编辑后 messages;覆盖不写回模板/字段(重开面板恢复原样)。
 - **PIPELINE-2**:`R-PIPELINE2` — ① 节点顺序不可跳级(未确认动机不进碰撞);② 后节点 assembleInput 确实包含前节点已确认产物;③ 质检节点对重复获得、提前知情与宪法 claim 冲突能确定性打回;④ 一键快速生成路径不受影响;⑤ 本轮未加表，故无迁移增量。
-- **PIPELINE-3**:`R-PIPELINE3` — 当前 `PromptWorkflow` step 已经可经同一节点接口执行且不会自动写回；仓库尚无 AgentRunner，其动态编排与确认关卡继续归 AGENT-1。
+- **PIPELINE-3**:`R-PIPELINE3` — 当前 `PromptWorkflow` step 已经可经同一节点接口执行且不会自动写回；动态只读编排与首个确认关卡已分别由 AGENT-1 27.1-b/c 接续。
 - **闸门**:`tsc` / `build` / `vitest` / `check:architecture` / `check:required-tables` / `check:ai-manual` 全绿。
 
 ---
@@ -224,7 +226,8 @@ Pipeline = GenerationNode[]       // 静态数组(工坊)或由编排器动态�
 - 工坊中间产物不落库；最终 `scenes + prohibitions` 经 `adopt()` 写入已登记 `detailedOutlines`，并进入正文上下文。
 - gate 同时复用 held-items、knowledge ledger 和 world constitution 闭集。模型漏报仍是诚实边界，不宣称纯代码理解任意自然语言。
 - 最终 gate 只审开场、收束与实际场景叙事字段，排除 `prohibitions` 和审计元数据，避免禁令被误判为剧情、`quote` 字段自证；作者确认后的采纳只做确定性 JSON 解析，不再暗中发起第 6 次模型调用。
-- 仓库当前没有 AgentRunner；PIPELINE-3 已完成现有 Workflow step 的接口适配，动态 Agent 编排继续归 AGENT-1。
+- PIPELINE-3 已完成现有 Workflow step 的接口适配；只读 `AgentRunner` 与首个 ChatCopilot
+  确认闭环已由 AGENT-1 27.1-b/c 交付，领域扩展和多 Agent 仍唯一归 AGENT-1。
 
 ---
 

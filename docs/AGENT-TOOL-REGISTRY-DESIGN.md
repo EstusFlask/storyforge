@@ -1,6 +1,8 @@
 # AGENT-1 · Tool Registry 地基设计
 
-> 状态：Phase 27.1-a 实施中。本文覆盖只读工具层，不宣称 ChatCopilot、AgentRunner、多 Agent 或后台 Agent 已完成。
+> 状态：Phase 27.1-a 已完成（2026-07-25）。本文覆盖只读工具层；后续
+> AgentRunner 与 ChatCopilot 的实际边界分别见 `AGENT-RUNNER-DESIGN.md` 和
+> `CHAT-COPILOT-MVP-DESIGN.md`，仍不宣称多 Agent 或后台 Agent 已完成。
 
 ## 1. 为什么先做这一层
 
@@ -81,9 +83,11 @@ Tool 定义声明 `risk: read | generate | write`。Phase 27.1-a 注册表只有
 
 ## 4. 后续顺序
 
-1. **27.1-a（本期）**：只读工具、作用域/预算/泄漏反例测试。
-2. **27.1-b**：提供商 tool calling 能力探测；不支持原生 tools 时使用严格、可验证的单步动作协议；先跑纯只读一致性任务。
-3. **27.1-c**：ChatCopilot UI；只接一个“生成世界观候选 → 用户确认 → adopt”的最小写闭环。
+1. **27.1-a（已完成）**：只读工具、作用域/预算/泄漏反例测试。
+2. **27.1-b（已完成）**：使用严格、可验证的单步动作协议跑纯只读任务；原生 tools
+   保留为后续优化。
+3. **27.1-c（已实现，验收中）**：ChatCopilot UI；只接
+   “当前世界来源候选 → 用户确认 → GenerationNode gate → adopt”的最小写闭环。
 4. **27.1-d/e**：逐步扩展领域，再讨论多 Agent；不提前常驻。
 
 ## 5. 验证要求

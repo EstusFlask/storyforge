@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import {
+  adoptGenerationNodeOutput,
   prepareGenerationNode,
   runGenerationNode,
   type GenerationNode,
@@ -71,6 +72,62 @@ describe('PIPELINE-1 · GenerationNode 运行边界', () => {
       prepareGenerationNode(node, '质检'),
       { adopt: true },
     )
+
+    expect(result.gate?.status).toBe('blocked')
+    expect(result.adopted).toBe(false)
+    expect(adopt).not.toHaveBeenCalled()
+  })
+
+  it('采纳已经确认的精确候选时不重新调用模型，并重新执行 gate', async () => {
+    const run = vi.fn(async () => '模型第一次生成')
+    const gate = vi.fn((output: string) => ({
+      status: output.length >= 4 ? 'pass' as const : 'blocked' as const,
+      issues: output.length >= 4 ? [] : [{ code: 'too-short', message: '内容过短' }],
+    }))
+    const adopt = vi.fn(async (output: string) => `已采纳：${output}`)
+    const node: GenerationNode<string, string, string> = {
+      id: 'chat-copilot.world-origin',
+      kind: 'worldview.dimension',
+      editableInput: true,
+      assembleInput: content => [{ role: 'user', content }],
+      run,
+      gate,
+      adopt,
+    }
+
+    const generated = await runGenerationNode(
+      node,
+      prepareGenerationNode(node, '生成世界来源'),
+    )
+    const result = await adoptGenerationNodeOutput(node, '作者编辑后的候选')
+
+    expect(generated.output).toBe('模型第一次生成')
+    expect(run).toHaveBeenCalledTimes(1)
+    expect(gate).toHaveBeenLastCalledWith('作者编辑后的候选')
+    expect(adopt).toHaveBeenCalledWith('作者编辑后的候选')
+    expect(result).toMatchObject({
+      output: '作者编辑后的候选',
+      adopted: true,
+      adoption: '已采纳：作者编辑后的候选',
+    })
+  })
+
+  it('精确候选的二次 gate 被阻断时保持只读', async () => {
+    const adopt = vi.fn(async () => '不应执行')
+    const node: GenerationNode<string, string, string> = {
+      id: 'chat-copilot.world-origin',
+      kind: 'worldview.dimension',
+      editableInput: true,
+      assembleInput: content => [{ role: 'user', content }],
+      run: async () => '候选',
+      gate: output => ({
+        status: output.trim() ? 'pass' : 'blocked',
+        issues: output.trim() ? [] : [{ code: 'empty', message: '候选为空' }],
+      }),
+      adopt,
+    }
+
+    const result = await adoptGenerationNodeOutput(node, '   ')
 
     expect(result.gate?.status).toBe('blocked')
     expect(result.adopted).toBe(false)

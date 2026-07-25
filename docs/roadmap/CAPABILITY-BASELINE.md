@@ -276,15 +276,20 @@
 - AGENT-1 Phase 27.1-a 已提供 13 个只读工具和统一注册表；全部经 `CONTEXT_SOURCES → assembleContext()` 读取，带项目/世界/实体归属校验、独立预算与裁剪元数据。
 - Phase 27.1-b 已提供 provider-neutral 严格 JSON 协议和只读 `AgentRunner`；步数、工具数、
   模型/工具 token、协议修正、循环和取消均有代码硬停止，协议消息禁止静默裁剪。
+- Phase 27.1-c 已提供工作区右侧 ChatCopilot 的世界来源单点闭环：正式只读工具装配当前
+  项目/世界，复用 `worldview.dimension` 生成可编辑候选，明确确认后才经
+  `GenerationNode gate + adopt(worldviews.worldOrigin)` 写入并刷新同一 store。
+- 已确认候选不会在采纳时再次生成；并发旧候选、空/过短/过长/无变化文本和注册表异常
+  均由确定性代码阻断。
 - 项目概况、世界组目录、世界大纲树和本地搜索已成为正式上下文源；搜索只做当前项目/世界内的有界短摘，不调用网络或 embedding。
 - 应用是纯前端、本地 IndexedDB、可导出/导入和多种备份恢复路径。
 - Phase 27.2a 场景考证按钮已存在；多世界、角色、地点、状态和故事线数据可作为未来运行时底座。
 
 ### 当前边界 / 尚未完成
 
-- Tool Registry 与只读 AgentRunner 目前仍是 headless 地基；原生 `tool_calls` 尚未作为
-  provider 优化接入，也没有生成/写入工具或聊天历史。
-- ChatCopilot、多 Agent 团队、后台 Agent 和 NPC 自动演进仍未形成正式产品闭环。
+- 原生 `tool_calls` 尚未作为 provider 优化接入；ChatCopilot 目前只支持当前世界
+  `worldOrigin`，没有泛化意图识别、其它领域写入工具或聊天历史。
+- 多 Agent 团队、后台 Agent 和 NPC 自动演进仍未形成正式产品闭环。
 - 协同编辑、账号、云同步、发布发现和社区治理不属于当前纯前端架构的增量功能，必须另立 PLATFORM 架构阶段。
 - 新手转化、加密云备份、帮助系统、国际化和开源信任仍需独立治理/产品组合。
 

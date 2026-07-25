@@ -47,7 +47,7 @@
 | 5 | **STORY-1 角色驱动与动态故事规划** | 让角色变化、角色弧光和主线/支线影响后续大纲 | `CF-20260702-9` 持久化工作区与 `CF-20260702-12` 中途重规划均已完成 | 影响分析 → 作者选择 → 目标范围重规划；不静默修改既有正文 | **COMPLETE（2026-07-25）** |
 | 6 | **AUTHOR-1 长篇编辑与作者风格智能** | 提高长篇改稿、个人风格保持和既有作品续写能力 | `EDITOR-5` 与 `FB-5` 高级校准已完成；`FB-4` 已完成可行性审查并在来源/版本/剧情记忆地基就绪前设计暂缓，TipTap 长期优化独立登记 | 实体引用安全重映射；批量改稿预览/快照/撤销；有界改稿样本与作者确认式风格校准；原稿续写不以低保真摘要冒充剧情事实 | **CURRENT SCOPE COMPLETE；FB-4 DESIGN DEFERRED（2026-07-25）** |
 | 7 | **IDEA-1 灵感与参考资料演化** | 让灵感和参考资料持续融合、更新、追溯 | `CM-1` 与参考分析版本演化已完成；剧情连续性胶囊仍唯一归未来 `FB-4A` | 灵感与参考分析均具备来源、版本、差异和作者确认边界；失败分析不覆盖当前上下文，原文断点不进入便携备份 | **CURRENT SCOPE COMPLETE（2026-07-25）** |
-| 8 | **AGENT-1 对话副驾与 Agent 团队** | 用对话组合调用现有能力，不重写面板业务 | Phase 27.1-a 只读 Tool Registry 与 27.1-b 只读 AgentRunner 已完成；继续 27.1-c~e、27.2b、整理本章 Agent、一致性 Agent、per-role 模型和预算 | Tool Registry 薄封装；前台写入必确认；后台默认只读；Canon 负责校验 | **IN PROGRESS；27.1-a/b COMPLETE（2026-07-25）** |
+| 8 | **AGENT-1 对话副驾与 Agent 团队** | 用对话组合调用现有能力，不重写面板业务 | Phase 27.1-a Tool Registry、27.1-b 只读 AgentRunner 与 27.1-c 世界来源 ChatCopilot MVP 已完成；继续 27.1-d/e、27.2b、整理本章 Agent、一致性 Agent、per-role 模型和预算 | Tool Registry 薄封装；前台写入必确认；后台默认只读；Canon 负责校验 | **IN PROGRESS；27.1-a/b/c COMPLETE（2026-07-25）** |
 | 9 | **SIM-1 世界模拟与互动叙事** | 通向跑团、文字游戏、陪伴角色和大型游戏运行时 | Phase 27.3 NPC 演进、世界时间线、位置/状态/能力/生命周期、角色碰撞 | 创作 Canon 与运行时状态分层；模拟不得污染作者原稿 | **LONG-TERM；WORLD + CANON + AGENT** |
 | 10 | **PRODUCT-1 新手转化、数据主权与开源信任** | 让新用户快速得到成果，成熟用户敢托付手稿，贡献者能参与 | `AUDIT-5/8/9/10/11`、升级前快照、加密备份、帮助系统、i18n、安全/贡献/发布政策 | 首次成果闭环、Labs 隐藏、备份恢复可信、隐私和贡献流程清楚 | **DESIGN；可错峰** |
 | 11 | **PLATFORM-1 协作与社区广场** | 支撑作品发布、发现、讨论、协作和社区治理 | 协同编辑、账号/权限、云同步、发布发现、评论社群、内容治理 | 先完成后端、身份、同步冲突、隐私和治理架构；不在纯前端上硬叠 | **LONG-TERM；独立架构立项** |
@@ -77,15 +77,23 @@
   不足时拒绝静默裁掉目标或工具历史。
 - 真实项目使用当前已配置提供商在 2 轮内执行 2 个正式工具并完成答复，只有标准
   `aiUsageLog` 增长，全部内容表零变化；专项合跑 3 文件/36 测试。
-- 当前仍无 ChatCopilot、生成/写入工具、聊天持久化或后台 Agent；下一步唯一进入
-  Phase 27.1-c 的前台单点确认写入闭环。
+- Phase 27.1-c 已在工作区交付世界来源 ChatCopilot：只读工具装配当前项目/世界，
+  `worldview.dimension` 生成可编辑候选，作者明确确认后才经 GenerationNode gate 与
+  `adopt(worldviews.worldOrigin)` 写回；切换作用域会作废旧候选。
+- 确认采纳不再次调用模型；空值、长度、无变化、来源过期和注册表异常均阻断。真实项目
+  验证了拒绝零写入、编辑候选逐字写回、面板同步和临时内容清理；专项 4 文件/17 测试，
+  全量 222 文件/777 测试。
+- 当前仍无泛化意图识别、其它领域写入工具、聊天持久化、多 Agent 或后台 Agent；
+  下一步进入 27.1-d 前必须逐领域增加独立候选闭环，不把单点 MVP 夸成通用代理。
 
 ### GOV-1 第一阶段交付证据
 
 - AI Manual 改用 TypeScript AST 扫描 59 个唯一 moduleKey / 204 条模板；运行时测试独立校验模板元数据、`100_000` 数字预算与重复 key，消除同源假绿。
 - 参考分析的结果行、状态更新和整批替换进入 `FIELD_REGISTRY`、`ADOPTION_SCHEMAS`、`adopt()`；跨项目 `referenceId` 被 FK 归属校验拒绝。
 - `check:architecture` 扩展到 `src/lib/**` 的受治理表写回和旧 context builder，并带 AST 自测；事实账本与角色合并作为有策略注册表、唯一入口和复审日期的 `ADOPTION_EXTENSIONS`。
-- 生产依赖漏洞降为 0，`check:dependencies` 进入本地与 GitHub CI；新增 `SECURITY.md` 漏洞响应边界。
+- `check:dependencies` 已进入本地与 GitHub CI；当前门禁报告 React Router
+  `GHSA-qwww-vcr4-c8h2` 的 2 个 high，官方自动建议会强制降级到
+  `react-router-dom@7.11.0`，因此在兼容升级方案确认前不执行破坏性 `--force`。
 - 覆盖率排除静态 Prompt 数据，真实运行时基线设总门槛以及 AI / import / registry 分层门槛；不再以静态字符串抬分。
 - UI 显示语义版本 + 构建 SHA；Blueprint §1.1 的版本、源码、schema、三注册表和 Prompt 规模由 `check:project-metrics` 自动锁定。
 - Agent 自动入口改为自包含短宪法，任务专用资料由 `docs/CONTEXT-ROUTING.md` 按 UI、AI 读写、数据生命周期、路线图、PR 和历史追溯分流；`check:agent-context` 锁定入口体积、核心红线和禁止全文必读回退。

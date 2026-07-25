@@ -425,6 +425,65 @@ test('本地 OpenAI 兼容服务可刷新并保存模型列表', async ({ page }
   await expect(baseUrl).toHaveValue('http://localhost:1234/v1')
 })
 
+test('对话副驾生成世界来源候选，拒绝零写入并精确采纳可见编辑', async ({ page }) => {
+  let chatCalls = 0
+  await page.addInitScript(() => {
+    localStorage.setItem('storyforge-ai-config', JSON.stringify({
+      provider: 'ollama',
+      apiKey: '',
+      model: 'chat-copilot-e2e',
+      baseUrl: 'http://localhost:1234/v1',
+      temperature: 0,
+      maxTokens: 0,
+    }))
+  })
+  await page.route('http://localhost:1234/v1/chat/completions', async route => {
+    chatCalls += 1
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        choices: [{
+          message: {
+            content: chatCalls === 1
+              ? '模型候选一：潮汐退去后，最初的陆地显露。'
+              : '模型候选二：群星坠落后，文明在灯塔旁诞生。',
+          },
+        }],
+        usage: { prompt_tokens: 120, completion_tokens: 30, total_tokens: 150 },
+      }),
+    })
+  })
+
+  await openCleanHome(page)
+  await createProject(page, 'E2E 对话副驾确认闭环')
+  await page.getByRole('button', { name: '打开 AI 对话副驾' }).click()
+  const request = page.getByRole('textbox', { name: '给 AI 对话副驾的要求' })
+  const candidate = page.getByRole('textbox', { name: '世界来源候选' })
+
+  await request.fill('生成一段世界来源，包含文明起点')
+  await page.getByRole('button', { name: '生成世界来源候选' }).click()
+  await expect(candidate).toHaveValue('模型候选一：潮汐退去后，最初的陆地显露。')
+
+  await openSidebarLeaf(page, '世界观', '世界起源')
+  await expect(page.locator('main').getByText('模型候选一：潮汐退去后，最初的陆地显露。', { exact: true }))
+    .toHaveCount(0)
+  await page.getByRole('button', { name: '拒绝', exact: true }).click()
+  await expect(page.getByText('候选已拒绝，没有写入项目。', { exact: true })).toBeVisible()
+
+  await request.fill('重新生成一段世界来源')
+  await page.getByRole('button', { name: '生成世界来源候选' }).click()
+  await expect(candidate).toHaveValue('模型候选二：群星坠落后，文明在灯塔旁诞生。')
+  const edited = '作者确认版：星潮退去后，观潮者点燃第一座灯塔，并以此作为文明纪元的起点。'
+  await candidate.fill(edited)
+  await page.getByRole('button', { name: '采纳', exact: true }).click()
+
+  await expect(page.getByText('已采纳到“世界观 → 世界起源 → 世界来源”，相关面板已同步刷新。', { exact: true }))
+    .toBeVisible()
+  await expect(page.locator('main').getByText(edited, { exact: true })).toBeVisible()
+  expect(chatCalls).toBe(2)
+})
+
 test('外部文档词条先形成带证据候选，作者确认后才进入 Codex', async ({ page }) => {
   await page.addInitScript(() => {
     localStorage.setItem('storyforge-ai-config', JSON.stringify({
