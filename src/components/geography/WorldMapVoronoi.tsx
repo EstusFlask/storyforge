@@ -14,6 +14,7 @@ import type {
 interface Props {
   config?: Partial<MapGenConfig>
   onMapGenerated?: (data: VoronoiMapData) => void
+  onConfigChange?: (patch: Partial<MapGenConfig>) => void | Promise<void>
 }
 
 // ── 图层名称 ──
@@ -31,7 +32,7 @@ const LAYER_LABELS: Record<keyof LayerVisibility, string> = {
   vignette: '暗角',
 }
 
-export default function WorldMapVoronoi({ config, onMapGenerated }: Props) {
+export default function WorldMapVoronoi({ config, onMapGenerated, onConfigChange }: Props) {
   const containerRef = useRef<HTMLDivElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const offscreenRef = useRef<HTMLCanvasElement | null>(null)
@@ -81,6 +82,9 @@ export default function WorldMapVoronoi({ config, onMapGenerated }: Props) {
           const t0 = performance.now()
           const data = generateMap(cfg)
           console.log(`[WorldMapVoronoi] Generated in ${Math.round(performance.now() - t0)}ms (${data.cells.length} cells)`)
+          const resolvedKmPerPixel = data.scaleResolution?.kmPerPixel ?? cfg.kmPerPixel ?? 1
+          kmPerPixelRef.current = resolvedKmPerPixel
+          setKmPerPixel(resolvedKmPerPixel)
 
           const dpr = window.devicePixelRatio || 1
           const renderScale = Math.min(dpr, 3)
@@ -236,8 +240,25 @@ export default function WorldMapVoronoi({ config, onMapGenerated }: Props) {
   }, [mapData, paint])
 
   const handleKmPerPixelChange = useCallback((newVal: number) => {
-    kmPerPixelRef.current = newVal; setKmPerPixel(newVal); rerender()
-  }, [rerender])
+    kmPerPixelRef.current = newVal
+    setKmPerPixel(newVal)
+    const current = mapDataRef.current
+    if (current) {
+      const next: VoronoiMapData = {
+        ...current,
+        scaleResolution: {
+          kmPerPixel: newVal,
+          source: 'manual',
+          travelEstimate: false,
+          anchorCount: 1,
+        },
+      }
+      mapDataRef.current = next
+      setMapData(next)
+    }
+    void onConfigChange?.({ kmPerPixel: newVal })
+    rerender()
+  }, [onConfigChange, rerender])
 
   const toggleLayer = useCallback((key: keyof LayerVisibility) => {
     setLayers(prev => {
@@ -324,6 +345,17 @@ export default function WorldMapVoronoi({ config, onMapGenerated }: Props) {
             {mapData.rivers.length} 河 ·{' '}
             {mapData.roads.length} 路
           </div>
+          {mapData.scaleResolution && (
+            <div className="text-gray-500">
+              比例尺：{scaleSourceLabel(mapData.scaleResolution.source)}
+              {mapData.scaleResolution.travelEstimate ? '（旅行里程估算）' : ''}
+            </div>
+          )}
+          {(mapData.spatialDiagnostics?.violations.length ?? 0) > 0 && (
+            <div className="text-amber-400">
+              {mapData.spatialDiagnostics!.violations.length} 条空间关系存在冲突
+            </div>
+          )}
         </div>
       )}
 
@@ -440,6 +472,9 @@ export default function WorldMapVoronoi({ config, onMapGenerated }: Props) {
               onChange={e => handleKmPerPixelChange(Number(e.target.value))}
               className="bg-transparent text-[10px] text-gray-200 outline-none cursor-pointer"
             >
+              {!STANDARD_KM_PER_PIXEL.includes(kmPerPixel) && (
+                <option value={kmPerPixel}>1px = {formatKm(kmPerPixel)}</option>
+              )}
               <option value={0.1}>1px = 100m</option>
               <option value={0.5}>1px = 500m</option>
               <option value={1}>1px = 1km</option>
@@ -455,6 +490,22 @@ export default function WorldMapVoronoi({ config, onMapGenerated }: Props) {
       {mapData && !generating && showLegend && <MapLegend />}
     </div>
   )
+}
+
+const STANDARD_KM_PER_PIXEL = [0.1, 0.5, 1, 2, 5, 10, 50]
+
+function scaleSourceLabel(source: NonNullable<VoronoiMapData['scaleResolution']>['source']): string {
+  switch (source) {
+    case 'manual': return '手动设定'
+    case 'map-width': return '用户疆域尺寸'
+    case 'explicit-distance': return '用户明确距离'
+    case 'estimated': return '系统估算'
+  }
+}
+
+function formatKm(value: number): string {
+  if (value < 1) return `${Math.round(value * 1000)}m`
+  return `${Math.round(value * 100) / 100}km`
 }
 
 // ── 图例 ──

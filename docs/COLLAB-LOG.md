@@ -1948,3 +1948,34 @@ TypeScript、生产 build、bundle budget 与 `git diff --check` 全绿；Chromi
 👉 Phase 34 已完成；WORLD-1 下一阶段按路线进入 Phase 35-b 分类落地与合并，先盘点
 自然/人文现有入口、Codex 内置分类、旧自由文本与重要地点/物品/势力/历史线重叠，再冻结
 无损兼容和逐入口下线顺序。
+
+### [2026-07-25] Codex · REPORT · WORLD-1 收口 / ENH-WORLDMAP-2 空间约束地图 / `feat/world-1-model`
+
+本阶段先冻结 `docs/WORLD-MAP-SPATIAL-CONSTRAINTS-DESIGN.md`，保留既有 Voronoi 地形、
+气候、河流、国家、道路和导出引擎，在其上新增可回放的命名空间约束层。AI 只抽取实体、
+规模、八向方位、远近和显式里程，不输出像素坐标或数据库 ID；`explicit` 必须带能在
+用户消息中逐字命中的证据，未知枚举、闭集外端点、伪造证据和无约束关系由本地 parser
+拒绝或降级为 inferred。
+
+本地求解器以名称和 seed 生成稳定初值，联合收敛方位、距离、重叠与画布边界；公里、
+里、日程和月程统一换算，旅行单位保持“估算”标记。比例尺严格按手动值、用户疆域宽度、
+显式距离中位锚、系统估算四级决议并在 UI 公开来源；矛盾关系保留残差提示。国家与显式
+首都在求解前合并为同一地理锚，避免双坐标漂移。
+
+生成阶段把命名首都、城镇和要塞放到约束点附近最合适的可用陆地；国家规模进入 Dijkstra
+扩张权重，聚落规模影响人口、图标与字号。命名河流只匹配最近的现有物理河道，不破坏
+水往低处流；山脉、区域和地标使用空间标签。旧 `MapGenConfig` 没有空间实体时保持原
+名称和生成路径；没有新增表或第二套地点数据库，配置继续按当前世界保存在
+`worldNodes.mapConfigJSON`，手动比例尺可刷新恢复。
+
+专项回归覆盖单位换算、四级比例尺、稳定坐标、八向方位、远近、冲突残差、证据闭集、
+国家/首都同锚和真实 Voronoi 陆地落点。完整验证为 205 个 Vitest 文件 / 705 个测试、
+statements/lines 69.74%、branches 72.91%、functions 71.30%；ESLint、TypeScript、
+生产 build、bundle、47 required tables、AI manual、architecture、source reachability、
+roadmap、agent context、canon coverage、project metrics 与 `git diff --check` 全绿。
+Chromium 13/13 包含真实页面“填写世界尺寸/山川关系 → 兼容 API → 生成地图 → 显示比例尺
+来源 → 手动覆盖 → 刷新恢复”。依赖审计仍仅报告 React Router
+`GHSA-qwww-vcr4-c8h2`；强制修复会破坏性降级到 7.11.0，未执行。
+
+👉 WORLD-1 已完整收口；严格路线下一单位为 STORY-1，先冻结角色变更影响范围、
+作者选择、目标章节/故事线重规划和不得静默覆盖既有正文的事务边界。

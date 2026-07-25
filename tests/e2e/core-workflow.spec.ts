@@ -522,3 +522,117 @@ test('真实世界观入口可维护修炼 DAG 并关联角色境界', async ({ 
   await expect(page.getByText('正文当前：筑基境', { exact: true })).toBeVisible()
   await expect(page.getByLabel('反哺后续写作（默认关闭）')).toBeChecked()
 })
+
+test('世界地图把明确距离和方位落实到命名实体，并持久化手动比例尺', async ({ page }) => {
+  await page.addInitScript(() => {
+    localStorage.setItem('storyforge-ai-config', JSON.stringify({
+      provider: 'ollama',
+      apiKey: '',
+      model: 'world-map-e2e',
+      baseUrl: 'http://localhost:1234/v1',
+      temperature: 0,
+      maxTokens: 0,
+    }))
+  })
+  await page.route('http://localhost:1234/v1/chat/completions', async route => {
+    const request = route.request().postDataJSON() as {
+      messages?: Array<{ role: string; content: string }>
+    }
+    const source = request.messages?.find(message => message.role === 'user')?.content ?? ''
+    expect(source).toContain('疆域东西横跨三千公里')
+    expect(source).toContain('东港在西京以东，相距六百公里')
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        choices: [{
+          message: {
+            content: JSON.stringify({
+              seed: 'e2e-spatial-map',
+              mapName: '空间约束世界',
+              pointCount: 3000,
+              landRatio: 0.68,
+              continentCount: 1,
+              stateCount: 2,
+              burgDensity: 0.2,
+              heightmapTemplate: 'pangea',
+              namingStyle: 'chinese',
+              stateNames: ['西陆帝国', '东海王国'],
+              burgNames: ['西京', '东港'],
+              mapWidthKm: 3000,
+              mapWidthEvidenceQuote: '疆域东西横跨三千公里',
+              spatialEntities: [
+                {
+                  name: '西陆帝国',
+                  kind: 'state',
+                  scaleTier: 'empire',
+                  capitalName: '西京',
+                  source: 'inferred',
+                },
+                {
+                  name: '东海王国',
+                  kind: 'state',
+                  scaleTier: 'kingdom',
+                  capitalName: '东港',
+                  source: 'inferred',
+                },
+                {
+                  name: '西京',
+                  kind: 'settlement',
+                  scaleTier: 'metropolis',
+                  source: 'explicit',
+                  evidenceQuote: '西京',
+                },
+                {
+                  name: '东港',
+                  kind: 'settlement',
+                  scaleTier: 'city',
+                  source: 'explicit',
+                  evidenceQuote: '东港',
+                },
+              ],
+              spatialRelations: [{
+                from: '东港',
+                to: '西京',
+                direction: 'east',
+                distanceTier: 'far',
+                distanceValue: 600,
+                distanceUnit: 'km',
+                source: 'explicit',
+                evidenceQuote: '东港在西京以东，相距六百公里',
+              }],
+            }),
+          },
+        }],
+        usage: { prompt_tokens: 200, completion_tokens: 80, total_tokens: 280 },
+      }),
+    })
+  })
+
+  await openCleanHome(page)
+  await createProject(page, 'E2E 空间约束地图')
+  await openSidebarLeaf(page, '世界观', '自然环境')
+  await page.getByRole('button', { name: /疆域尺寸/ }).click()
+  await page.getByText('世界整体大小、核心区域的疆域范围', { exact: true }).last().click()
+  await page.locator('textarea').last().fill('疆域东西横跨三千公里')
+  await page.getByRole('heading', { name: '📐 疆域尺寸' }).click()
+  await page.getByRole('button', { name: /山川水系/ }).click()
+  await page.getByText('重要山脉、河流、湖泊、运河与水路', { exact: true }).last().click()
+  await page.locator('textarea').last().fill('东港在西京以东，相距六百公里')
+  await page.getByRole('heading', { name: '⛰ 山川水系' }).click()
+
+  await openSidebarLeaf(page, '世界观', '世界地图')
+  await page.getByRole('button', { name: 'AI 生成地图', exact: true }).click()
+  await expect(page.getByText('空间约束世界', { exact: true })).toBeVisible({ timeout: 30_000 })
+  await expect(page.getByText('比例尺：用户疆域尺寸', { exact: true })).toBeVisible()
+  await expect(page.getByText(/2 国/)).toBeVisible()
+
+  const scale = page.locator('select').last()
+  await scale.selectOption('2')
+  await expect(page.getByText('比例尺：手动设定', { exact: true })).toBeVisible()
+  await page.reload()
+  await openSidebarLeaf(page, '世界观', '世界地图')
+  await expect(page.getByText('空间约束世界', { exact: true })).toBeVisible({ timeout: 30_000 })
+  await expect(page.getByText('比例尺：手动设定', { exact: true })).toBeVisible()
+  await expect(page.locator('select').last()).toHaveValue('2')
+})
