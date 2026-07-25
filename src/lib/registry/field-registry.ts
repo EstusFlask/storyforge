@@ -436,11 +436,35 @@ export const FIELD_REGISTRY: FieldSpec[] = [
   longtext('references', 'analysisSummary'),
   longtext('references', 'mergedCharacters'),
 
+  // IDEA-1 reference analysis versions. Source declaration is immutable per run;
+  // AI-derived status/summary updates still pass through adopt().
+  num('referenceAnalysisRuns', 'referenceId'),
+  num('referenceAnalysisRuns', 'version'),
+  enumeration('referenceAnalysisRuns', 'status', ['analyzing', 'ready', 'active', 'superseded', 'failed', 'cancelled']),
+  enumeration('referenceAnalysisRuns', 'depth', ['quick', 'deep']),
+  text('referenceAnalysisRuns', 'sourceFilename'),
+  text('referenceAnalysisRuns', 'fileHash'),
+  num('referenceAnalysisRuns', 'totalChars'),
+  enumeration('referenceAnalysisRuns', 'sourceKind', ['own-work', 'authorized', 'public-domain', 'research', 'unknown']),
+  enumeration('referenceAnalysisRuns', 'usageScope', ['analysis-only', 'creative-reference', 'continuation-authorized']),
+  longtext('referenceAnalysisRuns', 'rightsNote'),
+  bool('referenceAnalysisRuns', 'rightsConfirmed'),
+  num('referenceAnalysisRuns', 'rightsDeclaredAt'),
+  num('referenceAnalysisRuns', 'expectedChunks'),
+  num('referenceAnalysisRuns', 'completedChunks'),
+  num('referenceAnalysisRuns', 'progress'),
+  longtext('referenceAnalysisRuns', 'error'),
+  longtext('referenceAnalysisRuns', 'analysisSummary'),
+  longtext('referenceAnalysisRuns', 'mergedCharacters'),
+  num('referenceAnalysisRuns', 'completedAt'),
+  num('referenceAnalysisRuns', 'activatedAt'),
+
   // CM-1 incremental inspiration workspace (bounded JSON strings)
   json('inspirationWorkspaces', 'fragments'),
   json('inspirationWorkspaces', 'versions'),
 
   num('referenceChunkAnalysis', 'referenceId'),
+  num('referenceChunkAnalysis', 'analysisRunId'),
   num('referenceChunkAnalysis', 'chunkIndex'),
   text('referenceChunkAnalysis', 'label'),
   num('referenceChunkAnalysis', 'startOffset'),

@@ -90,5 +90,5 @@ AI 输出先经过原单世界/多世界闭集解析。系统把上一版和新�
 - `R-CM1-v45-migration`：旧项目原样保留，只新增空表；
 - `R-CM1-inspiration-fusion-ui`：来源、逐字段差异、确认/放弃和采纳硬锁；
 - `R-inspiration-parse`：截断 JSON、JSON5 对象字面量和对象字段可读化；
-- `R-17` 与注册表测试：49 张 required/project tables 双向覆盖；
+- `R-17` 与注册表测试：当前 51 张 required/project tables 双向覆盖；
 - Chromium 真实项目双轮 Agnes 融合、确认、刷新与来源保护。

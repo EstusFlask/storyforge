@@ -356,14 +356,51 @@ export const PROJECT_TABLES: TableSpec[] = [
   // ───────────────────── 参考书 / 作品分析 ─────────────────────
   { table: db.references, name: 'references', owner: 'project', exportable: true,
     exportIdField: true,
-    refs: [{ kind: 'simple', field: 'id', target: 'referenceChunkAnalysis[referenceId]', onDelete: 'cascade' }] },
+    refs: [
+      { kind: 'simple', field: 'id', target: 'referenceAnalysisRuns[referenceId]', onDelete: 'cascade' },
+      { kind: 'simple', field: 'id', target: 'referenceChunkAnalysis[referenceId]', onDelete: 'cascade' },
+    ] },
+
+  { table: db.referenceAnalysisRuns, name: 'referenceAnalysisRuns', owner: 'project',
+    exportable: true, exportIdField: true,
+    refs: [
+      { kind: 'simple', field: 'id', target: 'referenceChunkAnalysis[analysisRunId]', onDelete: 'cascade' },
+      { kind: 'simple', field: 'id', target: 'referenceAnalysisSources[analysisRunId]', onDelete: 'cascade' },
+    ],
+    exportRemap: [
+      { field: 'referenceId', remapVia: 'references', exportAs: '_referenceExportId', onUnmapped: 'require' },
+    ],
+    defaults: {
+      sourceKind: 'unknown',
+      usageScope: 'analysis-only',
+      rightsNote: '',
+      rightsConfirmed: false,
+      expectedChunks: 0,
+      completedChunks: 0,
+      progress: 0,
+    },
+    note: 'IDEA-1 版本化分析；仅 active run 可进入 AI 上下文，来源声明绑定文件哈希' },
 
   { table: db.referenceChunkAnalysis, name: 'referenceChunkAnalysis', owner: 'direct-child',
     exportable: true,
     projectResolver: async (projectId) =>
       (await db.references.where('projectId').equals(projectId).primaryKeys()) as number[],
     refs: [{ kind: 'indirect', via: { table: 'references', field: 'referenceId', resolveProject: 'projectId' }, onDelete: 'cascade' }],
-    exportRemap: [{ field: 'referenceId', remapVia: 'references', exportAs: '_referenceExportId', onUnmapped: 'require' }] },
+    exportRemap: [
+      { field: 'referenceId', remapVia: 'references', exportAs: '_referenceExportId', onUnmapped: 'require' },
+      { field: 'analysisRunId', remapVia: 'referenceAnalysisRuns', exportAs: '_analysisRunExportId' },
+    ] },
+
+  { table: db.referenceAnalysisSources, name: 'referenceAnalysisSources', owner: 'indirect',
+    exportable: false,
+    projectResolver: async (projectId) =>
+      (await db.referenceAnalysisRuns.where('projectId').equals(projectId).primaryKeys()) as number[],
+    refs: [{
+      kind: 'indirect',
+      via: { table: 'referenceAnalysisRuns', field: 'analysisRunId', resolveProject: 'projectId' },
+      onDelete: 'cascade',
+    }],
+    note: 'IDEA-1 本地断点续跑原文；不进 JSON 备份，报告与来源哈希仍可便携往返' },
 
   // ───────────────────── 临时态 / blob ─────────────────────
   { table: db.importSessions, name: 'importSessions', owner: 'transient', exportable: false },

@@ -68,6 +68,10 @@ function normalize(data: any) {
   // IDEA-1:增量灵感工作区晚于旧 v3 fixture；来源/版本往返由 R-CM1 与
   // R-export-fullcoverage 锁定。
   delete data.inspirationWorkspaces
+  // IDEA-1 reference analysis runs are a new portable layer. Legacy chunks had no
+  // run shadow id; version/remap behavior is covered by R-IDEA1-reference-evolution.
+  delete data.referenceAnalysisRuns
+  for (const row of data.referenceChunkAnalysis ?? []) delete row._analysisRunExportId
   for (const row of data.characters ?? []) {
     delete row._raceEntryExportId
     delete row._cultivationSystemExportId

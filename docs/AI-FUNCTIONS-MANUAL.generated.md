@@ -145,7 +145,8 @@ AI 输出经 `adopt({ target, data })` 写回,只有这里登记的字段可写(
 | `itemLedger` | `action` `chapterId` `chapterTitle` `characterId` `heldByName` `itemName` `note` `quantity` |
 | `knowledgeLedger` | `action` `belief` `characterId` `characterName` `factId` `knowledgeKey` `sourceChapterId` `sourceQuote` `sourceType` `statement` `status` `worldGroupId` |
 | `outlineNodes` | `order` `parentId` `summary` `title` `type` `worldGroupId` |
-| `referenceChunkAnalysis` | `characterCraft` `chunkIndex` `climaxDesign` `conflictEscalation` `dailyLife` `dialogueTechnique` `emotionalBeats` `endOffset` `foreshadowing` `historicalContext` `label` `languageCustoms` `materialCulture` `narrativeStyle` `openingTechnique` `otherTechniques` `pacingControl` `plotStructure` `proseStyle` `rawExcerpt` `referenceId` `socialInstitutions` `startOffset` `worldBuilding` |
+| `referenceAnalysisRuns` | `activatedAt` `analysisSummary` `completedAt` `completedChunks` `depth` `error` `expectedChunks` `fileHash` `mergedCharacters` `progress` `referenceId` `rightsConfirmed` `rightsDeclaredAt` `rightsNote` `sourceFilename` `sourceKind` `status` `totalChars` `usageScope` `version` |
+| `referenceChunkAnalysis` | `analysisRunId` `characterCraft` `chunkIndex` `climaxDesign` `conflictEscalation` `dailyLife` `dialogueTechnique` `emotionalBeats` `endOffset` `foreshadowing` `historicalContext` `label` `languageCustoms` `materialCulture` `narrativeStyle` `openingTechnique` `otherTechniques` `pacingControl` `plotStructure` `proseStyle` `rawExcerpt` `referenceId` `socialInstitutions` `startOffset` `worldBuilding` |
 | `references` | `analysisDepth` `analysisError` `analysisProgress` `analysisStatus` `analysisSummary` `fileHash` `genre` `importSessionId` `mergedCharacters` `totalChars` |
 | `stateCards` | `category` `entityName` `fields` `lastChapterId` |
 | `storyArcs` | `description` `name` `stages` `type` |
@@ -159,6 +160,11 @@ AI 输出经 `adopt({ target, data })` 写回,只有这里登记的字段可写(
 
 | ID | 目标表 | 领域策略注册表 | 唯一入口 | 复审日期 |
 |---|---|---|---|---|
+| `reference-analysis-run-lifecycle` | `referenceAnalysisRuns` | `REFERENCE_ANALYSIS_RUN_POLICY + ADOPTION_SCHEMAS + PROJECT_TABLES` | `src/lib/reference-analysis/lifecycle.ts`<br/>`src/lib/reference-analysis/legacy-bridge.ts` | 2027-01-01 |
+| `reference-analysis-source-lifecycle` | `referenceAnalysisSources` | `REFERENCE_ANALYSIS_RUN_POLICY + PROJECT_TABLES` | `src/lib/reference-analysis/lifecycle.ts` | 2027-01-01 |
+| `reference-analysis-chunk-lifecycle` | `referenceChunkAnalysis` | `REFERENCE_ANALYSIS_RUN_POLICY + ADOPTION_SCHEMAS + PROJECT_TABLES` | `src/lib/reference-analysis/lifecycle.ts`<br/>`src/lib/reference-analysis/legacy-bridge.ts` | 2027-01-01 |
+| `reference-analysis-reference-lifecycle` | `references` | `REFERENCE_ANALYSIS_RUN_POLICY + PROJECT_TABLES refs` | `src/lib/reference-analysis/lifecycle.ts` | 2027-01-01 |
+| `reference-analysis-citation-lifecycle` | `creativeRules` | `PROJECT_TABLES references refs` | `src/lib/reference-analysis/lifecycle.ts` | 2027-01-01 |
 | `fact-ledger` | `temporalFacts` | `FACT_PREDICATE_REGISTRY` | `src/lib/fact-ledger/fact-ledger.ts`<br/>`src/lib/fact-ledger/human-readable-io.ts`<br/>`src/lib/fact-ledger/lifecycle.ts`<br/>`src/lib/fact-ledger/setting-assertions.ts`<br/>`src/lib/consistency/impact-analysis.ts`<br/>`src/lib/cultivation/lifecycle.ts`<br/>`src/lib/editor/entity-rename.ts` | 2027-01-01 |
 | `character-merge-lifecycle` | `characters` | `PROJECT_TABLES refs + remapCharacterReferences + cultivation DAG validator` | `src/lib/import/character-merge.ts`<br/>`src/lib/codex/references.ts`<br/>`src/lib/cultivation/lifecycle.ts`<br/>`src/lib/cultivation/progress-lifecycle.ts` | 2027-01-01 |
 | `knowledge-ledger` | `knowledgeLedger` | `KNOWLEDGE_ACTIONS + ADOPTION_SCHEMAS + PROJECT_TABLES` | `src/lib/knowledge-ledger/knowledge-ledger.ts`<br/>`src/lib/knowledge-ledger/lifecycle.ts` | 2027-01-01 |
@@ -211,8 +217,8 @@ AI 输出经 `adopt({ target, data })` 写回,只有这里登记的字段可写(
 | `outline.workshop.scan` | `src/lib/outline/workshop.ts:442` |
 | `outline.workshop.scenes` | `src/lib/outline/workshop.ts:453` |
 | `prompt.examples` | `src/components/settings/prompt/PromptExamplesEditor.tsx:108` |
-| `reference.characters` | `src/components/project/AnalysisReportViewer.tsx:143` |
-| `reference.summary` | `src/components/project/AnalysisReportViewer.tsx:112` |
+| `reference.characters` | `src/components/project/AnalysisReportViewer.tsx:151` |
+| `reference.summary` | `src/components/project/AnalysisReportViewer.tsx:119` |
 | `relation.extract` | `src/components/relations/CharacterRelationPanel.tsx:98` |
 | `review.anti-ai` | `src/components/editor/ReviewPanel.tsx:100` |
 | `review.outline-workshop` | `src/lib/outline/workshop.ts:451` |
@@ -241,4 +247,4 @@ AI 输出经 `adopt({ target, data })` 写回,只有这里登记的字段可写(
 
 ---
 
-生成时间基准:commit `80ad227`
+生成时间基准:commit `4f127ea`

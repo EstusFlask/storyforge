@@ -19,6 +19,8 @@ import type {
   CharacterRelation,
   Snapshot,
   Reference,
+  ReferenceAnalysisRun,
+  ReferenceAnalysisSource,
   ReferenceChunkAnalysis,
   PromptTemplate,
   DetailedOutline,
@@ -81,6 +83,8 @@ class StoryForgeDB extends Dexie {
 
   // Phase 20 —— 参考作品深度分析（八维分块分析）
   referenceChunkAnalysis!: Table<ReferenceChunkAnalysis, number>
+  referenceAnalysisRuns!: Table<ReferenceAnalysisRun, number>
+  referenceAnalysisSources!: Table<ReferenceAnalysisSource, number>
 
   // A1 —— 状态表（角色/地点/物品/势力状态追踪）
   stateCards!: Table<StateCard, number>
@@ -447,6 +451,14 @@ class StoryForgeDB extends Dexie {
     // 猜测或自动搬运旧草稿，旧草稿仍由面板兼容读取，作者首次融合时显式落库。
     this.version(45).stores({
       inspirationWorkspaces: '++id, projectId, updatedAt',
+    })
+
+    // v46: IDEA-1 参考资料版本化分析。只新增 run + 本地原文表，并为分块增加
+    // analysisRunId 索引；旧 references / chunk 行原样保留，由显式运行时桥接建 v1。
+    this.version(46).stores({
+      referenceAnalysisRuns: '++id, projectId, referenceId, [referenceId+version], status, updatedAt',
+      referenceAnalysisSources: 'analysisRunId, fileHash, createdAt',
+      referenceChunkAnalysis: '++id, referenceId, analysisRunId, [analysisRunId+chunkIndex], chunkIndex',
     })
   }
 }

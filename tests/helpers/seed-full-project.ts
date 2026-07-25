@@ -141,7 +141,17 @@ export async function seedFullProject() {
 
   // ── 参考书 + 分块分析(creativeRules 引用 reference) ──
   const ref1 = await db.references.add({ projectId, title: '斗破苍穹', author: '天蚕土豆', type: 'story', note: '参考爽点', createdAt: now, updatedAt: now } as any) as number
-  await db.referenceChunkAnalysis.add({ referenceId: ref1, chunkIndex: 0, openingTechnique: '天才陨落钩子', createdAt: now, updatedAt: now } as any)
+  const referenceRun = await db.referenceAnalysisRuns.add({
+    projectId, referenceId: ref1, version: 1, status: 'active', depth: 'quick',
+    sourceFilename: '斗破苍穹.txt', fileHash: 'full-project-reference', totalChars: 100,
+    sourceKind: 'unknown', usageScope: 'analysis-only', rightsNote: '测试种子',
+    rightsConfirmed: false, rightsDeclaredAt: now, expectedChunks: 1, completedChunks: 1,
+    progress: 100, completedAt: now, activatedAt: now, createdAt: now, updatedAt: now,
+  } as any) as number
+  await db.referenceChunkAnalysis.add({
+    referenceId: ref1, analysisRunId: referenceRun, chunkIndex: 0,
+    openingTechnique: '天才陨落钩子', createdAt: now, updatedAt: now,
+  } as any)
   await db.creativeRules.add({ projectId, citedReferenceIds: [ref1], content: '多爽点', createdAt: now, updatedAt: now } as any)
 
   // ── 词条(树,wgA) ──

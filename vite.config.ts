@@ -174,6 +174,9 @@ export default defineConfig({
           'vendor-d3': ['d3-hierarchy'],
           // 侧栏与工作区共享大量图标；独立缓存，避免每次功能加一个图标都把入口包推过预算。
           'vendor-icons': ['lucide-react'],
+          // 上下文装配被首页、写作与多个懒加载面板共同引用；单独缓存可避免
+          // 每次扩展项目数据源都推高首屏入口包，同时不改变其同步调用语义。
+          'ai-context': ['./src/lib/ai/context-builder.ts'],
         },
       },
     },

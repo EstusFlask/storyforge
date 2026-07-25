@@ -44,6 +44,7 @@ import {
   registerRefChunks,
   runRefAnalysis,
 } from '../reference-analysis/pipeline'
+import { createReferenceAnalysisRun } from '../reference-analysis/lifecycle'
 import { chatWithAbort } from './chat-with-abort'
 import { runCharacterMerge } from './character-merge'
 import {
@@ -426,9 +427,26 @@ export async function applyReferenceFromSession(
       text: getChunkText(sessionId, c.index) ?? '',
     })).filter(c => c.text)
     if (chunkPlans.length > 0) {
-      registerRefChunks(refId, chunkPlans)
+      // chunk registry 已是 DOCX/PDF/EPUB 等格式解析后的纯文本；不能把原始二进制
+      // Blob 用 .text() 当成断点原文。用本轮真实分析文本持久化即可安全续跑。
+      const sourceText = chunkPlans.map(chunk => chunk.text).join('\n\n')
+      const run = await createReferenceAnalysisRun({
+        referenceId: refId,
+        depth: 'deep',
+        sourceFilename: session.filename,
+        fileHash: session.fileHash,
+        totalChars: session.totalChars,
+        expectedChunks: chunkPlans.length,
+        sourceKind: 'unknown',
+        usageScope: 'analysis-only',
+        rightsNote: '由项目导入流程建立；尚未在版本面板补充来源声明',
+        rightsConfirmed: false,
+        sourceText,
+        sourceChunks: chunkPlans,
+      })
+      registerRefChunks(run.id!, chunkPlans)
       statusStore?.pushActivity('info', `🔬 开始深层分析（${chunkPlans.length} 块）…`)
-      await runRefAnalysis(refId)
+      await runRefAnalysis(refId, run.id)
     } else {
       // 块文本丢了(刷新过) → 退回浅层,免得卡住
       await writeShallowAnalysisFromTechniques(refId, session.merged?.writingTechniques)

@@ -20,7 +20,7 @@ import type {
   CreativeRules, CharacterRelation,
   DetailedOutline, EmotionBeatCard, StateCard,
   StoryArc, WorldNode, Note,
-  Reference, ReferenceChunkAnalysis,
+  Reference, ReferenceAnalysisRun, ReferenceChunkAnalysis,
   HistoricalTimelineEvent, HistoricalKeyword,
   WorldGroup, WorldGroupLink, ItemLedgerEntry, StoryTimelineEvent,
   ImportantLocation, WorldRulesProfile, CodexCategory, CodexEntry,
@@ -98,7 +98,14 @@ export interface ProjectExportData {
   worldNodes?: (Omit<WorldNode, 'id' | 'projectId' | 'worldGroupId'> & WorldGroupExportRef & { _exportId: number; _parentExportId: number | null })[]
   notes?: Omit<Note, 'id' | 'projectId'>[]
   references?: (Omit<Reference, 'id' | 'projectId'> & { _exportId: number })[]
-  referenceChunkAnalysis?: (Omit<ReferenceChunkAnalysis, 'id' | 'referenceId'> & { _referenceExportId: number })[]
+  referenceAnalysisRuns?: (
+    Omit<ReferenceAnalysisRun, 'id' | 'projectId' | 'referenceId'>
+    & { _exportId: number; _referenceExportId: number }
+  )[]
+  referenceChunkAnalysis?: (
+    Omit<ReferenceChunkAnalysis, 'id' | 'referenceId' | 'analysisRunId'>
+    & { _referenceExportId: number; _analysisRunExportId?: number | null }
+  )[]
   historicalTimelineEvents?: (Omit<HistoricalTimelineEvent, 'id' | 'projectId' | 'worldGroupId'> & WorldGroupExportRef)[]
   historicalKeywords?: (Omit<HistoricalKeyword, 'id' | 'projectId' | 'worldGroupId'> & WorldGroupExportRef)[]
 

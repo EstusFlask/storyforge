@@ -34,6 +34,8 @@ export const REQUIRED_TABLES = [
   'promptTemplates',
   'promptWorkflows',
   'referenceChunkAnalysis',
+  'referenceAnalysisRuns',
+  'referenceAnalysisSources',
   'references',
   'retrievalChunks',
   'snapshots',

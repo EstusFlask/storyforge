@@ -28,8 +28,8 @@ describe('Phase 1.1a · PROJECT_TABLES 注册表', () => {
       expect(result.ok, result.errors.join('; ')).toBe(true)
     })
 
-    it('登记了全部 49 张表', () => {
-      expect(PROJECT_TABLES.length).toBe(49)   // v45 inspirationWorkspaces→49
+    it('登记了全部 51 张表', () => {
+      expect(PROJECT_TABLES.length).toBe(51)   // v46 reference analysis runs/sources→51
     })
 
     it('每张表名唯一', () => {
@@ -118,6 +118,22 @@ describe('Phase 1.1a · PROJECT_TABLES 注册表', () => {
       } as any) as number
       await db.importLogs.add({ sessionId, level: 'info', message: 'm', timestamp: now } as any)
       await db.importFiles.put({ sessionId, filename: 'f', blob: new Blob(['x']), fileHash: 'h', createdAt: now } as any)
+      const referenceId = await db.references.add({
+        projectId, title: 'R', author: '', type: 'story', note: '', url: '',
+        createdAt: now, updatedAt: now,
+      } as any) as number
+      const runId = await db.referenceAnalysisRuns.add({
+        projectId, referenceId, version: 1, status: 'active', depth: 'quick',
+        sourceFilename: 'r.txt', fileHash: 'rh', totalChars: 1,
+        sourceKind: 'unknown', usageScope: 'analysis-only', rightsNote: '',
+        rightsConfirmed: false, rightsDeclaredAt: now, expectedChunks: 1,
+        completedChunks: 1, progress: 100, createdAt: now, updatedAt: now,
+      } as any) as number
+      await db.referenceAnalysisSources.put({
+        analysisRunId: runId, filename: 'r.txt', fileHash: 'rh',
+        chunks: [{ index: 0, startChar: 0, endChar: 1, charCount: 1, text: 'r' }],
+        createdAt: now,
+      })
 
       await cascadeDeleteProject(projectId)
 
@@ -127,6 +143,8 @@ describe('Phase 1.1a · PROJECT_TABLES 注册表', () => {
       expect(await db.importSessions.where('projectId').equals(projectId).count()).toBe(0)
       expect(await db.importLogs.where('sessionId').equals(sessionId).count()).toBe(0)
       expect(await db.importFiles.count(), 'importFiles 应全清(间接归属 blob)').toBe(0)
+      expect(await db.referenceAnalysisRuns.where('projectId').equals(projectId).count()).toBe(0)
+      expect(await db.referenceAnalysisSources.get(runId), '参考分析断点原文应级联清理').toBeUndefined()
     })
 
     it('cascadeDeleteGroup 删世界数据 + 所有词条分类保留 + 大纲 setNull', async () => {

@@ -126,7 +126,7 @@ export default function ReferenceDetailCard({ reference, referenceIndex, onUpdat
         {activeTab === 'worldview' && <ReferenceWorldviewTab entries={worldviewEntries} />}
         {activeTab === 'characters' && <ReferenceCharactersTab characters={characters} />}
         {activeTab === 'outline' && <ReferenceOutlineTab outline={outline} />}
-        {activeTab === 'deep-analysis' && <ReferenceDeepAnalysisTab reference={reference} onUpdate={onUpdate} />}
+        {activeTab === 'deep-analysis' && <ReferenceDeepAnalysisTab reference={reference} />}
       </div>
     </div>
   )
