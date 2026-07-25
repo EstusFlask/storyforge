@@ -30,6 +30,7 @@ import type {
   StorylineCrossing,
   CultivationSystem,
   CultivationProgress,
+  CharacterDrivenPlan,
 } from '../types'
 import type { TemporalFact } from '../types/temporal-fact'
 
@@ -56,7 +57,9 @@ type HomeWorldGroupExportRef = {
 export interface ProjectExportData {
   version: number
   exportedAt: number
-  project: Omit<Project, 'id'>
+  project: Omit<Project, 'id' | 'activeCharacterDrivenPlanId'> & {
+    _activeCharacterDrivenPlanExportId?: number | null
+  }
 
   // ── 原有（v1）──
   worldviews: (Omit<Worldview, 'id' | 'projectId' | 'worldGroupId'> & WorldGroupExportRef)[]
@@ -117,6 +120,11 @@ export interface ProjectExportData {
   cultivationSystems?: (Omit<CultivationSystem, 'id' | 'projectId' | 'worldGroupId'> & WorldGroupExportRef & { _exportId: number })[]
   /** WORLD-1 / Phase 34 作者确认的正文修炼事件（四类 FK 由注册表重映射）。 */
   cultivationProgress?: (Omit<CultivationProgress, 'id' | 'projectId'> & Record<string, unknown>)[]
+  /** STORY-1 / CF-9C 角色驱动设计方案（角色、父版本及 active 引用均便携重映射）。 */
+  characterDrivenPlans?: (
+    Omit<CharacterDrivenPlan, 'id' | 'projectId' | 'parentPlanId'>
+    & { _exportId: number; _parentExportId: number | null; _arcCharacterIndexes?: Array<number | null> }
+  )[]
 }
 
 /** 导出项目为 JSON(注册表派生) */

@@ -11,6 +11,7 @@
 import { db } from '../db/schema'
 import { PROJECT_TABLES, REGISTRY_BY_NAME } from '../registry/project-tables'
 import { remapWorldPortalTargets } from '../utils/world-portals'
+import { parseCharacterDrivenPlanArcs } from '../types/character-driven-plan'
 import type { TableSpec } from '../registry/types'
 import type { ProjectExportData } from './json-export'
 
@@ -73,6 +74,11 @@ function toExportRow(
           ? scene.characterIds.map((id: unknown) => typeof id === 'number' ? map?.get(id) : undefined).filter((id: unknown): id is number => typeof id === 'number')
           : [])
         : []
+    } else if (rr.kind === 'character-plan-arcs') {
+      const map = idMaps.get(rr.remapVia)
+      obj[rr.exportAs] = parseCharacterDrivenPlanArcs(obj[rr.field]).map(arc =>
+        arc.characterId == null ? null : (map?.get(arc.characterId) ?? null),
+      )
     }
   }
 
@@ -111,7 +117,9 @@ export async function deriveExportProjectJSON(projectId: number): Promise<Projec
   }
 
   // 第二遍:逐行转导出对象
-  const { id: _pid, ...projectData } = project
+  const projectSpec = REGISTRY_BY_NAME.get('projects')
+  if (!projectSpec) throw new Error('[deriveExport] PROJECT_TABLES 缺少 projects 根表')
+  const projectData = toExportRow(projectSpec, project, 0, idMaps)
   const result: any = {
     version: EXPORT_VERSION,
     exportedAt: Date.now(),

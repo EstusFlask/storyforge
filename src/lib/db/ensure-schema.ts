@@ -4,6 +4,7 @@ export const REQUIRED_TABLES = [
   'aiUsageLog',
   'chapters',
   'characterRelations',
+  'characterDrivenPlans',
   'characters',
   'codexCategories',
   'codexEntries',

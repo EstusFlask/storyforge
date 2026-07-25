@@ -4,13 +4,14 @@
  * 用户为选中的角色设定初始/目标状态 → AI 生成中间情节大纲 → 可批量导入到大纲
  */
 
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, useRef } from 'react'
 import {
   Sparkles, Trash2, Check, ChevronDown, ChevronRight,
-  Users, BookOpen, Loader2, ArrowRight,
+  Users, BookOpen, Loader2, ArrowRight, Copy, Plus, Pencil, Power,
 } from 'lucide-react'
 import { useCharacterStore } from '../../stores/character'
 import { useOutlineStore } from '../../stores/outline'
+import { useCharacterDrivenPlanStore } from '../../stores/character-driven-plan'
 import { useAIStream } from '../../hooks/useAIStream'
 import { createAISessionKey } from '../../stores/ai-generation-session'
 import {
@@ -21,8 +22,14 @@ import {
 } from '../../lib/ai/character-driven-plot'
 import AIStreamOutput from '../shared/AIStreamOutput'
 import AutoResizeTextarea from '../shared/AutoResizeTextarea'
+import { useDialog } from '../shared/Dialog'
 import type { Project } from '../../lib/types'
+import {
+  parseCharacterDrivenPlanArcs,
+  parseCharacterDrivenPlotVolumes,
+} from '../../lib/types'
 import { characterAxesLabel } from '../../lib/character/character-axes'
+import { adoptCharacterDrivenVolumes } from '../../lib/story-planning/character-driven-adoption'
 
 interface Props {
   project: Project
@@ -41,8 +48,26 @@ export function applyCharacterArcAutoFill(
 
 export default function CharacterDrivenPlotPanel({ project }: Props) {
   const { characters, loadAll: loadChars } = useCharacterStore()
-  const { nodes, loadAll: loadOutline, addNode } = useOutlineStore()
+  const { loadAll: loadOutline } = useOutlineStore()
+  const {
+    plans,
+    currentPlanId,
+    activePlanId,
+    loading: plansLoading,
+    loadAll: loadPlans,
+    selectPlan,
+    createPlan,
+    copyAsNewVersion,
+    renamePlan,
+    saveInputs,
+    saveGenerated,
+    markAdopted,
+    setActivePlan,
+    deletePlan,
+  } = useCharacterDrivenPlanStore()
   const ai = useAIStream(createAISessionKey(project.id!, 'character-driven-plot.generate'))
+  const dialog = useDialog()
+  const generationPlanId = useRef<number | null>(null)
 
   const [arcs, setArcs] = useState<CharacterArcInput[]>([])
   const [userHint, setUserHint] = useState('')
@@ -54,6 +79,46 @@ export default function CharacterDrivenPlotPanel({ project }: Props) {
 
   useEffect(() => { loadChars(project.id!) }, [project.id, loadChars])
   useEffect(() => { loadOutline(project.id!) }, [project.id, loadOutline])
+  useEffect(() => { loadPlans(project.id!) }, [project.id, loadPlans])
+
+  const currentPlan = useMemo(
+    () => plans.find(plan => plan.id === currentPlanId) ?? null,
+    [plans, currentPlanId],
+  )
+
+  useEffect(() => {
+    if (!currentPlan) {
+      setArcs([])
+      setUserHint('')
+      setParsedVolumes(null)
+      return
+    }
+    const nextArcs = parseCharacterDrivenPlanArcs(currentPlan.arcs)
+    const nextVolumes = parseCharacterDrivenPlotVolumes(currentPlan.generatedVolumes)
+    setArcs(nextArcs)
+    setUserHint(currentPlan.userHint)
+    setParsedVolumes(nextVolumes.length ? nextVolumes : null)
+    setSelectedVolumes(new Set(nextVolumes.map((_, index) => index)))
+    setExpandedVolumes(new Set(nextVolumes.map((_, index) => index)))
+    setImportDone(currentPlan.status === 'adopted')
+  }, [currentPlan?.id]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const persistInputs = (nextArcs: CharacterArcInput[], nextHint = userHint) => {
+    if (currentPlan?.id == null) return
+    const characterIds = new Set(characters.flatMap(character =>
+      character.id == null ? [] : [character.id],
+    ))
+    const normalized = nextArcs.map(arc => ({
+      ...arc,
+      characterId: arc.characterId != null && characterIds.has(arc.characterId)
+        ? arc.characterId
+        : null,
+    }))
+    if (normalized.some((arc, index) => arc.characterId !== nextArcs[index]?.characterId)) {
+      setArcs(normalized)
+    }
+    void saveInputs(currentPlan.id, { arcs: normalized, userHint: nextHint })
+  }
 
   // 可选角色列表（排除已添加的）
   const availableChars = useMemo(() => {
@@ -68,13 +133,15 @@ export default function CharacterDrivenPlotPanel({ project }: Props) {
   const handleAddArc = (charId: number) => {
     const ch = characters.find(c => c.id === charId)
     if (!ch) return
-    setArcs(prev => [...prev, {
+    const next = [...arcs, {
       characterId: charId,
       name: ch.name,
       role: characterAxesLabel(ch),
       initialState: '',
       targetState: '',
-    }])
+    }]
+    setArcs(next)
+    persistInputs(next)
   }
 
   // 从角色已有信息预填
@@ -83,30 +150,46 @@ export default function CharacterDrivenPlotPanel({ project }: Props) {
     const ch = characters.find(c => c.id === arc.characterId)
     if (!ch) return
     const updates = applyCharacterArcAutoFill(arc, ch)
-    setArcs(prev => prev.map((a, i) => i === index ? updates : a))
+    const next = arcs.map((a, i) => i === index ? updates : a)
+    setArcs(next)
+    persistInputs(next)
   }
 
   // 删除弧光
   const handleRemoveArc = (index: number) => {
-    setArcs(prev => prev.filter((_, i) => i !== index))
+    const next = arcs.filter((_, i) => i !== index)
+    setArcs(next)
+    persistInputs(next)
   }
 
   // 更新弧光字段
   const handleUpdateArc = (index: number, field: 'initialState' | 'targetState', value: string) => {
-    setArcs(prev => prev.map((a, i) => i === index ? { ...a, [field]: value } : a))
+    const next = arcs.map((a, i) => i === index ? { ...a, [field]: value } : a)
+    setArcs(next)
   }
 
   // 开始生成
   const handleGenerate = async () => {
-    if (arcs.length === 0 || arcs.some(a => !a.initialState.trim() || !a.targetState.trim())) return
+    if (!currentPlan?.id || arcs.length === 0 || arcs.some(a => !a.initialState.trim() || !a.targetState.trim())) return
     setParsedVolumes(null)
     setImportDone(false)
+    generationPlanId.current = currentPlan.id
+    await saveInputs(currentPlan.id, { arcs, userHint })
+
+    const resolvedArcs = arcs.map(arc => {
+      const character = arc.characterId == null
+        ? null
+        : characters.find(item => item.id === arc.characterId)
+      return character
+        ? { ...arc, name: character.name, role: characterAxesLabel(character) }
+        : arc
+    })
 
     const messages = await buildCharacterDrivenPlotPrompt(
       project.id!,
       project.name,
       project.genres?.join('/') || '',
-      arcs,
+      resolvedArcs,
       userHint || undefined,
     )
 
@@ -118,48 +201,32 @@ export default function CharacterDrivenPlotPanel({ project }: Props) {
     if (!ai.isStreaming && ai.output) {
       const volumes = parsePlotOutput(ai.output)
       if (volumes.length > 0) {
-        setParsedVolumes(volumes)
-        setSelectedVolumes(new Set(volumes.map((_, i) => i)))
-        setExpandedVolumes(new Set(volumes.map((_, i) => i)))
+        const targetPlanId = generationPlanId.current ?? currentPlanId
+        if (targetPlanId != null) void saveGenerated(targetPlanId, volumes)
+        if (targetPlanId === currentPlanId) {
+          setParsedVolumes(volumes)
+          setSelectedVolumes(new Set(volumes.map((_, i) => i)))
+          setExpandedVolumes(new Set(volumes.map((_, i) => i)))
+        }
       }
     }
-  }, [ai.isStreaming, ai.output])
+  }, [ai.isStreaming, ai.output, currentPlanId, saveGenerated])
 
   // 采纳 → 写入大纲
   const handleAcceptToOutline = async () => {
     if (!parsedVolumes || selectedVolumes.size === 0) return
     setImporting(true)
-
-    const existingTopLevel = nodes.filter(n => n.parentId === null).length
-
-    for (const vi of Array.from(selectedVolumes).sort()) {
-      const vol = parsedVolumes[vi]
-      if (!vol) continue
-
-      const volId = await addNode({
-        projectId: project.id!,
-        parentId: null,
-        type: 'volume',
-        title: vol.volumeTitle,
-        summary: vol.volumeSummary,
-        order: existingTopLevel + vi,
-      })
-
-      for (let ci = 0; ci < vol.chapters.length; ci++) {
-        const ch = vol.chapters[ci]
-        await addNode({
-          projectId: project.id!,
-          parentId: volId,
-          type: 'chapter',
-          title: ch.title,
-          summary: `${ch.summary}${ch.arcProgress ? `\n\n【角色弧光推进】${ch.arcProgress}` : ''}`,
-          order: ci,
-        })
-      }
+    try {
+      const selected = Array.from(selectedVolumes)
+        .sort((a, b) => a - b)
+        .flatMap(index => parsedVolumes[index] ? [parsedVolumes[index]] : [])
+      await adoptCharacterDrivenVolumes({ projectId: project.id!, volumes: selected })
+      if (currentPlan?.id != null) await markAdopted(currentPlan.id)
+      await loadOutline(project.id!)
+      setImportDone(true)
+    } finally {
+      setImporting(false)
     }
-
-    setImporting(false)
-    setImportDone(true)
   }
 
   // 切换卷展开
@@ -182,7 +249,71 @@ export default function CharacterDrivenPlotPanel({ project }: Props) {
     })
   }
 
-  const canGenerate = arcs.length > 0 && arcs.every(a => a.initialState.trim() && a.targetState.trim()) && !ai.isStreaming
+  const canGenerate = currentPlan != null
+    && arcs.length > 0
+    && arcs.every(a => a.initialState.trim() && a.targetState.trim())
+    && !ai.isStreaming
+
+  const handleCreatePlan = async () => {
+    ai.reset()
+    await createPlan(project.id!)
+  }
+
+  const handleCopyPlan = async () => {
+    if (!currentPlan?.id) return
+    ai.reset()
+    await copyAsNewVersion(currentPlan.id)
+  }
+
+  const handleRenamePlan = async () => {
+    if (!currentPlan?.id) return
+    const name = await dialog.prompt({
+      title: '重命名角色驱动方案',
+      defaultValue: currentPlan.name,
+      placeholder: '方案名称',
+    })
+    if (name?.trim()) await renamePlan(currentPlan.id, name)
+  }
+
+  const handleDeletePlan = async () => {
+    if (!currentPlan?.id || !await dialog.confirm({
+      title: `删除方案「${currentPlan.name}」？`,
+      message: '大纲与正文不会被删除；子版本会保留，但不再指向此方案。',
+      confirmText: '删除',
+      tone: 'danger',
+    })) return
+    ai.reset()
+    await deletePlan(currentPlan.id)
+  }
+
+  if (!currentPlan) {
+    return (
+      <div className="h-full flex flex-col overflow-hidden">
+        <div className="flex items-center gap-2 px-4 py-3 border-b border-border bg-bg-surface">
+          <Users className="w-5 h-5 text-accent" />
+          <h2 className="text-lg font-semibold text-text-primary">角色驱动剧情</h2>
+          <span className="text-xs text-text-muted ml-2">持久化角色弧光设计工作区</span>
+        </div>
+        <div className="flex-1 grid place-items-center p-6">
+          <div className="max-w-md text-center border border-dashed border-border rounded-xl p-8">
+            <BookOpen className="w-10 h-10 mx-auto mb-3 text-accent opacity-70" />
+            <h3 className="text-base font-medium text-text-primary">创建第一份角色驱动方案</h3>
+            <p className="text-xs text-text-muted mt-2 mb-4">
+              角色弧光、作者要求和生成结果都会保存，可复制为新版本并显式设为后续 AI 参考。
+            </p>
+            <button
+              onClick={handleCreatePlan}
+              disabled={plansLoading}
+              className="inline-flex items-center gap-1.5 px-4 py-2 bg-accent text-white rounded-lg text-sm disabled:opacity-40"
+            >
+              {plansLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
+              新建方案
+            </button>
+          </div>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div className="h-full flex flex-col overflow-hidden">
@@ -190,7 +321,50 @@ export default function CharacterDrivenPlotPanel({ project }: Props) {
       <div className="flex items-center gap-2 px-4 py-3 border-b border-border bg-bg-surface">
         <Users className="w-5 h-5 text-accent" />
         <h2 className="text-lg font-semibold text-text-primary">角色驱动剧情</h2>
-        <span className="text-xs text-text-muted ml-2">从角色弧光反推情节大纲</span>
+        <span className="text-xs text-text-muted ml-2">持久化角色弧光设计工作区</span>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-2 px-4 py-2 border-b border-border bg-bg-base">
+        <select
+          value={currentPlan.id}
+          disabled={ai.isStreaming}
+          onChange={event => {
+            ai.reset()
+            selectPlan(Number(event.target.value))
+          }}
+          className="min-w-48 text-xs bg-bg-surface border border-border rounded px-2 py-1.5 text-text-primary"
+          aria-label="当前角色驱动方案"
+        >
+          {plans.map(plan => (
+            <option key={plan.id} value={plan.id}>
+              {plan.name} · v{plan.version} · {plan.status}
+            </option>
+          ))}
+        </select>
+        <button onClick={handleCreatePlan} disabled={ai.isStreaming} className="inline-flex items-center gap-1 text-xs text-accent disabled:opacity-40">
+          <Plus className="w-3.5 h-3.5" />新建
+        </button>
+        <button onClick={handleCopyPlan} disabled={ai.isStreaming} className="inline-flex items-center gap-1 text-xs text-accent disabled:opacity-40">
+          <Copy className="w-3.5 h-3.5" />复制为新版本
+        </button>
+        <button onClick={handleRenamePlan} disabled={ai.isStreaming} className="inline-flex items-center gap-1 text-xs text-text-muted disabled:opacity-40">
+          <Pencil className="w-3.5 h-3.5" />重命名
+        </button>
+        <button onClick={handleDeletePlan} disabled={ai.isStreaming} className="inline-flex items-center gap-1 text-xs text-red-500 disabled:opacity-40">
+          <Trash2 className="w-3.5 h-3.5" />删除
+        </button>
+        <button
+          onClick={() => setActivePlan(project.id!, activePlanId === currentPlan.id ? null : currentPlan.id!)}
+          className={`ml-auto inline-flex items-center gap-1 px-2 py-1 rounded text-xs ${
+            activePlanId === currentPlan.id
+              ? 'bg-green-500/15 text-green-600'
+              : 'bg-bg-surface text-text-muted border border-border'
+          }`}
+          title="只有明确设为当前参考的方案才会注入后续大纲与正文 AI 上下文"
+        >
+          <Power className="w-3.5 h-3.5" />
+          {activePlanId === currentPlan.id ? '后续 AI 正在参考' : '设为当前参考'}
+        </button>
       </div>
 
       <div className="flex-1 overflow-y-auto p-4 space-y-6">
@@ -228,10 +402,25 @@ export default function CharacterDrivenPlotPanel({ project }: Props) {
           ) : (
             <div className="space-y-4">
               {arcs.map((arc, i) => (
-                <div key={arc.characterId} className="bg-bg-surface border border-border rounded-lg p-4">
+                <div key={`${arc.characterId ?? 'snapshot'}-${i}`} className="bg-bg-surface border border-border rounded-lg p-4">
                   <div className="flex items-center justify-between mb-3">
                     <div className="flex items-center gap-2">
-                      <span className="text-sm font-medium text-text-primary">{arc.name}</span>
+                      {(() => {
+                        const current = arc.characterId == null
+                          ? null
+                          : characters.find(character => character.id === arc.characterId)
+                        return (
+                          <>
+                            <span className="text-sm font-medium text-text-primary">{current?.name ?? arc.name}</span>
+                            {current && current.name !== arc.name && (
+                              <span className="text-[11px] text-text-muted">方案快照：{arc.name}</span>
+                            )}
+                            {!current && (
+                              <span className="text-[11px] text-amber-600">原角色已删除 · 使用快照</span>
+                            )}
+                          </>
+                        )
+                      })()}
                       <span className="text-xs px-1.5 py-0.5 bg-bg-hover rounded text-text-muted">{arc.role}</span>
                     </div>
                     <div className="flex items-center gap-1">
@@ -259,6 +448,7 @@ export default function CharacterDrivenPlotPanel({ project }: Props) {
                       <AutoResizeTextarea
                         value={arc.initialState}
                         onChange={e => handleUpdateArc(i, 'initialState', e.target.value)}
+                        onBlur={() => persistInputs(arcs)}
                         placeholder="角色在故事开始时的状态、处境、性格特点..."
                         className="w-full text-sm bg-bg-base border border-border rounded px-3 py-2 text-text-primary placeholder:text-text-muted resize-none"
                         minRows={2}
@@ -271,6 +461,7 @@ export default function CharacterDrivenPlotPanel({ project }: Props) {
                       <AutoResizeTextarea
                         value={arc.targetState}
                         onChange={e => handleUpdateArc(i, 'targetState', e.target.value)}
+                        onBlur={() => persistInputs(arcs)}
                         placeholder="角色在故事结束时应达到的状态、成长结果..."
                         className="w-full text-sm bg-bg-base border border-border rounded px-3 py-2 text-text-primary placeholder:text-text-muted resize-none"
                         minRows={2}
@@ -298,7 +489,11 @@ export default function CharacterDrivenPlotPanel({ project }: Props) {
             <label className="block text-xs text-text-muted mb-1">额外要求（可选）</label>
             <AutoResizeTextarea
               value={userHint}
-              onChange={e => setUserHint(e.target.value)}
+              onChange={e => {
+                const next = e.target.value
+                setUserHint(next)
+              }}
+              onBlur={() => persistInputs(arcs, userHint)}
               placeholder="例如：控制在3卷以内、侧重战斗场景、需要感情线贯穿始终..."
               className="w-full text-sm bg-bg-base border border-border rounded px-3 py-2 text-text-primary placeholder:text-text-muted resize-none"
               minRows={2}
@@ -344,6 +539,7 @@ export default function CharacterDrivenPlotPanel({ project }: Props) {
               onAccept={() => {
                 const vols = parsePlotOutput(ai.output)
                 if (vols.length > 0) {
+                  void saveGenerated(currentPlan.id!, vols)
                   setParsedVolumes(vols)
                   setSelectedVolumes(new Set(vols.map((_, i) => i)))
                   setExpandedVolumes(new Set(vols.map((_, i) => i)))

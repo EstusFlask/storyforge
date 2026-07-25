@@ -21,7 +21,12 @@ export async function applyCharacterReferenceRemap(input: CharacterReferenceRema
 
   await remapSimpleCharacterRefs(input.projectId, input.fromCharacterId, toCharacterId)
   await remapRegisteredCharacterArrays(input.projectId, input.fromCharacterId, toCharacterId)
-  await remapRegisteredCharacterJson(input.projectId, input.fromCharacterId, toCharacterId)
+  await remapRegisteredCharacterJson(
+    input.projectId,
+    input.fromCharacterId,
+    toCharacterId,
+    toName,
+  )
   await remapCharacterStateCards(input.projectId, input.fromName, toName)
   await remapItemLedgerCharacterRefs(
     input.projectId,
@@ -141,6 +146,7 @@ async function remapRegisteredCharacterJson(
   projectId: number,
   fromId: number,
   toId?: number,
+  toName?: string,
 ): Promise<void> {
   for (const spec of PROJECT_TABLES) {
     const refs = (spec.refs ?? []).filter((ref): ref is JsonRef =>
@@ -154,6 +160,9 @@ async function remapRegisteredCharacterJson(
         if (ref.jsonPath === '$[].characterIds[]') {
           const next = remapSceneCharacterIds(row[ref.field], fromId, toId)
           if (next.changed) patch[ref.field] = next.value
+        } else if (ref.jsonPath === '$[].characterId') {
+          const next = remapCharacterPlanArcs(row[ref.field], fromId, toId, toName)
+          if (next.changed) patch[ref.field] = next.value
         }
       }
       if (Object.keys(patch).length) {
@@ -161,6 +170,42 @@ async function remapRegisteredCharacterJson(
         await spec.table.update(row.id, patch as any)
       }
     }
+  }
+}
+
+function remapCharacterPlanArcs(
+  value: unknown,
+  fromId: number,
+  toId?: number,
+  toName?: string,
+): { value: unknown; changed: boolean } {
+  const storedAsJson = typeof value === 'string'
+  let arcs: unknown = value
+  if (storedAsJson) {
+    try {
+      arcs = JSON.parse(value)
+    } catch {
+      return { value, changed: false }
+    }
+  }
+  if (!Array.isArray(arcs)) return { value, changed: false }
+
+  let changed = false
+  const next = arcs.map(arc => {
+    if (!arc || typeof arc !== 'object') return arc
+    const record = arc as Record<string, unknown>
+    if (record.characterId !== fromId) return arc
+    changed = true
+    return {
+      ...record,
+      characterId: toId ?? null,
+      // 删除只断开 ID 并保留快照名；合并才更新到 canonical 名称。
+      ...(toId != null && toName ? { name: toName } : {}),
+    }
+  })
+  return {
+    value: storedAsJson ? JSON.stringify(next) : next,
+    changed,
   }
 }
 

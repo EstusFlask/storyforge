@@ -47,6 +47,7 @@ import type {
   StorylineCrossing,
   CultivationSystem,
   CultivationProgress,
+  CharacterDrivenPlan,
 } from '../types'
 import type { AIUsageEntry } from '../ai/usage-log'
 import type { TemporalFact } from '../types/temporal-fact'
@@ -126,6 +127,9 @@ class StoryForgeDB extends Dexie {
 
   // WORLD-1 / Phase 34 —— 作者确认的逐章修炼进度事件
   cultivationProgress!: Table<CultivationProgress, number>
+
+  // STORY-1 / CF-9C —— 持久化角色驱动设计方案
+  characterDrivenPlans!: Table<CharacterDrivenPlan, number>
 
   // FB-5 —— 自适应文风学习（每项目一份 AI 文风画像）
   userStyleProfiles!: Table<UserStyleProfile, number>
@@ -427,6 +431,12 @@ class StoryForgeDB extends Dexie {
     this.version(43).stores({
     }).upgrade(async (tx) => {
       await migrateWorldHistoryConsolidation(tx)
+    })
+
+    // v44: CF-9C 角色驱动设计工作区。只新增空表；projects 上的 active 引用为可选
+    // 非索引字段，旧项目保持 undefined，不从既有临时面板或大纲反推方案。
+    this.version(44).stores({
+      characterDrivenPlans: '++id, projectId, status, parentPlanId, updatedAt',
     })
   }
 }

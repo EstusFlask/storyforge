@@ -44,7 +44,7 @@
 | 2 | **CANON-1 长期一致性与 Canon** | 把长篇一致性从提示词劝告升级为可度量、可追溯的软硬工程 | `CONSISTENCY-0`、`CONSISTENCY-2`、`CONSISTENCY-3`、长期一致性路线第 2–4 步、Phase 38 写后事实检测、Phase 39 故事线进度、`EDITOR-2`、`CF-20260703-8` | 覆盖地图、知识账本、世界宪法、时序/故事线、影响传播和编辑器出口闭环；明确硬/软/未覆盖 | **COMPLETE（2026-07-25）** |
 | 3 | **PIPE-1 透明生成与质量工作坊** | 让作者看得见、改得动、能分阶段确认 AI 如何生成卷纲、章纲和正文 | `PIPELINE-1`、`PIPELINE-2`、`PIPELINE-3`、`CF-20260702-7`、Phase 38 大纲评估和改进闭环、全局骨架 | 一次性生成与 `GenerationNode` 共用一条管线；提示词、上下文、预算、gate、采纳透明 | **COMPLETE（2026-07-25）** |
 | 4 | **WORLD-1 世界知识、词条、地图与修炼** | 把散文设定升级成可关联、可计算、可供创作和运行时共用的知识库 | Codex 世界隔离、Phase 37-a、Phase 34、Phase 35-b/c、`ENH-WORLDMAP-2` 已完成 | Codex/自然/人文无重复入口；地点、势力、物产、器物、修炼、力量阶段与地图关系一致 | **COMPLETE（2026-07-25）** |
-| 5 | **STORY-1 角色驱动与动态故事规划** | 让角色变化、角色弧光和主线/支线影响后续大纲 | `CF-20260702-9` 方案 C、`CF-20260702-12` 角色变更影响分析/弧光重规划 | 影响分析 → 作者选择 → 目标范围重规划；不静默修改既有正文 | **DEPENDENT；CANON + PIPE** |
+| 5 | **STORY-1 角色驱动与动态故事规划** | 让角色变化、角色弧光和主线/支线影响后续大纲 | `CF-20260702-9` 方案 C 已完成；下一步 `CF-20260702-12` 角色变更影响分析/弧光重规划 | 影响分析 → 作者选择 → 目标范围重规划；不静默修改既有正文 | **IN PROGRESS；CF-9C COMPLETE** |
 | 6 | **AUTHOR-1 长篇编辑与作者风格智能** | 提高长篇改稿、个人风格保持和既有作品续写能力 | `EDITOR-5`、`FB-4`、`FB-5` 高级校准、TipTap 长期优化 | 实体引用安全重映射；批量改稿预览/快照/撤销；风格画像可解释 | **DESIGN；EDITOR-5 可先独立** |
 | 7 | **IDEA-1 灵感与参考资料演化** | 让灵感和参考资料持续融合、更新、追溯 | `CM-1`、参考作品分析后续能力；与风格画像共享底座 | 增量输入、差异预览、版本和来源可追溯；参考分析统一走宪法路径 | **DEPENDENT；GOV-1** |
 | 8 | **AGENT-1 对话副驾与 Agent 团队** | 用对话组合调用现有能力，不重写面板业务 | Phase 27.1-a~e、27.2b、整理本章 Agent、一致性 Agent、per-role 模型和预算 | Tool Registry 薄封装；前台写入必确认；后台默认只读；Canon 负责校验 | **DEPENDENT；CANON + PIPE** |
@@ -59,7 +59,7 @@
 3. ✅ CANON-1（2026-07-25）：覆盖基线 → 认知账本 → 世界宪法 → 存亡时序 → Phase 39 故事线动态进度与交汇全部收口。
 4. ✅ PIPE-1（2026-07-25）：透明最终提示词、五阶段章纲工坊、确定性 gate 与既有 Workflow 节点适配已收口；未制造空壳 Agent。
 5. ✅ WORLD-1（2026-07-25）：世界隔离地基 → Phase 37-a 修炼体系 → Phase 34 力量追踪 → Phase 35-b 分类/历史合并 → Phase 35-c 导入分类 → ENH-WORLDMAP-2 空间约束地图全部收口。
-6. STORY-1、AUTHOR-1、IDEA-1：按独立用户价值选择下一完整功能。
+6. 🔄 STORY-1：CF-9C 持久化角色驱动工作区已完成；当前继续 CF-12 中途角色变化影响分析与作者确认式局部重规划。
 7. AGENT-1 → SIM-1 → PLATFORM-1：严格依赖顺序进入长期阶段。
 
 ### GOV-1 第一阶段交付证据
@@ -117,6 +117,15 @@
 - 命名首都和聚落只落到适宜陆地；国家规模影响领土扩张，聚落规模影响人口、图标和
   标签，命名河流只匹配最近物理河道。旧配置继续走原 Voronoi 路径。
 
+### STORY-1 第一阶段交付证据
+
+- DB v44 新增项目级 `characterDrivenPlans`，保存角色弧光快照、作者要求、生成卷章、状态与版本链；工作台提供新建、打开、复制新版、重命名、删除和刷新回填。
+- `projects.activeCharacterDrivenPlanId` 只由作者显式设置；`characterDrivenPlan` 上下文源在无 active 时为空，有 active 时进入卷纲、章纲、细纲、场景和正文生成。
+- 角色改名显示当前名与快照名；删除角色只断开软 ID，方案和弧光文本不级联删除；合并角色更新 canonical 引用。
+- 项目 active、父版本和弧光角色 ID 均使用便携导出序号重映射；旧格式原始 ID 不猜测，导入时安全置空。
+- 采纳卷章统一走 `adopt(target=outlineNodes)`，重复采纳幂等；不改 `storyCore`，不触碰既有正文。
+- `R-CF9C-*` 覆盖 CRUD、迁移、上下文、导出导入、删除降级与采纳；Chromium 验证真实项目/角色、版本、激活与刷新恢复。
+
 ## 四、原任务唯一归属
 
 | 原任务 | 主归属 | 迁移规则 |
@@ -146,6 +155,7 @@
 | Canon / 一致性 | [`CONSISTENCY-ENGINEERING-ROUTE.md`](../CONSISTENCY-ENGINEERING-ROUTE.md)、[`CONSISTENCY-COVERAGE-MAP.md`](../CONSISTENCY-COVERAGE-MAP.md)、[`CONSISTENCY-CHECK-DESIGN.md`](../CONSISTENCY-CHECK-DESIGN.md) |
 | 透明生成 | [`TRANSPARENT-GENERATION-PIPELINE.md`](../TRANSPARENT-GENERATION-PIPELINE.md) |
 | 世界知识 | [`CODEX-REDESIGN.md`](../CODEX-REDESIGN.md)、[`WORLD-RULES-MULTIWORLD-DESIGN.md`](../WORLD-RULES-MULTIWORLD-DESIGN.md) |
+| 动态故事规划 | [`CHARACTER-DRIVEN-WORKSPACE-DESIGN.md`](../CHARACTER-DRIVEN-WORKSPACE-DESIGN.md) |
 | Agent | [`AI-COPILOT-DESIGN.md`](../AI-COPILOT-DESIGN.md) |
 
 设计文档提供方案细节，`README.md` 提供当前归属和施工顺序；两者冲突时，先停止开发并回到 `CLAUDE.md`、`MASTER-BLUEPRINT.md` 和本路线图裁决。

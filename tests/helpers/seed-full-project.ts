@@ -57,6 +57,25 @@ export async function seedFullProject() {
   } as any) as number
   const char2 = await db.characters.add({ projectId, isCrossWorld: true, name: '苏长歌', role: 'supporting', createdAt: now, updatedAt: now } as any) as number
   await db.characterRelations.add({ projectId, fromCharacterId: char1, toCharacterId: char2, type: 'ally', description: '同门', createdAt: now, updatedAt: now } as any)
+  const characterDrivenPlan = await db.characterDrivenPlans.add({
+    projectId,
+    name: '林惊羽角色驱动方案',
+    arcs: JSON.stringify([{
+      characterId: char1,
+      name: '林惊羽',
+      role: '主角',
+      initialState: '孤身复仇',
+      targetState: '守护同门',
+    }]),
+    userHint: '服务复仇主线',
+    generatedVolumes: '[]',
+    status: 'draft',
+    version: 1,
+    parentPlanId: null,
+    createdAt: now,
+    updatedAt: now,
+  }) as number
+  await db.projects.update(projectId, { activeCharacterDrivenPlanId: characterDrivenPlan })
 
   // ── 大纲(树,wgA)+ 章节 + 细纲 + 情感卡 ──
   const vol = await db.outlineNodes.add({ projectId, worldGroupId: wgA, parentId: null, type: 'volume', title: '第一卷', summary: '开篇', order: 0, createdAt: now, updatedAt: now } as any) as number
@@ -150,7 +169,7 @@ export async function seedFullProject() {
     sourceQuote: '废墟中睁眼', status: 'confirmed', createdAt: now, updatedAt: now,
   })
 
-  return { projectId, wgA, wgB, char1, char2, vol, chapNode, chapter, temporalFact, ref1, cat, subCat, rootWorld, mirrorWorld, locParent, cultivationSystem, codexEntry }
+  return { projectId, wgA, wgB, char1, char2, vol, chapNode, chapter, temporalFact, ref1, cat, subCat, rootWorld, mirrorWorld, locParent, cultivationSystem, codexEntry, characterDrivenPlan }
 }
 
 /** 所有 exportable 的项目级表名(可按 projectId 查;排除 projects 与 direct-child referenceChunkAnalysis) */

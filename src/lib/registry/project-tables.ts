@@ -16,6 +16,11 @@ import type { TableSpec } from './types'
 export const PROJECT_TABLES: TableSpec[] = [
   // ───────────────────────── 项目根表 ─────────────────────────
   { table: db.projects, name: 'projects', owner: 'project', exportable: true,
+    exportRemap: [{
+      field: 'activeCharacterDrivenPlanId',
+      remapVia: 'characterDrivenPlans',
+      exportAs: '_activeCharacterDrivenPlanExportId',
+    }],
     note: '项目本身' },
 
   // ───────────────────── 世界观/设定(world-scoped 多)─────────────────────
@@ -170,6 +175,35 @@ export const PROJECT_TABLES: TableSpec[] = [
       { kind: 'simple', field: 'id', target: 'storylineCrossings[arcIdA]', onDelete: 'cascade' },
       { kind: 'simple', field: 'id', target: 'storylineCrossings[arcIdB]', onDelete: 'cascade' },
     ] },
+
+  { table: db.characterDrivenPlans, name: 'characterDrivenPlans', owner: 'project',
+    exportable: true, exportIdField: true, tree: { parentField: 'parentPlanId' },
+    refs: [
+      { kind: 'json', field: 'arcs', jsonPath: '$[].characterId', target: 'characters[id]', onDelete: 'remap' },
+      { kind: 'simple', field: 'id', target: 'projects[activeCharacterDrivenPlanId]', onDelete: 'setNull' },
+      { kind: 'simple', field: 'id', target: 'characterDrivenPlans[parentPlanId]', onDelete: 'setNull' },
+    ],
+    exportRemap: [{
+      field: 'parentPlanId',
+      remapVia: 'characterDrivenPlans',
+      selfTree: true,
+      exportAs: '_parentExportId',
+    }],
+    exportRefRemap: [{
+      field: 'arcs',
+      remapVia: 'characters',
+      kind: 'character-plan-arcs',
+      exportAs: '_arcCharacterIndexes',
+    }],
+    defaults: {
+      arcs: '[]',
+      userHint: '',
+      generatedVolumes: '[]',
+      status: 'draft',
+      version: 1,
+      parentPlanId: null,
+    },
+    note: 'CF-9C 项目级角色驱动设计方案；角色为软引用，删除后保留姓名/身份快照' },
 
   { table: db.storylineProgress, name: 'storylineProgress', owner: 'project',
     exportable: true,

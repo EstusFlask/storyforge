@@ -211,12 +211,27 @@
 ### 已有能力
 
 - 角色双轴（戏份、道德/秩序）模型、角色关系、StoryArc 和大纲主线约束已有基础。
-- 角色生成、大纲生成、故事线和章节上下文已有注册表入口。
+- CF-9C 已把临时角色驱动面板升级为项目级持久化工作区：方案保存弧光角色快照、作者要求、生成卷章、状态和版本链。
+- 工作台支持新建、打开、复制为新版、重命名、删除、生成结果回填和显式“设为当前参考”；刷新不丢输入与结果。
+- `characterDrivenPlan` 只读取 `projects.activeCharacterDrivenPlanId` 指向的同项目方案；普通卷纲、章纲、细纲、场景与正文生成均显式接入，没有 active 时不注入。
+- 角色改名时使用当前名并提示方案快照名；角色删除时软 ID 置空、文本快照保留，方案不级联删除。
+- DB v44、`PROJECT_TABLES`、必需表、项目删除、便携导出导入均已收口；active、父版本和弧光角色引用会在导入后重映射。
+- 勾选生成卷后只经统一 `adopt(target=outlineNodes)` 写入卷/章，并保留 `【角色弧光推进】`；重复采纳幂等。
 
 ### 当前边界 / 尚未完成
 
-- 角色修改后的影响范围分析和弧光重规划仍未形成用户确认闭环。
-- 不应另造 StorylineProgress 之外的第二套线索概念；动态进度由 CANON-1 负责事实底座。
+- CF-12 尚未完成：已写到中途后新增或修改角色弧光，还没有“已写区保护 → 影响分析 → 作者选择 → 未写区局部重规划”的正式出口。
+- 当前方案激活不会自动修改 `storyCore.mainPlot`、既有大纲或正文；这是刻意的数据安全边界。
+- 不应另造 `StorylineProgress` 之外的第二套线索概念；CF-12 必须复用 active 方案、Canon、故事线与现有大纲。
+
+### 代码与测试入口
+
+- `src/stores/character-driven-plan.ts`
+- `src/lib/types/character-driven-plan.ts`
+- `src/lib/story-planning/character-driven-adoption.ts`
+- `src/components/outline/CharacterDrivenPlotPanel.tsx`
+- `tests/regression/R-CF9C-*.test.ts`
+- `docs/CHARACTER-DRIVEN-WORKSPACE-DESIGN.md`
 
 ## AUTHOR-1 / IDEA-1 长篇编辑、风格与灵感
 

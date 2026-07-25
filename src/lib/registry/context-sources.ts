@@ -35,6 +35,10 @@ import { formatCanonAssertionsContext, readCanonAssertions } from '../fact-ledge
 import { readStorylineProgressContext } from '../storyline/storyline-progress'
 import { readCultivationProgressContext } from '../cultivation/progress'
 import type { Chapter, Character, OutlineNode, PowerSystem, Worldview } from '../types'
+import {
+  parseCharacterDrivenPlanArcs,
+  parseCharacterDrivenPlotVolumes,
+} from '../types/character-driven-plan'
 import type { ContextSource } from './types'
 import { countWords, htmlToPlainText } from '../utils/html'
 
@@ -79,6 +83,45 @@ async function readUserStyleProfile(projectId: number): Promise<string> {
   const profile = await db.userStyleProfiles.where('projectId').equals(projectId).first()
   if (!profile || !profile.enabled || !profile.profile.trim()) return ''
   return `【作者文风偏好】\n请在本次写作中尽量贴合作者一贯的文风习惯:\n${profile.profile.trim()}`
+}
+
+export async function readActiveCharacterDrivenPlanContext(projectId: number): Promise<string> {
+  const project = await db.projects.get(projectId)
+  const activeId = project?.activeCharacterDrivenPlanId
+  if (activeId == null) return ''
+
+  const plan = await db.characterDrivenPlans.get(activeId)
+  if (!plan || plan.projectId !== projectId) return ''
+
+  const [characters, arcs] = await Promise.all([
+    db.characters.where('projectId').equals(projectId).toArray(),
+    Promise.resolve(parseCharacterDrivenPlanArcs(plan.arcs)),
+  ])
+  const byId = new Map(characters.flatMap(character =>
+    character.id == null ? [] : [[character.id, character] as const],
+  ))
+  const lines = [
+    `【当前生效的角色驱动方案】${plan.name}（v${plan.version}，${plan.status}）`,
+  ]
+  if (plan.userHint.trim()) lines.push(`作者要求：${plan.userHint.trim()}`)
+  for (const arc of arcs) {
+    const current = arc.characterId == null ? null : byId.get(arc.characterId)
+    const identity = current
+      ? `${current.name}${current.name !== arc.name ? `（方案快照名：${arc.name}）` : ''}`
+      : `${arc.name}（原角色已删除，仅保留方案快照）`
+    lines.push(
+      `- ${identity}｜${arc.role || '未标注身份'}：${arc.initialState || '未填写'} → ${arc.targetState || '未填写'}`,
+    )
+  }
+  const volumes = parseCharacterDrivenPlotVolumes(plan.generatedVolumes)
+  for (const volume of volumes) {
+    lines.push(`卷：${volume.volumeTitle}｜${volume.volumeSummary}`)
+    if (volume.characterArcs) lines.push(`  弧光：${volume.characterArcs}`)
+    for (const chapter of volume.chapters) {
+      lines.push(`  - ${chapter.title}：${chapter.summary}${chapter.arcProgress ? `；弧光推进：${chapter.arcProgress}` : ''}`)
+    }
+  }
+  return lines.join('\n')
 }
 
 async function readStoryArcs(projectId: number): Promise<string> {
@@ -622,6 +665,15 @@ export const CONTEXT_SOURCES: ContextSource[] = [
     layer: 'L1',
     budgetTokens: 4000, // 放宽:容下完整故事核心(主线/复线)
     read: async input => formatStoryCoreBlock(await db.storyCores.where('projectId').equals(input.projectId).first() ?? null),
+  },
+  {
+    key: 'characterDrivenPlan',
+    label: '当前生效角色驱动方案',
+    scope: 'project',
+    layer: 'L1',
+    budgetTokens: 5000,
+    protectedFromTrim: true,
+    read: input => readActiveCharacterDrivenPlanContext(input.projectId),
   },
   {
     key: 'powerSystem',

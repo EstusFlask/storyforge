@@ -62,6 +62,9 @@ function normalize(data: any) {
   // 新表和这些 FK 的往返由 R-export-fullcoverage 锁定。
   delete data.cultivationSystems
   delete data.cultivationProgress
+  // STORY-1:角色驱动方案及项目 active 影子引用为新格式；专项往返由 R-CF9C 锁定。
+  delete data.characterDrivenPlans
+  delete data.project?._activeCharacterDrivenPlanExportId
   for (const row of data.characters ?? []) {
     delete row._raceEntryExportId
     delete row._cultivationSystemExportId

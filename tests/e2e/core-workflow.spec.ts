@@ -541,71 +541,73 @@ test('世界地图把明确距离和方位落实到命名实体，并持久化�
     const source = request.messages?.find(message => message.role === 'user')?.content ?? ''
     expect(source).toContain('疆域东西横跨三千公里')
     expect(source).toContain('东港在西京以东，相距六百公里')
+    const content = JSON.stringify({
+      seed: 'e2e-spatial-map',
+      mapName: '空间约束世界',
+      pointCount: 3000,
+      landRatio: 0.68,
+      continentCount: 1,
+      stateCount: 2,
+      burgDensity: 0.2,
+      heightmapTemplate: 'pangea',
+      namingStyle: 'chinese',
+      stateNames: ['西陆帝国', '东海王国'],
+      burgNames: ['西京', '东港'],
+      mapWidthKm: 3000,
+      mapWidthEvidenceQuote: '疆域东西横跨三千公里',
+      spatialEntities: [
+        {
+          name: '西陆帝国',
+          kind: 'state',
+          scaleTier: 'empire',
+          capitalName: '西京',
+          source: 'inferred',
+        },
+        {
+          name: '东海王国',
+          kind: 'state',
+          scaleTier: 'kingdom',
+          capitalName: '东港',
+          source: 'inferred',
+        },
+        {
+          name: '西京',
+          kind: 'settlement',
+          scaleTier: 'metropolis',
+          source: 'explicit',
+          evidenceQuote: '西京',
+        },
+        {
+          name: '东港',
+          kind: 'settlement',
+          scaleTier: 'city',
+          source: 'explicit',
+          evidenceQuote: '东港',
+        },
+      ],
+      spatialRelations: [{
+        from: '东港',
+        to: '西京',
+        direction: 'east',
+        distanceTier: 'far',
+        distanceValue: 600,
+        distanceUnit: 'km',
+        source: 'explicit',
+        evidenceQuote: '东港在西京以东，相距六百公里',
+      }],
+    })
     await route.fulfill({
       status: 200,
-      contentType: 'application/json',
-      body: JSON.stringify({
-        choices: [{
-          message: {
-            content: JSON.stringify({
-              seed: 'e2e-spatial-map',
-              mapName: '空间约束世界',
-              pointCount: 3000,
-              landRatio: 0.68,
-              continentCount: 1,
-              stateCount: 2,
-              burgDensity: 0.2,
-              heightmapTemplate: 'pangea',
-              namingStyle: 'chinese',
-              stateNames: ['西陆帝国', '东海王国'],
-              burgNames: ['西京', '东港'],
-              mapWidthKm: 3000,
-              mapWidthEvidenceQuote: '疆域东西横跨三千公里',
-              spatialEntities: [
-                {
-                  name: '西陆帝国',
-                  kind: 'state',
-                  scaleTier: 'empire',
-                  capitalName: '西京',
-                  source: 'inferred',
-                },
-                {
-                  name: '东海王国',
-                  kind: 'state',
-                  scaleTier: 'kingdom',
-                  capitalName: '东港',
-                  source: 'inferred',
-                },
-                {
-                  name: '西京',
-                  kind: 'settlement',
-                  scaleTier: 'metropolis',
-                  source: 'explicit',
-                  evidenceQuote: '西京',
-                },
-                {
-                  name: '东港',
-                  kind: 'settlement',
-                  scaleTier: 'city',
-                  source: 'explicit',
-                  evidenceQuote: '东港',
-                },
-              ],
-              spatialRelations: [{
-                from: '东港',
-                to: '西京',
-                direction: 'east',
-                distanceTier: 'far',
-                distanceValue: 600,
-                distanceUnit: 'km',
-                source: 'explicit',
-                evidenceQuote: '东港在西京以东，相距六百公里',
-              }],
-            }),
-          },
-        }],
-        usage: { prompt_tokens: 200, completion_tokens: 80, total_tokens: 280 },
-      }),
+      contentType: 'text/event-stream',
+      body: [
+        `data: ${JSON.stringify({ choices: [{ delta: { content } }] })}`,
+        `data: ${JSON.stringify({
+          choices: [{ delta: {} }],
+          usage: { prompt_tokens: 200, completion_tokens: 80, total_tokens: 280 },
+        })}`,
+        'data: [DONE]',
+        '',
+      ].join('\n\n'),
     })
   })
 
@@ -623,8 +625,8 @@ test('世界地图把明确距离和方位落实到命名实体，并持久化�
 
   await openSidebarLeaf(page, '世界观', '世界地图')
   await page.getByRole('button', { name: 'AI 生成地图', exact: true }).click()
-  await expect(page.getByText('空间约束世界', { exact: true })).toBeVisible({ timeout: 30_000 })
-  await expect(page.getByText('比例尺：用户疆域尺寸', { exact: true })).toBeVisible()
+  await expect(page.getByText('比例尺：用户疆域尺寸', { exact: true })).toBeVisible({ timeout: 30_000 })
+  await expect(page.getByRole('button', { name: 'AI 重新生成', exact: true })).toBeVisible()
   await expect(page.getByText(/2 国/)).toBeVisible()
 
   const scale = page.locator('select').last()
@@ -632,7 +634,55 @@ test('世界地图把明确距离和方位落实到命名实体，并持久化�
   await expect(page.getByText('比例尺：手动设定', { exact: true })).toBeVisible()
   await page.reload()
   await openSidebarLeaf(page, '世界观', '世界地图')
-  await expect(page.getByText('空间约束世界', { exact: true })).toBeVisible({ timeout: 30_000 })
-  await expect(page.getByText('比例尺：手动设定', { exact: true })).toBeVisible()
+  await expect(page.getByText('比例尺：手动设定', { exact: true })).toBeVisible({ timeout: 30_000 })
+  await expect(page.getByRole('button', { name: 'AI 重新生成', exact: true })).toBeVisible()
   await expect(page.locator('select').last()).toHaveValue('2')
+})
+
+test('角色驱动方案可持久化、复制版本并显式设为后续 AI 参考', async ({ page }) => {
+  await openCleanHome(page)
+  await createProject(page, 'E2E 角色驱动工作区')
+
+  await openSidebarLeaf(page, '角色设计', '角色生成')
+  await page.getByRole('button', { name: /新建角色/ }).click()
+  await page.getByRole('button', { name: '主要', exact: true }).click()
+  await page.getByRole('button', { name: '守序善良', exact: true }).click()
+  await page.getByRole('button', { name: '创建并分流', exact: true }).click()
+
+  await openSidebarLeaf(page, '创作区', '角色驱动')
+  await page.getByRole('button', { name: '新建方案', exact: true }).click()
+  await expect(page.getByText('角色弧光设定', { exact: true })).toBeVisible()
+
+  const characterPicker = page.locator('select').filter({
+    has: page.locator('option', { hasText: '+ 添加角色' }),
+  })
+  await characterPicker.selectOption({ index: 1 })
+  const initial = page.getByPlaceholder('角色在故事开始时的状态、处境、性格特点...')
+  const target = page.getByPlaceholder('角色在故事结束时应达到的状态、成长结果...')
+  const hint = page.getByPlaceholder(/控制在3卷以内/)
+  await initial.fill('逃避故乡与旧案')
+  await initial.blur()
+  await target.fill('主动承担守护故乡的责任')
+  await target.blur()
+  await hint.fill('必须服务既有主线')
+  await hint.blur()
+
+  await page.getByRole('button', { name: '重命名', exact: true }).click()
+  await page.getByPlaceholder('方案名称').fill('归乡弧光')
+  await page.getByRole('button', { name: '确认', exact: true }).click()
+  await expect(page.getByLabel('当前角色驱动方案')).toContainText('归乡弧光')
+
+  await page.getByRole('button', { name: '复制为新版本', exact: true }).click()
+  await expect(page.getByLabel('当前角色驱动方案')).toContainText('v2')
+  await page.getByRole('button', { name: '设为当前参考', exact: true }).click()
+  await expect(page.getByRole('button', { name: '后续 AI 正在参考', exact: true })).toBeVisible()
+
+  await page.reload()
+  await openSidebarLeaf(page, '创作区', '角色驱动')
+  await expect(page.getByLabel('当前角色驱动方案')).toContainText('v2')
+  await expect(page.getByLabel('当前角色驱动方案').locator('option')).toHaveCount(2)
+  await expect(initial).toHaveValue('逃避故乡与旧案')
+  await expect(target).toHaveValue('主动承担守护故乡的责任')
+  await expect(hint).toHaveValue('必须服务既有主线')
+  await expect(page.getByRole('button', { name: '后续 AI 正在参考', exact: true })).toBeVisible()
 })

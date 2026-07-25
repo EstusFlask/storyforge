@@ -5,6 +5,12 @@
  */
 
 import type { ChatMessage } from '../types'
+import {
+  parseCharacterDrivenPlotVolumes,
+  type CharacterDrivenPlanArc,
+  type CharacterDrivenPlotChapter,
+  type CharacterDrivenPlotVolume,
+} from '../types/character-driven-plan'
 import type { OutlineNode } from '../types/outline'
 import { usePromptStore } from '../../stores/prompt'
 import { renderPrompt } from './prompt-engine'
@@ -19,31 +25,13 @@ import {
 // ── 类型 ────────────────────────────────────────────────────────────────
 
 /** 单个角色的弧光设定（用户填写） */
-export interface CharacterArcInput {
-  characterId: number
-  name: string
-  role: string
-  /** 初始状态描述 */
-  initialState: string
-  /** 目标状态/结局描述 */
-  targetState: string
-}
+export type CharacterArcInput = CharacterDrivenPlanArc
 
 /** AI 输出的章节 */
-export interface PlotChapter {
-  title: string
-  summary: string
-  keyCharacters: string[]
-  arcProgress: string
-}
+export type PlotChapter = CharacterDrivenPlotChapter
 
 /** AI 输出的卷 */
-export interface PlotVolume {
-  volumeTitle: string
-  volumeSummary: string
-  characterArcs: string
-  chapters: PlotChapter[]
-}
+export type PlotVolume = CharacterDrivenPlotVolume
 
 // ── 构建 Prompt ─────────────────────────────────────────────────────────
 
@@ -168,21 +156,7 @@ export function parsePlotOutput(output: string): PlotVolume[] {
 
   try {
     const parsed = JSON.parse(jsonStr)
-    if (!Array.isArray(parsed)) return []
-
-    return parsed.map((vol: Record<string, unknown>) => ({
-      volumeTitle: String(vol.volumeTitle || vol.title || ''),
-      volumeSummary: String(vol.volumeSummary || vol.summary || ''),
-      characterArcs: String(vol.characterArcs || ''),
-      chapters: Array.isArray(vol.chapters)
-        ? vol.chapters.map((ch: Record<string, unknown>) => ({
-            title: String(ch.title || ''),
-            summary: String(ch.summary || ''),
-            keyCharacters: Array.isArray(ch.keyCharacters) ? ch.keyCharacters.map(String) : [],
-            arcProgress: String(ch.arcProgress || ''),
-          }))
-        : [],
-    })).filter(v => v.volumeTitle)
+    return parseCharacterDrivenPlotVolumes(parsed)
   } catch {
     // JSON 解析失败，尝试正则降级（简单的标题+摘要提取）
     return []

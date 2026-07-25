@@ -114,6 +114,12 @@ export type ExportRefRemap = {
   remapVia: string
   kind: 'scene-character-ids'
   exportAs: string
+} | {
+  /** CharacterDrivenPlan.arcs JSON 内逐项 characterId 的便携影子数组。 */
+  field: string
+  remapVia: string
+  kind: 'character-plan-arcs'
+  exportAs: string
 }
 
 /**

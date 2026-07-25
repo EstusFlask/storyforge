@@ -172,6 +172,8 @@ export default defineConfig({
           'vendor-editor': ['@tiptap/react', '@tiptap/starter-kit', '@tiptap/extension-placeholder'],
           'vendor-db': ['dexie'],
           'vendor-d3': ['d3-hierarchy'],
+          // 侧栏与工作区共享大量图标；独立缓存，避免每次功能加一个图标都把入口包推过预算。
+          'vendor-icons': ['lucide-react'],
         },
       },
     },
