@@ -48,6 +48,7 @@ import type {
   CultivationSystem,
   CultivationProgress,
   CharacterDrivenPlan,
+  InspirationWorkspace,
 } from '../types'
 import type { AIUsageEntry } from '../ai/usage-log'
 import type { TemporalFact } from '../types/temporal-fact'
@@ -130,6 +131,9 @@ class StoryForgeDB extends Dexie {
 
   // STORY-1 / CF-9C —— 持久化角色驱动设计方案
   characterDrivenPlans!: Table<CharacterDrivenPlan, number>
+
+  // IDEA-1 / CM-1 —— 增量灵感碎片与确认版本
+  inspirationWorkspaces!: Table<InspirationWorkspace, number>
 
   // FB-5 —— 自适应文风学习（每项目一份 AI 文风画像）
   userStyleProfiles!: Table<UserStyleProfile, number>
@@ -437,6 +441,12 @@ class StoryForgeDB extends Dexie {
     // 非索引字段，旧项目保持 undefined，不从既有临时面板或大纲反推方案。
     this.version(44).stores({
       characterDrivenPlans: '++id, projectId, status, parentPlanId, updatedAt',
+    })
+
+    // v45: CM-1 增量灵感工作区。只新增每项目一份空表；不从 localStorage
+    // 猜测或自动搬运旧草稿，旧草稿仍由面板兼容读取，作者首次融合时显式落库。
+    this.version(45).stores({
+      inspirationWorkspaces: '++id, projectId, updatedAt',
     })
   }
 }

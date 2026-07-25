@@ -47,6 +47,12 @@ import {
   parseStyleCalibrationFeedback,
   parseStyleRevisionPairs,
 } from '../style/style-learning'
+import {
+  buildInspirationFusionInput,
+  latestInspirationVersion,
+  parseInspirationFragments,
+  parseInspirationVersions,
+} from '../inspiration/workspace'
 
 async function readWorldview(projectId: number, worldGroupId?: number | null): Promise<Worldview | null> {
   const rows = await db.worldviews.where('projectId').equals(projectId).toArray()
@@ -99,6 +105,23 @@ async function readUserStyleProfile(projectId: number): Promise<string> {
     pairExamples ? `【作者改稿对照（仅学习改写方向）】\n${pairExamples}` : '',
     feedback ? `【最近校准反馈】\n${feedback}` : '',
   ].filter(Boolean).join('\n\n')
+}
+
+async function readInspirationWorkspaceContext(
+  projectId: number,
+  selectedIds: string[] | undefined,
+  mode: 'single' | 'multiworld' = 'single',
+): Promise<string> {
+  if (!selectedIds?.length) return ''
+  const workspace = await db.inspirationWorkspaces.where('projectId').equals(projectId).first()
+  if (!workspace) return ''
+  const fragments = parseInspirationFragments(workspace.fragments)
+  const versions = parseInspirationVersions(workspace.versions)
+  return buildInspirationFusionInput({
+    fragments,
+    selectedIds: new Set(selectedIds),
+    previousVersion: latestInspirationVersion(versions, mode),
+  })
 }
 
 export async function readActiveCharacterDrivenPlanContext(projectId: number): Promise<string> {
@@ -874,6 +897,20 @@ export const CONTEXT_SOURCES: ContextSource[] = [
     layer: 'L2',
     budgetTokens: 1800,
     read: input => readUserStyleProfile(input.projectId),
+  },
+  {
+    // CM-1:只读取作者本次明确勾选的短灵感和同模式最近确认版本。
+    key: 'inspirationWorkspace',
+    label: '增量灵感工作区',
+    scope: 'project',
+    layer: 'L0',
+    budgetTokens: 11_000,
+    enabled: input => !!input.inspirationFragmentIds?.length,
+    read: input => readInspirationWorkspaceContext(
+      input.projectId,
+      input.inspirationFragmentIds,
+      input.inspirationMode,
+    ),
   },
   {
     // C2 反向哺喂：某角色在剧情里已确认的事实（需 subjectCharacterName）。

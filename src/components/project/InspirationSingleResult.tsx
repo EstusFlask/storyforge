@@ -18,6 +18,7 @@ interface Props {
   adoptedSections: ReadonlySet<string>
   selectedChars: ReadonlySet<number>
   adopting: boolean
+  adoptionLocked?: boolean
   onToggleSection: (key: string) => void
   onToggleCharacter: (index: number) => void
   onAdoptWorldview: () => void
@@ -32,6 +33,7 @@ export default function InspirationSingleResult({
   adoptedSections,
   selectedChars,
   adopting,
+  adoptionLocked = false,
   onToggleSection,
   onToggleCharacter,
   onAdoptWorldview,
@@ -50,11 +52,11 @@ export default function InspirationSingleResult({
         {!allAdopted && (
           <button
             onClick={onAdoptAll}
-            disabled={adopting}
+            disabled={adopting || adoptionLocked}
             className="flex items-center gap-1 px-3 py-1.5 bg-green-600 text-white rounded text-xs font-medium hover:bg-green-700 disabled:opacity-40 transition-colors"
           >
             {adopting ? <Loader2 className="w-3 h-3 animate-spin" /> : <ArrowDownToLine className="w-3 h-3" />}
-            一键全部采纳
+            {adoptionLocked ? '先确认融合版本' : '一键全部采纳'}
           </button>
         )}
       </div>
@@ -67,6 +69,7 @@ export default function InspirationSingleResult({
         adopted={adoptedSections.has('worldview')}
         onAdopt={onAdoptWorldview}
         adopting={adopting}
+        adoptionLocked={adoptionLocked}
         adoptLabel="写入世界观"
       >
         <div className="space-y-2 text-sm">
@@ -88,6 +91,7 @@ export default function InspirationSingleResult({
         adopted={adoptedSections.has('storyCore')}
         onAdopt={onAdoptStoryCore}
         adopting={adopting}
+        adoptionLocked={adoptionLocked}
         adoptLabel="写入故事设计"
       >
         <div className="space-y-2 text-sm">
@@ -107,6 +111,7 @@ export default function InspirationSingleResult({
         adopted={adoptedSections.has('characters')}
         onAdopt={onAdoptCharacters}
         adopting={adopting}
+        adoptionLocked={adoptionLocked}
         adoptLabel={`写入角色库（${selectedChars.size} 个）`}
       >
         <div className="space-y-3">
@@ -133,6 +138,7 @@ function ResultCard({
   adopted,
   onAdopt,
   adopting,
+  adoptionLocked,
   adoptLabel,
   children,
 }: {
@@ -143,6 +149,7 @@ function ResultCard({
   adopted: boolean
   onAdopt: () => void
   adopting: boolean
+  adoptionLocked: boolean
   adoptLabel: string
   children: ReactNode
 }) {
@@ -167,11 +174,11 @@ function ResultCard({
               event.stopPropagation()
               onAdopt()
             }}
-            disabled={adopting}
+            disabled={adopting || adoptionLocked}
             className="flex items-center gap-1 px-2.5 py-1 bg-green-600 text-white rounded text-xs hover:bg-green-700 disabled:opacity-40 transition-colors"
           >
             {adopting ? <Loader2 className="w-3 h-3 animate-spin" /> : <ArrowDownToLine className="w-3 h-3" />}
-            {adoptLabel}
+            {adoptionLocked ? '先确认融合版本' : adoptLabel}
           </button>
         )}
       </div>

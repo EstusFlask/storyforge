@@ -46,7 +46,7 @@
 | 4 | **WORLD-1 世界知识、词条、地图与修炼** | 把散文设定升级成可关联、可计算、可供创作和运行时共用的知识库 | Codex 世界隔离、Phase 37-a、Phase 34、Phase 35-b/c、`ENH-WORLDMAP-2` 已完成 | Codex/自然/人文无重复入口；地点、势力、物产、器物、修炼、力量阶段与地图关系一致 | **COMPLETE（2026-07-25）** |
 | 5 | **STORY-1 角色驱动与动态故事规划** | 让角色变化、角色弧光和主线/支线影响后续大纲 | `CF-20260702-9` 持久化工作区与 `CF-20260702-12` 中途重规划均已完成 | 影响分析 → 作者选择 → 目标范围重规划；不静默修改既有正文 | **COMPLETE（2026-07-25）** |
 | 6 | **AUTHOR-1 长篇编辑与作者风格智能** | 提高长篇改稿、个人风格保持和既有作品续写能力 | `EDITOR-5` 与 `FB-5` 高级校准已完成；`FB-4` 已完成可行性审查并在来源/版本/剧情记忆地基就绪前设计暂缓，TipTap 长期优化独立登记 | 实体引用安全重映射；批量改稿预览/快照/撤销；有界改稿样本与作者确认式风格校准；原稿续写不以低保真摘要冒充剧情事实 | **CURRENT SCOPE COMPLETE；FB-4 DESIGN DEFERRED（2026-07-25）** |
-| 7 | **IDEA-1 灵感与参考资料演化** | 让灵感和参考资料持续融合、更新、追溯 | `CM-1`、参考作品分析后续能力；与风格画像共享底座，并为 FB-4 提供来源与版本地基 | 增量输入、差异预览、版本和来源可追溯；参考分析统一走宪法路径 | **READY；GOV-1 COMPLETE** |
+| 7 | **IDEA-1 灵感与参考资料演化** | 让灵感和参考资料持续融合、更新、追溯 | `CM-1` 已完成；继续推进参考作品分析后续能力，并为 FB-4 补齐可追溯来源与剧情记忆地基 | 灵感已实现增量输入、差异预览、确认版本和来源追溯；参考分析后续仍统一走宪法路径 | **CM-1 COMPLETE；参考资料演化 READY（2026-07-25）** |
 | 8 | **AGENT-1 对话副驾与 Agent 团队** | 用对话组合调用现有能力，不重写面板业务 | Phase 27.1-a~e、27.2b、整理本章 Agent、一致性 Agent、per-role 模型和预算 | Tool Registry 薄封装；前台写入必确认；后台默认只读；Canon 负责校验 | **DEPENDENT；CANON + PIPE** |
 | 9 | **SIM-1 世界模拟与互动叙事** | 通向跑团、文字游戏、陪伴角色和大型游戏运行时 | Phase 27.3 NPC 演进、世界时间线、位置/状态/能力/生命周期、角色碰撞 | 创作 Canon 与运行时状态分层；模拟不得污染作者原稿 | **LONG-TERM；WORLD + CANON + AGENT** |
 | 10 | **PRODUCT-1 新手转化、数据主权与开源信任** | 让新用户快速得到成果，成熟用户敢托付手稿，贡献者能参与 | `AUDIT-5/8/9/10/11`、升级前快照、加密备份、帮助系统、i18n、安全/贡献/发布政策 | 首次成果闭环、Labs 隐藏、备份恢复可信、隐私和贡献流程清楚 | **DESIGN；可错峰** |
@@ -60,7 +60,8 @@
 4. ✅ PIPE-1（2026-07-25）：透明最终提示词、五阶段章纲工坊、确定性 gate 与既有 Workflow 节点适配已收口；未制造空壳 Agent。
 5. ✅ WORLD-1（2026-07-25）：世界隔离地基 → Phase 37-a 修炼体系 → Phase 34 力量追踪 → Phase 35-b 分类/历史合并 → Phase 35-c 导入分类 → ENH-WORLDMAP-2 空间约束地图全部收口。
 6. ✅ STORY-1（2026-07-25）：CF-9C 持久化角色驱动工作区与 CF-12 中途角色变化影响分析、作者确认式未来大纲 patch 已收口。
-7. 🔄 AUTHOR-1 → IDEA-1 → AGENT-1 → SIM-1 → PRODUCT-1 / PLATFORM-1：按上表依赖和设计状态继续，不越过需要先收敛方案的开发单位。
+7. ✅ AUTHOR-1 当前范围与 IDEA-1 / CM-1（2026-07-25）：安全实体改名、互动文风校准、FB-4 可行性审查和增量灵感融合已收口。
+8. 🔄 IDEA-1 参考资料演化 → AGENT-1 → SIM-1 → PRODUCT-1 / PLATFORM-1：按上表依赖和设计状态继续，不越过需要先收敛方案的开发单位。
 
 ### GOV-1 第一阶段交付证据
 
@@ -144,6 +145,14 @@
 - `FB-4` 审查确认历史方案依赖的 `master-study` 已删除，现有 13 维参考分析只有方法论、没有角色终态/事件因果/结局状态等可校验剧情记忆，上传链也没有来源授权记录。
 - 原稿续写因此设计暂缓：不得整本回灌、不得把参考分析摘要当 Canon、不得默认仿写原作者声音；重新立项前必须先具备可追溯来源、版本化剧情胶囊、有界上下文和持久化断点续跑。完整结论见 `FB4-CONTINUATION-FEASIBILITY.md`。
 
+### IDEA-1 / CM-1 已交付证据
+
+- 原“灵感反推”入口升级为项目级增量工作区；碎片记录作者、参考启发、研究资料或其他来源，可勾选本次参与项，未选内容不发送给 AI。
+- DB v45 `inspirationWorkspaces` 保存最多 24 个碎片和 12 个确认版本；每轮只带入最多 9000 字符所选碎片和 5000 字符上一版，避免反复回灌全部历史。
+- AI 结果先与上一确认版本做字段级差异，未确认时不能采纳到世界观、故事核心、角色或多世界；确认后记录父版本和参与碎片。
+- 已确认版本引用的碎片不可删除；旧 `localStorage` 草稿继续兼容，但不会被后台猜测迁移。项目删除、便携导出导入和 v45 空迁移均进入注册表与回归测试。
+- Agnes 真实双轮融合验证了新增素材、冲突修正、确认、刷新恢复和来源保护；同时补齐 JSON5 对象字面量及对象字段可读化兼容。完整边界见 `INCREMENTAL-INSPIRATION-DESIGN.md`。
+
 ## 四、原任务唯一归属
 
 | 原任务 | 主归属 | 迁移规则 |
@@ -174,7 +183,7 @@
 | 透明生成 | [`TRANSPARENT-GENERATION-PIPELINE.md`](../TRANSPARENT-GENERATION-PIPELINE.md) |
 | 世界知识 | [`CODEX-REDESIGN.md`](../CODEX-REDESIGN.md)、[`WORLD-RULES-MULTIWORLD-DESIGN.md`](../WORLD-RULES-MULTIWORLD-DESIGN.md) |
 | 动态故事规划 | [`CHARACTER-DRIVEN-WORKSPACE-DESIGN.md`](../CHARACTER-DRIVEN-WORKSPACE-DESIGN.md)、[`CHARACTER-REVISION-WORKFLOW-DESIGN.md`](../CHARACTER-REVISION-WORKFLOW-DESIGN.md) |
-| 作者工具 | [`ENTITY-RENAME-DESIGN.md`](../ENTITY-RENAME-DESIGN.md)、[`STYLE-CALIBRATION-DESIGN.md`](../STYLE-CALIBRATION-DESIGN.md)、[`FB4-CONTINUATION-FEASIBILITY.md`](../FB4-CONTINUATION-FEASIBILITY.md) |
+| 作者工具 / 灵感 | [`ENTITY-RENAME-DESIGN.md`](../ENTITY-RENAME-DESIGN.md)、[`STYLE-CALIBRATION-DESIGN.md`](../STYLE-CALIBRATION-DESIGN.md)、[`FB4-CONTINUATION-FEASIBILITY.md`](../FB4-CONTINUATION-FEASIBILITY.md)、[`INCREMENTAL-INSPIRATION-DESIGN.md`](../INCREMENTAL-INSPIRATION-DESIGN.md) |
 | Agent | [`AI-COPILOT-DESIGN.md`](../AI-COPILOT-DESIGN.md) |
 
 设计文档提供方案细节，`README.md` 提供当前归属和施工顺序；两者冲突时，先停止开发并回到 `CLAUDE.md`、`MASTER-BLUEPRINT.md` 和本路线图裁决。

@@ -158,6 +158,29 @@ export async function seedFullProject() {
   // ── FB-5 文风画像 ──
   await db.userStyleProfiles.add({ projectId, profile: '简洁明快', enabled: true, createdAt: now, updatedAt: now } as any)
 
+  // ── IDEA-1 / CM-1 增量灵感工作区 ──
+  const inspirationFragmentId = 'idea-seed-old-city'
+  await db.inspirationWorkspaces.add({
+    projectId,
+    fragments: JSON.stringify([{
+      id: inspirationFragmentId,
+      text: '旧城每逢暴雨都会忘记一个人',
+      label: '遗忘规则',
+      sourceKind: 'author',
+      createdAt: now,
+    }]),
+    versions: JSON.stringify([{
+      id: 'idea-version-seed',
+      parentVersionId: null,
+      mode: 'single',
+      fragmentIds: [inspirationFragmentId],
+      resultJson: JSON.stringify({ storyCore: { logline: '守塔人保存被雨抹去的名字' } }),
+      createdAt: now,
+    }]),
+    createdAt: now,
+    updatedAt: now,
+  })
+
   // ── NS-4 时序事实账本（带分类型 FK，供全表往返覆盖） ──
   const temporalFact = await db.temporalFacts.add({ projectId, worldGroupId: wgA, characterId: char1, subjectName: '林惊羽', predicate: 'powerStage', factKind: 'state', value: '炼气一层', sourceType: 'chapter', sourceChapterId: chapter, validFromChapterId: chapter, status: 'confirmed', locked: false, createdAt: now, updatedAt: now } as any) as number
 

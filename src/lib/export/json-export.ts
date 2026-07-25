@@ -31,6 +31,7 @@ import type {
   CultivationSystem,
   CultivationProgress,
   CharacterDrivenPlan,
+  InspirationWorkspace,
 } from '../types'
 import type { TemporalFact } from '../types/temporal-fact'
 
@@ -83,6 +84,8 @@ export interface ProjectExportData {
   stateCards?: Omit<StateCard, 'id' | 'projectId'>[]
   /** FB-5 文风画像(每项目单例) */
   userStyleProfiles?: Omit<UserStyleProfile, 'id' | 'projectId'>[]
+  /** CM-1 增量灵感碎片与确认版本(每项目单例) */
+  inspirationWorkspaces?: Omit<InspirationWorkspace, 'id' | 'projectId'>[]
   /** NS-4 时序事实账本(各 FK 在派生导出里被 remap 成 _xxxExportId) */
   temporalFacts?: (Omit<TemporalFact, 'id' | 'projectId'> & Record<string, unknown>)[]
   /** CONSISTENCY-2 角色认知事件账本（全部 FK 由注册表重映射）。 */

@@ -20,7 +20,7 @@
 | **WORLD-1 世界知识** | Phase 20/22/23/25/32；C-1/C-2/C-6/C-7；Phase 36；多世界 25.4/25.5；WORLD-1 世界隔离地基；Phase 37-a；Phase 34；Phase 35-b/c；ENH-WORLDMAP-2 | Codex、重要地点、地图、世界规则、多世界、正式历史、严格世界隔离、修炼体系 DAG、正文修炼进度、政经文化拆分、城池地点软关联、外部导入证据候选、空间约束地图与可信比例尺 | `R-PHASE36-content-types`、`cultivation-system.test.ts`、`cultivation-progress.test.ts`、`R-WORLD1-*`、`R-worldmap-spatial-layout`、Codex/location/import 回归、浏览器世界知识/词条导入/地图流程 |
 | **STORY-1 角色驱动与动态规划** | `CF-20260702-9/12` | 持久化角色驱动工作区、版本链、active 上下文源、中途变更影响分析、三档未来大纲 patch、正文保护和过期预览拒绝 | `R-CF9C-*`、`R-CF12-character-revision`、Chromium 角色驱动与中途重规划流程 |
 | **AUTHOR-1 作者工具** | Phase E/H；`FB-5` 基础画像与高级校准；编辑器基础；`CF-20260702-5/10/11`；`EDITOR-5` | 本地模型配置、任务路由、有界文风 few-shot 与互动校准、富文本、自动保存、对照润色、稳定实体智能全书改名与原子撤销 | `R-EDITOR3-*`、`R-EDITOR5-entity-rename`、`R-FB5-*`、Chromium 文风闭环 |
-| **IDEA-1 灵感与参考** | Phase 26.4；Phase 28/28.5；参考作品导入/分块/分析；角色 AI 聚合去重 | 灵感反推、参考资料分析、角色聚合、AI 去重、结果持久化 | 参考/导入回归、`docs/ROADMAP-LEGACY.md` 对应历史记录 |
+| **IDEA-1 灵感与参考** | Phase 26.4；Phase 28/28.5；`CM-1`；参考作品导入/分块/分析；角色 AI 聚合去重 | 灵感反推、带来源碎片、增量融合、字段差异、确认版本、参考资料分析、角色聚合与 AI 去重 | `R-CM1-*`、`INCREMENTAL-INSPIRATION-DESIGN.md`、参考/导入回归 |
 | **AGENT-1 前置能力** | Phase 16/17 工作流；模型路由；Phase 27.2a 场景考证 | Prompt workflow、任务模型路由、用户触发的场景考证 | `AI-COPILOT-DESIGN.md`、现有 workflow / provider 测试 |
 | **PRODUCT-1 可靠性与发布** | 数据云备份、导出/导入、快照、PWA/Vite、版本与 Release 相关修复、社区反馈批次 | 本地优先、JSON/文件夹/Gist/快照恢复、生产构建和 CI | `R-export-import-roundtrip`、`R-folder-backup`、`R-gist-backup`、CI |
 
@@ -42,7 +42,7 @@
 以下内容在历史文档中可能出现“有主链路”“代码已具备”或“设计已完成”，但仍有明确剩余边界，必须回到 [当前能力基线](./CAPABILITY-BASELINE.md) 和 [当前路线图](./README.md) 判断：
 
 - WORLD-1 的 Phase 37-a、Phase 34、Phase 35-b/c 与 ENH-WORLDMAP-2 距离、规模和相对位置已完成。
-- `FB-4`、个人写作向量库、`CM-1` 未完成；`EDITOR-2/5` 与 `FB-5` 高级校准已完成。
+- `FB-4` 与个人写作向量库未完成；`CM-1`、`EDITOR-2/5` 与 `FB-5` 高级校准已完成。
 - Phase 27.1 多 Agent、27.2b 后台建议、27.3 NPC 演进未完成。
 
 ## 迁移审计账本

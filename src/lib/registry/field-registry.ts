@@ -436,6 +436,10 @@ export const FIELD_REGISTRY: FieldSpec[] = [
   longtext('references', 'analysisSummary'),
   longtext('references', 'mergedCharacters'),
 
+  // CM-1 incremental inspiration workspace (bounded JSON strings)
+  json('inspirationWorkspaces', 'fragments'),
+  json('inspirationWorkspaces', 'versions'),
+
   num('referenceChunkAnalysis', 'referenceId'),
   num('referenceChunkAnalysis', 'chunkIndex'),
   text('referenceChunkAnalysis', 'label'),

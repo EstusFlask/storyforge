@@ -8,6 +8,7 @@ import type { Table } from 'dexie'
 import type { AIProvider } from '../types/ai'
 import type { ContextLayer, ContextSegment } from '../ai/context-budget'
 import type { PreparedContinuityContext } from '../ai/chapter-memory/continuity-context'
+import type { InspirationResultMode } from '../types/inspiration-workspace'
 
 /**
  * 表的归属方式 —— 决定删项目时如何定位该表的记录。
@@ -288,6 +289,10 @@ export interface AssembleContextInput {
   subjectCharacterName?: string
   /** INV-1: 按角色过滤物品流水/持有投影。 */
   characterId?: number | null
+  /** CM-1: 本次明确参与增量融合的碎片；由 inspirationWorkspace source 读取。 */
+  inspirationFragmentIds?: string[]
+  /** CM-1: 单世界与多世界各自维护最近确认版本。 */
+  inspirationMode?: InspirationResultMode
   /** assembleContext 内部批量预取；调用方无需传。 */
   continuitySnapshot?: PreparedContinuityContext
 }

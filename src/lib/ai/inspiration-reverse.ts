@@ -88,6 +88,32 @@ const VALID_WEIGHTS: CharacterRoleWeight[] = ['main', 'secondary', 'npc', 'extra
 const VALID_MORAL: CharacterMoralAxis[] = ['good', 'neutral', 'evil']
 const VALID_ORDER: CharacterOrderAxis[] = ['lawful', 'neutral', 'chaotic']
 
+function asText(value: unknown): string {
+  if (typeof value === 'string') return value
+  if (value == null) return ''
+  if (Array.isArray(value)) {
+    return value.map(item => {
+      if (typeof item === 'string') return item
+      if (!item || typeof item !== 'object') return String(item)
+      const record = item as Record<string, unknown>
+      const name = typeof record.name === 'string' ? record.name : ''
+      const details = Object.entries(record)
+        .filter(([key]) => key !== 'name')
+        .map(([key, child]) => `${key}：${asText(child)}`)
+        .filter(entry => !entry.endsWith('：'))
+        .join('；')
+      return [name, details].filter(Boolean).join('（') + (name && details ? '）' : '')
+    }).filter(Boolean).join('；')
+  }
+  if (typeof value === 'object') {
+    return Object.entries(value as Record<string, unknown>)
+      .map(([key, child]) => `${key}：${asText(child)}`)
+      .filter(entry => !entry.endsWith('：'))
+      .join('；')
+  }
+  return String(value)
+}
+
 function parseAxes(c: Record<string, unknown>): Pick<ReverseCharacter, 'roleWeight' | 'moralAxis' | 'orderAxis'> {
   return {
     roleWeight: VALID_WEIGHTS.includes(c.roleWeight as CharacterRoleWeight)
@@ -124,37 +150,37 @@ export function parseReverseMultiWorldOutput(output: string): ReverseMultiWorldR
     // 第一遍解析失败、反推结果不显示，用户要重推或退出重进才出来（社区反馈）。
     const p = extractJSON(output) as Record<string, any>
     const storyCore: ReverseStoryCore = {
-      logline: String(p.storyCore?.logline || ''),
-      theme: String(p.storyCore?.theme || ''),
-      centralConflict: String(p.storyCore?.centralConflict || ''),
-      plotPattern: String(p.storyCore?.plotPattern || ''),
-      mainPlot: String(p.storyCore?.mainPlot || ''),
+      logline: asText(p.storyCore?.logline),
+      theme: asText(p.storyCore?.theme),
+      centralConflict: asText(p.storyCore?.centralConflict),
+      plotPattern: asText(p.storyCore?.plotPattern),
+      mainPlot: asText(p.storyCore?.mainPlot),
     }
     const worlds: ReverseWorld[] = Array.isArray(p.worlds)
       ? p.worlds.map((w: Record<string, unknown>): ReverseWorld => ({
-          name: String(w.name || '未命名世界'),
+          name: asText(w.name) || '未命名世界',
           type: VALID_WG_TYPES.includes(w.type as WorldGroupType) ? (w.type as WorldGroupType) : 'traversal',
-          worldOrigin: String(w.worldOrigin || ''),
-          powerHierarchy: String(w.powerHierarchy || ''),
-          continentLayout: String(w.continentLayout || ''),
-          climateByRegion: String(w.climateByRegion || ''),
-          historyLine: String(w.historyLine || ''),
-          races: String(w.races || ''),
-          factionLayout: String(w.factionLayout || ''),
-          entryCondition: String(w.entryCondition || ''),
-          powerRestriction: String(w.powerRestriction || ''),
+          worldOrigin: asText(w.worldOrigin),
+          powerHierarchy: asText(w.powerHierarchy),
+          continentLayout: asText(w.continentLayout),
+          climateByRegion: asText(w.climateByRegion),
+          historyLine: asText(w.historyLine),
+          races: asText(w.races),
+          factionLayout: asText(w.factionLayout),
+          entryCondition: asText(w.entryCondition),
+          powerRestriction: asText(w.powerRestriction),
         }))
       : []
     const characters: ReverseCharacterMW[] = Array.isArray(p.characters)
       ? p.characters.map((c: Record<string, unknown>): ReverseCharacterMW => ({
-          name: String(c.name || ''),
+          name: asText(c.name),
           ...parseAxes(c),
-          shortDescription: String(c.shortDescription || ''),
-          personality: String(c.personality || ''),
-          background: String(c.background || ''),
-          motivation: String(c.motivation || ''),
-          arc: String(c.arc || ''),
-          homeWorld: String(c.homeWorld || ''),
+          shortDescription: asText(c.shortDescription),
+          personality: asText(c.personality),
+          background: asText(c.background),
+          motivation: asText(c.motivation),
+          arc: asText(c.arc),
+          homeWorld: asText(c.homeWorld),
           isCrossWorld: Boolean(c.isCrossWorld),
         }))
       : []
@@ -191,32 +217,32 @@ export function parseReverseOutput(output: string): ReverseResult | null {
     const parsed = extractJSON(output) as Record<string, any>
 
     const worldview: ReverseWorldview = {
-      worldOrigin: String(parsed.worldview?.worldOrigin || ''),
-      powerHierarchy: String(parsed.worldview?.powerHierarchy || ''),
-      continentLayout: String(parsed.worldview?.continentLayout || ''),
-      climateByRegion: String(parsed.worldview?.climateByRegion || ''),
-      historyLine: String(parsed.worldview?.historyLine || ''),
-      races: String(parsed.worldview?.races || ''),
-      factionLayout: String(parsed.worldview?.factionLayout || ''),
+      worldOrigin: asText(parsed.worldview?.worldOrigin),
+      powerHierarchy: asText(parsed.worldview?.powerHierarchy),
+      continentLayout: asText(parsed.worldview?.continentLayout),
+      climateByRegion: asText(parsed.worldview?.climateByRegion),
+      historyLine: asText(parsed.worldview?.historyLine),
+      races: asText(parsed.worldview?.races),
+      factionLayout: asText(parsed.worldview?.factionLayout),
     }
 
     const storyCore: ReverseStoryCore = {
-      logline: String(parsed.storyCore?.logline || ''),
-      theme: String(parsed.storyCore?.theme || ''),
-      centralConflict: String(parsed.storyCore?.centralConflict || ''),
-      plotPattern: String(parsed.storyCore?.plotPattern || ''),
-      mainPlot: String(parsed.storyCore?.mainPlot || ''),
+      logline: asText(parsed.storyCore?.logline),
+      theme: asText(parsed.storyCore?.theme),
+      centralConflict: asText(parsed.storyCore?.centralConflict),
+      plotPattern: asText(parsed.storyCore?.plotPattern),
+      mainPlot: asText(parsed.storyCore?.mainPlot),
     }
 
     const characters: ReverseCharacter[] = Array.isArray(parsed.characters)
       ? parsed.characters.map((c: Record<string, unknown>) => ({
-          name: String(c.name || ''),
+          name: asText(c.name),
           ...parseAxes(c),
-          shortDescription: String(c.shortDescription || ''),
-          personality: String(c.personality || ''),
-          background: String(c.background || ''),
-          motivation: String(c.motivation || ''),
-          arc: String(c.arc || ''),
+          shortDescription: asText(c.shortDescription),
+          personality: asText(c.personality),
+          background: asText(c.background),
+          motivation: asText(c.motivation),
+          arc: asText(c.arc),
         }))
       : []
 

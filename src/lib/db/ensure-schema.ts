@@ -22,6 +22,7 @@ export const REQUIRED_TABLES = [
   'importJobs',
   'importLogs',
   'importSessions',
+  'inspirationWorkspaces',
   'importantLocations',
   'itemLedger',
   'knowledgeLedger',

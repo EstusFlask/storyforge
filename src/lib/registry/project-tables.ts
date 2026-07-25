@@ -277,6 +277,11 @@ export const PROJECT_TABLES: TableSpec[] = [
   { table: db.userStyleProfiles, name: 'userStyleProfiles', owner: 'project', exportable: true,
     note: '每项目一份 AI 文风画像;projectId 单例' },
 
+  // ───────────────────── 增量灵感工作区（CM-1） ─────────────────────
+  { table: db.inspirationWorkspaces, name: 'inspirationWorkspaces', owner: 'project', exportable: true,
+    defaults: { fragments: '[]', versions: '[]' },
+    note: '每项目一份有界灵感碎片与确认版本；未确认 AI 预览不落库' },
+
   // ───────────────────── NS-4 时序事实账本 ─────────────────────
   // 导出/导入：全部分类型 FK + 三个章节引用 + 自引用 supersedesFactId 都做 exportRemap，
   //   未映射（引用的实体/章已不在导出内）默认置 null，事实不丢、引用不悬空。

@@ -76,7 +76,7 @@
 
 ## 二、上下文源清单（CONTEXT_SOURCES · AI 读什么）
 
-共 39 个上下文源。assembleContext({ sourceKeys }) 按 key 装配。
+共 40 个上下文源。assembleContext({ sourceKeys }) 按 key 装配。
 
 | key | 标签 | 作用域 | 层级 | 预算(token) |
 |---|---|---|---|---|
@@ -117,6 +117,7 @@
 | `characterRelations` | 角色关系 | project | L2 | 2200 |
 | `references` | 引用手法 | project | L3 | 2000 |
 | `userStyleProfile` | 我的文风 | project | L2 | 1800 |
+| `inspirationWorkspace` | 增量灵感工作区 | project | L0 | 11000 |
 | `characterFacts` | 该角色的剧情事实 | project | L1 | 1500 |
 | `characterPassages` | 该角色的正文表现 | project | L1 | 2500 |
 
@@ -140,6 +141,7 @@ AI 输出经 `adopt({ target, data })` 写回,只有这里登记的字段可写(
 | `historicalKeywords` | `aiBrainstorm` `aiConsult` |
 | `historicalTimelineEvents` | `aiBrainstorm` `aiConsult` |
 | `importantLocations` | `description` `name` `parentId` `significance` `sortOrder` `tags` |
+| `inspirationWorkspaces` | `fragments` `versions` |
 | `itemLedger` | `action` `chapterId` `chapterTitle` `characterId` `heldByName` `itemName` `note` `quantity` |
 | `knowledgeLedger` | `action` `belief` `characterId` `characterName` `factId` `knowledgeKey` `sourceChapterId` `sourceQuote` `sourceType` `statement` `status` `worldGroupId` |
 | `outlineNodes` | `order` `parentId` `summary` `title` `type` `worldGroupId` |
@@ -197,7 +199,7 @@ AI 输出经 `adopt({ target, data })` 写回,只有这里登记的字段可写(
 | `geography.world-map` | `src/components/geography/WorldMapPanel.tsx:107` |
 | `history.consult` | `src/components/history/useHistoryAI.ts:118` |
 | `history.storm` | `src/components/history/useHistoryAI.ts:120` |
-| `inspiration.reverse` | `src/components/project/InspirationPanel.tsx:107` |
+| `inspiration.reverse` | `src/hooks/useIncrementalInspiration.ts:212` |
 | `inventory.extract` | `src/components/items/InventoryPanel.tsx:150` |
 | `location.extract` | `src/components/location/LocationPanel.tsx:106` |
 | `outline.chapter` | `src/lib/ai/batch-outline-runner.ts:123`<br/>`src/lib/outline/generation-node.ts:55` |
@@ -239,4 +241,4 @@ AI 输出经 `adopt({ target, data })` 写回,只有这里登记的字段可写(
 
 ---
 
-生成时间基准:commit `9fa39c1`
+生成时间基准:commit `80ad227`

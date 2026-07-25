@@ -65,6 +65,9 @@ function normalize(data: any) {
   // STORY-1:角色驱动方案及项目 active 影子引用为新格式；专项往返由 R-CF9C 锁定。
   delete data.characterDrivenPlans
   delete data.project?._activeCharacterDrivenPlanExportId
+  // IDEA-1:增量灵感工作区晚于旧 v3 fixture；来源/版本往返由 R-CM1 与
+  // R-export-fullcoverage 锁定。
+  delete data.inspirationWorkspaces
   for (const row of data.characters ?? []) {
     delete row._raceEntryExportId
     delete row._cultivationSystemExportId

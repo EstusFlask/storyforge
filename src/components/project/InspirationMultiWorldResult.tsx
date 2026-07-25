@@ -6,21 +6,28 @@ interface Props {
   result: ReverseMultiWorldResult
   adopted: boolean
   adopting: boolean
+  adoptionLocked?: boolean
   onAdopt: () => void
 }
 
-export default function InspirationMultiWorldResult({ result, adopted, adopting, onAdopt }: Props) {
+export default function InspirationMultiWorldResult({
+  result,
+  adopted,
+  adopting,
+  adoptionLocked = false,
+  onAdopt,
+}: Props) {
   return (
     <section className="space-y-3">
       <div className="flex items-center justify-between">
         <h3 className="text-sm font-medium text-text-primary">多世界反推结果（{result.worlds.length} 个世界）</h3>
         <button
           onClick={onAdopt}
-          disabled={adopting || adopted}
+          disabled={adopting || adopted || adoptionLocked}
           className="flex items-center gap-1 px-3 py-1.5 bg-green-600 text-white rounded text-xs font-medium hover:bg-green-700 disabled:opacity-40 transition-colors"
         >
           {adopting ? <Loader2 className="w-3 h-3 animate-spin" /> : adopted ? <Check className="w-3 h-3" /> : <ArrowDownToLine className="w-3 h-3" />}
-          {adopted ? '已采纳' : '一键创建多世界'}
+          {adopted ? '已采纳' : adoptionLocked ? '先确认融合版本' : '一键创建多世界'}
         </button>
       </div>
 
