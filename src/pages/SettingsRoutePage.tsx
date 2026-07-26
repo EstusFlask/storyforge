@@ -1,5 +1,5 @@
 import { lazy, Suspense } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate } from 'react-router'
 import { ArrowLeft } from 'lucide-react'
 
 const SettingsPage = lazy(() => import('../components/settings/SettingsPage'))

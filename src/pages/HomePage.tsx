@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate } from 'react-router'
 import { Flame, Github, X, ChevronDown, ChevronRight, FolderOpen, Loader2 } from 'lucide-react'
 import { useProjectStore } from '../stores/project'
 import WelcomeGuide from '../components/guide/WelcomeGuide'

@@ -1,5 +1,5 @@
 import { useEffect, useState, useMemo, lazy, Suspense } from 'react'
-import { useNavigate, useParams } from 'react-router-dom'
+import { useNavigate, useParams } from 'react-router'
 import { useProjectStore } from '../stores/project'
 import { useWorldviewStore } from '../stores/worldview'
 import { useCharacterStore } from '../stores/character'
