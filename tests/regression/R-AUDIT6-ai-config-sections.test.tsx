@@ -67,13 +67,15 @@ describe('AUDIT-6 / HEALTH-4 · AI 设置分区', () => {
     expect(props.onDeletePreset).toHaveBeenCalledWith('writer', '写作模型')
   })
 
-  it('任务路由展示四类边界并转发专用预设', async () => {
+  it('任务路由分开展示四类通用任务与六个主 Agent 团队角色，并转发专用预设', async () => {
     const onSetRoute = vi.fn()
     const host = await mount(AITaskRoutingSection as ComponentType<never>, {
       presets: [preset], routes: { creation: 'writer' }, onSetRoute,
     })
-    expect(host.querySelectorAll('select')).toHaveLength(4)
+    expect(host.querySelectorAll('select')).toHaveLength(10)
     expect(host.textContent).toContain('结构提取')
+    expect(host.textContent).toContain('主 Agent 团队角色')
+    expect(host.textContent).toContain('正文领域 Agent')
     const review = host.querySelector<HTMLSelectElement>('select[aria-label="审查校验模型预设"]')!
     await act(async () => {
       const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value')!.set!
@@ -81,6 +83,13 @@ describe('AUDIT-6 / HEALTH-4 · AI 设置分区', () => {
       review.dispatchEvent(new Event('change', { bubbles: true }))
     })
     expect(onSetRoute).toHaveBeenCalledWith('review', 'writer')
+    const prose = host.querySelector<HTMLSelectElement>('select[aria-label="正文领域 Agent模型预设"]')!
+    await act(async () => {
+      const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value')!.set!
+      setter.call(prose, 'writer')
+      prose.dispatchEvent(new Event('change', { bubbles: true }))
+    })
+    expect(onSetRoute).toHaveBeenCalledWith('agent-prose', 'writer')
   })
 
   it('连接日志保留可读格式并转发清空命令', async () => {

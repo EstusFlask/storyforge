@@ -1,6 +1,6 @@
 import JSON5 from 'json5'
 import { useAIConfigStore } from '../../stores/ai-config'
-import { chat } from '../ai/client'
+import { chat, resolveRequestConfig } from '../ai/client'
 import {
   parseChapterOutlineOutput,
   parseVolumeOutlineOutput,
@@ -66,6 +66,7 @@ export interface OutlineCopilotInput {
   assembled: Awaited<ReturnType<typeof assembleContext>>
   snapshot: OutlineCopilotSnapshot
   config: AIConfig
+  routingCategory?: string
   signal?: AbortSignal
 }
 
@@ -339,6 +340,7 @@ export async function prepareOutlineCopilot(input: {
   worldGroupId: number | null
   authorRequest: string
   supplementalContext?: string
+  routingCategory?: string
   signal?: AbortSignal
 }): Promise<PreparedOutlineCopilot> {
   const project = await db.projects.get(input.projectId)
@@ -359,7 +361,12 @@ export async function prepareOutlineCopilot(input: {
 
   const parentVolumeId = targetVolume?.id ?? null
   const before = snapshotOf(allNodes, worldGroupId, mode, parentVolumeId)
-  const config = useAIConfigStore.getState().config
+  const defaultCategory = mode === 'volumes' ? 'outline.volume' : 'outline.chapter'
+  const routingCategory = input.routingCategory ?? defaultCategory
+  const config = resolveRequestConfig(
+    useAIConfigStore.getState().config,
+    { category: routingCategory },
+  ).config
   const assembled = await assembleContext({
     projectId: input.projectId,
     worldGroupId,
@@ -384,6 +391,7 @@ export async function prepareOutlineCopilot(input: {
     assembled,
     snapshot,
     config,
+    routingCategory,
     signal: input.signal,
   }
   const node = createOutlineCopilotNode(nodeInput)
@@ -419,7 +427,7 @@ export function createOutlineCopilotNode(
     items,
   }))
   const runAI = dependencies.runAI ?? (messages => chat(messages, input.config, {
-    category: input.mode === 'volumes' ? 'outline.volume' : 'outline.chapter',
+    category: input.routingCategory ?? (input.mode === 'volumes' ? 'outline.volume' : 'outline.chapter'),
     projectId: input.project.id!,
     configOverrides: { maxTokens: input.mode === 'volumes' ? 8000 : 12_000 },
     contextOverflowPolicy: 'reject',

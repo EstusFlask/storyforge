@@ -2115,3 +2115,31 @@ project metrics、production dependency audit 0 vulnerabilities、ESLint、TypeS
 👉 主 Agent 当前已闭环世界来源、灵感反推、新增角色、新增大纲和正文五个领域。
 27.1-d 已完成；下一开发单位进入 27.1-e，先冻结分 Agent 团队与后台任务的可见性、
 权限、取消、预算、并发和恢复边界，再决定首个可交付的后台能力。
+
+### [2026-07-27] Codex · REPORT · AGENT-1 Phase 27.1-e 首个增量 / 团队角色模型路由 / `feat/agent-role-routing`
+
+本阶段没有增加新的分 Agent 标签页；作者仍只面对工作区右栏的唯一主 Agent。既有 AI
+连接预设现在可分别绑定主 Agent 编排、世界、角色、灵感、大纲和正文六个幕后角色，未绑定
+角色继续沿用全局模型。旧四类任务路由 JSON 可直接兼容，删除预设会同时清理通用和角色
+绑定；API Key 生命周期仍完全复用既有配置 store，没有新增表、迁移或导出字段。
+
+六类角色统一经过共享 `resolveAIConfigForTask()` 解析。五个领域在装配正式上下文之前
+先确定实际 provider/model，使上下文窗口、裁剪、请求与用量记录不会出现“按全局模型装配、
+再偷偷换模型”的偏差。手工入口仍走原四类通用路由，只有主 Agent 派发的后台领域任务使用
+`agent.*` 路由；候选可见、作者确认后写入的安全线没有改变。
+
+完整 `npm run ci` 通过：233 个 Vitest 文件 / 844 项测试，coverage statements/lines
+73.53%、branches 73.22%、functions 72.47%；55 required tables、AI Manual、
+architecture、source reachability、roadmap、agent context、canon coverage、project
+metrics、production dependency audit 0 vulnerabilities、ESLint、TypeScript、生产 build
+和 bundle budget 全绿。完整 Chromium E2E 24/24 通过。
+
+真实 Agnes 隔离项目把主 Agent 编排和角色领域分别绑定 Agnes。一个角色创作请求先由主
+Agent 规划为恰好 1 个 character 任务，再由角色模型生成可见 JSON 候选；使用量恰好新增
+2 条 `Agent 团队` 记录，分别对应编排和角色任务，并记录实际 provider/model。拒绝候选后
+角色正式数据仍为 0 行。验证结束后两条路由均恢复全局模型，隔离项目已走完整删除安全门
+清理。
+
+👉 27.1-e 的 per-role 模型/API 路由已完成，但不代表团队自治完成。下一增量继续冻结输入
+权重、Canon 打回、预算、取消、并发与恢复；在这些边界落地前，不默认并行调用、不自动
+重试，也不允许长期后台 Agent 静默写入。

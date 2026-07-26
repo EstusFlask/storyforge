@@ -96,7 +96,8 @@ Tool 定义声明 `risk: read | generate | write`。Phase 27.1-a 注册表只有
    “当前世界来源候选 → 用户确认 → GenerationNode gate → adopt”的最小写闭环。
 4. **27.1-d（已完成）**：灵感反推、角色、大纲和正文四个独立候选闭环均已逐领域
    设计和验收；写入继续由各领域 GenerationNode 与 adoption 边界负责。
-5. **27.1-e**：领域闭环稳定后再讨论多 Agent；不提前常驻。
+5. **27.1-e（进行中）**：首个增量只增加主 Agent 与五个已闭环领域的 per-role
+   模型/API 路由；并行自治、输入权重、Canon 打回与常驻后台仍不提前开放。
 
 ## 5. 验证要求
 

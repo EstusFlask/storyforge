@@ -1,7 +1,7 @@
 import JSON5 from 'json5'
 import { useAIConfigStore } from '../../stores/ai-config'
 import { buildCharacterPrompt } from '../ai/adapters/character-adapter'
-import { chat } from '../ai/client'
+import { chat, resolveRequestConfig } from '../ai/client'
 import {
   MORAL_AXES,
   ORDER_AXES,
@@ -58,6 +58,7 @@ export interface CharacterCopilotInput {
   contextSources: string[]
   snapshot: CharacterRosterSnapshot
   config: AIConfig
+  routingCategory?: string
   signal?: AbortSignal
 }
 
@@ -295,6 +296,7 @@ export async function prepareCharacterCopilot(input: {
   authorRequest: string
   /** 主 Agent 可把尚未写库的上游候选作为本轮显式证据传入，绝不冒充 Canon。 */
   supplementalContext?: string
+  routingCategory?: string
   signal?: AbortSignal
 }): Promise<PreparedCharacterCopilot> {
   const project = await db.projects.get(input.projectId)
@@ -304,7 +306,11 @@ export async function prepareCharacterCopilot(input: {
   }
   const worldGroupId = project.enableMultiWorld ? input.worldGroupId : null
   const beforeRead = await readRosterSnapshot(input.projectId, worldGroupId)
-  const config = useAIConfigStore.getState().config
+  const routingCategory = input.routingCategory ?? 'character.generate'
+  const config = resolveRequestConfig(
+    useAIConfigStore.getState().config,
+    { category: routingCategory },
+  ).config
   const executionContext = {
     projectId: input.projectId,
     worldGroupId,
@@ -336,6 +342,7 @@ export async function prepareCharacterCopilot(input: {
     contextSources: [...new Set([...worldview.meta.included, ...characters.meta.included])],
     snapshot: afterRead,
     config,
+    routingCategory,
     signal: input.signal,
   }
   const node = createCharacterCopilotNode(nodeInput)
@@ -382,7 +389,7 @@ export function createCharacterCopilotNode(
     },
   ))
   const runAI = dependencies.runAI ?? (messages => chat(messages, input.config, {
-    category: 'character.generate',
+    category: input.routingCategory ?? 'character.generate',
     projectId: input.projectId,
     configOverrides: { maxTokens: 6000 },
     contextOverflowPolicy: 'reject',

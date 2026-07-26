@@ -47,6 +47,12 @@ describe('R-CF20260702-10 · task classification and resolution', () => {
     ['chapter.deai', 'review'],
     ['scene.verify', 'review'],
     ['agent.readonly', 'review'],
+    ['agent.orchestrator', 'agent-orchestrator'],
+    ['agent.world-origin', 'agent-world-origin'],
+    ['agent.character', 'agent-character'],
+    ['agent.inspiration', 'agent-inspiration'],
+    ['agent.outline', 'agent-outline'],
+    ['agent.prose', 'agent-prose'],
     ['node.creation', 'creation'],
   ] as const)('classifies %s as %s', (category, taskKind) => {
     expect(classifyAITask(category)).toBe(taskKind)
@@ -98,6 +104,48 @@ describe('R-CF20260702-10 · task classification and resolution', () => {
       expect(resolved.presetId).toBe(presetId)
       expect(resolved.config.model).toBe(`${presetId}-model`)
       expect(resolved.config.maxTokens).toBe(16_384)
+    }
+  })
+
+  it('routes every主 Agent role independently without changing manual creation routing', () => {
+    const presets = [
+      preset('manual-creation'),
+      preset('planner'),
+      preset('world'),
+      preset('character'),
+      preset('inspiration'),
+      preset('outline'),
+      preset('prose'),
+    ]
+    const routes = {
+      creation: 'manual-creation',
+      'agent-orchestrator': 'planner',
+      'agent-world-origin': 'world',
+      'agent-character': 'character',
+      'agent-inspiration': 'inspiration',
+      'agent-outline': 'outline',
+      'agent-prose': 'prose',
+    } as const
+    const cases = [
+      ['chapter.content', 'manual-creation'],
+      ['agent.orchestrator', 'planner'],
+      ['agent.world-origin', 'world'],
+      ['agent.character', 'character'],
+      ['agent.inspiration', 'inspiration'],
+      ['agent.outline', 'outline'],
+      ['agent.prose', 'prose'],
+    ] as const
+    for (const [category, presetId] of cases) {
+      const resolved = resolveAIConfigForTask({
+        category,
+        requestedConfig: globalConfig,
+        globalConfig,
+        presets,
+        routes,
+      })
+      expect(resolved.taskKind).toBe(category === 'chapter.content' ? 'creation' : `agent-${category.slice(6)}`)
+      expect(resolved.presetId).toBe(presetId)
+      expect(resolved.config.model).toBe(`${presetId}-model`)
     }
   })
 
@@ -157,6 +205,26 @@ describe('R-CF20260702-10 · route storage and client boundary', () => {
     fresh.useAIConfigStore.getState().deletePreset(id)
     expect(fresh.useAIConfigStore.getState().taskRoutes).toEqual({})
     expect(JSON.parse(localStorage.getItem(TASK_ROUTES_KEY) || '{}')).toEqual({})
+  })
+
+  it('persists a主 Agent role route and keeps old four-kind storage backward compatible', async () => {
+    const { useAIConfigStore, TASK_ROUTES_KEY } = await import('../../src/stores/ai-config')
+    const id = useAIConfigStore.getState().saveAsPreset('正文 Agent 模型')
+    useAIConfigStore.getState().setTaskRoute('agent-prose', id)
+    const stored = JSON.parse(localStorage.getItem(TASK_ROUTES_KEY) || '{}')
+    expect(stored).toEqual({ 'agent-prose': id })
+
+    localStorage.setItem(TASK_ROUTES_KEY, JSON.stringify({
+      creation: id,
+      'agent-prose': id,
+      'future-unknown-route': id,
+    }))
+    vi.resetModules()
+    const fresh = await import('../../src/stores/ai-config')
+    expect(fresh.useAIConfigStore.getState().taskRoutes).toEqual({
+      creation: id,
+      'agent-prose': id,
+    })
   })
 
   it('routes a real chat request and logs the actual provider, model and task kind', async () => {

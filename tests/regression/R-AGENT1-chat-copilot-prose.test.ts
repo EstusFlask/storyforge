@@ -16,7 +16,7 @@ import {
   runGenerationNode,
 } from '../../src/lib/generation/generation-node'
 import { assembleContext } from '../../src/lib/registry/assemble-context'
-import type { AgentEvent, Chapter, OutlineNode, Project } from '../../src/lib/types'
+import type { AIConfigPreset, AgentEvent, Chapter, OutlineNode, Project } from '../../src/lib/types'
 import { useAIConfigStore } from '../../src/stores/ai-config'
 
 const longDraft = (marker: string) => (
@@ -124,7 +124,11 @@ describe('AGENT-1 27.1-d · ChatCopilot 正文闭环', () => {
     await db.open()
   })
 
-  afterEach(() => db.close())
+  afterEach(() => {
+    vi.unstubAllGlobals()
+    useAIConfigStore.setState({ presets: [], taskRoutes: {} })
+    db.close()
+  })
 
   it('选择明确章纲并只经正式上下文装配，生成前保持零正文写入', async () => {
     const { project, firstId } = await seedProject()
@@ -141,6 +145,67 @@ describe('AGENT-1 27.1-d · ChatCopilot 正文闭环', () => {
     expect(prepared.contextSources).toContain('worldview')
     expect(prompt).toContain('第一章：海床之光')
     expect(prompt).toContain('盐海每十年退潮')
+    expect(await db.chapters.count()).toBe(0)
+  })
+
+  it('主 Agent 正文角色使用独立模型预设，并按实际 provider/model 记录用量', async () => {
+    const { project } = await seedProject()
+    const globalConfig = {
+      ...useAIConfigStore.getState().config,
+      provider: 'deepseek' as const,
+      apiKey: 'global-key',
+      model: 'global-model',
+      baseUrl: 'https://global.example/v1',
+    }
+    const prosePreset: AIConfigPreset = {
+      id: 'prose-role',
+      name: '正文专用',
+      config: {
+        ...globalConfig,
+        provider: 'ollama',
+        apiKey: '',
+        model: 'qwen-prose-local',
+        baseUrl: 'http://localhost:11434/v1',
+        contextWindow: 131_072,
+      },
+    }
+    useAIConfigStore.setState({
+      config: globalConfig,
+      presets: [prosePreset],
+      taskRoutes: { 'agent-prose': prosePreset.id },
+    })
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      expect(url).toBe('http://localhost:11434/v1/chat/completions')
+      const body = JSON.parse(String(init?.body))
+      expect(body.model).toBe('qwen-prose-local')
+      return new Response(JSON.stringify({
+        choices: [{ message: { content: longDraft('角色路由正文') } }],
+        usage: { prompt_tokens: 23, completion_tokens: 17, total_tokens: 40 },
+      }), { status: 200 })
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const prepared = await prepareProseCopilot({
+      projectId: project.id!,
+      worldGroupId: null,
+      authorRequest: '写第一章正文',
+      routingCategory: 'agent.prose',
+    })
+    const result = await runGenerationNode(prepared.node, prepared.prepared)
+
+    expect(result.gate?.status).toBe('pass')
+    expect(fetchMock).toHaveBeenCalledOnce()
+    await vi.waitFor(async () => {
+      expect(await db.aiUsageLog.toCollection().last()).toMatchObject({
+        projectId: project.id,
+        category: 'agent.prose',
+        provider: 'ollama',
+        model: 'qwen-prose-local',
+        taskKind: 'agent-prose',
+        inputTokens: 23,
+        outputTokens: 17,
+      })
+    })
     expect(await db.chapters.count()).toBe(0)
   })
 

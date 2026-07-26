@@ -431,6 +431,10 @@ loop（受步数/Token 上限约束）:
 - 总 agent 负责任务拆解、领域分发、收敛与打回
 - 分 agent 按世界观 / 故事 / 角色 / 大纲 / 章节细纲等领域配置专属模型/API与输入权重
 - 复用确定性 canon 校验器做跨 agent 产物匹配检测，不通过则带证据打回
+- 首个增量已实现六角色专属模型/API 路由：主 Agent 编排与世界、角色、灵感、大纲、正文
+  分别绑定已有预设，且在上下文装配前解析实际模型；并行自治、输入权重与 Canon 自动打回
+  仍未完成。详细边界见
+  [`AGENT-TEAM-ROLE-ROUTING-DESIGN.md`](./AGENT-TEAM-ROLE-ROUTING-DESIGN.md)
 
 **Phase 27.2b / 5.2 后台 Agent**
 - 整理本章 Agent（先）→ 一致性 Agent → NPC 演进 Agent（最后，最复杂）

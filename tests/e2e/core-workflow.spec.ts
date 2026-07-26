@@ -429,7 +429,7 @@ test('取消删除安全门后项目与正文都保留', async ({ page }) => {
   await expect(page.locator('.tiptap-editor')).toContainText(chapterText)
 })
 
-test('上下文窗口与四类任务模型路由跨模块和刷新保留', async ({ page }) => {
+test('上下文窗口、四类通用任务与主 Agent 角色模型路由跨模块和刷新保留', async ({ page }) => {
   await openCleanHome(page)
   await createProject(page, 'E2E AI 配置持久化')
   await sidebarButton(page, '设置').click()
@@ -457,14 +457,19 @@ test('上下文窗口与四类任务模型路由跨模块和刷新保留', async
   await page.getByLabel('结构提取模型预设').selectOption({ label: '创作模型 · deepseek/deepseek-chat' })
   await page.getByLabel('分析总结模型预设').selectOption({ label: '审查模型 · deepseek/deepseek-review' })
   await page.getByLabel('审查校验模型预设').selectOption({ label: '审查模型 · deepseek/deepseek-review' })
+  await page.getByLabel('主 Agent 编排模型预设').selectOption({ label: '审查模型 · deepseek/deepseek-review' })
+  await page.getByLabel('正文领域 Agent模型预设').selectOption({ label: '创作模型 · deepseek/deepseek-chat' })
 
   await page.reload()
   await sidebarButton(page, '设置').click()
   await expectNumericInputValue(contextWindow, 2_100_000)
   await expect(page.getByLabel('创作生成模型预设')).toHaveValue(await page.getByLabel('结构提取模型预设').inputValue())
   await expect(page.getByLabel('分析总结模型预设')).toHaveValue(await page.getByLabel('审查校验模型预设').inputValue())
+  await expect(page.getByLabel('主 Agent 编排模型预设')).toHaveValue(await page.getByLabel('审查校验模型预设').inputValue())
+  await expect(page.getByLabel('正文领域 Agent模型预设')).toHaveValue(await page.getByLabel('创作生成模型预设').inputValue())
   await expect(page.getByLabel('创作生成模型预设').locator('option:checked')).toContainText('创作模型')
   await expect(page.getByLabel('分析总结模型预设').locator('option:checked')).toContainText('审查模型')
+  await expect(page.getByLabel('正文领域 Agent模型预设').locator('option:checked')).toContainText('创作模型')
 })
 
 test('本地 OpenAI 兼容服务可刷新并保存模型列表', async ({ page }) => {

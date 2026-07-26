@@ -1,6 +1,6 @@
 import { useAIConfigStore } from '../../stores/ai-config'
 import { buildWorldviewPrompt } from '../ai/adapters/worldview-adapter'
-import { chat } from '../ai/client'
+import { chat, resolveRequestConfig } from '../ai/client'
 import { db } from '../db/schema'
 import type {
   GenerationGateIssue,
@@ -33,6 +33,7 @@ export interface WorldOriginCopilotInput extends WorldOriginCopilotScope {
   contextText: string
   snapshot: WorldOriginSnapshot
   config: AIConfig
+  routingCategory?: string
   signal?: AbortSignal
 }
 
@@ -94,6 +95,7 @@ function assertAuthorRequest(value: string): string {
 export async function prepareWorldOriginCopilot(
   input: Pick<WorldOriginCopilotScope, 'projectId' | 'worldGroupId'> & {
     authorRequest: string
+    routingCategory?: string
     signal?: AbortSignal
   },
 ): Promise<PreparedWorldOriginCopilot> {
@@ -102,7 +104,11 @@ export async function prepareWorldOriginCopilot(
   if (project.enableMultiWorld && input.worldGroupId == null) {
     throw new Error('多世界项目必须先选择世界。')
   }
-  const config = useAIConfigStore.getState().config
+  const routingCategory = input.routingCategory ?? 'worldview.dimension'
+  const config = resolveRequestConfig(
+    useAIConfigStore.getState().config,
+    { category: routingCategory },
+  ).config
   const toolContext = {
     projectId: input.projectId,
     worldGroupId: input.worldGroupId,
@@ -134,6 +140,7 @@ export async function prepareWorldOriginCopilot(
     ].join('\n\n'),
     snapshot,
     config,
+    routingCategory,
   }
   const node = createWorldOriginCopilotNode(nodeInput)
   return {
@@ -164,7 +171,7 @@ export function createWorldOriginCopilotNode(
     }))
   const runAI = dependencies.runAI
     ?? (messages => chat(messages, input.config, {
-      category: 'worldview.dimension',
+      category: input.routingCategory ?? 'worldview.dimension',
       projectId: input.projectId,
       configOverrides: { maxTokens: 3000 },
       contextOverflowPolicy: 'reject',
