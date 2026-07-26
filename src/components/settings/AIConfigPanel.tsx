@@ -42,7 +42,8 @@ export const PROVIDER_OPTIONS: { value: AIProvider; label: string; cors: boolean
 export default function AIConfigPanel() {
   const { config, setConfig, switchProvider, testConnection,
     rememberApiKey, setRememberApiKey,
-    presets, taskRoutes, agentContextProfiles, setTaskRoute, setAgentContextProfile,
+    presets, taskRoutes, agentContextProfiles, agentTeamBudgetProfile,
+    setTaskRoute, setAgentContextProfile, setAgentTeamBudgetProfile,
     activePresetId, editingPresetId, saveAsPreset, applyPreset, updatePresetFromCurrent,
     renamePreset, deletePreset } = useAIConfigStore()
   const dialog = useDialog()
@@ -192,8 +193,10 @@ export default function AIConfigPanel() {
           presets={presets}
           routes={taskRoutes}
           contextProfiles={agentContextProfiles}
+          teamBudgetProfile={agentTeamBudgetProfile}
           onSetRoute={setTaskRoute}
           onSetContextProfile={setAgentContextProfile}
+          onSetTeamBudgetProfile={setAgentTeamBudgetProfile}
         />
 
         <div className="space-y-4">

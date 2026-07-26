@@ -71,14 +71,17 @@ describe('AUDIT-6 / HEALTH-4 · AI 设置分区', () => {
   it('任务路由分开展示四类通用任务与六个主 Agent 团队角色，并转发专用预设', async () => {
     const onSetRoute = vi.fn()
     const onSetContextProfile = vi.fn()
+    const onSetTeamBudgetProfile = vi.fn()
     const host = await mount(AITaskRoutingSection as ComponentType<never>, {
       presets: [preset],
       routes: { creation: 'writer' },
       contextProfiles: DEFAULT_AGENT_CONTEXT_PROFILES,
+      teamBudgetProfile: 'balanced',
       onSetRoute,
       onSetContextProfile,
+      onSetTeamBudgetProfile,
     })
-    expect(host.querySelectorAll('select')).toHaveLength(15)
+    expect(host.querySelectorAll('select')).toHaveLength(16)
     expect(host.textContent).toContain('结构提取')
     expect(host.textContent).toContain('主 Agent 团队角色')
     expect(host.textContent).toContain('正文领域 Agent')
@@ -103,6 +106,13 @@ describe('AUDIT-6 / HEALTH-4 · AI 设置分区', () => {
       proseContext.dispatchEvent(new Event('change', { bubbles: true }))
     })
     expect(onSetContextProfile).toHaveBeenCalledWith('agent-prose', 'lean')
+    const teamBudget = host.querySelector<HTMLSelectElement>('select[aria-label="主 Agent 团队总预算"]')!
+    await act(async () => {
+      const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value')!.set!
+      setter.call(teamBudget, 'economy')
+      teamBudget.dispatchEvent(new Event('change', { bubbles: true }))
+    })
+    expect(onSetTeamBudgetProfile).toHaveBeenCalledWith('economy')
   })
 
   it('连接日志保留可读格式并转发清空命令', async () => {

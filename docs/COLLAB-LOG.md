@@ -2172,3 +2172,33 @@ budget 全绿。完整 Chromium E2E 24/24 通过。
 👉 输入成本现在有角色级上限和可见证据，但仍不等于整个 Agent 团队已有总账。下一增量
 继续实现 Canon 确定性打回与跨调用团队预算；在总预算、取消、恢复边界完成前仍不默认
 并行领域调用。
+
+### [2026-07-27] Codex · REPORT · AGENT-1 Phase 27.1-e 第三个增量 / 团队总预算与 Canon 受控打回 / `feat/agent-canon-team-budget`
+
+主 Agent 编排、五个领域生成和 Canon 返工现在共享同一轮团队账本。设置提供节省 80K、
+均衡 160K 和充分 240K 三档；每档最多 7 次模型调用，并且整轮只有 1 次 Canon 打回机会。
+每次调用前按冻结消息估算输入并预留该领域最大输出，最坏预算不足会在请求发出前停止；
+返回后按冻结输入和真实输出文本更新本地估算。provider 精确 usage 仍由标准用量日志记录，
+不会把本地估算冒充服务端账单。
+
+领域 GenerationNode 的结构、空值、重复和无变化 gate 现在可以携带 issue code / message
+把同一领域定向返工一次；大纲和正文还复用 `readProjectHeldItems()` 与
+`checkHeldItemAcquisition()`，阻断当前仍持有物品被再次写成获得。返工同样先过团队预算，
+第二版仍失败就终止；网络、解析、协议和普通模型错误不自动重试。认知、存亡活动与世界
+宪法中需要额外 LLM 提取逐字 claim 的审查继续留给后续一致性 Agent，不伪装成零 token
+硬门。候选保存本轮档位、估算 token、调用次数和打回次数，刷新后仍可解释。
+
+完整 `npm run ci` 通过：235 个 Vitest 文件 / 857 项测试，coverage statements/lines
+73.55%、branches 73.30%、functions 72.47%；55 required tables、AI Manual、
+architecture、502 个源码入口可达、roadmap、agent context、canon、project metrics、
+production dependency audit 0 vulnerabilities、ESLint、TypeScript、生产 build 和 bundle
+budget 全绿。完整 Chromium E2E 24/24 通过；主 Agent 浏览器反例强制首版世界候选过短，
+验证第 2 次领域调用修复后才显示候选，整轮可见 3/7 次调用和 Canon 打回 1/1。
+
+真实 Agnes 隔离项目选择节省团队档位与精简世界上下文，一次世界来源请求恰好调用主
+Agent 和世界 Agent 两次。候选显示约 `4,545 / 80,000 tokens`、`2/7` 次调用、
+`Canon 打回 0/1`，上下文证据约 93 tokens；拒绝后世界来源正式数据仍为空。测试路由、
+上下文和团队档位均恢复默认，隔离项目通过完整危险操作流程删除。
+
+👉 27.1-e 当前范围完成，但不意味着已开放并行自治、投票或长期静默 Agent。下一开发单位
+进入 27.2b“整理本章 Agent”，继续保持后台默认只读、候选可见和作者确认写入。

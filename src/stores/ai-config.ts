@@ -15,6 +15,10 @@ import {
   type AgentContextProfiles,
   type AgentContextTaskKind,
 } from '../lib/agent/context-policy'
+import {
+  sanitizeAgentTeamBudgetProfile,
+  type AgentTeamBudgetProfile,
+} from '../lib/agent/team-budget'
 
 const STORAGE_KEY = 'storyforge-ai-config'
 const PRESETS_KEY = 'storyforge-ai-presets'
@@ -24,6 +28,7 @@ const EMBEDDING_KEY = 'storyforge-embedding-config'
 const EMBEDDING_SESSION_KEY = 'storyforge-embedding-key-session'
 export const TASK_ROUTES_KEY = 'storyforge-ai-task-routes'
 export const AGENT_CONTEXT_PROFILES_KEY = 'storyforge-agent-context-profiles'
+export const AGENT_TEAM_BUDGET_PROFILE_KEY = 'storyforge-agent-team-budget-profile'
 
 const DEFAULT_CONFIG: AIConfig = {
   provider: 'deepseek',
@@ -99,6 +104,14 @@ function loadAgentContextProfiles(): AgentContextProfiles {
 
 function saveAgentContextProfiles(profiles: AgentContextProfiles): void {
   localStorage.setItem(AGENT_CONTEXT_PROFILES_KEY, JSON.stringify(profiles))
+}
+
+function loadAgentTeamBudgetProfile(): AgentTeamBudgetProfile {
+  return sanitizeAgentTeamBudgetProfile(localStorage.getItem(AGENT_TEAM_BUDGET_PROFILE_KEY))
+}
+
+function saveAgentTeamBudgetProfile(profile: AgentTeamBudgetProfile): void {
+  localStorage.setItem(AGENT_TEAM_BUDGET_PROFILE_KEY, profile)
 }
 
 /** 根据 HTTP 状态码和英文错误信息，返回中文解释 */
@@ -203,6 +216,7 @@ interface AIConfigStore {
   presets: AIConfigPreset[]
   taskRoutes: AITaskRoutes
   agentContextProfiles: AgentContextProfiles
+  agentTeamBudgetProfile: AgentTeamBudgetProfile
   /** 当前生效的预设 id（null = 未对应任何预设/已改动） */
   activePresetId: string | null
   /** 最近一次应用/保存的预设 id；表单改动后仍保留,用于显式覆盖当前预设。 */
@@ -222,6 +236,7 @@ interface AIConfigStore {
   deletePreset: (id: string) => void
   setTaskRoute: (taskKind: AITaskKind, presetId: string | null) => void
   setAgentContextProfile: (taskKind: AgentContextTaskKind, profile: AgentContextProfile) => void
+  setAgentTeamBudgetProfile: (profile: AgentTeamBudgetProfile) => void
 }
 
 const initial = loadInitialConfig()
@@ -232,6 +247,7 @@ export const useAIConfigStore = create<AIConfigStore>((set, get) => ({
   presets: loadPresets(),
   taskRoutes: loadTaskRoutes(),
   agentContextProfiles: loadAgentContextProfiles(),
+  agentTeamBudgetProfile: loadAgentTeamBudgetProfile(),
   activePresetId: null,
   editingPresetId: null,
   embedding: loadEmbeddingConfig(initial.rememberApiKey),
@@ -324,6 +340,12 @@ export const useAIConfigStore = create<AIConfigStore>((set, get) => ({
     })
     saveAgentContextProfiles(agentContextProfiles)
     set({ agentContextProfiles })
+  },
+
+  setAgentTeamBudgetProfile: profile => {
+    const agentTeamBudgetProfile = sanitizeAgentTeamBudgetProfile(profile)
+    saveAgentTeamBudgetProfile(agentTeamBudgetProfile)
+    set({ agentTeamBudgetProfile })
   },
 
   switchProvider: (provider: AIProvider) => {

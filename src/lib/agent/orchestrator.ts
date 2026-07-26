@@ -10,7 +10,6 @@ import { chat, resolveRequestConfig } from '../ai/client'
 import { db } from '../db/schema'
 import {
   adoptGenerationNodeOutput,
-  runGenerationNode,
   type GenerationNode,
 } from '../generation/generation-node'
 import {
@@ -58,6 +57,13 @@ import type {
   AgentContextTaskKind,
 } from './context-policy'
 import { executeAgentTool } from './tool-registry'
+import { validateDomainCandidateCanon } from './canon-validator'
+import { runBudgetedGenerationNode } from './team-execution'
+import {
+  AgentTeamBudgetExceededError,
+  AgentTeamBudgetTracker,
+  type AgentTeamBudgetEvidence,
+} from './team-budget'
 
 export const DOMAIN_AGENT_IDS = ['world-origin', 'character', 'inspiration', 'outline', 'prose'] as const
 export type DomainAgentId = typeof DOMAIN_AGENT_IDS[number]
@@ -68,6 +74,14 @@ const CONTEXT_TASK_BY_AGENT: Record<DomainAgentId, AgentContextTaskKind> = {
   inspiration: 'agent-inspiration',
   outline: 'agent-outline',
   prose: 'agent-prose',
+}
+
+const MAX_OUTPUT_TOKENS_BY_AGENT: Record<DomainAgentId, number> = {
+  'world-origin': 3_000,
+  character: 6_000,
+  inspiration: 8_000,
+  outline: 12_000,
+  prose: 16_000,
 }
 
 export interface MasterAgentTask {
@@ -89,6 +103,7 @@ export interface MasterCandidatePayload {
   label: string
   contextSources: string[]
   contextEvidence?: AgentContextEvidence
+  teamBudgetEvidence?: AgentTeamBudgetEvidence
   baseSnapshot: unknown
   mode?: InspirationResultMode
   selectedFragmentIds?: string[]
@@ -290,6 +305,7 @@ export async function createMasterAgentPlan(input: {
   projectId: number
   worldGroupId: number | null
   request: string
+  budget?: AgentTeamBudgetTracker
   signal?: AbortSignal
 }, dependencies: PlannerDependencies = {}): Promise<MasterAgentPlan> {
   const request = input.request.trim()
@@ -324,7 +340,14 @@ export async function createMasterAgentPlan(input: {
     role: 'user' as const,
     content: `【项目紧凑状态】\n${status.ok ? status.content : '状态不可用'}\n\n【用户目标】\n${request}`,
   }]
+  let reservation: ReturnType<AgentTeamBudgetTracker['reserveCall']> | null = null
+  let settled = false
   try {
+    reservation = input.budget?.reserveCall({
+      label: '主 Agent 编排',
+      messages,
+      maxOutputTokens: 1_800,
+    }) ?? null
     const output = dependencies.complete
       ? await dependencies.complete(messages)
       : await chat(messages, config, {
@@ -333,8 +356,14 @@ export async function createMasterAgentPlan(input: {
           configOverrides: { maxTokens: 1800, temperature: 0.2 },
           contextOverflowPolicy: 'reject',
         }, input.signal)
+    if (reservation) {
+      input.budget!.settleCall(reservation, output)
+      settled = true
+    }
     return sanitizePlan(extractJsonObject(output), request)
   } catch (error) {
+    if (reservation && !settled) input.budget!.settleFailedCall(reservation)
+    if (error instanceof AgentTeamBudgetExceededError) throw error
     if (input.signal?.aborted) throw error
     console.warn('[master-agent] 计划模型失败，使用确定性路由降级：', error)
     return fallbackPlan(request)
@@ -362,12 +391,16 @@ export async function executeMasterAgentPlan(input: {
   projectId: number
   worldGroupId: number | null
   plan: MasterAgentPlan
+  budget?: AgentTeamBudgetTracker
   signal?: AbortSignal
   onTask?: (task: MasterAgentTask, status: 'running' | 'completed' | 'failed', error?: string) => void
 }): Promise<ExecutedMasterCandidate[]> {
   const candidates: ExecutedMasterCandidate[] = []
   const outputs = new Map<string, string>()
   const contextProfiles = useAIConfigStore.getState().agentContextProfiles
+  const budget = input.budget ?? new AgentTeamBudgetTracker(
+    useAIConfigStore.getState().agentTeamBudgetProfile,
+  )
   for (const task of topologicalTasks(input.plan)) {
     if (input.signal?.aborted) throw new DOMException('Aborted', 'AbortError')
     input.onTask?.(task, 'running')
@@ -385,10 +418,13 @@ export async function executeMasterAgentPlan(input: {
           contextProfile: contextProfiles[CONTEXT_TASK_BY_AGENT[task.agentId]],
           signal: input.signal,
         })
-        const result = await runGenerationNode(prepared.node, prepared.prepared)
-        if (result.gate?.status === 'blocked') {
-          throw new Error(result.gate.issues.map(issue => issue.message).join('；'))
-        }
+        const result = await runBudgetedGenerationNode({
+          node: prepared.node,
+          prepared: prepared.prepared,
+          budget,
+          callLabel: '世界领域 Agent',
+          maxOutputTokens: MAX_OUTPUT_TOKENS_BY_AGENT[task.agentId],
+        })
         const draft = result.output
         candidates.push({
           payload: {
@@ -416,10 +452,13 @@ export async function executeMasterAgentPlan(input: {
           contextProfile: contextProfiles[CONTEXT_TASK_BY_AGENT[task.agentId]],
           signal: input.signal,
         })
-        const result = await runGenerationNode(prepared.node, prepared.prepared)
-        if (result.gate?.status === 'blocked') {
-          throw new Error(result.gate.issues.map(issue => issue.message).join('；'))
-        }
+        const result = await runBudgetedGenerationNode({
+          node: prepared.node,
+          prepared: prepared.prepared,
+          budget,
+          callLabel: '角色领域 Agent',
+          maxOutputTokens: MAX_OUTPUT_TOKENS_BY_AGENT[task.agentId],
+        })
         const draft = JSON.stringify(result.output, null, 2)
         candidates.push({
           payload: {
@@ -451,10 +490,13 @@ export async function executeMasterAgentPlan(input: {
           contextProfile: contextProfiles[CONTEXT_TASK_BY_AGENT[task.agentId]],
           signal: input.signal,
         })
-        const result = await runGenerationNode(prepared.node, prepared.prepared)
-        if (result.gate?.status === 'blocked') {
-          throw new Error(result.gate.issues.map(issue => issue.message).join('；'))
-        }
+        const result = await runBudgetedGenerationNode({
+          node: prepared.node,
+          prepared: prepared.prepared,
+          budget,
+          callLabel: '灵感领域 Agent',
+          maxOutputTokens: MAX_OUTPUT_TOKENS_BY_AGENT[task.agentId],
+        })
         const draft = JSON.stringify(result.output, null, 2)
         candidates.push({
           payload: {
@@ -484,10 +526,20 @@ export async function executeMasterAgentPlan(input: {
           contextProfile: contextProfiles[CONTEXT_TASK_BY_AGENT[task.agentId]],
           signal: input.signal,
         })
-        const result = await runGenerationNode(prepared.node, prepared.prepared)
-        if (result.gate?.status === 'blocked') {
-          throw new Error(result.gate.issues.map(issue => issue.message).join('；'))
-        }
+        const result = await runBudgetedGenerationNode({
+          node: prepared.node,
+          prepared: prepared.prepared,
+          budget,
+          callLabel: '大纲领域 Agent',
+          maxOutputTokens: MAX_OUTPUT_TOKENS_BY_AGENT[task.agentId],
+          validate: output => validateDomainCandidateCanon({
+            agentId: task.agentId,
+            projectId: input.projectId,
+            worldGroupId: input.worldGroupId,
+            outlineNodeId: prepared.parentVolumeId,
+            outputText: JSON.stringify(output),
+          }),
+        })
         const draft = JSON.stringify(result.output, null, 2)
         candidates.push({
           payload: {
@@ -517,10 +569,20 @@ export async function executeMasterAgentPlan(input: {
           contextProfile: contextProfiles[CONTEXT_TASK_BY_AGENT[task.agentId]],
           signal: input.signal,
         })
-        const result = await runGenerationNode(prepared.node, prepared.prepared)
-        if (result.gate?.status === 'blocked') {
-          throw new Error(result.gate.issues.map(issue => issue.message).join('；'))
-        }
+        const result = await runBudgetedGenerationNode({
+          node: prepared.node,
+          prepared: prepared.prepared,
+          budget,
+          callLabel: '正文领域 Agent',
+          maxOutputTokens: MAX_OUTPUT_TOKENS_BY_AGENT[task.agentId],
+          validate: output => validateDomainCandidateCanon({
+            agentId: task.agentId,
+            projectId: input.projectId,
+            worldGroupId: input.worldGroupId,
+            outlineNodeId: prepared.outlineNodeId,
+            outputText: output,
+          }),
+        })
         const draft = result.output
         candidates.push({
           payload: {
@@ -548,6 +610,10 @@ export async function executeMasterAgentPlan(input: {
       throw error
     }
   }
+  const teamBudgetEvidence = budget.snapshot()
+  candidates.forEach(candidate => {
+    candidate.payload.teamBudgetEvidence = teamBudgetEvidence
+  })
   return candidates
 }
 

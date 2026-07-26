@@ -14,6 +14,8 @@ import {
 } from '../../lib/agent/orchestrator'
 import type { AgentEvent, Project } from '../../lib/types'
 import { parseAgentEventPayload } from '../../lib/types'
+import { AgentTeamBudgetTracker } from '../../lib/agent/team-budget'
+import { useAIConfigStore } from '../../stores/ai-config'
 
 function errorMessage(error: unknown): string {
   if (error instanceof Error && error.message.trim()) return error.message
@@ -122,10 +124,14 @@ export function useMasterCopilot(input: {
         content: request,
       })
       await reload(conversationId)
+      const teamBudget = new AgentTeamBudgetTracker(
+        useAIConfigStore.getState().agentTeamBudgetProfile,
+      )
       const plan = await createMasterAgentPlan({
         projectId: project.id!,
         worldGroupId,
         request,
+        budget: teamBudget,
         signal: controller.signal,
       })
       await appendAgentEvent({
@@ -149,6 +155,7 @@ export function useMasterCopilot(input: {
         projectId: project.id!,
         worldGroupId,
         plan,
+        budget: teamBudget,
         signal: controller.signal,
         onTask: (task, status, error) => {
           taskQueue = taskQueue.then(async () => {
@@ -178,7 +185,13 @@ export function useMasterCopilot(input: {
         conversationId,
         kind: 'message',
         role: 'assistant',
-        content: `后台领域 Agent 已完成，生成了 ${candidates.length} 份候选。请检查、编辑并决定是否采纳。`,
+        content: [
+          `后台领域 Agent 已完成，生成了 ${candidates.length} 份候选。请检查、编辑并决定是否采纳。`,
+          `本轮团队约使用 ${teamBudget.snapshot().usedTokens.toLocaleString()} / `
+          + `${teamBudget.snapshot().maxTokens.toLocaleString()} tokens，`
+          + `${teamBudget.snapshot().calls} 次调用，`
+          + `Canon 受控打回 ${teamBudget.snapshot().canonRetries} 次。`,
+        ].join(' '),
       })
     } catch (error) {
       if (!controller.signal.aborted) {

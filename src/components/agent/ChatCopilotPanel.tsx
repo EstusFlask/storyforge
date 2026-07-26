@@ -217,6 +217,14 @@ export default function ChatCopilotPanel({
                 </div>
               </details>
             )}
+            {candidate.payload.teamBudgetEvidence && (
+              <p className="mt-2 rounded border border-border/60 bg-bg-surface px-2 py-1.5 text-[10px] text-text-muted">
+                本轮团队预算约 {candidate.payload.teamBudgetEvidence.usedTokens.toLocaleString()} /
+                {' '}{candidate.payload.teamBudgetEvidence.maxTokens.toLocaleString()} tokens
+                {' · '}{candidate.payload.teamBudgetEvidence.calls}/{candidate.payload.teamBudgetEvidence.maxCalls} 次调用
+                {' · '}Canon 打回 {candidate.payload.teamBudgetEvidence.canonRetries}/{candidate.payload.teamBudgetEvidence.maxCanonRetries}
+              </p>
+            )}
             {(candidate.payload.dependsOnTaskIds?.length ?? 0) > 0 && (
               <p className="mt-1 text-[10px] text-warning">
                 采纳前需先采纳上游任务：{candidate.payload.dependsOnTaskIds!.join('、')}
