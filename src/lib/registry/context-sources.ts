@@ -59,6 +59,7 @@ import {
   readAgentSearchResults,
   readAgentWorldGroups,
 } from '../agent/read-sources'
+import { readRagSelectionContext } from '../retrieval/rag-library'
 
 async function readWorldview(projectId: number, worldGroupId?: number | null): Promise<Worldview | null> {
   const rows = await db.worldviews.where('projectId').equals(projectId).toArray()
@@ -587,6 +588,23 @@ export const CONTEXT_SOURCES: ContextSource[] = [
     requiresWorldGroupId: true,
     enabled: input => !!input.searchQuery?.trim(),
     read: readAgentSearchResults,
+  },
+  {
+    // RAG-1: 作者在可见资料库/节点中精确选择的记录字段。正文仍实时读取 Canon，
+    // 稳定选择键和实际纳入证据分别由源记录元数据与节点运行快照保存。
+    key: 'ragSelection',
+    label: '作者选择的资料字段',
+    scope: 'manual',
+    layer: 'L0',
+    budgetTokens: 100_000,
+    enabled: input => !!input.ragEntryKeys?.length,
+    read: input => readRagSelectionContext({
+      projectId: input.projectId,
+      worldGroupId: input.worldGroupId,
+      entryKeys: input.ragEntryKeys,
+      inputBudgetTokens: input.inputBudgetTokens,
+      trace: input.ragSelectionTrace,
+    }),
   },
   {
     key: 'manualText',

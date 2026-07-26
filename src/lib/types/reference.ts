@@ -1,4 +1,5 @@
 import { FICTION_DIMENSIONS, FICTION_DIMENSION_LABELS } from './import-session-data'
+import type { RagDocumentMetadata } from './rag-library'
 export type { FictionDimension } from './import-session-data'
 export { FICTION_DIMENSIONS, FICTION_DIMENSION_LABELS } from './import-session-data'
 
@@ -34,7 +35,7 @@ export type ReferenceAnalysisRunStatus =
   | 'cancelled'
 
 /** 参考书目条目 */
-export interface Reference {
+export interface Reference extends RagDocumentMetadata {
   id?: number
   projectId: number
   title: string        // 书名 / 文件名

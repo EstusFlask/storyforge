@@ -9,6 +9,7 @@ import type { AIProvider } from '../types/ai'
 import type { ContextLayer, ContextSegment } from '../ai/context-budget'
 import type { PreparedContinuityContext } from '../ai/chapter-memory/continuity-context'
 import type { InspirationResultMode } from '../types/inspiration-workspace'
+import type { RagSelectionTraceCollector } from '../types/rag-library'
 
 /**
  * 表的归属方式 —— 决定删项目时如何定位该表的记录。
@@ -299,6 +300,10 @@ export interface AssembleContextInput {
   searchLimit?: number
   /** AGENT-1: 搜索限定的数据类型。 */
   searchKinds?: string[]
+  /** RAG-1: 节点/Agent 明确选择的稳定资料字段键。 */
+  ragEntryKeys?: string[]
+  /** RAG-1 内部执行证据收集器；调用结束后由节点运行快照冻结。 */
+  ragSelectionTrace?: RagSelectionTraceCollector
   /** assembleContext 内部批量预取；调用方无需传。 */
   continuitySnapshot?: PreparedContinuityContext
 }

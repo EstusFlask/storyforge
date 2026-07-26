@@ -13,6 +13,7 @@ import type {
   NodeRunRecord,
 } from '../types'
 import { parseNodeFlowGraph } from '../types'
+import { createRagSelectionTrace } from '../types'
 import { topologicalNodeOrder } from './graph'
 
 export interface NodeExecutionInput {
@@ -133,24 +134,35 @@ async function executeNode(input: {
   }
   if (node.kind === 'source.context') {
     const config = useAIConfigStore.getState().config
-    const sourceKeys = arrayConfig(node, 'sourceKeys')
-    if (!sourceKeys.length) throw new Error('项目元素节点尚未选择任何来源。')
+    const selectionMode = stringConfig(
+      node,
+      'selectionMode',
+      arrayConfig(node, 'sourceKeys').length ? 'registered' : 'exact',
+    )
+    const sourceKeys = selectionMode === 'registered' ? arrayConfig(node, 'sourceKeys') : []
+    const ragEntryKeys = selectionMode === 'registered' ? [] : arrayConfig(node, 'ragEntryKeys')
+    if (!sourceKeys.length && !ragEntryKeys.length) {
+      throw new Error('项目元素节点尚未选择任何资料字段或注册来源。')
+    }
+    const ragTrace = createRagSelectionTrace()
     const assembled = await assembleContext({
       projectId: input.projectId,
       worldGroupId: input.worldGroupId,
       chapterId: numberConfig(node, 'chapterId', 0) || undefined,
       outlineNodeId: numberConfig(node, 'outlineNodeId', 0) || undefined,
-      sourceKeys,
+      sourceKeys: ragEntryKeys.length ? ['ragSelection'] : sourceKeys,
+      ragEntryKeys,
+      ragSelectionTrace: ragTrace,
       provider: config.provider,
       model: config.model,
       inputBudgetTokens: numberConfig(node, 'inputBudgetTokens', 12_000),
     })
     let output = assembled.text
-    const include = stringConfig(node, 'include')
+    const include = (selectionMode === 'registered' ? stringConfig(node, 'include') : '')
       .split(/[\n,，]/)
       .map(value => value.trim())
       .filter(Boolean)
-    const exclude = stringConfig(node, 'exclude')
+    const exclude = (selectionMode === 'registered' ? stringConfig(node, 'exclude') : '')
       .split(/[\n,，]/)
       .map(value => value.trim())
       .filter(Boolean)
@@ -162,11 +174,17 @@ async function executeNode(input: {
     }
     return {
       output,
-      snapshotEvidence: {
-        included: assembled.included,
-        omitted: assembled.omitted,
-        trimmed: assembled.trimmed,
-      },
+      snapshotEvidence: ragEntryKeys.length
+        ? {
+            included: ragTrace.included,
+            omitted: ragTrace.omitted,
+            trimmed: ragTrace.trimmed,
+          }
+        : {
+            included: assembled.included,
+            omitted: assembled.omitted,
+            trimmed: assembled.trimmed,
+          },
     }
   }
   if (node.kind === 'transform.compose') {
@@ -274,6 +292,9 @@ export async function runNodeFlow(input: {
           signal: input.signal,
         })
         if (executed.snapshotEvidence) snapshots[node.id].sourceEvidence = executed.snapshotEvidence
+        if (node.kind === 'source.context') {
+          snapshots[node.id].totalTokens = estimateTokens(executed.output)
+        }
         results[node.id] = {
           nodeId: node.id,
           status: 'completed',

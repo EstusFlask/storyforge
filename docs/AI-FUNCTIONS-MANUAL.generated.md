@@ -76,7 +76,7 @@
 
 ## 二、上下文源清单（CONTEXT_SOURCES · AI 读什么）
 
-共 44 个上下文源。assembleContext({ sourceKeys }) 按 key 装配。
+共 45 个上下文源。assembleContext({ sourceKeys }) 按 key 装配。
 
 | key | 标签 | 作用域 | 层级 | 预算(token) |
 |---|---|---|---|---|
@@ -84,6 +84,7 @@
 | `worldGroups` | 世界组目录 | project | L2 | 1500 |
 | `outlineTree` | 大纲树 | world | L2 | 6000 |
 | `searchResults` | 项目内搜索结果 | world | L2 | 2200 |
+| `ragSelection` | 作者选择的资料字段 | manual | L0 | 100000 |
 | `manualText` | 用户指定内容 | manual | L0 | 100000 |
 | `chapterContent` | 章节正文 | chapter | L0 | 100000 |
 | `contextMemo` | 上下文快照 | project | L3 | 1500 |
@@ -214,7 +215,7 @@ AI 输出经 `adopt({ target, data })` 写回,只有这里登记的字段可写(
 | `inspiration.reverse` | `src/hooks/useIncrementalInspiration.ts:212`<br/>`src/lib/agent/inspiration-copilot.ts:242` |
 | `inventory.extract` | `src/components/items/InventoryPanel.tsx:150` |
 | `location.extract` | `src/components/location/LocationPanel.tsx:106` |
-| `node.creation` | `src/lib/node-flow/executor.ts:185` |
+| `node.creation` | `src/lib/node-flow/executor.ts:203` |
 | `outline.chapter` | `src/lib/ai/batch-outline-runner.ts:123`<br/>`src/lib/outline/generation-node.ts:55` |
 | `outline.character-driven` | `src/components/outline/CharacterDrivenPlotPanel.tsx:198` |
 | `outline.character-revision` | `src/components/outline/CharacterRevisionPanel.tsx:169` |
@@ -254,4 +255,4 @@ AI 输出经 `adopt({ target, data })` 写回,只有这里登记的字段可写(
 
 ---
 
-生成时间基准:commit `11fdb1f`
+生成时间基准:commit `0aa9030`

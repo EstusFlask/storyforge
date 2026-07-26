@@ -52,7 +52,15 @@ function defaultNode(kind: NodeFlowKind, index: number): NodeFlowNode {
   if (kind === 'source.context') {
     return {
       ...base,
-      config: { sourceKeys: [], inputBudgetTokens: 12_000, chapterId: 0, include: '', exclude: '' },
+      config: {
+        selectionMode: 'exact',
+        ragEntryKeys: [],
+        sourceKeys: [],
+        inputBudgetTokens: 12_000,
+        chapterId: 0,
+        include: '',
+        exclude: '',
+      },
       inputSlots: [],
     }
   }
@@ -398,7 +406,13 @@ export default function NodeModeWorkspace(props: {
         </section>
 
         <div className="w-80 shrink-0">
-          <NodeInspector graph={graph} node={selectedNode} onGraphChange={changeGraph} />
+          <NodeInspector
+            projectId={projectId}
+            worldGroupId={props.worldGroupId}
+            graph={graph}
+            node={selectedNode}
+            onGraphChange={changeGraph}
+          />
         </div>
       </div>
 

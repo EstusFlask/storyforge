@@ -1,3 +1,5 @@
+import type { RagDocumentMetadata } from './rag-library'
+
 /**
  * Phase 25.3 — 重要地点模块
  * 取代旧的「地理环境」面板，使用多标签组合替代单选下拉
@@ -54,7 +56,7 @@ export const TAG_EMOJI: Partial<Record<LocationTag, string>> = {
 }
 
 /** 重要地点 */
-export interface ImportantLocation {
+export interface ImportantLocation extends RagDocumentMetadata {
   id?: number
   projectId: number
   /** 地点名称 */

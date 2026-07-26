@@ -1,3 +1,5 @@
+import type { RagDocumentMetadata } from './rag-library'
+
 /**
  * 神明设定（嵌入 Worldview.divineDesign）
  */
@@ -17,7 +19,7 @@ export interface NaturalResources {
 }
 
 /** 世界观（v3 §2.1 — 三大块结构：世界起源 + 自然环境 + 人文环境） */
-export interface Worldview {
+export interface Worldview extends RagDocumentMetadata {
   id?: number
   projectId: number
   // ── 旧字段（P5 改 panel 时迁移到下方新结构后删） ─────────────────────────
@@ -66,7 +68,7 @@ export interface Worldview {
 }
 
 /** 故事核心（v3 §2.1 — 加 logline / concept / subPlots） */
-export interface StoryCore {
+export interface StoryCore extends RagDocumentMetadata {
   id?: number
   projectId: number
   theme: string                // 主题

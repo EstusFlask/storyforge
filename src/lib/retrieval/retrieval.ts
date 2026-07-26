@@ -135,6 +135,25 @@ export async function rebuildProjectRetrievalChunks(args: {
   return { chapters: sorted.length, rebuiltChapters, chunks }
 }
 
+/**
+ * RAG-1 可见资料库的“删除派生索引”边界。
+ * 只清 retrievalChunks / narrativeSummaryNodes；章节正文与任何 Canon 记录绝不删除。
+ */
+export async function clearProjectRetrievalCache(projectId: number): Promise<{
+  chunks: number
+  summaries: number
+}> {
+  return db.transaction('rw', db.retrievalChunks, db.narrativeSummaryNodes, async () => {
+    const [chunkKeys, summaryKeys] = await Promise.all([
+      db.retrievalChunks.where('projectId').equals(projectId).primaryKeys(),
+      db.narrativeSummaryNodes.where('projectId').equals(projectId).primaryKeys(),
+    ])
+    if (chunkKeys.length) await db.retrievalChunks.bulkDelete(chunkKeys as number[])
+    if (summaryKeys.length) await db.narrativeSummaryNodes.bulkDelete(summaryKeys as number[])
+    return { chunks: chunkKeys.length, summaries: summaryKeys.length }
+  })
+}
+
 function capText(text: string, max = SUMMARY_EXCERPT_CHARS): string {
   const clean = text.replace(/\s+/g, ' ').trim()
   if (clean.length <= max) return clean
