@@ -11,6 +11,7 @@ interface Props {
   hasOutline: boolean
   showOutlinePreview: boolean
   showReviewPanel: boolean
+  consistencyAlertCount: number
   showNotePanel: boolean
   customInstruction: string
   onGenerate: () => void
@@ -37,6 +38,7 @@ export default function ChapterEditorToolbar({
   hasOutline,
   showOutlinePreview,
   showReviewPanel,
+  consistencyAlertCount,
   showNotePanel,
   customInstruction,
   onGenerate,
@@ -118,6 +120,11 @@ export default function ChapterEditorToolbar({
         }`}>
         <ShieldCheck className="w-3 h-3" />
         质量审校
+        {consistencyAlertCount > 0 && (
+          <span className="min-w-4 rounded-full bg-error/15 px-1 text-center text-[10px] text-error">
+            {consistencyAlertCount}
+          </span>
+        )}
       </button>
       <button onClick={onToggleNotePanel}
         title="便签"

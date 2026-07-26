@@ -6,7 +6,8 @@
  *  - 收起再展开 → 从 store 回显（不销毁）；
  *  - 切一级标签再回来 → store 仍在内存（活在本次会话）；
  *  - 切章节 → 按 chapterId 读各自的报告，互不串台。
- * 报告是廉价可重算的分析产物，故只存内存（不落 DB），用户再点「开始检测」即覆盖。
+ * 普通审校/去 AI 味/追读力仍是廉价可重算的内存产物；一致性 Agent 报告另经
+ * agentConversations/agentEvents 持久化，这里只保留当前 UI 投影。
  */
 import { create } from 'zustand'
 import type { ReviewResult } from '../lib/ai/adapters/review-adapter'

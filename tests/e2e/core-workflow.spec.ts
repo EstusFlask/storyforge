@@ -305,6 +305,68 @@ test('整理本章只调用一次模型，刷新恢复候选并在确认后写�
   expect(organizationCalls).toBe(1)
 })
 
+test('一致性 Agent 显式单次检测，刷新恢复只读报告且不写业务产物', async ({ page }) => {
+  let consistencyCalls = 0
+  await page.addInitScript(() => {
+    localStorage.setItem('storyforge-ai-config', JSON.stringify({
+      provider: 'ollama',
+      apiKey: '',
+      model: 'consistency-agent-e2e',
+      baseUrl: 'http://localhost:1234/v1',
+      temperature: 0,
+      maxTokens: 0,
+      contextWindow: 100000,
+    }))
+  })
+  await page.route('http://localhost:1234/v1/chat/completions', async route => {
+    consistencyCalls += 1
+    const content = JSON.stringify({
+      findings: [],
+      cognitionReferences: [],
+      lifecycleReferences: [],
+    })
+    await route.fulfill({
+      status: 200,
+      contentType: 'text/event-stream',
+      body: [
+        `data: ${JSON.stringify({ choices: [{ delta: { content } }] })}`,
+        `data: ${JSON.stringify({
+          choices: [{ delta: {} }],
+          usage: { prompt_tokens: 150, completion_tokens: 20, total_tokens: 170 },
+        })}`,
+        'data: [DONE]',
+        '',
+      ].join('\n\n'),
+    })
+  })
+
+  await createBookWithSavedChapter(
+    page,
+    'E2E 一致性 Agent 只读闭环',
+    '林舟取出一直随身携带的潮汐钥匙，确认门上的月纹仍未熄灭。',
+  )
+  await page.getByRole('button', { name: '质量审校', exact: true }).click()
+  const review = page.locator('main').getByText('一致性', { exact: true }).last()
+  await review.click()
+  await page.getByRole('button', { name: '开始检测', exact: true }).click()
+
+  await expect(page.getByText('当前正文报告 · Fast Guard', { exact: false })).toBeVisible()
+  await expect(page.getByText('1/7 次模型调用', { exact: false })).toBeVisible()
+  await expect(page.getByText('未发现有证据支持的一致性问题。', { exact: true })).toBeVisible()
+  expect(consistencyCalls).toBe(1)
+
+  await page.reload()
+  await sidebarButton(page, '章节').click()
+  await page.getByRole('button', { name: '质量审校', exact: true }).click()
+  await page.locator('main').getByText('一致性', { exact: true }).last().click()
+  await expect(page.getByText('当前正文报告 · Fast Guard', { exact: false })).toBeVisible()
+  await expect(page.getByText('未发现有证据支持的一致性问题。', { exact: true })).toBeVisible()
+  expect(consistencyCalls).toBe(1)
+
+  await openSidebarLeaf(page, '创作区', '故事年表')
+  await expect(page.getByText('还没有故事年表', { exact: true })).toBeVisible()
+})
+
 test('智能实体改名先预览，再原子同步正文与角色主档并可撤销', async ({ page }) => {
   await createBookWithSavedChapter(
     page,
