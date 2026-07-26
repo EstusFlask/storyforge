@@ -2,6 +2,7 @@ import JSON5 from 'json5'
 import { useAIConfigStore } from '../../stores/ai-config'
 import { useCharacterStore } from '../../stores/character'
 import { useInspirationWorkspaceStore } from '../../stores/inspiration-workspace'
+import { useOutlineStore } from '../../stores/outline'
 import { useWorldviewStore } from '../../stores/worldview'
 import { chat } from '../ai/client'
 import { db } from '../db/schema'
@@ -15,9 +16,10 @@ import {
   MAX_INSPIRATION_FRAGMENTS,
 } from '../inspiration/workspace'
 import { adopt } from '../registry/adopt'
-import type {
-  AgentEvent,
-  InspirationResultMode,
+import {
+  parseAgentEventPayload,
+  type AgentEvent,
+  type InspirationResultMode,
 } from '../types'
 import {
   parseCharacterCandidateDraft,
@@ -32,12 +34,19 @@ import {
   type InspirationWorkspaceSnapshot,
 } from './inspiration-copilot'
 import {
+  adoptRestoredOutlineCandidate,
+  parseOutlineCandidateDraft,
+  prepareOutlineCopilot,
+  type OutlineCopilotMode,
+  type OutlineCopilotSnapshot,
+} from './outline-copilot'
+import {
   prepareWorldOriginCopilot,
   type WorldOriginSnapshot,
 } from './world-origin-copilot'
 import { executeAgentTool } from './tool-registry'
 
-export const DOMAIN_AGENT_IDS = ['world-origin', 'character', 'inspiration'] as const
+export const DOMAIN_AGENT_IDS = ['world-origin', 'character', 'inspiration', 'outline'] as const
 export type DomainAgentId = typeof DOMAIN_AGENT_IDS[number]
 
 export interface MasterAgentTask {
@@ -61,6 +70,9 @@ export interface MasterCandidatePayload {
   baseSnapshot: unknown
   mode?: InspirationResultMode
   selectedFragmentIds?: string[]
+  outlineMode?: OutlineCopilotMode
+  outlineParentId?: number | null
+  dependsOnTaskIds?: string[]
 }
 
 export interface ExecutedMasterCandidate {
@@ -86,11 +98,38 @@ function extractJsonObject(text: string): Record<string, unknown> {
   return parsed as Record<string, unknown>
 }
 
+function explicitlyRequestedDomains(request: string): Set<DomainAgentId> {
+  const hasInspiration = /灵感|反推|碎片|脑洞/.test(request)
+  const hasOutline = /大纲|卷纲|章纲|章节规划|剧情结构|情节结构/.test(request)
+  const worldMention = /世界|设定|起源|文明|力量|体系|时代|地理/.test(request)
+  const worldObject = '(?:世界观|世界|背景设定|世界起源|文明设定|力量体系|时代背景|地理设定)'
+  const worldAction = (
+    new RegExp(`(?:创建|生成|设计|新增|建立|补充|完善|修改|重做).{0,12}${worldObject}`).test(request)
+    || new RegExp(`${worldObject}.{0,12}(?:创建|生成|设计|新增|建立|补充|完善|修改|重做)`).test(request)
+  )
+  const characterMention = /角色|人物|主角|配角|反派|npc/i.test(request)
+  const characterAction = (
+    /(?:创建|生成|设计|新增|塑造|补充|完善|修改|重做).{0,12}(?:角色|人物|主角|配角|反派|npc)/i.test(request)
+    || /(?:角色|人物|主角|配角|反派|npc).{0,12}(?:创建|生成|设计|新增|塑造|补充|完善|修改|重做)/i.test(request)
+  )
+  const hasWorld = hasOutline ? worldAction : worldMention
+  // 大纲里的“角色变化/角色弧光”是输出约束，不是创建或修改角色主档的授权。
+  const hasCharacter = hasOutline ? characterAction : characterMention
+  return new Set<DomainAgentId>([
+    ...(hasWorld ? ['world-origin' as const] : []),
+    ...(hasCharacter ? ['character' as const] : []),
+    ...(hasInspiration ? ['inspiration' as const] : []),
+    ...(hasOutline ? ['outline' as const] : []),
+  ])
+}
+
 function fallbackPlan(request: string): MasterAgentPlan {
   const tasks: MasterAgentTask[] = []
-  const hasWorld = /世界|设定|起源|文明|力量|体系|时代|地理/.test(request)
-  const hasCharacter = /角色|人物|主角|配角|反派|npc/i.test(request)
-  const hasInspiration = /灵感|反推|碎片|脑洞/.test(request)
+  const requested = explicitlyRequestedDomains(request)
+  const hasWorld = requested.has('world-origin')
+  const hasCharacter = requested.has('character')
+  const hasInspiration = requested.has('inspiration')
+  const hasOutline = requested.has('outline')
   if (hasWorld) tasks.push({
     id: 'world-1',
     agentId: 'world-origin',
@@ -103,11 +142,26 @@ function fallbackPlan(request: string): MasterAgentPlan {
     instruction: request,
     dependsOn: [],
   })
-  if (hasCharacter || tasks.length === 0) tasks.push({
+  if (hasCharacter) tasks.push({
     id: 'character-1',
     agentId: 'character',
     instruction: request,
     dependsOn: hasWorld ? ['world-1'] : [],
+  })
+  if (hasOutline) tasks.push({
+    id: 'outline-1',
+    agentId: 'outline',
+    instruction: request,
+    dependsOn: [
+      ...(hasWorld ? ['world-1'] : []),
+      ...(hasCharacter ? ['character-1'] : []),
+    ],
+  })
+  if (!tasks.length) tasks.push({
+    id: 'character-1',
+    agentId: 'character',
+    instruction: request,
+    dependsOn: [],
   })
   return { summary: '根据用户要求调度相关创作领域。', tasks }
 }
@@ -116,21 +170,41 @@ function sanitizePlan(raw: Record<string, unknown>, request: string): MasterAgen
   const rawTasks = Array.isArray(raw.tasks) ? raw.tasks : []
   const tasks: MasterAgentTask[] = []
   const ids = new Set<string>()
+  const agentIds = new Set<DomainAgentId>()
+  const explicitlyRequested = explicitlyRequestedDomains(request)
   for (const item of rawTasks.slice(0, 6)) {
     if (!item || typeof item !== 'object' || Array.isArray(item)) continue
     const source = item as Record<string, unknown>
     if (!DOMAIN_AGENT_IDS.includes(source.agentId as DomainAgentId)) continue
+    const agentId = source.agentId as DomainAgentId
+    // 模型不得把描述中出现的设定元素误当成新增数据授权。只要用户文本明确命中了至少一个
+    // 已闭环领域，就只能调度这些领域；例如“用浮空城和守灯人规划卷纲”只能写大纲。
+    if (explicitlyRequested.size > 0 && !explicitlyRequested.has(agentId)) continue
+    // 当前每个领域节点都以一次候选快照为确认单位。同领域并列任务会共享旧快照，
+    // 第一个采纳后让后续候选必然过期；批量目标必须由单个领域任务一次产出。
+    if (agentIds.has(agentId)) {
+      const existing = tasks.find(task => task.agentId === agentId)!
+      existing.instruction = request.slice(0, 1000)
+      if (Array.isArray(source.dependsOn)) {
+        existing.dependsOn = [...new Set([
+          ...existing.dependsOn,
+          ...source.dependsOn.filter((value): value is string => typeof value === 'string'),
+        ])].slice(0, 5)
+      }
+      continue
+    }
     const id = typeof source.id === 'string' && source.id.trim()
       ? source.id.trim().slice(0, 80)
       : `task-${tasks.length + 1}`
     if (ids.has(id)) continue
     ids.add(id)
+    agentIds.add(agentId)
     const instruction = typeof source.instruction === 'string' && source.instruction.trim()
       ? source.instruction.trim().slice(0, 1000)
       : request
     tasks.push({
       id,
-      agentId: source.agentId as DomainAgentId,
+      agentId,
       instruction,
       dependsOn: Array.isArray(source.dependsOn)
         ? source.dependsOn.filter((value): value is string => typeof value === 'string').slice(0, 5)
@@ -172,9 +246,14 @@ export async function createMasterAgentPlan(input: {
 - world-origin：建立或补充世界来源、时代与文明起点；
 - character：设计一个新角色；
 - inspiration：基于项目内已保存灵感碎片做结构化反推。
+- outline：生成卷级大纲，或把当前卷纲展开为章节大纲。
+只调度用户明确要求生成或修改的领域。用户在大纲要求中提到世界元素或角色姓名，只是大纲
+约束，不代表授权新建世界观或角色；不得擅自扩大写入范围。
 依赖任务必须写 dependsOn。世界设定与角色同时出现时，角色应依赖世界任务。
-只输出 JSON：{"summary":"给用户的简短计划","tasks":[{"id":"稳定ID","agentId":"world-origin|character|inspiration","instruction":"给分 Agent 的完整要求","dependsOn":[]}]}。
-最多 6 个任务；不要输出 Markdown。`,
+大纲依赖本轮新生成的世界或角色任务。只输出 JSON：
+{"summary":"给用户的简短计划","tasks":[{"id":"稳定ID","agentId":"world-origin|character|inspiration|outline","instruction":"给分 Agent 的完整要求","dependsOn":[]}]}。
+每个领域最多一个任务；同一领域的批量目标必须合并到这个任务中一次产出。最多 4 个任务；
+不要输出 Markdown。`,
   }, {
     role: 'user' as const,
     content: `【项目紧凑状态】\n${status.ok ? status.content : '状态不可用'}\n\n【用户目标】\n${request}`,
@@ -250,6 +329,7 @@ export async function executeMasterAgentPlan(input: {
             label: '世界来源',
             contextSources: prepared.contextSources,
             baseSnapshot: prepared.snapshot,
+            dependsOnTaskIds: task.dependsOn,
           },
           draft,
           runtimeNode: prepared.node,
@@ -277,13 +357,14 @@ export async function executeMasterAgentPlan(input: {
             label: '新角色',
             contextSources: prepared.contextSources,
             baseSnapshot: prepared.snapshot,
+            dependsOnTaskIds: task.dependsOn,
           },
           draft,
           runtimeNode: prepared.node,
           runtimeOutput: result.output,
         })
         outputs.set(task.id, draft)
-      } else {
+      } else if (task.agentId === 'inspiration') {
         const workspace = await db.inspirationWorkspaces.where('projectId').equals(input.projectId).first()
         const selectedFragmentIds = parseInspirationFragments(workspace?.fragments)
           .slice(0, MAX_INSPIRATION_FRAGMENTS)
@@ -310,6 +391,37 @@ export async function executeMasterAgentPlan(input: {
             baseSnapshot: prepared.snapshot,
             mode: prepared.mode,
             selectedFragmentIds,
+            dependsOnTaskIds: task.dependsOn,
+          },
+          draft,
+          runtimeNode: prepared.node,
+          runtimeOutput: result.output,
+        })
+        outputs.set(task.id, draft)
+      } else {
+        const prepared = await prepareOutlineCopilot({
+          projectId: input.projectId,
+          worldGroupId: input.worldGroupId,
+          authorRequest: task.instruction,
+          supplementalContext: upstream,
+          signal: input.signal,
+        })
+        const result = await runGenerationNode(prepared.node, prepared.prepared)
+        if (result.gate?.status === 'blocked') {
+          throw new Error(result.gate.issues.map(issue => issue.message).join('；'))
+        }
+        const draft = JSON.stringify(result.output, null, 2)
+        candidates.push({
+          payload: {
+            version: 1,
+            taskId: task.id,
+            agentId: task.agentId,
+            label: prepared.label,
+            contextSources: prepared.contextSources,
+            baseSnapshot: prepared.snapshot,
+            outlineMode: prepared.mode,
+            outlineParentId: prepared.parentVolumeId,
+            dependsOnTaskIds: task.dependsOn,
           },
           draft,
           runtimeNode: prepared.node,
@@ -370,6 +482,41 @@ async function currentInspirationSnapshot(projectId: number): Promise<Inspiratio
   }
 }
 
+async function assertCandidateDependenciesAdopted(
+  event: AgentEvent,
+  payload: MasterCandidatePayload,
+): Promise<void> {
+  const taskIds = payload.dependsOnTaskIds ?? []
+  if (!taskIds.length) return
+  const events = await db.agentEvents
+    .where('conversationId')
+    .equals(event.conversationId)
+    .toArray()
+  const candidateByTask = new Map<string, number>()
+  const adoptedCandidateIds = new Set<number>()
+  for (const row of events) {
+    if (row.kind === 'candidate' && row.id != null) {
+      const candidate = parseAgentEventPayload<Partial<MasterCandidatePayload>>(row, {})
+      if (candidate.taskId) candidateByTask.set(candidate.taskId, row.id)
+    } else if (row.kind === 'confirmation') {
+      const confirmation = parseAgentEventPayload<{
+        candidateEventId?: number
+        decision?: 'adopted' | 'rejected'
+      }>(row, {})
+      if (confirmation.decision === 'adopted' && confirmation.candidateEventId != null) {
+        adoptedCandidateIds.add(confirmation.candidateEventId)
+      }
+    }
+  }
+  const missing = taskIds.filter(taskId => {
+    const candidateId = candidateByTask.get(taskId)
+    return candidateId == null || !adoptedCandidateIds.has(candidateId)
+  })
+  if (missing.length) {
+    throw new Error(`请先采纳本候选依赖的上游结果：${missing.join('、')}。`)
+  }
+}
+
 export async function adoptMasterCandidate(input: {
   projectId: number
   worldGroupId: number | null
@@ -378,12 +525,15 @@ export async function adoptMasterCandidate(input: {
   draft: string
   runtime?: ExecutedMasterCandidate
 }): Promise<string> {
+  await assertCandidateDependenciesAdopted(input.event, input.payload)
   if (input.runtime) {
     const output = input.payload.agentId === 'world-origin'
       ? input.draft
       : input.payload.agentId === 'character'
         ? parseCharacterCandidateDraft(input.draft)
-        : parseInspirationCandidateDraft(input.draft, input.payload.mode ?? 'single')
+        : input.payload.agentId === 'inspiration'
+          ? parseInspirationCandidateDraft(input.draft, input.payload.mode ?? 'single')
+          : parseOutlineCandidateDraft(input.draft)
     const result = await adoptGenerationNodeOutput(input.runtime.runtimeNode, output)
     if (!result.adopted) {
       throw new Error(result.gate?.issues.map(issue => issue.message).join('；') || '候选没有通过确认闸门。')
@@ -416,7 +566,7 @@ export async function adoptMasterCandidate(input: {
       mode: 'add',
       data: { ...candidate, isCrossWorld: false },
     })
-  } else {
+  } else if (input.payload.agentId === 'inspiration') {
     const base = input.payload.baseSnapshot as InspirationWorkspaceSnapshot
     const current = await currentInspirationSnapshot(input.projectId)
     if (JSON.stringify(base) !== JSON.stringify(current)) throw new Error('灵感工作区已变化，请重新生成。')
@@ -429,15 +579,31 @@ export async function adoptMasterCandidate(input: {
       fragmentIds: input.payload.selectedFragmentIds ?? [],
       result: result as InspirationCopilotResult,
     })
+  } else {
+    const mode = input.payload.outlineMode
+    if (!mode) throw new Error('大纲候选缺少写回模式，请重新生成。')
+    await adoptRestoredOutlineCandidate({
+      projectId: input.projectId,
+      worldGroupId: input.worldGroupId,
+      mode,
+      parentVolumeId: input.payload.outlineParentId ?? null,
+      snapshot: input.payload.baseSnapshot as OutlineCopilotSnapshot,
+      draft: input.draft,
+    })
   }
 
   await Promise.all([
     useWorldviewStore.getState().loadAll(input.projectId, input.worldGroupId),
     useCharacterStore.getState().loadAll(input.projectId),
+    useOutlineStore.getState().loadAll(input.projectId),
   ])
   return input.payload.agentId === 'world-origin'
     ? '世界来源已写入项目。'
     : input.payload.agentId === 'character'
       ? `角色“${(parseCharacterCandidateDraft(input.draft) as CharacterCopilotCandidate).name}”已加入项目。`
-      : `已保存新的${input.payload.mode === 'multiworld' ? '多世界' : '单世界'}灵感版本。`
+      : input.payload.agentId === 'inspiration'
+        ? `已保存新的${input.payload.mode === 'multiworld' ? '多世界' : '单世界'}灵感版本。`
+        : input.payload.outlineMode === 'volumes'
+          ? '卷级大纲已写入项目。'
+          : '章节大纲已写入目标卷。'
 }
