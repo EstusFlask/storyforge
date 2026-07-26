@@ -39,6 +39,7 @@ const EXTRACTION_PREFIXES = [
   'codex.extract',
   'location.extract',
   'story.timeline',
+  'chapter.organize',
   'chapter.memory',
   'character.structure',
   'foreshadow.structure',

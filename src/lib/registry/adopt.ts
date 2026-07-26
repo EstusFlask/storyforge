@@ -96,6 +96,46 @@ export async function clearAdoptedCollection(input: {
   return ids.length
 }
 
+/**
+ * 在同一 IndexedDB 事务中完成“按登记范围清理旧结果 → 写入整批新结果”。
+ * 任一条未能写入都会抛错并回滚，避免提取结果解析/FK 异常时先删掉作者已有数据。
+ */
+export async function replaceAdoptedCollection(input: {
+  projectId: number
+  target: string
+  scope: Record<string, unknown>
+  data: Record<string, unknown>[]
+}): Promise<AdoptResult> {
+  const adoption = ADOPTION_BY_TARGET.get(input.target)
+  const tableSpec = REGISTRY_BY_NAME.get(input.target)
+  if (!adoption || !tableSpec || !adoption.replaceScope?.length) {
+    throw new Error(`[adopt] target ${input.target} 未登记 replaceScope`)
+  }
+  const relatedTables = (adoption.fkChecks ?? [])
+    .map(check => REGISTRY_BY_NAME.get(check.target)?.table)
+    .filter((table): table is NonNullable<typeof table> => table != null)
+  const tables = [...new Set([tableSpec.table, ...relatedTables])]
+  return db.transaction('rw', tables, async () => {
+    await clearAdoptedCollection({
+      projectId: input.projectId,
+      target: input.target,
+      scope: input.scope,
+    })
+    const result = await adopt({
+      projectId: input.projectId,
+      target: input.target,
+      mode: 'add-many',
+      data: input.data,
+    })
+    if (result.written.length !== input.data.length) {
+      throw new Error(
+        `[adopt] ${input.target} 整批替换未完整写入（${result.written.length}/${input.data.length}），已回滚。`,
+      )
+    }
+    return result
+  })
+}
+
 function emptyResult(): AdoptResult {
   return { written: [], aliasMapped: [], unknown: [], typeErrors: [], fkErrors: [], skipped: [] }
 }

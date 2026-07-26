@@ -227,6 +227,18 @@ export const FIELD_REGISTRY: FieldSpec[] = [
   num('characters', 'cultivationSystemId', ['修炼体系ID', '主修体系ID']),
   text('characters', 'cultivationStageId', ['境界ID', '当前境界ID']),
 
+  // characterRelations：AI 提取只能在作者确认后经 adopt() 写入。
+  num('characterRelations', 'fromCharacterId', ['起点角色ID']),
+  num('characterRelations', 'toCharacterId', ['终点角色ID']),
+  enumeration(
+    'characterRelations',
+    'relationType',
+    ['family', 'lover', 'friend', 'rival', 'enemy', 'master', 'student', 'ally', 'subordinate', 'other'],
+  ),
+  text('characterRelations', 'label', ['关系名']),
+  longtext('characterRelations', 'description', ['关系描述']),
+  bool('characterRelations', 'isBidirectional', ['双向关系']),
+
   // creativeRules
   longtext('creativeRules', 'writingStyle', ['style', '文风']),
   enumeration(

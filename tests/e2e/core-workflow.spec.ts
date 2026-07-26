@@ -229,6 +229,82 @@ test('建卷建章、保存正文、刷新恢复并导出正文与隐私诊断',
   expect(diagnosticText).not.toContain(chapterText)
 })
 
+test('整理本章只调用一次模型，刷新恢复候选并在确认后写入故事年表', async ({ page }) => {
+  let organizationCalls = 0
+  await page.addInitScript(() => {
+    localStorage.setItem('storyforge-ai-config', JSON.stringify({
+      provider: 'ollama',
+      apiKey: '',
+      model: 'chapter-organization-e2e',
+      baseUrl: 'http://localhost:1234/v1',
+      temperature: 0,
+      maxTokens: 0,
+      contextWindow: 100000,
+    }))
+  })
+  await page.route('http://localhost:1234/v1/chat/completions', async route => {
+    organizationCalls += 1
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        choices: [{
+          message: {
+            content: JSON.stringify({
+              stateDiffs: [],
+              facts: [],
+              inventoryEvents: [],
+              storyEvents: [{
+                title: '旧城门开启',
+                storyTime: '',
+                importance: 2,
+                description: '林舟打开了封闭已久的旧城门。',
+                sourceQuote: '林舟推开旧城门。',
+              }],
+              relations: [],
+              foreshadowUpdates: [],
+            }),
+          },
+        }],
+        usage: { prompt_tokens: 180, completion_tokens: 60, total_tokens: 240 },
+      }),
+    })
+  })
+
+  await createBookWithSavedChapter(
+    page,
+    'E2E 整理本章确认闭环',
+    '林舟推开旧城门。风从封闭已久的街道深处涌来。',
+  )
+  await page.getByRole('button', { name: '整理本章', exact: true }).click()
+
+  const modal = page.locator('div.fixed.inset-0').filter({ hasText: '整理本章 · 第1章' })
+  await expect(modal.getByRole('heading', { name: '整理本章 · 第1章', exact: true })).toBeVisible()
+  await expect(modal.getByText('故事年表', { exact: true })).toBeVisible()
+  await expect(modal.getByText('旧城门开启 · 重要度 2', { exact: true })).toBeVisible()
+  await expect(modal.getByText('证据：“林舟推开旧城门。”', { exact: true })).toBeVisible()
+  await expect(modal.getByText('1 / 7 次模型调用', { exact: true })).toBeVisible()
+  expect(organizationCalls).toBe(1)
+
+  await modal.getByRole('button', { name: '关闭整理本章', exact: true }).click()
+  await openSidebarLeaf(page, '创作区', '故事年表')
+  await expect(page.getByText('还没有故事年表', { exact: true })).toBeVisible()
+
+  await page.reload()
+  await sidebarButton(page, '章节').click()
+  await page.getByRole('button', { name: '查看整理结果', exact: true }).click()
+  await expect(modal.getByText('旧城门开启 · 重要度 2', { exact: true })).toBeVisible()
+  expect(organizationCalls).toBe(1)
+
+  await modal.getByRole('button', { name: '确认写入所选（1）', exact: true }).click()
+  await expect(modal.getByText('已写入', { exact: true })).toHaveCount(1)
+  await modal.getByRole('button', { name: '关闭整理本章', exact: true }).click()
+  await openSidebarLeaf(page, '创作区', '故事年表')
+  await expect(page.locator('input[value="旧城门开启"]')).toBeVisible()
+  await expect(page.getByText('林舟打开了封闭已久的旧城门。', { exact: true })).toBeVisible()
+  expect(organizationCalls).toBe(1)
+})
+
 test('智能实体改名先预览，再原子同步正文与角色主档并可撤销', async ({ page }) => {
   await createBookWithSavedChapter(
     page,
