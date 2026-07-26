@@ -191,6 +191,52 @@ export async function seedFullProject() {
     updatedAt: now,
   })
 
+  // ── PLATFORM-2 / AGENT-1 可审计对话事件 ──
+  const agentConversation = await db.agentConversations.add({
+    projectId,
+    worldGroupId: wgA,
+    title: '建立主世界与主角',
+    status: 'active',
+    createdAt: now,
+    updatedAt: now,
+  }) as number
+  await db.agentEvents.add({
+    projectId,
+    conversationId: agentConversation,
+    sequence: 1,
+    kind: 'message',
+    role: 'user',
+    content: '建立主世界与主角',
+    payload: '{}',
+    createdAt: now,
+  })
+
+  // ── FLOW-2 独立节点文档与可见运行记录 ──
+  const nodeFlow = await db.nodeFlows.add({
+    projectId,
+    worldGroupId: wgA,
+    name: '主角生成图',
+    description: '全表往返覆盖',
+    graphJson: JSON.stringify({
+      version: 1,
+      nodes: [],
+      edges: [],
+      viewport: { x: 0, y: 0, zoom: 1 },
+    }),
+    createdAt: now,
+    updatedAt: now,
+  }) as number
+  await db.nodeRuns.add({
+    projectId,
+    flowId: nodeFlow,
+    status: 'completed',
+    inputSnapshotsJson: JSON.stringify({}),
+    nodeResultsJson: JSON.stringify({}),
+    startedAt: now,
+    updatedAt: now,
+    completedAt: now,
+  })
+
   // ── NS-4 时序事实账本（带分类型 FK，供全表往返覆盖） ──
   const temporalFact = await db.temporalFacts.add({ projectId, worldGroupId: wgA, characterId: char1, subjectName: '林惊羽', predicate: 'powerStage', factKind: 'state', value: '炼气一层', sourceType: 'chapter', sourceChapterId: chapter, validFromChapterId: chapter, status: 'confirmed', locked: false, createdAt: now, updatedAt: now } as any) as number
 

@@ -29,7 +29,7 @@ const UsageStatsPage = lazy(() => import('../components/settings/UsageStatsPage'
 const VersionHistoryPanel = lazy(() => import('../components/system/VersionHistoryPanel'))
 const ImportDocPanel = lazy(() => import('../components/system/ImportDocPanel'))
 const PromptManagerPanel = lazy(() => import('../components/settings/prompt/PromptManagerPanel'))
-const PromptWorkflowsPanel = lazy(() => import('../components/settings/prompt/PromptWorkflowsPanel'))
+const NodeModeWorkspace = lazy(() => import('../components/node-flow/NodeModeWorkspace'))
 const DataManagementPanel = lazy(() => import('../components/data/DataManagementPanel'))
 const WorldRulesPanel = lazy(() => import('../components/worldview/WorldRulesPanel'))
 const StoryCorePanel = lazy(() => import('../components/worldview/StoryCorePanel'))
@@ -170,7 +170,7 @@ export default function WorkspacePage() {
     setActiveModule('chapters-list')
   }
 
-  const immersiveModules = new Set<SidebarModule>(['chapters-list', 'editor', 'foreshadow'])
+  const immersiveModules = new Set<SidebarModule>(['chapters-list', 'editor', 'foreshadow', 'visual-workflows'])
   const isImmersiveModule = immersiveModules.has(activeModule)
   const copilotWorldGroupId = project.enableMultiWorld ? activeWorldGroupId : null
   const copilotWorldName = project.enableMultiWorld
@@ -236,7 +236,7 @@ export default function WorkspacePage() {
       case 'character-driven-plot':
         return <CharacterDrivenPlotPanel project={project} />
       case 'visual-workflows':
-        return <PromptWorkflowsPanel project={project} />
+        return <NodeModeWorkspace project={project} worldGroupId={copilotWorldGroupId} />
       case 'detailed-outline':
         return <DetailedOutlinePanel project={project} />
       case 'chapters-list':

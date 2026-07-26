@@ -61,6 +61,7 @@ const CREATION_PREFIXES = [
   'technology',
   'emotion.beat',
   'inspiration.',
+  'node.',
   'style.calibrate',
 ]
 

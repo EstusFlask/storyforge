@@ -181,11 +181,12 @@ AI 输出经 `adopt({ target, data })` 写回,只有这里登记的字段可写(
 
 ## 四、AI 调用点（消耗统计 category · 在哪触发)
 
-共 57 个 category。
+共 59 个 category。
 未分类调用: 0 个。动态 category 调用: 3 个。
 
 | category | 触发文件 |
 |---|---|
+| `agent.orchestrator` | `src/lib/agent/orchestrator.ts:185` |
 | `agent.readonly` | `src/lib/agent/client-adapter.ts:23` |
 | `ai.restructure` | `src/lib/ai/restructure.ts:54` |
 | `canon.setting.extract` | `src/components/facts/WorldConstitutionPanel.tsx:79` |
@@ -197,7 +198,7 @@ AI 输出经 `adopt({ target, data })` 写回,只有这里登记的字段可写(
 | `chapter.memory` | `src/components/editor/ChapterEditor.tsx:349` |
 | `chapter.polish` | `src/components/editor/ChapterEditor.tsx:603` |
 | `chapter.toolbar` | `src/components/editor/FloatingToolbar.tsx:105` |
-| `character.generate` | `src/components/character/CharacterPanel.tsx:160`<br/>`src/lib/agent/character-copilot.ts:375` |
+| `character.generate` | `src/components/character/CharacterPanel.tsx:160`<br/>`src/lib/agent/character-copilot.ts:384` |
 | `character.structure` | `src/lib/ai/parse-character-output.ts:80` |
 | `character.supplement` | `src/components/character/CharacterSupplementAction.tsx:80` |
 | `codex.extract` | `src/components/codex/CodexPanel.tsx:226` |
@@ -210,9 +211,10 @@ AI 输出经 `adopt({ target, data })` 写回,只有这里登记的字段可写(
 | `geography.world-map` | `src/components/geography/WorldMapPanel.tsx:107` |
 | `history.consult` | `src/components/history/useHistoryAI.ts:118` |
 | `history.storm` | `src/components/history/useHistoryAI.ts:120` |
-| `inspiration.reverse` | `src/hooks/useIncrementalInspiration.ts:212`<br/>`src/lib/agent/inspiration-copilot.ts:240` |
+| `inspiration.reverse` | `src/hooks/useIncrementalInspiration.ts:212`<br/>`src/lib/agent/inspiration-copilot.ts:242` |
 | `inventory.extract` | `src/components/items/InventoryPanel.tsx:150` |
 | `location.extract` | `src/components/location/LocationPanel.tsx:106` |
+| `node.creation` | `src/lib/node-flow/executor.ts:185` |
 | `outline.chapter` | `src/lib/ai/batch-outline-runner.ts:123`<br/>`src/lib/outline/generation-node.ts:55` |
 | `outline.character-driven` | `src/components/outline/CharacterDrivenPlotPanel.tsx:198` |
 | `outline.character-revision` | `src/components/outline/CharacterRevisionPanel.tsx:169` |
@@ -252,4 +254,4 @@ AI 输出经 `adopt({ target, data })` 写回,只有这里登记的字段可写(
 
 ---
 
-生成时间基准:commit `7f87885`
+生成时间基准:commit `11fdb1f`

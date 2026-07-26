@@ -65,6 +65,7 @@ export interface PreparedCharacterCopilot {
   node: GenerationNode<CharacterCopilotInput, CharacterCopilotCandidate, AdoptResult>
   prepared: PreparedGenerationNode
   contextSources: string[]
+  snapshot: CharacterRosterSnapshot
 }
 
 interface CharacterCopilotDependencies {
@@ -292,6 +293,8 @@ export async function prepareCharacterCopilot(input: {
   projectId: number
   worldGroupId: number | null
   authorRequest: string
+  /** 主 Agent 可把尚未写库的上游候选作为本轮显式证据传入，绝不冒充 Canon。 */
+  supplementalContext?: string
   signal?: AbortSignal
 }): Promise<PreparedCharacterCopilot> {
   const project = await db.projects.get(input.projectId)
@@ -323,7 +326,12 @@ export async function prepareCharacterCopilot(input: {
     genres: project.genres?.join('/') || project.genre || '',
     worldGroupId,
     authorRequest: assertAuthorRequest(input.authorRequest),
-    worldContext: worldview.content,
+    worldContext: [
+      worldview.content,
+      input.supplementalContext?.trim()
+        ? `【本轮上游候选（尚未采纳，不属于 Canon）】\n${input.supplementalContext.trim()}`
+        : '',
+    ].filter(Boolean).join('\n\n'),
     characterContext: characters.content,
     contextSources: [...new Set([...worldview.meta.included, ...characters.meta.included])],
     snapshot: afterRead,
@@ -335,6 +343,7 @@ export async function prepareCharacterCopilot(input: {
     node,
     prepared: prepareGenerationNode(node, nodeInput),
     contextSources: nodeInput.contextSources,
+    snapshot: afterRead,
   }
 }
 

@@ -28,8 +28,8 @@ describe('Phase 1.1a · PROJECT_TABLES 注册表', () => {
       expect(result.ok, result.errors.join('; ')).toBe(true)
     })
 
-    it('登记了全部 51 张表', () => {
-      expect(PROJECT_TABLES.length).toBe(51)   // v46 reference analysis runs/sources→51
+    it('登记了全部 55 张表', () => {
+      expect(PROJECT_TABLES.length).toBe(55)   // v47 Agent 会话/事件 + 节点图/运行→55
     })
 
     it('每张表名唯一', () => {

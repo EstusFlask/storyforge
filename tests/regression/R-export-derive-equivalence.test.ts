@@ -72,6 +72,12 @@ function normalize(data: any) {
   // run shadow id; version/remap behavior is covered by R-IDEA1-reference-evolution.
   delete data.referenceAnalysisRuns
   for (const row of data.referenceChunkAnalysis ?? []) delete row._analysisRunExportId
+  // AGENT-2 / FLOW-2 project process data is newer than the legacy v3 fixture.
+  // Its exact remap and roundtrip contract is covered by R-export-fullcoverage.
+  delete data.agentConversations
+  delete data.agentEvents
+  delete data.nodeFlows
+  delete data.nodeRuns
   for (const row of data.characters ?? []) {
     delete row._raceEntryExportId
     delete row._cultivationSystemExportId

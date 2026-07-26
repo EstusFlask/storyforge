@@ -157,52 +157,51 @@
 - `src/components/settings/prompt/WorkflowRunner.tsx`
 - `docs/TRANSPARENT-GENERATION-PIPELINE.md`
 
-## FLOW-1 节点模式（可视化节点创作工作流）
+## FLOW-2 独立自由节点模式
 
 ### 已有能力
 
-- `PromptWorkflow` 已提供全局系统/用户工作流、线性步骤、Prompt 模块、参数、作者提示、
-  暂停确认和六类显式保存目标。
-- `promptWorkflows` 已作为全局配置表登记在 `PROJECT_TABLES`；工作流可保存、克隆、删除
-  以及通过专用 JSON 导入导出。
-- `WorkflowRunner` 已支持逐步执行、暂停、跳过、重试、编辑输出和作者点击保存；写作品时
-  继续使用既有 `adopt()`。
-- `createWorkflowGenerationNode()` 已把每个步骤适配到统一 `GenerationNode`，运行默认
-  只产生候选，不自动采纳。
-- Prompt 变量装配已经能够从已登记 `CONTEXT_SOURCES` 获取项目事实，模型路由与消耗统计
-  由现有 AI 基础设施承担。
-- 第一阶段已在 `PromptWorkflow` 增加可选 v1 `graph`；图节点只保存步骤 ID 与布局，
-  显式边保存来源、目标和目标变量。旧行无图时只生成内存兼容图，不后台迁移。
-- 纯代码图编译支持分叉、汇合和稳定拓扑顺序，并在保存、导入与执行前阻断悬空引用、
-  重复节点/边、自环、非法端口和环路。
-- 工作区“节点模式”提供画布、拖动、缩放、输入/输出端口、连线清理、顺序视图、
-  节点检查器和执行状态图；系统工作流只读，克隆后才可编辑。
-- 显式图的目标节点只读取自己的声明入边；较早节点重新生成或编辑会作废后序候选。
-  执行继续复用 `GenerationNode`，作品只有作者点击保存后才经既有 `adopt()` 写回。
-- 节点布局、连线、变量和视口跟随工作流保存、克隆与专用 JSON 导入导出；项目备份和
-  项目删除仍不携带全局配方。
+- 工作区“节点模式”已经改用独立 `NodeModeWorkspace`，不再复用分步骤的
+  `PromptWorkflowsPanel`；旧 `PromptWorkflow.graph` 仅作为历史技术实验。
+- `nodeFlows` 保存项目级自由图、动态端口、连线、节点配置与视口；未完成图也会自动保存，
+  运行前才进行悬空引用、重复边、自环、类型不匹配、必需输入和环路校验。
+- 已有自由文本、项目元素、整理合并、自由创作、内容校验、内容输出六类节点；作者可任意
+  分支、汇合、增加输入槽、命名语义、设置优先级和逐连线 Token 上限。
+- 项目元素节点只经 `CONTEXT_SOURCES → assembleContext()` 选择来源，支持世界/章节作用域、
+  来源预算和包含/排除筛选；自由创作仍走统一 AI 客户端、模型路由与用量统计。
+- 支持运行整图或运行到任意节点；目标节点只执行自己的祖先闭包。`nodeRuns` 在每个节点后
+  冻结实际配置、上游内容、来源 included/omitted/trimmed、Token 估算、输出、错误与 gate，
+  刷新后仍可检查和编辑。
+- 运行或连线不会自动改项目 Canon。只有“内容输出”节点选择明确目标且作者点击确认后，
+  才能经 `FIELD_REGISTRY / AdoptionSchema → adopt()` 写入世界来源或新增角色。
+- `nodeFlows/nodeRuns` 已登记 `PROJECT_TABLES`，进入项目删除、世界删除、JSON 导出导入和
+  ID 重映射生命周期；删除节点图会级联删除运行记录。
 
 ### 当前边界 / 尚未完成
 
-- 工作流运行产物只在当前会话内；尚无运行历史表，这一边界在 FLOW-1 第一阶段保持不变。
-- 循环、条件、并行模型调用、脚本/插件节点、持久运行历史和 Agent 自动生成图尚未交付；
-  后续必须独立登记阶段，不能绕过 Tool Registry、Canon 或作者确认。
+- 当前项目元素选择粒度为登记来源、章节作用域和行级包含/排除；可浏览的记录/字段选择器与
+  统一资料检索管理器归 `RAG-1`，不能用节点直读 IndexedDB 来冒充。
+- 条件、循环、并行模型调用、脚本/插件节点、脏下游自动失效、图模板库和主 Agent 生成图
+  尚未交付；后续必须独立登记，不能绕过 Tool Registry、Canon 或作者确认。
+- 第一批确认目标只有世界来源和新增角色；增加任何目标都必须先登记字段、采纳 schema、
+  生命周期与反例测试。
 
 ### 新功能必须复用
 
-- 图节点业务配置仍以 `PromptWorkflowStep` 为唯一来源，布局不能复制 Prompt/参数。
-- 图执行必须编译回现有步骤与 `GenerationNode`，作品写回必须保留作者确认。
-- 旧工作流无 `graph` 时运行语义不得变化；兼容布局只能在内存生成，不能后台改写用户行。
-- 图是全局可复用配方，不是项目手稿；第一阶段继续跟随 `promptWorkflows` 生命周期。
+- 节点自由只发生在选择和编排；项目读取仍走 `CONTEXT_SOURCES`，AI 调用仍走共享客户端，
+  正式写回仍走 `adopt()`。
+- `PromptWorkflow` 属于分步骤配方，`NodeFlow` 属于项目手稿过程数据；不得再次合并两者的
+  产品入口或持久化模型。
+- 新节点类型必须定义输入/输出类型、可见配置、运行快照、失败语义和可取消边界。
 
 ### 代码与设计入口
 
-- `src/lib/types/workflow.ts`
-- `src/stores/workflow.ts`
-- `src/lib/generation/workflow-generation-node.ts`
-- `src/components/settings/prompt/PromptWorkflowsPanel.tsx`
-- `src/components/settings/prompt/WorkflowEditor.tsx`
-- `src/components/settings/prompt/WorkflowRunner.tsx`
+- `src/lib/types/node-flow.ts`
+- `src/lib/node-flow/graph.ts`
+- `src/lib/node-flow/executor.ts`
+- `src/stores/node-flow.ts`
+- `src/components/node-flow/NodeModeWorkspace.tsx`
+- `docs/AUTHORING-PLATFORM-DESIGN.md`
 - `docs/VISUAL-WORKFLOW-DESIGN.md`
 
 ## WORLD-1 世界知识、词条、地图与修炼
@@ -338,16 +337,22 @@
   与关系，复用当前激活的 `character.generate` 模板形成闭集 JSON；确认只经既有
   `GenerationNode → adopt(characters)` 新增一个当前世界角色并刷新同一角色 store。
   同名、未知字段、非法三轴和过期角色名单均阻断；不改已有角色或自动创建下游数据。
+- 工作区右栏现在只有一个面向作者的“主 Agent”对话入口；作者无需选择领域标签。主 Agent
+  用紧凑项目状态规划 `world-origin / character / inspiration` 幕后任务，支持依赖排序，
+  并把未采纳的世界候选作为显式非 Canon 上游证据交给角色任务。
+- `agentConversations/agentEvents` 持久保存用户消息、计划、任务状态、候选编辑、确认、拒绝
+  和错误；刷新后候选仍可恢复。候选确认继续复用原领域 GenerationNode gate，刷新后则用
+  冻结快照重新执行并发校验，不会因会话恢复绕开安全边界。
 - 项目概况、世界组目录、世界大纲树和本地搜索已成为正式上下文源；搜索只做当前项目/世界内的有界短摘，不调用网络或 embedding。
 - 应用是纯前端、本地 IndexedDB、可导出/导入和多种备份恢复路径。
 - Phase 27.2a 场景考证按钮已存在；多世界、角色、地点、状态和故事线数据可作为未来运行时底座。
 
 ### 当前边界 / 尚未完成
 
-- 原生 `tool_calls` 尚未作为 provider 优化接入；ChatCopilot 当前只支持明确选择的
-  `worldOrigin`、灵感反推与新增角色三个领域，没有泛化意图识别、大纲/正文领域写入工具或
-  聊天历史。
-- 多 Agent 团队、后台 Agent 和 NPC 自动演进仍未形成正式产品闭环。
+- 原生 `tool_calls` 尚未作为 provider 优化接入；主 Agent 当前只编排世界来源、灵感反推与
+  新增角色三个已闭环领域，没有大纲/正文领域写入工具。
+- 后台领域任务目前按依赖顺序执行，不是并行自治团队；长期后台 Agent 和 NPC 自动演进仍未
+  形成正式产品闭环。
 - 协同编辑、账号、云同步、发布发现和社区治理不属于当前纯前端架构的增量功能，必须另立 PLATFORM 架构阶段。
 - 新手转化、加密云备份、帮助系统、国际化和开源信任仍需独立治理/产品组合。
 

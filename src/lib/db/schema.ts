@@ -51,6 +51,10 @@ import type {
   CultivationProgress,
   CharacterDrivenPlan,
   InspirationWorkspace,
+  AgentConversation,
+  AgentEvent,
+  NodeFlow,
+  NodeRunRecord,
 } from '../types'
 import type { AIUsageEntry } from '../ai/usage-log'
 import type { TemporalFact } from '../types/temporal-fact'
@@ -160,6 +164,14 @@ class StoryForgeDB extends Dexie {
 
   // NS-5 —— 章→卷→全书层级摘要树（可重建派生缓存，不导出）
   narrativeSummaryNodes!: Table<NarrativeSummaryNode, number>
+
+  // PLATFORM-2 / AGENT-1 —— 可持久、可审计的总 Agent 对话事件流
+  agentConversations!: Table<AgentConversation, number>
+  agentEvents!: Table<AgentEvent, number>
+
+  // FLOW-2 —— 独立自由节点文档与逐节点可见运行记录
+  nodeFlows!: Table<NodeFlow, number>
+  nodeRuns!: Table<NodeRunRecord, number>
 
   constructor() {
     super('storyforge')
@@ -459,6 +471,15 @@ class StoryForgeDB extends Dexie {
       referenceAnalysisRuns: '++id, projectId, referenceId, [referenceId+version], status, updatedAt',
       referenceAnalysisSources: 'analysisRunId, fileHash, createdAt',
       referenceChunkAnalysis: '++id, referenceId, analysisRunId, [analysisRunId+chunkIndex], chunkIndex',
+    })
+
+    // v47: PLATFORM-2 / AGENT-1 / FLOW-2 创作过程层。四张表均为纯新增空表，
+    // 不从旧 PromptWorkflow.graph 或组件内存猜测迁移，避免把错误产品模型固化成正式数据。
+    this.version(47).stores({
+      agentConversations: '++id, projectId, worldGroupId, status, updatedAt',
+      agentEvents: '++id, projectId, conversationId, [conversationId+sequence], kind, createdAt',
+      nodeFlows: '++id, projectId, worldGroupId, updatedAt',
+      nodeRuns: '++id, projectId, flowId, status, updatedAt',
     })
   }
 }

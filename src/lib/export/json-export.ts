@@ -32,6 +32,10 @@ import type {
   CultivationProgress,
   CharacterDrivenPlan,
   InspirationWorkspace,
+  AgentConversation,
+  AgentEvent,
+  NodeFlow,
+  NodeRunRecord,
 } from '../types'
 import type { TemporalFact } from '../types/temporal-fact'
 
@@ -86,6 +90,26 @@ export interface ProjectExportData {
   userStyleProfiles?: Omit<UserStyleProfile, 'id' | 'projectId'>[]
   /** CM-1 增量灵感碎片与确认版本(每项目单例) */
   inspirationWorkspaces?: Omit<InspirationWorkspace, 'id' | 'projectId'>[]
+  /** PLATFORM-2 / AGENT-1 总对话（世界与事件引用由注册表重映射）。 */
+  agentConversations?: (
+    Omit<AgentConversation, 'id' | 'projectId' | 'worldGroupId'>
+    & WorldGroupExportRef
+    & { _exportId: number }
+  )[]
+  agentEvents?: (
+    Omit<AgentEvent, 'id' | 'projectId' | 'conversationId'>
+    & { _conversationExportId: number }
+  )[]
+  /** FLOW-2 独立自由节点文档与运行记录。 */
+  nodeFlows?: (
+    Omit<NodeFlow, 'id' | 'projectId' | 'worldGroupId'>
+    & WorldGroupExportRef
+    & { _exportId: number }
+  )[]
+  nodeRuns?: (
+    Omit<NodeRunRecord, 'id' | 'projectId' | 'flowId'>
+    & { _flowExportId: number }
+  )[]
   /** NS-4 时序事实账本(各 FK 在派生导出里被 remap 成 _xxxExportId) */
   temporalFacts?: (Omit<TemporalFact, 'id' | 'projectId'> & Record<string, unknown>)[]
   /** CONSISTENCY-2 角色认知事件账本（全部 FK 由注册表重映射）。 */

@@ -282,6 +282,43 @@ export const PROJECT_TABLES: TableSpec[] = [
     defaults: { fragments: '[]', versions: '[]' },
     note: '每项目一份有界灵感碎片与确认版本；未确认 AI 预览不落库' },
 
+  // ───────────────────── PLATFORM-2 创作过程层 ─────────────────────
+  { table: db.agentConversations, name: 'agentConversations', owner: 'project',
+    worldScoped: true, exportable: true, exportIdField: true,
+    refs: [
+      { kind: 'simple', field: 'id', target: 'agentEvents[conversationId]', onDelete: 'cascade' },
+    ],
+    exportRemap: [
+      { field: 'worldGroupId', remapVia: 'worldGroups', exportAs: '_worldGroupExportId' },
+    ],
+    defaults: { status: 'active' },
+    note: 'AGENT-1 单一总对话；领域 Agent 只作为幕后事件，不形成前台标签' },
+
+  { table: db.agentEvents, name: 'agentEvents', owner: 'project', exportable: true,
+    exportRemap: [
+      { field: 'conversationId', remapVia: 'agentConversations', exportAs: '_conversationExportId', onUnmapped: 'require' },
+    ],
+    defaults: { payload: '{}' },
+    note: 'Agent 追加事件流：消息/计划/任务/候选/确认/错误，未确认候选不属于 Canon' },
+
+  { table: db.nodeFlows, name: 'nodeFlows', owner: 'project',
+    worldScoped: true, exportable: true, exportIdField: true,
+    refs: [
+      { kind: 'simple', field: 'id', target: 'nodeRuns[flowId]', onDelete: 'cascade' },
+    ],
+    exportRemap: [
+      { field: 'worldGroupId', remapVia: 'worldGroups', exportAs: '_worldGroupExportId' },
+    ],
+    defaults: { graphJson: '{"version":1,"nodes":[],"edges":[],"viewport":{"x":0,"y":0,"zoom":1}}' },
+    note: 'FLOW-2 项目级自由节点文档；独立于 PromptWorkflow' },
+
+  { table: db.nodeRuns, name: 'nodeRuns', owner: 'project', exportable: true,
+    exportRemap: [
+      { field: 'flowId', remapVia: 'nodeFlows', exportAs: '_flowExportId', onUnmapped: 'require' },
+    ],
+    defaults: { inputSnapshotsJson: '{}', nodeResultsJson: '{}' },
+    note: 'FLOW-2 逐节点输入/输出/错误/确认记录，保证刷新后仍可见' },
+
   // ───────────────────── NS-4 时序事实账本 ─────────────────────
   // 导出/导入：全部分类型 FK + 三个章节引用 + 自引用 supersedesFactId 都做 exportRemap，
   //   未映射（引用的实体/章已不在导出内）默认置 null，事实不丢、引用不悬空。

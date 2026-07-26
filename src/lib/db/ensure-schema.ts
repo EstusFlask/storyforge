@@ -2,6 +2,8 @@ import Dexie from 'dexie'
 
 export const REQUIRED_TABLES = [
   'aiUsageLog',
+  'agentConversations',
+  'agentEvents',
   'chapters',
   'characterRelations',
   'characterDrivenPlans',
@@ -28,6 +30,8 @@ export const REQUIRED_TABLES = [
   'knowledgeLedger',
   'notes',
   'narrativeSummaryNodes',
+  'nodeFlows',
+  'nodeRuns',
   'outlineNodes',
   'powerSystems',
   'projects',

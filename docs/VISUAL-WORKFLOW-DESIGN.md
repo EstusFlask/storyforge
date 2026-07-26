@@ -1,4 +1,10 @@
-# FLOW-1 · 节点模式（可视化节点创作工作流）设计
+# FLOW-1（历史实现）/ FLOW-2（重构）· 自由节点创作模式
+
+> 2026-07-26 产品校正：下文 FLOW-1 把 `PromptWorkflow` 增加画布视图的方案，已被作者明确
+> 判定为层级与功能均不符合节点模式。FLOW-1 代码只作为迁移来源，不再构成完成证据。
+> 正式重构以 [`AUTHORING-PLATFORM-DESIGN.md`](./AUTHORING-PLATFORM-DESIGN.md) 的
+> FLOW-2 为准：独立入口、独立数据模型、字段级自由来源、动态端口、逐节点可见输入输出和
+> 持久运行记录。
 
 > 状态：第一阶段已交付（2026-07-26）。
 > 用户目标：像 ComfyUI 一样，用可拖拽、可连线、可检查的节点图编排 StoryForge 的创作过程，
@@ -6,7 +12,7 @@
 
 ## 1. 产品定位
 
-FLOW-1 是 StoryForge 的**作者可控编排层**。它把当前线性的 `PromptWorkflow` 升级为
+FLOW-1 曾被实现为 StoryForge 的作者可控编排层：把当前线性的 `PromptWorkflow` 升级为
 可视化有向无环图（DAG），每个可执行节点仍然落到现有 `GenerationNode`，项目事实仍经
 `CONTEXT_SOURCES → assembleContext()` 读取，作品写回仍由作者确认后经
 `FIELD_REGISTRY / AdoptionSchema → adopt()` 完成。
@@ -49,7 +55,7 @@ PromptWorkflow step → GenerationNode
 
 因此第一阶段是**兼容升级现有工作流**，不是新增 `visualWorkflows` 表或第二个 Runner。
 
-## 3. FLOW-1 第一阶段范围
+## 3. FLOW-1 历史第一阶段范围（已撤销“节点模式完成”结论）
 
 ### 3.1 图数据
 
@@ -180,3 +186,27 @@ interface PromptWorkflowGraph {
   导入导出和 UI；Chromium 覆盖克隆、分支连线、保存刷新及清理。
 - 真实 StoryForge 项目使用 Agnes 完成两节点确认链：作者编辑首节点候选后，下游输出包含
   编辑标记；全过程未点击作品保存，项目内容零主动写回，临时全局工作流已删除。
+
+## 9. FLOW-2 当前独立实现（2026-07-26）
+
+本节取代上面 FLOW-1 的产品完成结论；上文只保留为错误方案与可复用技术证据。
+
+- 工作区“节点模式”现在加载 `NodeModeWorkspace`，与提示词管理中的
+  `PromptWorkflowsPanel/WorkflowRunner` 完全分离。
+- DB v47 新增项目级 `nodeFlows/nodeRuns`：前者保存自由图和动态端口，后者冻结每个节点
+  的实际入参、来源纳入/省略/裁剪、Token 估算、输出、错误、gate 和采纳状态。
+- 作者可自由添加文本、项目元素、整理合并、自由创作、内容校验和内容输出六类节点；
+  支持分叉/汇合、类型端口、逐输入预算、全图运行和运行到任意节点的祖先闭包。
+- 项目元素只通过 `CONTEXT_SOURCES → assembleContext()`；AI 节点只通过共享 `chat()`，
+  分类为 `node.creation`；运行和连线不会产生 Canon 写入。
+- 世界来源与新增角色是第一批明确确认目标。作者编辑输出并点击“确认采纳到项目”后，
+  才经 `FIELD_REGISTRY / AdoptionSchema → adopt()` 写回；重复角色、非法角色 JSON、
+  空内容、长度和 gate 失败均阻断。
+- 图草稿会自动保存，即使尚未接完必需端口；运行前才执行完整图校验。刷新恢复、项目
+  JSON 往返、世界/项目删除和节点图运行级联均由 `PROJECT_TABLES` 管理。
+- `R-FLOW2-free-node-mode` 已覆盖路径校验、局部拓扑、输入输出持久化、作者编辑、显式
+  采纳与删除级联。RAG-1 的记录/字段级可见选择器、条件、并行、模板和 Agent 生成图属于
+  后续增强，不以当前来源分类筛选冒充。
+- 真实浏览器隔离项目完成“自由文本 → 内容输出”连线与运行，运行记录公开 22 tokens 的
+  实际输入和完整输出；刷新后图、连线及 completed 记录恢复。同期真实 Agnes 经主 Agent
+  完成一个幕后世界来源任务并返回可编辑候选，作者拒绝后 Canon 零写入；隔离项目已清理。

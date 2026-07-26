@@ -61,6 +61,7 @@ export interface PreparedInspirationCopilot {
   previousResult: InspirationCopilotResult | null
   contextSources: string[]
   selectedFragmentIds: string[]
+  snapshot: InspirationWorkspaceSnapshot
 }
 
 interface InspirationCopilotDependencies {
@@ -217,6 +218,7 @@ export async function prepareInspirationCopilot(input: {
     previousResult,
     contextSources: context.meta.included,
     selectedFragmentIds,
+    snapshot,
   }
 }
 
