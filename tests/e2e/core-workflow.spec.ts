@@ -73,40 +73,42 @@ test('新用户可创建项目并进入工作区', async ({ page }) => {
   await expect(page.getByRole('button', { name: '章节', exact: true })).toBeVisible()
 })
 
-test('节点模式可克隆、建立分支、保存刷新并完整清理', async ({ page }) => {
+test('独立节点模式可自由建图、运行、刷新恢复并完整清理', async ({ page }) => {
   await openCleanHome(page)
   await createProject(page, 'E2E 节点模式')
   await openSidebarLeaf(page, '创作区', '节点模式')
-  await expect(page.getByRole('heading', { name: '节点模式', exact: true })).toBeVisible()
+  await expect(page.getByRole('heading', { name: '独立节点模式', exact: true })).toBeVisible()
+  await page.getByRole('button', { name: '创建第一张节点图', exact: true }).click()
 
-  await page.getByRole('button', { name: '克隆工作流 极速起书 · 通用', exact: true }).click()
-  await expect(page.getByRole('heading', { name: '极速起书 · 通用 (副本)', exact: true })).toBeVisible()
-  await page.getByRole('button', {
-    name: '编辑工作流 极速起书 · 通用 (副本)',
-    exact: true,
-  }).click()
+  const flowName = page.getByRole('textbox', { name: '节点图名称' })
+  await expect(flowName).toHaveValue('未命名节点图')
+  await flowName.fill('E2E 节点分支')
+  await page.getByRole('button', { name: /^自由文本/ }).click()
+  await page.getByRole('button', { name: /^内容输出/ }).click()
 
-  await expect(page.getByRole('heading', { name: '节点模式 · 极速起书 · 通用 (副本)' })).toBeVisible()
-  await expect(page.getByTestId('workflow-canvas')).toBeVisible()
-  await page.locator('aside input').first().fill('E2E FLOW 分支')
-  await page.getByRole('button', { name: '从 一句话故事 输出', exact: true }).click()
-  await page.getByRole('button', { name: '连接到 第一章正文', exact: true }).click()
-  await expect(page.getByText('一句话故事 → 第一章正文.chapterSummary', { exact: true })).toBeVisible()
-  await page.getByRole('button', { name: /^保存/ }).click()
-  await expect(page.getByRole('button', { name: '保存', exact: true })).toBeDisabled()
+  await page.locator('article').filter({ hasText: '自由文本' }).click()
+  await page.getByLabel('作者输入').fill('潮汐退去后，第一座城从海床升起。')
+  await page.getByRole('button', { name: '从 自由文本 开始连线', exact: true }).click()
+  await page.getByRole('button', { name: '连接到 内容输出.最终内容', exact: true }).click()
+  await expect(page.getByText('自由文本 → 最终内容', { exact: true })).toBeVisible()
+  await page.getByRole('button', { name: '保存', exact: true }).click()
+  await expect(page.getByText('节点图已保存。', { exact: true })).toBeVisible()
+  await page.getByRole('button', { name: '运行全部', exact: true }).click()
+  await expect(page.getByText('节点运行完成，实际输入与输出已保存。', { exact: true })).toBeVisible()
 
   await page.reload()
   await openSidebarLeaf(page, '创作区', '节点模式')
-  await expect(page.getByRole('heading', { name: 'E2E FLOW 分支', exact: true })).toBeVisible()
-  await page.getByRole('button', { name: '编辑工作流 E2E FLOW 分支', exact: true }).click()
-  await expect(page.getByText('一句话故事 → 第一章正文.chapterSummary', { exact: true })).toBeVisible()
+  await expect(page.getByRole('textbox', { name: '节点图名称' })).toHaveValue('E2E 节点分支')
+  await page.locator('article').filter({ hasText: '内容输出' }).click()
+  await expect(page.getByText('自由文本 → 最终内容', { exact: true })).toBeVisible()
+  await expect(page.getByLabel('节点输出内容')).toContainText('潮汐退去后，第一座城从海床升起。')
 
-  await page.getByRole('button', { name: '删除整个工作流', exact: true }).click()
+  await page.getByRole('button', { name: '删除当前节点图', exact: true }).click()
   const confirmDelete = page.locator('div.fixed.inset-0').filter({
-    hasText: '删除工作流「E2E FLOW 分支」？',
+    hasText: '删除节点图“E2E 节点分支”？',
   })
   await confirmDelete.getByRole('button', { name: '删除', exact: true }).click()
-  await expect(page.getByRole('heading', { name: 'E2E FLOW 分支', exact: true })).toHaveCount(0)
+  await expect(page.getByRole('heading', { name: '独立节点模式', exact: true })).toBeVisible()
 })
 
 test('人文知识主入口可保存拆分概述，并安全关联与断开城池地点', async ({ page }) => {
@@ -461,8 +463,8 @@ test('本地 OpenAI 兼容服务可刷新并保存模型列表', async ({ page }
   await expect(baseUrl).toHaveValue('http://localhost:1234/v1')
 })
 
-test('对话副驾生成世界来源候选，拒绝零写入并精确采纳可见编辑', async ({ page }) => {
-  let chatCalls = 0
+test('主 Agent 调度世界领域任务，拒绝零写入并精确采纳可见编辑', async ({ page }) => {
+  let generationCalls = 0
   await page.addInitScript(() => {
     localStorage.setItem('storyforge-ai-config', JSON.stringify({
       provider: 'ollama',
@@ -474,16 +476,31 @@ test('对话副驾生成世界来源候选，拒绝零写入并精确采纳可�
     }))
   })
   await page.route('http://localhost:1234/v1/chat/completions', async route => {
-    chatCalls += 1
+    const body = route.request().postDataJSON() as {
+      messages?: Array<{ role: string; content: string }>
+    }
+    const combined = body.messages?.map(message => message.content).join('\n') ?? ''
+    const isPlanner = combined.includes('你只把用户目标拆成幕后领域任务')
+    if (!isPlanner) generationCalls += 1
     await route.fulfill({
       status: 200,
       contentType: 'application/json',
       body: JSON.stringify({
         choices: [{
           message: {
-            content: chatCalls === 1
-              ? '模型候选一：潮汐退去后，最初的陆地显露。'
-              : '模型候选二：群星坠落后，文明在灯塔旁诞生。',
+            content: isPlanner
+              ? JSON.stringify({
+                  summary: '交给世界来源 Agent。',
+                  tasks: [{
+                    id: 'world-1',
+                    agentId: 'world-origin',
+                    instruction: '生成世界来源',
+                    dependsOn: [],
+                  }],
+                })
+              : generationCalls === 1
+                ? '模型候选一：潮汐退去后，最初的陆地显露。'
+                : '模型候选二：群星坠落后，文明在灯塔旁诞生。',
           },
         }],
         usage: { prompt_tokens: 120, completion_tokens: 30, total_tokens: 150 },
@@ -494,34 +511,35 @@ test('对话副驾生成世界来源候选，拒绝零写入并精确采纳可�
   await openCleanHome(page)
   await createProject(page, 'E2E 对话副驾确认闭环')
   await page.getByRole('button', { name: '打开 AI 对话副驾' }).click()
-  const request = page.getByRole('textbox', { name: '给 AI 对话副驾的要求' })
-  const candidate = page.getByRole('textbox', { name: '世界来源候选' })
+  const copilot = page.getByRole('complementary', { name: '主 Agent 创作副驾' })
+  const request = copilot.getByRole('textbox', { name: '告诉主 Agent 你的目标' })
+  const candidate = copilot.getByRole('textbox', { name: '世界来源候选内容' })
 
   await request.fill('生成一段世界来源，包含文明起点')
-  await page.getByRole('button', { name: '生成世界来源候选' }).click()
+  await copilot.getByRole('button', { name: '交给主 Agent', exact: true }).click()
   await expect(candidate).toHaveValue('模型候选一：潮汐退去后，最初的陆地显露。')
 
   await openSidebarLeaf(page, '世界观', '世界起源')
   await expect(page.locator('main').getByText('模型候选一：潮汐退去后，最初的陆地显露。', { exact: true }))
     .toHaveCount(0)
-  await page.getByRole('button', { name: '拒绝', exact: true }).click()
-  await expect(page.getByText('候选已拒绝，没有写入项目。', { exact: true })).toBeVisible()
+  await copilot.getByRole('button', { name: '拒绝', exact: true }).click()
+  await expect(copilot.getByText('候选已拒绝，没有写入项目。', { exact: true }).last()).toBeVisible()
 
   await request.fill('重新生成一段世界来源')
-  await page.getByRole('button', { name: '生成世界来源候选' }).click()
+  await copilot.getByRole('button', { name: '交给主 Agent', exact: true }).click()
   await expect(candidate).toHaveValue('模型候选二：群星坠落后，文明在灯塔旁诞生。')
   const edited = '作者确认版：星潮退去后，观潮者点燃第一座灯塔，并以此作为文明纪元的起点。'
   await candidate.fill(edited)
-  await page.getByRole('button', { name: '采纳', exact: true }).click()
+  await copilot.getByRole('button', { name: '采纳', exact: true }).click()
 
-  await expect(page.getByText('已采纳到“世界观 → 世界起源 → 世界来源”，相关面板已同步刷新。', { exact: true }))
+  await expect(copilot.getByText('世界来源已写入项目。', { exact: true }).last())
     .toBeVisible()
   await expect(page.locator('main').getByText(edited, { exact: true })).toBeVisible()
-  expect(chatCalls).toBe(2)
+  expect(generationCalls).toBe(2)
 })
 
-test('对话副驾只用勾选灵感碎片生成候选，拒绝零写入并保存可见 JSON 版本', async ({ page }) => {
-  let chatCalls = 0
+test('主 Agent 使用项目灵感碎片生成候选，拒绝零写入并保存可见版本', async ({ page }) => {
+  let generationCalls = 0
   const modelResult = {
     worldview: {
       worldOrigin: '模型版：盐海退潮后，灯塔城从海床升起。',
@@ -552,18 +570,34 @@ test('对话副驾只用勾选灵感碎片生成候选，拒绝零写入并保�
     }))
   })
   await page.route('http://localhost:1234/v1/chat/completions', async route => {
-    chatCalls += 1
     const body = route.request().postDataJSON() as {
       messages?: Array<{ role: string; content: string }>
     }
     const combined = body.messages?.map(message => message.content).join('\n') ?? ''
-    expect(combined).toContain('退潮后城市从海床升起')
-    expect(combined).not.toContain('未勾选的秘密碎片')
+    const isPlanner = combined.includes('你只把用户目标拆成幕后领域任务')
+    if (!isPlanner) {
+      generationCalls += 1
+      expect(combined).toContain('退潮后城市从海床升起')
+    }
     await route.fulfill({
       status: 200,
       contentType: 'application/json',
       body: JSON.stringify({
-        choices: [{ message: { content: JSON.stringify(modelResult) } }],
+        choices: [{
+          message: {
+            content: isPlanner
+              ? JSON.stringify({
+                  summary: '交给灵感领域 Agent。',
+                  tasks: [{
+                    id: 'inspiration-1',
+                    agentId: 'inspiration',
+                    instruction: '整理已保存的灵感碎片',
+                    dependsOn: [],
+                  }],
+                })
+              : JSON.stringify(modelResult),
+          },
+        }],
         usage: { prompt_tokens: 140, completion_tokens: 60, total_tokens: 200 },
       }),
     })
@@ -579,22 +613,19 @@ test('对话副驾只用勾选灵感碎片生成候选，拒绝零写入并保�
   await expect(page.getByText('0 个已确认版本', { exact: true })).toBeVisible()
 
   await page.getByRole('button', { name: '打开 AI 对话副驾' }).click()
-  const copilot = page.getByRole('complementary', { name: 'AI 对话副驾' })
-  await copilot.getByRole('button', { name: '灵感反推', exact: true }).click()
-  await expect(copilot.getByRole('region', { name: '灵感来源选择' })).toContainText('潮汐灯塔')
-  await expect(copilot.getByText('已选 1/1', { exact: true })).toBeVisible()
-  const request = copilot.getByRole('textbox', { name: '给 AI 对话副驾的要求' })
-  const candidate = copilot.getByRole('textbox', { name: '灵感反推候选 JSON' })
+  const copilot = page.getByRole('complementary', { name: '主 Agent 创作副驾' })
+  const request = copilot.getByRole('textbox', { name: '告诉主 Agent 你的目标' })
+  const candidate = copilot.getByRole('textbox', { name: '灵感反推版本候选内容' })
 
   await request.fill('强化灯塔意象和守灯人的核心冲突')
-  await copilot.getByRole('button', { name: '生成灵感反推候选' }).click()
+  await copilot.getByRole('button', { name: '交给主 Agent', exact: true }).click()
   await expect(candidate).toContainText('模型版：盐海退潮后')
   await copilot.getByRole('button', { name: '拒绝', exact: true }).click()
-  await expect(copilot.getByText('灵感候选已拒绝，没有新增确认版本。', { exact: true })).toBeVisible()
+  await expect(copilot.getByText('候选已拒绝，没有写入项目。', { exact: true }).last()).toBeVisible()
   await expect(page.getByText('0 个已确认版本', { exact: true })).toBeVisible()
 
   await request.fill('重新整理为更克制的开篇框架')
-  await copilot.getByRole('button', { name: '生成灵感反推候选' }).click()
+  await copilot.getByRole('button', { name: '交给主 Agent', exact: true }).click()
   await expect(candidate).toContainText('模型版：盐海退潮后')
   const edited = {
     ...modelResult,
@@ -604,22 +635,19 @@ test('对话副驾只用勾选灵感碎片生成候选，拒绝零写入并保�
     },
   }
   await candidate.fill(JSON.stringify(edited, null, 2))
-  await copilot.getByRole('button', { name: '保存版本', exact: true }).click()
-  await expect(copilot.getByText(
-    '已保存为新的单世界灵感版本；项目主档尚未自动采纳。',
-    { exact: true },
-  )).toBeVisible()
+  await copilot.getByRole('button', { name: '采纳', exact: true }).click()
+  await expect(copilot.getByText('已保存新的单世界灵感版本。', { exact: true }).last()).toBeVisible()
   await expect(page.getByText('1 个已确认版本', { exact: true })).toBeVisible()
 
-  await copilot.getByRole('button', { name: '关闭 AI 对话副驾' }).click()
+  await copilot.getByRole('button', { name: '关闭主 Agent' }).click()
   await openSidebarLeaf(page, '世界观', '世界起源')
   await expect(page.locator('main').getByText(edited.worldview.worldOrigin, { exact: true }))
     .toHaveCount(0)
-  expect(chatCalls).toBe(2)
+  expect(generationCalls).toBe(2)
 })
 
-test('对话副驾生成可编辑角色候选，拒绝零写入并确认新增到既有角色面板', async ({ page }) => {
-  let chatCalls = 0
+test('主 Agent 调度角色领域任务，拒绝零写入并确认新增到角色面板', async ({ page }) => {
+  let generationCalls = 0
   const modelCandidate = {
     name: '模型守灯人',
     roleWeight: 'secondary',
@@ -642,19 +670,36 @@ test('对话副驾生成可编辑角色候选，拒绝零写入并确认新增�
     }))
   })
   await page.route('http://localhost:1234/v1/chat/completions', async route => {
-    chatCalls += 1
     const body = route.request().postDataJSON() as {
       messages?: Array<{ role: string; content: string }>
     }
     const combined = body.messages?.map(message => message.content).join('\n') ?? ''
-    expect(combined).toContain('E2E 角色副驾确认闭环')
-    expect(combined).toContain('"roleWeight": "main | secondary | npc | extra"')
-    expect(combined).toContain('设计一名守灯钟匠')
+    const isPlanner = combined.includes('你只把用户目标拆成幕后领域任务')
+    if (!isPlanner) {
+      generationCalls += 1
+      expect(combined).toContain('E2E 角色副驾确认闭环')
+      expect(combined).toContain('"roleWeight": "main | secondary | npc | extra"')
+      expect(combined).toContain('设计一名守灯钟匠')
+    }
     await route.fulfill({
       status: 200,
       contentType: 'application/json',
       body: JSON.stringify({
-        choices: [{ message: { content: JSON.stringify(modelCandidate) } }],
+        choices: [{
+          message: {
+            content: isPlanner
+              ? JSON.stringify({
+                  summary: '交给角色领域 Agent。',
+                  tasks: [{
+                    id: 'character-1',
+                    agentId: 'character',
+                    instruction: '设计一名守灯钟匠',
+                    dependsOn: [],
+                  }],
+                })
+              : JSON.stringify(modelCandidate),
+          },
+        }],
         usage: { prompt_tokens: 180, completion_tokens: 70, total_tokens: 250 },
       }),
     })
@@ -666,21 +711,19 @@ test('对话副驾生成可编辑角色候选，拒绝零写入并确认新增�
   await expect(page.getByText('角色生成 · 0', { exact: true })).toBeVisible()
 
   await page.getByRole('button', { name: '打开 AI 对话副驾' }).click()
-  const copilot = page.getByRole('complementary', { name: 'AI 对话副驾' })
-  await copilot.getByRole('button', { name: '角色生成', exact: true }).click()
-  await expect(copilot.getByText(/只读取当前世界观与可见角色/)).toBeVisible()
-  const request = copilot.getByRole('textbox', { name: '给 AI 对话副驾的要求' })
-  const candidate = copilot.getByRole('textbox', { name: '角色候选 JSON' })
+  const copilot = page.getByRole('complementary', { name: '主 Agent 创作副驾' })
+  const request = copilot.getByRole('textbox', { name: '告诉主 Agent 你的目标' })
+  const candidate = copilot.getByRole('textbox', { name: '新角色候选内容' })
 
   await request.fill('设计一名守灯钟匠，克制寡言')
-  await copilot.getByRole('button', { name: '生成角色候选' }).click()
+  await copilot.getByRole('button', { name: '交给主 Agent', exact: true }).click()
   await expect(candidate).toContainText('模型守灯人')
   await copilot.getByRole('button', { name: '拒绝', exact: true }).click()
-  await expect(copilot.getByText('角色候选已拒绝，没有新增角色。', { exact: true })).toBeVisible()
+  await expect(copilot.getByText('候选已拒绝，没有写入项目。', { exact: true }).last()).toBeVisible()
   await expect(page.getByText('角色生成 · 0', { exact: true })).toBeVisible()
 
   await request.fill('重新设计一名守灯钟匠')
-  await copilot.getByRole('button', { name: '生成角色候选' }).click()
+  await copilot.getByRole('button', { name: '交给主 Agent', exact: true }).click()
   await expect(candidate).toContainText('模型守灯人')
   const edited = {
     ...modelCandidate,
@@ -688,15 +731,12 @@ test('对话副驾生成可编辑角色候选，拒绝零写入并确认新增�
     shortDescription: '作者确认的旧港守灯钟匠。',
   }
   await candidate.fill(JSON.stringify(edited, null, 2))
-  await copilot.getByRole('button', { name: '新增角色', exact: true }).click()
+  await copilot.getByRole('button', { name: '采纳', exact: true }).click()
 
-  await expect(copilot.getByText(
-    '已新增角色“沈砚灯”，角色相关面板已同步刷新。',
-    { exact: true },
-  )).toBeVisible()
+  await expect(copilot.getByText('角色“沈砚灯”已加入项目。', { exact: true }).last()).toBeVisible()
   await expect(page.getByText('角色生成 · 1', { exact: true })).toBeVisible()
   await expect(page.getByText('沈砚灯', { exact: true })).toBeVisible()
-  expect(chatCalls).toBe(2)
+  expect(generationCalls).toBe(2)
 })
 
 test('外部文档词条先形成带证据候选，作者确认后才进入 Codex', async ({ page }) => {

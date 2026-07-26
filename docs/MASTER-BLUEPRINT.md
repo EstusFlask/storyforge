@@ -89,7 +89,7 @@
 
 | 当前事实 | 数值 | 单一事实源 |
 |---|---:|---|
-| 应用语义版本 | `3.8.1` | `package.json` |
+| 应用语义版本 | `3.9.0` | `package.json` |
 | TypeScript 生产源码 | 492 个文件 / 99761 行 | `tsconfig.json` |
 | IndexedDB schema | v47 / 55 张 required tables | `schema.ts` / `REQUIRED_TABLES` |
 | PROJECT_TABLES | 55 张表 | `project-tables.ts` |
