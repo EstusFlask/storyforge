@@ -78,6 +78,11 @@ function normalize(data: any) {
   delete data.agentEvents
   delete data.nodeFlows
   delete data.nodeRuns
+  // SIM-1 process/runtime data is newer than the legacy v3 fixture.
+  // Parent/session/world remaps are covered by R-export-fullcoverage and R-SIM1-runtime-core.
+  delete data.simulationSessions
+  delete data.simulationEvents
+  delete data.simulationCheckpoints
   for (const row of data.characters ?? []) {
     delete row._raceEntryExportId
     delete row._cultivationSystemExportId

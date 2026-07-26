@@ -237,6 +237,80 @@ export async function seedFullProject() {
     completedAt: now,
   })
 
+  // ── SIM-1 共享互动运行时（父子分支 + 事件 + 检查点） ──
+  const simulationParent = await db.simulationSessions.add({
+    projectId,
+    worldGroupId: wgA,
+    kind: 'ttrpg',
+    title: '青云山战役',
+    status: 'active',
+    rulesetVersion: 1,
+    seed: 'full-project-parent',
+    canonSnapshotJson: JSON.stringify({ version: 1, sources: [] }),
+    initialStateJson: JSON.stringify({
+      version: 1,
+      clock: 0,
+      entities: {},
+      memories: [],
+      narratives: [],
+      lastSequence: 0,
+    }),
+    parentSessionId: null,
+    parentThroughSequence: null,
+    createdAt: now,
+    updatedAt: now,
+  }) as number
+  const simulationChild = await db.simulationSessions.add({
+    projectId,
+    worldGroupId: wgA,
+    kind: 'ttrpg',
+    title: '青云山战役 · 分支',
+    status: 'active',
+    rulesetVersion: 1,
+    seed: 'full-project-child',
+    canonSnapshotJson: JSON.stringify({ version: 1, sources: [] }),
+    initialStateJson: JSON.stringify({
+      version: 1,
+      clock: 0,
+      entities: {},
+      memories: [],
+      narratives: [],
+      lastSequence: 0,
+    }),
+    parentSessionId: simulationParent,
+    parentThroughSequence: 0,
+    createdAt: now,
+    updatedAt: now,
+  }) as number
+  await db.simulationEvents.add({
+    projectId,
+    worldGroupId: wgA,
+    sessionId: simulationChild,
+    sequence: 1,
+    type: 'narrative.recorded',
+    actorKey: null,
+    targetKey: null,
+    payloadJson: JSON.stringify({ text: '林惊羽踏入青云山门。' }),
+    createdAt: now,
+  })
+  await db.simulationCheckpoints.add({
+    projectId,
+    worldGroupId: wgA,
+    sessionId: simulationChild,
+    throughSequence: 1,
+    name: '入山',
+    stateJson: JSON.stringify({
+      version: 1,
+      clock: 0,
+      entities: {},
+      memories: [],
+      narratives: [{ eventSequence: 1, text: '林惊羽踏入青云山门。' }],
+      lastSequence: 1,
+    }),
+    stateHash: 'fixture-hash',
+    createdAt: now,
+  })
+
   // ── NS-4 时序事实账本（带分类型 FK，供全表往返覆盖） ──
   const temporalFact = await db.temporalFacts.add({ projectId, worldGroupId: wgA, characterId: char1, subjectName: '林惊羽', predicate: 'powerStage', factKind: 'state', value: '炼气一层', sourceType: 'chapter', sourceChapterId: chapter, validFromChapterId: chapter, status: 'confirmed', locked: false, createdAt: now, updatedAt: now } as any) as number
 
@@ -248,7 +322,11 @@ export async function seedFullProject() {
     sourceQuote: '废墟中睁眼', status: 'confirmed', createdAt: now, updatedAt: now,
   })
 
-  return { projectId, wgA, wgB, char1, char2, vol, chapNode, chapter, temporalFact, ref1, cat, subCat, rootWorld, mirrorWorld, locParent, cultivationSystem, codexEntry, characterDrivenPlan }
+  return {
+    projectId, wgA, wgB, char1, char2, vol, chapNode, chapter, temporalFact, ref1,
+    cat, subCat, rootWorld, mirrorWorld, locParent, cultivationSystem, codexEntry,
+    characterDrivenPlan, simulationParent, simulationChild,
+  }
 }
 
 /** 所有 exportable 的项目级表名(可按 projectId 查;排除 projects 与 direct-child referenceChunkAnalysis) */

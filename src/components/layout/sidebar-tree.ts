@@ -6,6 +6,7 @@ import {
   FileCog, History, Upload, Download, Settings,
   Map, ClipboardList, GitBranch, Clock, MapPin, Scale,
   Drama, Package, CalendarClock, ScanSearch, Coins, Feather, Database, TrendingUp, Workflow,
+  Gamepad2,
 } from 'lucide-react'
 
 /**
@@ -42,6 +43,7 @@ export type SidebarModule =
   | 'character-driven-plot'  // Phase 26.3 — 角色驱动剧情
   | 'visual-workflows'       // FLOW-1 — 可视化节点创作工作流
   | 'rag-library'            // RAG-1 — 可见资料与检索管理
+  | 'simulation-runtime'     // SIM-1 — NPC/跑团/角色聊天共享运行时
   | 'detailed-outline'      // 占位 (P8)
   | 'chapters-list'         // 占位 (P8)
   | 'editor'
@@ -89,7 +91,7 @@ export type SidebarModule =
   | 'power-system'
   | 'story-core' | 'backup'
 
-export type ModuleContentType = 'upstream' | 'writing' | 'downstream' | 'tool' | 'system'
+export type ModuleContentType = 'upstream' | 'writing' | 'downstream' | 'tool' | 'experience' | 'system'
 
 export interface ModuleContentTypeDefinition {
   label: string
@@ -112,6 +114,10 @@ export const MODULE_CONTENT_TYPE_DEFINITIONS: Record<ModuleContentType, ModuleCo
   tool: {
     label: 'AI 工具',
     description: '用于生成、反推、分析或考证的辅助工具。',
+  },
+  experience: {
+    label: '体验',
+    description: '独立于创作 Canon 的互动运行、存档与事件区域。',
   },
   system: {
     label: '系统',
@@ -147,6 +153,7 @@ export const MODULE_CONTENT_TYPES: Record<SidebarModule, ModuleContentType> = {
   'character-driven-plot': 'tool',
   'visual-workflows': 'tool',
   'rag-library': 'tool',
+  'simulation-runtime': 'experience',
   'detailed-outline': 'upstream',
   'chapters-list': 'writing',
   editor: 'writing',
@@ -280,6 +287,13 @@ export const NAV_TREE: TreeSection[] = [
       leaf('story-timeline',   '故事年表', CalendarClock),
       leaf('cultivation-progress', '修炼进度', TrendingUp),
       leaf('scene-verify',     '场景考证', ScanSearch),
+    ],
+  },
+  {
+    sectionId: 'experience',
+    label: '体验中心',
+    children: [
+      leaf('simulation-runtime', '互动运行时', Gamepad2),
     ],
   },
   // 作品学习已整合进「项目参考 → 深度分析」tab（Phase 20）
