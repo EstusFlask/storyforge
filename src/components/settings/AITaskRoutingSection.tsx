@@ -11,6 +11,7 @@ import {
   type AgentContextProfiles,
   type AgentContextTaskKind,
 } from '../../lib/agent/context-policy'
+import type { AgentTeamBudgetProfile } from '../../lib/agent/team-budget'
 
 const TASK_ROUTE_META: Record<AITaskKind, { label: string; description: string }> = {
   creation: { label: '创作生成', description: '正文、大纲、细纲、世界观与角色生成' },
@@ -29,14 +30,22 @@ interface Props {
   presets: AIConfigPreset[]
   routes: AITaskRoutes
   contextProfiles: AgentContextProfiles
+  teamBudgetProfile: AgentTeamBudgetProfile
   onSetRoute: (taskKind: AITaskKind, presetId: string | null) => void
   onSetContextProfile: (taskKind: AgentContextTaskKind, profile: AgentContextProfile) => void
+  onSetTeamBudgetProfile: (profile: AgentTeamBudgetProfile) => void
 }
 
 const CONTEXT_PROFILE_META: Record<AgentContextProfile, { label: string; description: string }> = {
   lean: { label: '精简', description: '约 45% 登记源预算，优先节省输入' },
   balanced: { label: '均衡（推荐）', description: '约 72% 登记源预算，兼顾质量与成本' },
   full: { label: '完整', description: '沿用登记源完整预算，适合高风险长上下文任务' },
+}
+
+const TEAM_BUDGET_META: Record<AgentTeamBudgetProfile, { label: string; description: string }> = {
+  economy: { label: '节省', description: '每轮最多约 80K tokens' },
+  balanced: { label: '均衡（推荐）', description: '每轮最多约 160K tokens' },
+  expanded: { label: '充分', description: '每轮最多约 240K tokens' },
 }
 
 function isContextTaskKind(taskKind: AITaskKind): taskKind is AgentContextTaskKind {
@@ -47,8 +56,10 @@ export default function AITaskRoutingSection({
   presets,
   routes,
   contextProfiles,
+  teamBudgetProfile,
   onSetRoute,
   onSetContextProfile,
+  onSetTeamBudgetProfile,
 }: Props) {
   const renderRoutes = (taskKinds: readonly AITaskKind[]) => (
     <div className="grid gap-2 sm:grid-cols-2">
@@ -107,6 +118,23 @@ export default function AITaskRoutingSection({
           五个领域还可独立收窄登记源预算；“完整”保持原上下文上限。
         </p>
       </div>
+      <label className="mb-2 block rounded border border-border bg-bg-base p-2.5">
+        <span className="block text-xs font-medium text-text-primary">本轮团队总预算</span>
+        <span className="mt-0.5 block text-[10px] text-text-muted">
+          覆盖主 Agent、领域生成和一次受控 Canon 打回；达到上限会在下一次调用前停止。
+        </span>
+        <select
+          value={teamBudgetProfile}
+          onChange={event => onSetTeamBudgetProfile(event.target.value as AgentTeamBudgetProfile)}
+          aria-label="主 Agent 团队总预算"
+          className="mt-2 w-full rounded border border-border bg-bg-surface px-2 py-1.5 text-xs text-text-primary focus:border-accent focus:outline-none"
+        >
+          {(Object.entries(TEAM_BUDGET_META) as Array<[AgentTeamBudgetProfile, typeof TEAM_BUDGET_META[AgentTeamBudgetProfile]]>)
+            .map(([profile, meta]) => (
+              <option key={profile} value={profile}>{meta.label} · {meta.description}</option>
+            ))}
+        </select>
+      </label>
       {renderRoutes(AGENT_ROLE_TASK_KINDS)}
       {presets.length === 0 && (
         <p className="mt-2 text-[11px] text-amber-400">先保存至少一个配置预设，才能给任务绑定专用模型。</p>

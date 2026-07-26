@@ -460,6 +460,7 @@ test('上下文窗口、四类通用任务与主 Agent 角色模型路由跨模�
   await page.getByLabel('主 Agent 编排模型预设').selectOption({ label: '审查模型 · deepseek/deepseek-review' })
   await page.getByLabel('正文领域 Agent模型预设').selectOption({ label: '创作模型 · deepseek/deepseek-chat' })
   await page.getByLabel('正文领域 Agent上下文输入档位').selectOption('lean')
+  await page.getByLabel('主 Agent 团队总预算').selectOption('economy')
 
   await page.reload()
   await sidebarButton(page, '设置').click()
@@ -469,6 +470,7 @@ test('上下文窗口、四类通用任务与主 Agent 角色模型路由跨模�
   await expect(page.getByLabel('主 Agent 编排模型预设')).toHaveValue(await page.getByLabel('审查校验模型预设').inputValue())
   await expect(page.getByLabel('正文领域 Agent模型预设')).toHaveValue(await page.getByLabel('创作生成模型预设').inputValue())
   await expect(page.getByLabel('正文领域 Agent上下文输入档位')).toHaveValue('lean')
+  await expect(page.getByLabel('主 Agent 团队总预算')).toHaveValue('economy')
   await expect(page.getByLabel('创作生成模型预设').locator('option:checked')).toContainText('创作模型')
   await expect(page.getByLabel('分析总结模型预设').locator('option:checked')).toContainText('审查模型')
   await expect(page.getByLabel('正文领域 Agent模型预设').locator('option:checked')).toContainText('创作模型')
@@ -540,6 +542,8 @@ test('主 Agent 调度世界领域任务，拒绝零写入并精确采纳可见�
                   }],
                 })
               : generationCalls === 1
+                ? '短'
+                : generationCalls === 2
                 ? '模型候选一：潮汐退去后，最初的陆地显露。'
                 : '模型候选二：群星坠落后，文明在灯塔旁诞生。',
           },
@@ -561,6 +565,7 @@ test('主 Agent 调度世界领域任务，拒绝零写入并精确采纳可见�
   await expect(candidate).toHaveValue('模型候选一：潮汐退去后，最初的陆地显露。')
   await expect(copilot.getByText(/均衡 · ≈[\d,]+ tokens/)).toBeVisible()
   await expect(copilot.getByText(/查看本次实际输入证据 · \d+ 个来源/)).toBeVisible()
+  await expect(copilot.getByText(/本轮团队预算约 [\d,]+ \/ 160,000 tokens · 3\/7 次调用 · Canon 打回 1\/1/)).toBeVisible()
 
   await openSidebarLeaf(page, '世界观', '世界起源')
   await expect(page.locator('main').getByText('模型候选一：潮汐退去后，最初的陆地显露。', { exact: true }))
@@ -578,7 +583,7 @@ test('主 Agent 调度世界领域任务，拒绝零写入并精确采纳可见�
   await expect(copilot.getByText('世界来源已写入项目。', { exact: true }).last())
     .toBeVisible()
   await expect(page.locator('main').getByText(edited, { exact: true })).toBeVisible()
-  expect(generationCalls).toBe(2)
+  expect(generationCalls).toBe(3)
 })
 
 test('主 Agent 使用项目灵感碎片生成候选，拒绝零写入并保存可见版本', async ({ page }) => {

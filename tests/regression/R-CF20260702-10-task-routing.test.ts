@@ -250,6 +250,21 @@ describe('R-CF20260702-10 · route storage and client boundary', () => {
     expect(fresh.useAIConfigStore.getState().agentContextProfiles).not.toHaveProperty('future-agent')
   })
 
+  it('persists a bounded Agent team budget profile and falls back to balanced', async () => {
+    const {
+      AGENT_TEAM_BUDGET_PROFILE_KEY,
+      useAIConfigStore,
+    } = await import('../../src/stores/ai-config')
+    expect(useAIConfigStore.getState().agentTeamBudgetProfile).toBe('balanced')
+    useAIConfigStore.getState().setAgentTeamBudgetProfile('economy')
+    expect(localStorage.getItem(AGENT_TEAM_BUDGET_PROFILE_KEY)).toBe('economy')
+
+    localStorage.setItem(AGENT_TEAM_BUDGET_PROFILE_KEY, 'unlimited')
+    vi.resetModules()
+    const fresh = await import('../../src/stores/ai-config')
+    expect(fresh.useAIConfigStore.getState().agentTeamBudgetProfile).toBe('balanced')
+  })
+
   it('routes a real chat request and logs the actual provider, model and task kind', async () => {
     const routed = preset('local-writer', {
       provider: 'ollama',
