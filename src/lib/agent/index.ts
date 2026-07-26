@@ -1,4 +1,5 @@
 export * from './client-adapter'
+export * from './inspiration-copilot'
 export * from './protocol'
 export * from './runner'
 export * from './tool-registry'

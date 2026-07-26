@@ -2,7 +2,8 @@
 
 > 状态：Phase 27.1-a 已完成（2026-07-25）。本文覆盖只读工具层；后续
 > AgentRunner 与 ChatCopilot 的实际边界分别见 `AGENT-RUNNER-DESIGN.md` 和
-> `CHAT-COPILOT-MVP-DESIGN.md`，仍不宣称多 Agent 或后台 Agent 已完成。
+> `CHAT-COPILOT-MVP-DESIGN.md`；27.1-d 首个领域扩展见
+> `CHAT-COPILOT-INSPIRATION-DESIGN.md`。仍不宣称多 Agent 或后台 Agent 已完成。
 
 ## 1. 为什么先做这一层
 
@@ -17,7 +18,7 @@
 
 ## 2. Phase 27.1-a 边界
 
-本期实现 13 个只读工具：
+注册表当前实现 14 个只读工具。Phase 27.1-a 首批 13 个为：
 
 - `read_project_status`
 - `read_worldview`
@@ -33,7 +34,12 @@
 - `read_world_groups`
 - `search_text`
 
-本期明确不做：
+Phase 27.1-d 为灵感反推独立闭环追加：
+
+- `read_inspiration_workspace`：只接作者明确选择的 1–24 个当前项目碎片 ID 与单/多世界
+  模式，底层仍走 `inspirationWorkspace → assembleContext()`；未选择和跨项目碎片不返回。
+
+工具层明确不做：
 
 - 不调用模型，不实现 `AgentRunner`；
 - 不写数据库，不实现生成/采纳工具；
@@ -86,13 +92,15 @@ Tool 定义声明 `risk: read | generate | write`。Phase 27.1-a 注册表只有
 1. **27.1-a（已完成）**：只读工具、作用域/预算/泄漏反例测试。
 2. **27.1-b（已完成）**：使用严格、可验证的单步动作协议跑纯只读任务；原生 tools
    保留为后续优化。
-3. **27.1-c（已实现，验收中）**：ChatCopilot UI；只接
+3. **27.1-c（已完成）**：ChatCopilot UI；只接
    “当前世界来源候选 → 用户确认 → GenerationNode gate → adopt”的最小写闭环。
-4. **27.1-d/e**：逐步扩展领域，再讨论多 Agent；不提前常驻。
+4. **27.1-d（进行中）**：灵感反推独立候选闭环已接入；角色、大纲、正文仍须逐领域
+   设计和验收。
+5. **27.1-e**：领域闭环稳定后再讨论多 Agent；不提前常驻。
 
 ## 5. 验证要求
 
-- 13 个工具集合稳定，全部为只读风险；
+- 14 个工具集合稳定，全部为只读风险；
 - 任何工具参数不能注入 `projectId/worldGroupId`；
 - 跨项目章节/节点/角色/世界组不可读；
 - 多世界未选世界不得执行世界级工具；

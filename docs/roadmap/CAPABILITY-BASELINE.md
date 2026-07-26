@@ -273,7 +273,9 @@
 ### 已有能力
 
 - 当前 AI 主要是用户触发的单轮生成、流式输出、确认和采纳；已有模型路由和部分 Agent/工具基础。
-- AGENT-1 Phase 27.1-a 已提供 13 个只读工具和统一注册表；全部经 `CONTEXT_SOURCES → assembleContext()` 读取，带项目/世界/实体归属校验、独立预算与裁剪元数据。
+- AGENT-1 Tool Registry 当前提供 14 个只读工具：Phase 27.1-a 首批 13 个与 27.1-d 的
+  `read_inspiration_workspace` 全部经 `CONTEXT_SOURCES → assembleContext()` 读取，带
+  项目/世界/实体/碎片归属校验、独立预算与裁剪元数据。
 - Phase 27.1-b 已提供 provider-neutral 严格 JSON 协议和只读 `AgentRunner`；步数、工具数、
   模型/工具 token、协议修正、循环和取消均有代码硬停止，协议消息禁止静默裁剪。
 - Phase 27.1-c 已提供工作区右侧 ChatCopilot 的世界来源单点闭环：正式只读工具装配当前
@@ -281,14 +283,18 @@
   `GenerationNode gate + adopt(worldviews.worldOrigin)` 写入并刷新同一 store。
 - 已确认候选不会在采纳时再次生成；并发旧候选、空/过短/过长/无变化文本和注册表异常
   均由确定性代码阻断。
+- Phase 27.1-d 已提供灵感反推的首个独立领域闭环：副驾只读取作者勾选的已保存碎片与
+  同模式最近确认版本；结构化候选在内存中可编辑，拒绝零写入，确认只经既有
+  `saveVersion → adopt(inspirationWorkspaces)` 新增版本，不自动写入项目主档。
 - 项目概况、世界组目录、世界大纲树和本地搜索已成为正式上下文源；搜索只做当前项目/世界内的有界短摘，不调用网络或 embedding。
 - 应用是纯前端、本地 IndexedDB、可导出/导入和多种备份恢复路径。
 - Phase 27.2a 场景考证按钮已存在；多世界、角色、地点、状态和故事线数据可作为未来运行时底座。
 
 ### 当前边界 / 尚未完成
 
-- 原生 `tool_calls` 尚未作为 provider 优化接入；ChatCopilot 目前只支持当前世界
-  `worldOrigin`，没有泛化意图识别、其它领域写入工具或聊天历史。
+- 原生 `tool_calls` 尚未作为 provider 优化接入；ChatCopilot 当前只支持明确选择的
+  `worldOrigin` 与灵感反推两个领域，没有泛化意图识别、角色/大纲/正文领域写入工具或
+  聊天历史。
 - 多 Agent 团队、后台 Agent 和 NPC 自动演进仍未形成正式产品闭环。
 - 协同编辑、账号、云同步、发布发现和社区治理不属于当前纯前端架构的增量功能，必须另立 PLATFORM 架构阶段。
 - 新手转化、加密云备份、帮助系统、国际化和开源信任仍需独立治理/产品组合。

@@ -17,6 +17,7 @@ const EXPECTED_TOOLS = [
   'read_inventory',
   'read_story_timeline',
   'read_world_groups',
+  'read_inspiration_workspace',
   'search_text',
 ]
 
@@ -92,7 +93,7 @@ describe('R-AGENT1 · 只读 Tool Registry', () => {
   })
   afterEach(() => db.close())
 
-  it('注册完整的 13 个只读工具，参数拒绝额外字段，所有读取源均已登记', () => {
+  it('注册完整的只读工具，参数拒绝额外字段，所有读取源均已登记', () => {
     expect(AGENT_READ_TOOLS.map(tool => tool.name)).toEqual(EXPECTED_TOOLS)
     for (const tool of AGENT_READ_TOOLS) {
       expect(tool.risk).toBe('read')
@@ -104,6 +105,7 @@ describe('R-AGENT1 · 只读 Tool Registry', () => {
     expect(CONTEXT_SOURCE_BY_KEY.has('worldGroups')).toBe(true)
     expect(CONTEXT_SOURCE_BY_KEY.has('outlineTree')).toBe(true)
     expect(CONTEXT_SOURCE_BY_KEY.has('searchResults')).toBe(true)
+    expect(CONTEXT_SOURCE_BY_KEY.has('inspirationWorkspace')).toBe(true)
   })
 
   it('projectId/worldGroupId 只能由执行上下文给出，跨项目实体与世界组均拒绝', async () => {
@@ -242,18 +244,103 @@ describe('R-AGENT1 · 只读 Tool Registry', () => {
       updatedAt: now,
     }) as number
     const before = await tableCounts()
+    await db.inspirationWorkspaces.add({
+      projectId,
+      fragments: JSON.stringify([{
+        id: 'idea-1',
+        text: '铜钥匙每次开门都会忘记一段记忆',
+        label: '钥匙规则',
+        sourceKind: 'author',
+        createdAt: now,
+      }]),
+      versions: '[]',
+      createdAt: now,
+      updatedAt: now,
+    })
+    const beforeWithInspiration = await tableCounts()
     const args: Record<string, Record<string, unknown>> = {
       read_outline: { outlineNodeId: nodeId },
       read_chapter: { chapterId },
       read_foreshadows: { chapterId },
       read_inventory: { chapterId, outlineNodeId: nodeId, characterId },
       read_story_timeline: { chapterId },
+      read_inspiration_workspace: { fragmentIds: ['idea-1'], mode: 'single' },
       search_text: { query: '铜钥匙' },
     }
     for (const tool of AGENT_READ_TOOLS) {
       const result = await tool.execute({ projectId }, args[tool.name] ?? {})
       expect(result.ok, `${tool.name}: ${result.error ?? ''}`).toBe(true)
     }
-    expect(await tableCounts()).toEqual(before)
+    expect(beforeWithInspiration.inspirationWorkspaces).toBe(before.inspirationWorkspaces + 1)
+    expect(await tableCounts()).toEqual(beforeWithInspiration)
+  })
+
+  it('灵感工具只读取当前项目明确选择的碎片，并拒绝空选择和跨项目 ID', async () => {
+    const projectA = await addProject('灵感 A', false)
+    const projectB = await addProject('灵感 B', false)
+    const now = Date.now()
+    await db.inspirationWorkspaces.bulkAdd([
+      {
+        projectId: projectA,
+        fragments: JSON.stringify([
+          { id: 'a-1', text: '会吞掉名字的雨', label: '', sourceKind: 'author', createdAt: now },
+          { id: 'a-2', text: '不会进入本轮的灯塔', label: '', sourceKind: 'author', createdAt: now + 1 },
+        ]),
+        versions: '[]',
+        createdAt: now,
+        updatedAt: now,
+      },
+      {
+        projectId: projectB,
+        fragments: JSON.stringify([
+          { id: 'b-1', text: '另一个项目的秘密', label: '', sourceKind: 'author', createdAt: now },
+        ]),
+        versions: '[]',
+        createdAt: now,
+        updatedAt: now,
+      },
+    ])
+
+    const selected = await executeAgentTool(
+      'read_inspiration_workspace',
+      { projectId: projectA },
+      { fragmentIds: ['a-1'], mode: 'single' },
+    )
+    expect(selected.ok).toBe(true)
+    expect(selected.content).toContain('会吞掉名字的雨')
+    expect(selected.content).not.toContain('不会进入本轮的灯塔')
+
+    const empty = await executeAgentTool(
+      'read_inspiration_workspace',
+      { projectId: projectA },
+      { fragmentIds: [], mode: 'single' },
+    )
+    expect(empty.ok).toBe(false)
+    expect(empty.error).toContain('1-24')
+
+    const foreign = await executeAgentTool(
+      'read_inspiration_workspace',
+      { projectId: projectA },
+      { fragmentIds: ['b-1'], mode: 'single' },
+    )
+    expect(foreign.ok).toBe(false)
+    expect(foreign.error).toContain('不存在或不属于当前项目')
+    expect(foreign.content).not.toContain('另一个项目的秘密')
+
+    const mixed = await executeAgentTool(
+      'read_inspiration_workspace',
+      { projectId: projectA },
+      { fragmentIds: ['a-1', 'b-1'], mode: 'single' },
+    )
+    expect(mixed.ok).toBe(false)
+    expect(mixed.content).not.toContain('会吞掉名字的雨')
+
+    const wrongMode = await executeAgentTool(
+      'read_inspiration_workspace',
+      { projectId: projectA },
+      { fragmentIds: ['a-1'], mode: 'multiworld' },
+    )
+    expect(wrongMode.ok).toBe(false)
+    expect(wrongMode.error).toContain('模式与当前项目不一致')
   })
 })

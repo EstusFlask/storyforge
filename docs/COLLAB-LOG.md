@@ -2029,3 +2029,36 @@ ChatCopilot 等真实路由路径。
 
 👉 依赖阻塞已解除；严格路线继续 AGENT-1 Phase 27.1-d，首个增量只增加一个独立领域
 候选闭环，保持可见候选、作者确认、GenerationNode gate 与既有注册表写回边界。
+
+### [2026-07-26] Codex · REPORT · AGENT-1 Phase 27.1-d 首个领域 / 灵感反推 ChatCopilot / `feat/agent-inspiration-copilot`
+
+本阶段没有把副驾泛化成任意意图代理，而是冻结并交付第二个独立领域闭环。Tool Registry
+从 13 个扩展为 14 个只读工具；新增 `read_inspiration_workspace` 只接受作者明确勾选的
+1–24 个当前项目碎片与项目一致的单/多世界模式，底层仍走
+`CONTEXT_SOURCES.inspirationWorkspace → assembleContext()`。空选择、模式不一致、外项目
+碎片以及有效/外项目混合选择均整次拒绝，不以部分成功隐藏越界。
+
+ChatCopilot 新增“灵感反推”明确领域：加载既有增量灵感工作区，默认勾选当前项目已保存
+碎片，展示来源、结构化 JSON 候选和字段差异。生成复用正式灵感 prompt 与
+`GenerationNode`；候选只在内存，空壳、超限或多世界无世界由确定性 gate 阻断。拒绝
+零写入；确认重新解析作者眼前 JSON，检查工作区快照未变化后，才复用既有
+`saveVersion → adopt(inspirationWorkspaces)` 新增版本，且不二次调用模型、不自动写入
+世界观、故事核心或角色主档。
+
+专项回归 3 文件 / 15 项通过；Chromium 新用例在隔离项目中验证保存碎片、所选来源入模、
+拒绝仍为 0 版、编辑可见 JSON 后确认恰好 1 版、项目主档不写入与确认不追加 API 调用。
+完整 `npm run ci` 通过：223 个 Vitest 文件 / 785 项测试，coverage statements/lines
+71.62%、branches 72.82%、functions 73.21%；51 required tables、AI Manual、
+architecture、478 个生产源码可达、roadmap、agent context、canon coverage、project
+metrics、0 production vulnerabilities、ESLint、TypeScript、生产 build、bundle budget
+与 `git diff --check` 全绿。全量 Chromium E2E 19/19 通过。
+
+当前 Agnes 配置又在临时项目完成一次真实生成：只选 1 条明确标记碎片，成功返回世界观、
+故事核心和角色候选；原始输出不是严格 JSON，既有 JSON5 兼容层正常恢复。把世界来源加上
+“作者可见编辑验证”标记后确认，既有灵感面板从 0 同步为 1 个版本，世界来源主档仍为空；
+浏览器仅有兼容解析 warning，无运行 error。临时项目已走完整删除安全门清理，原有项目
+未修改。
+
+👉 27.1-d 的灵感反推首个领域闭环已完成。AGENT-1 仍没有泛化意图识别、角色/大纲/正文
+领域、聊天持久化、多 Agent 或后台 Agent；下一开发单位应继续按 27.1-d 顺序，为角色
+对话生成先冻结独立 read/candidate/gate/confirm 边界。

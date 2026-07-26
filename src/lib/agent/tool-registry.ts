@@ -1,4 +1,5 @@
 import { db } from '../db/schema'
+import { parseInspirationFragments } from '../inspiration/workspace'
 import { assembleContext } from '../registry/assemble-context'
 import { CONTEXT_SOURCE_BY_KEY } from '../registry/context-sources'
 import type { AssembleContextInput } from '../registry/types'
@@ -161,6 +162,30 @@ const READ_TOOL_SPECS: readonly ReadToolSpec[] = [
     argRules: { allowed: [] },
   },
   {
+    name: 'read_inspiration_workspace',
+    description: '只读取作者本次明确勾选的灵感碎片和同模式最近确认版本。',
+    parameters: {
+      type: 'object',
+      properties: {
+        fragmentIds: {
+          type: 'array',
+          description: '本次参与反推的灵感碎片 ID，最多 24 个',
+          items: { type: 'string' },
+        },
+        mode: {
+          type: 'string',
+          enum: ['single', 'multiworld'],
+          description: '与当前项目一致的反推结果模式',
+        },
+      },
+      required: ['fragmentIds', 'mode'],
+      additionalProperties: false,
+    },
+    sourceKeys: ['inspirationWorkspace'],
+    inputBudgetTokens: 11_000,
+    argRules: { allowed: ['fragmentIds', 'mode'], required: ['fragmentIds', 'mode'] },
+  },
+  {
     name: 'search_text',
     description: '在当前项目与世界作用域内做本地包含匹配，只返回有界短摘，不调用网络或 embedding。',
     parameters: {
@@ -240,6 +265,18 @@ function validateArgs(spec: ReadToolSpec, raw: Record<string, unknown>): Record<
       typeof kind !== 'string' || !AGENT_SEARCH_KINDS.includes(kind as typeof AGENT_SEARCH_KINDS[number])
     ))) throw new Error('kinds 含有不支持的数据类型')
   }
+  if ('fragmentIds' in args) {
+    if (
+      !Array.isArray(args.fragmentIds)
+      || args.fragmentIds.length === 0
+      || args.fragmentIds.length > 24
+      || args.fragmentIds.some(id => typeof id !== 'string' || !id.trim() || id.length > 120)
+    ) throw new Error('fragmentIds 必须包含 1-24 个有效碎片 ID')
+    args.fragmentIds = [...new Set(args.fragmentIds.map(id => String(id).trim()))]
+  }
+  if ('mode' in args && args.mode !== 'single' && args.mode !== 'multiworld') {
+    throw new Error('mode 必须是 single 或 multiworld')
+  }
   return args
 }
 
@@ -251,6 +288,19 @@ async function resolveScope(
   const projectId = positiveInteger(context.projectId, 'projectId')!
   const project = await db.projects.get(projectId)
   if (!project) throw new Error('项目不存在')
+  const fragmentIds = args.fragmentIds as string[] | undefined
+  const inspirationMode = args.mode as 'single' | 'multiworld' | undefined
+  if (
+    inspirationMode
+    && inspirationMode !== (project.enableMultiWorld ? 'multiworld' : 'single')
+  ) throw new Error('灵感反推模式与当前项目不一致')
+  if (fragmentIds) {
+    const workspace = await db.inspirationWorkspaces.where('projectId').equals(projectId).first()
+    const available = new Set(parseInspirationFragments(workspace?.fragments).map(item => item.id))
+    if (fragmentIds.some(fragmentId => !available.has(fragmentId))) {
+      throw new Error('灵感碎片不存在或不属于当前项目')
+    }
+  }
 
   const needsWorld = spec.requiresWorldScope
     || spec.sourceKeys.some(key => CONTEXT_SOURCE_BY_KEY.get(key)?.requiresWorldGroupId)
@@ -321,6 +371,8 @@ async function resolveScope(
     searchQuery: args.query as string | undefined,
     searchLimit: args.limit as number | undefined,
     searchKinds: args.kinds as string[] | undefined,
+    inspirationFragmentIds: fragmentIds,
+    inspirationMode,
     provider: context.provider,
     model: context.model,
     sourceKeys: [...spec.sourceKeys],

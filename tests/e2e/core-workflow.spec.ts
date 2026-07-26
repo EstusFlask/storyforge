@@ -484,6 +484,104 @@ test('对话副驾生成世界来源候选，拒绝零写入并精确采纳可�
   expect(chatCalls).toBe(2)
 })
 
+test('对话副驾只用勾选灵感碎片生成候选，拒绝零写入并保存可见 JSON 版本', async ({ page }) => {
+  let chatCalls = 0
+  const modelResult = {
+    worldview: {
+      worldOrigin: '模型版：盐海退潮后，灯塔城从海床升起。',
+      powerHierarchy: '',
+      continentLayout: '',
+      climateByRegion: '',
+      historyLine: '',
+      races: '',
+      factionLayout: '',
+    },
+    storyCore: {
+      logline: '守灯人必须在下一次海啸前找回失踪的潮汐钟。',
+      theme: '记忆与守护',
+      centralConflict: '',
+      plotPattern: '',
+      mainPlot: '',
+    },
+    characters: [],
+  }
+  await page.addInitScript(() => {
+    localStorage.setItem('storyforge-ai-config', JSON.stringify({
+      provider: 'ollama',
+      apiKey: '',
+      model: 'inspiration-copilot-e2e',
+      baseUrl: 'http://localhost:1234/v1',
+      temperature: 0,
+      maxTokens: 0,
+    }))
+  })
+  await page.route('http://localhost:1234/v1/chat/completions', async route => {
+    chatCalls += 1
+    const body = route.request().postDataJSON() as {
+      messages?: Array<{ role: string; content: string }>
+    }
+    const combined = body.messages?.map(message => message.content).join('\n') ?? ''
+    expect(combined).toContain('退潮后城市从海床升起')
+    expect(combined).not.toContain('未勾选的秘密碎片')
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        choices: [{ message: { content: JSON.stringify(modelResult) } }],
+        usage: { prompt_tokens: 140, completion_tokens: 60, total_tokens: 200 },
+      }),
+    })
+  })
+
+  await openCleanHome(page)
+  await createProject(page, 'E2E 灵感副驾确认闭环')
+  await sidebarButton(page, '灵感反推').click()
+  await page.getByPlaceholder(/随便写点什么/).fill('退潮后城市从海床升起，守灯人听见潮汐钟。')
+  await page.getByPlaceholder('碎片标题（可选）').fill('潮汐灯塔')
+  await page.getByRole('button', { name: /加入素材库/ }).click()
+  await expect(page.getByText('潮汐灯塔', { exact: true })).toBeVisible()
+  await expect(page.getByText('0 个已确认版本', { exact: true })).toBeVisible()
+
+  await page.getByRole('button', { name: '打开 AI 对话副驾' }).click()
+  const copilot = page.getByRole('complementary', { name: 'AI 对话副驾' })
+  await copilot.getByRole('button', { name: '灵感反推', exact: true }).click()
+  await expect(copilot.getByRole('region', { name: '灵感来源选择' })).toContainText('潮汐灯塔')
+  await expect(copilot.getByText('已选 1/1', { exact: true })).toBeVisible()
+  const request = copilot.getByRole('textbox', { name: '给 AI 对话副驾的要求' })
+  const candidate = copilot.getByRole('textbox', { name: '灵感反推候选 JSON' })
+
+  await request.fill('强化灯塔意象和守灯人的核心冲突')
+  await copilot.getByRole('button', { name: '生成灵感反推候选' }).click()
+  await expect(candidate).toContainText('模型版：盐海退潮后')
+  await copilot.getByRole('button', { name: '拒绝', exact: true }).click()
+  await expect(copilot.getByText('灵感候选已拒绝，没有新增确认版本。', { exact: true })).toBeVisible()
+  await expect(page.getByText('0 个已确认版本', { exact: true })).toBeVisible()
+
+  await request.fill('重新整理为更克制的开篇框架')
+  await copilot.getByRole('button', { name: '生成灵感反推候选' }).click()
+  await expect(candidate).toContainText('模型版：盐海退潮后')
+  const edited = {
+    ...modelResult,
+    worldview: {
+      ...modelResult.worldview,
+      worldOrigin: '作者确认版：盐海退潮后，第一座灯塔城从海床升起。',
+    },
+  }
+  await candidate.fill(JSON.stringify(edited, null, 2))
+  await copilot.getByRole('button', { name: '保存版本', exact: true }).click()
+  await expect(copilot.getByText(
+    '已保存为新的单世界灵感版本；项目主档尚未自动采纳。',
+    { exact: true },
+  )).toBeVisible()
+  await expect(page.getByText('1 个已确认版本', { exact: true })).toBeVisible()
+
+  await copilot.getByRole('button', { name: '关闭 AI 对话副驾' }).click()
+  await openSidebarLeaf(page, '世界观', '世界起源')
+  await expect(page.locator('main').getByText(edited.worldview.worldOrigin, { exact: true }))
+    .toHaveCount(0)
+  expect(chatCalls).toBe(2)
+})
+
 test('外部文档词条先形成带证据候选，作者确认后才进入 Codex', async ({ page }) => {
   await page.addInitScript(() => {
     localStorage.setItem('storyforge-ai-config', JSON.stringify({
