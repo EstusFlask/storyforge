@@ -1,3 +1,5 @@
+import type { RagDocumentMetadata } from './rag-library'
+
 /**
  * 物品流水（游戏包裹式物品栏）— Phase 25.5.2-b
  *
@@ -17,7 +19,7 @@ export const ITEM_LEDGER_ACTION_LABELS: Record<ItemLedgerAction, string> = {
 }
 
 /** 一条物品流水记录 */
-export interface ItemLedgerEntry {
+export interface ItemLedgerEntry extends RagDocumentMetadata {
   id?: number
   projectId: number
   /** 物品名称（聚合键） */

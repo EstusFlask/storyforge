@@ -3,6 +3,7 @@ import { nanoid } from 'nanoid'
 import { CONTEXT_SOURCES } from '../../lib/registry/context-sources'
 import type { NodeFlowGraph, NodeFlowNode, NodeValueType } from '../../lib/types'
 import { removeSlotFromGraph } from '../../lib/node-flow/graph'
+import RagEntrySelector from '../retrieval/RagEntrySelector'
 
 const VALUE_TYPES: NodeValueType[] = ['any', 'text', 'context', 'json', 'candidate']
 
@@ -26,6 +27,8 @@ function TextArea(props: {
 }
 
 export default function NodeInspector(props: {
+  projectId: number
+  worldGroupId: number | null
   graph: NodeFlowGraph
   node: NodeFlowNode | null
   onGraphChange: (graph: NodeFlowGraph) => void
@@ -51,6 +54,13 @@ export default function NodeInspector(props: {
   const sourceKeys = Array.isArray(node.config.sourceKeys)
     ? node.config.sourceKeys.filter((value): value is string => typeof value === 'string')
     : []
+  const ragEntryKeys = Array.isArray(node.config.ragEntryKeys)
+    ? node.config.ragEntryKeys.filter((value): value is string => typeof value === 'string')
+    : []
+  const selectionMode = node.config.selectionMode === 'registered'
+    || (node.config.selectionMode == null && sourceKeys.length > 0)
+    ? 'registered'
+    : 'exact'
 
   return (
     <aside className="h-full overflow-y-auto border-l border-border bg-bg-surface p-4">
@@ -75,7 +85,30 @@ export default function NodeInspector(props: {
 
         {node.kind === 'source.context' && (
           <>
-            <section>
+            <div className="grid grid-cols-2 rounded border border-border bg-bg-base p-0.5 text-[10px]">
+              <button
+                type="button"
+                onClick={() => updateConfig('selectionMode', 'exact')}
+                className={`rounded px-2 py-1 ${selectionMode === 'exact' ? 'bg-accent text-white' : 'text-text-muted hover:bg-bg-hover'}`}
+              >
+                精确资料
+              </button>
+              <button
+                type="button"
+                onClick={() => updateConfig('selectionMode', 'registered')}
+                className={`rounded px-2 py-1 ${selectionMode === 'registered' ? 'bg-accent text-white' : 'text-text-muted hover:bg-bg-hover'}`}
+              >
+                注册来源
+              </button>
+            </div>
+            {selectionMode === 'exact' ? (
+              <RagEntrySelector
+                projectId={props.projectId}
+                worldGroupId={props.worldGroupId}
+                selectedKeys={ragEntryKeys}
+                onChange={keys => updateConfig('ragEntryKeys', keys)}
+              />
+            ) : <section>
               <div className="mb-2">
                 <p className="text-[10px] font-medium text-text-secondary">项目元素来源</p>
                 <p className="text-[9px] leading-4 text-text-muted">
@@ -83,7 +116,7 @@ export default function NodeInspector(props: {
                 </p>
               </div>
               <div className="max-h-64 space-y-1 overflow-y-auto rounded border border-border bg-bg-base p-2">
-                {CONTEXT_SOURCES.map(source => (
+                {CONTEXT_SOURCES.filter(source => source.key !== 'ragSelection').map(source => (
                   <label key={source.key} className="flex cursor-pointer items-start gap-2 rounded px-1 py-1 hover:bg-bg-hover">
                     <input
                       type="checkbox"
@@ -105,18 +138,20 @@ export default function NodeInspector(props: {
                   </label>
                 ))}
               </div>
-            </section>
-            <div className="grid grid-cols-2 gap-2">
-              <label>
-                <span className="mb-1 block text-[10px] text-text-secondary">章节 ID</span>
-                <input
-                  type="number"
-                  min={0}
-                  value={Number(node.config.chapterId ?? 0)}
-                  onChange={event => updateConfig('chapterId', Number(event.target.value) || 0)}
-                  className="w-full rounded border border-border bg-bg-base px-2 py-1 text-[11px]"
-                />
-              </label>
+            </section>}
+            <div className={selectionMode === 'registered' ? 'grid grid-cols-2 gap-2' : ''}>
+              {selectionMode === 'registered' && (
+                <label>
+                  <span className="mb-1 block text-[10px] text-text-secondary">章节 ID</span>
+                  <input
+                    type="number"
+                    min={0}
+                    value={Number(node.config.chapterId ?? 0)}
+                    onChange={event => updateConfig('chapterId', Number(event.target.value) || 0)}
+                    className="w-full rounded border border-border bg-bg-base px-2 py-1 text-[11px]"
+                  />
+                </label>
+              )}
               <label>
                 <span className="mb-1 block text-[10px] text-text-secondary">Token 上限</span>
                 <input
@@ -128,18 +163,22 @@ export default function NodeInspector(props: {
                 />
               </label>
             </div>
-            <TextArea
-              label="只保留包含这些关键词的行（逗号或换行）"
-              value={String(node.config.include ?? '')}
-              rows={3}
-              onChange={value => updateConfig('include', value)}
-            />
-            <TextArea
-              label="排除包含这些关键词的行"
-              value={String(node.config.exclude ?? '')}
-              rows={2}
-              onChange={value => updateConfig('exclude', value)}
-            />
+            {selectionMode === 'registered' && (
+              <>
+                <TextArea
+                  label="只保留包含这些关键词的行（逗号或换行）"
+                  value={String(node.config.include ?? '')}
+                  rows={3}
+                  onChange={value => updateConfig('include', value)}
+                />
+                <TextArea
+                  label="排除包含这些关键词的行"
+                  value={String(node.config.exclude ?? '')}
+                  rows={2}
+                  onChange={value => updateConfig('exclude', value)}
+                />
+              </>
+            )}
           </>
         )}
 

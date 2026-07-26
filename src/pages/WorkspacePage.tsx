@@ -30,6 +30,7 @@ const VersionHistoryPanel = lazy(() => import('../components/system/VersionHisto
 const ImportDocPanel = lazy(() => import('../components/system/ImportDocPanel'))
 const PromptManagerPanel = lazy(() => import('../components/settings/prompt/PromptManagerPanel'))
 const NodeModeWorkspace = lazy(() => import('../components/node-flow/NodeModeWorkspace'))
+const RagLibraryPanel = lazy(() => import('../components/retrieval/RagLibraryPanel'))
 const DataManagementPanel = lazy(() => import('../components/data/DataManagementPanel'))
 const WorldRulesPanel = lazy(() => import('../components/worldview/WorldRulesPanel'))
 const StoryCorePanel = lazy(() => import('../components/worldview/StoryCorePanel'))
@@ -237,6 +238,8 @@ export default function WorkspacePage() {
         return <CharacterDrivenPlotPanel project={project} />
       case 'visual-workflows':
         return <NodeModeWorkspace project={project} worldGroupId={copilotWorldGroupId} />
+      case 'rag-library':
+        return <RagLibraryPanel project={project} />
       case 'detailed-outline':
         return <DetailedOutlinePanel project={project} />
       case 'chapters-list':

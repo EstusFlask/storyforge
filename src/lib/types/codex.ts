@@ -1,3 +1,5 @@
+import type { RagDocumentMetadata } from './rag-library'
+
 /**
  * Phase 35-a — 词条系统（Codex）数据模型
  *
@@ -77,7 +79,7 @@ export interface CodexCategory {
 }
 
 /** 一条词条 */
-export interface CodexEntry {
+export interface CodexEntry extends RagDocumentMetadata {
   id?: number
   projectId: number
   categoryId: number

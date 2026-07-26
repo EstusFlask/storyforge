@@ -169,6 +169,12 @@
   分支、汇合、增加输入槽、命名语义、设置优先级和逐连线 Token 上限。
 - 项目元素节点只经 `CONTEXT_SOURCES → assembleContext()` 选择来源，支持世界/章节作用域、
   来源预算和包含/排除筛选；自由创作仍走统一 AI 客户端、模型路由与用量统计。
+- `RAG-1` 已新增独立“资料与检索库”：章节、世界观、故事核心、角色/关系、词条、地点、
+  历史、伏笔、参考和物品流水实时投影为可见记录/字段；作者可停用、调权重和字段 token
+  上限。稳定资料 ID 随源记录导出，不使用导入后会变化的 Dexie 主键作为节点引用。
+- 项目元素节点可在“精确资料 / 注册来源”间切换；精确资料仍经
+  `CONTEXT_SOURCES.ragSelection → assembleContext()`，实际纳入、删除/停用省略和预算裁剪
+  全部冻结到 `nodeRuns`，资料库可反查最近运行证据。
 - 支持运行整图或运行到任意节点；目标节点只执行自己的祖先闭包。`nodeRuns` 在每个节点后
   冻结实际配置、上游内容、来源 included/omitted/trimmed、Token 估算、输出、错误与 gate，
   刷新后仍可检查和编辑。
@@ -179,8 +185,8 @@
 
 ### 当前边界 / 尚未完成
 
-- 当前项目元素选择粒度为登记来源、章节作用域和行级包含/排除；可浏览的记录/字段选择器与
-  统一资料检索管理器归 `RAG-1`，不能用节点直读 IndexedDB 来冒充。
+- 资料库当前对非章节资料提供精确选择和本地内容搜索；不会冒充已经为它们建立了 embedding
+  向量索引。章节继续复用 `retrievalChunks` 的关键词/可选向量与层级摘要。
 - 条件、循环、并行模型调用、脚本/插件节点、脏下游自动失效、图模板库和主 Agent 生成图
   尚未交付；后续必须独立登记，不能绕过 Tool Registry、Canon 或作者确认。
 - 第一批确认目标只有世界来源和新增角色；增加任何目标都必须先登记字段、采纳 schema、
@@ -203,6 +209,7 @@
 - `src/components/node-flow/NodeModeWorkspace.tsx`
 - `docs/AUTHORING-PLATFORM-DESIGN.md`
 - `docs/VISUAL-WORKFLOW-DESIGN.md`
+- `docs/RAG-VISIBLE-LIBRARY.md`
 
 ## WORLD-1 世界知识、词条、地图与修炼
 

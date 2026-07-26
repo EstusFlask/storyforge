@@ -41,6 +41,7 @@ export type SidebarModule =
   | 'outline'
   | 'character-driven-plot'  // Phase 26.3 — 角色驱动剧情
   | 'visual-workflows'       // FLOW-1 — 可视化节点创作工作流
+  | 'rag-library'            // RAG-1 — 可见资料与检索管理
   | 'detailed-outline'      // 占位 (P8)
   | 'chapters-list'         // 占位 (P8)
   | 'editor'
@@ -145,6 +146,7 @@ export const MODULE_CONTENT_TYPES: Record<SidebarModule, ModuleContentType> = {
   outline: 'upstream',
   'character-driven-plot': 'tool',
   'visual-workflows': 'tool',
+  'rag-library': 'tool',
   'detailed-outline': 'upstream',
   'chapters-list': 'writing',
   editor: 'writing',
@@ -265,6 +267,7 @@ export const NAV_TREE: TreeSection[] = [
       leaf('rules',            '创作规则', Ruler),
       leaf('outline',          '大纲',     BookOpen),
       leaf('character-driven-plot', '角色驱动', Drama),
+      leaf('rag-library',      '资料与检索库', Database),
       leaf('visual-workflows', '节点模式', Workflow),
       leaf('story-arc',        '故事线',   GitBranch),
       leaf('chapters-list',    '章节',     FilePen),

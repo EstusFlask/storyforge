@@ -1,3 +1,5 @@
+import type { RagDocumentMetadata } from './rag-library'
+
 /** 角色定位（v3 §2.1 — 扩展 npc / extra 两类） */
 export type CharacterRole =
   | 'protagonist'    // 主角
@@ -20,7 +22,7 @@ export type CharacterOrderAxis = 'lawful' | 'neutral' | 'chaotic'
 export type CharacterAlignment = 'good' | 'evil'
 
 /** 角色 */
-export interface Character {
+export interface Character extends RagDocumentMetadata {
   id?: number
   projectId: number
   name: string

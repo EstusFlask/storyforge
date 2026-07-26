@@ -111,6 +111,40 @@ test('独立节点模式可自由建图、运行、刷新恢复并完整清理',
   await expect(page.getByRole('heading', { name: '独立节点模式', exact: true })).toBeVisible()
 })
 
+test('可见资料库精确选择字段，节点冻结权重与实际召回', async ({ page }) => {
+  await openCleanHome(page)
+  await createProject(page, 'E2E RAG 可见资料')
+
+  await openSidebarLeaf(page, '世界观', '世界起源')
+  const originPlaceholder = '创世神话 / 历史时期 / 文明起源……世界从何而来？'
+  await page.getByText(originPlaceholder, { exact: true }).last().click()
+  await page.getByRole('textbox', { name: originPlaceholder }).fill('潮汐退去后，第一座浮空城从海床升起。')
+  await page.getByRole('heading', { name: '🌌 世界来源' }).click()
+
+  await sidebarButton(page, '资料与检索库').click()
+  await expect(page.getByRole('heading', { name: '资料与检索库', exact: true })).toBeVisible()
+  await page.getByText('世界观主世界观', { exact: true }).click()
+  await expect(page.getByText('潮汐退去后，第一座浮空城从海床升起。', { exact: true })).toBeVisible()
+  await page.getByRole('spinbutton', { name: '默认权重' }).fill('2.5')
+  await expect(page.getByRole('spinbutton', { name: '默认权重' })).toHaveValue('2.5')
+
+  await sidebarButton(page, '节点模式').click()
+  await page.getByRole('button', { name: '创建第一张节点图', exact: true }).click()
+  await page.getByRole('button', { name: /^项目元素/ }).click()
+  await page.getByText('世界观 · 主世界观', { exact: true }).click()
+  await page.getByRole('button', { name: /^世界来源 \d+ tokens · 本地关键词$/ }).click()
+  await expect(page.getByText(/已选 1 项/)).toBeVisible()
+  await page.getByRole('button', { name: '运行到 项目元素', exact: true }).click()
+  await expect(page.getByText('节点运行完成，实际输入与输出已保存。', { exact: true })).toBeVisible()
+  await expect(page.getByText(/已纳入：世界观 \/ 主世界观 \/ 世界来源（\d+ tokens，权重 2\.5）/))
+    .toBeVisible()
+  await expect(page.getByLabel('节点输出内容')).toContainText('第一座浮空城')
+
+  await page.reload()
+  await sidebarButton(page, '资料与检索库').click()
+  await expect(page.getByText(/项目元素 · .*纳入 1 \/ 省略 0 \/ 裁剪 0/)).toBeVisible()
+})
+
 test('人文知识主入口可保存拆分概述，并安全关联与断开城池地点', async ({ page }) => {
   await openCleanHome(page)
   await createProject(page, 'E2E 世界知识归并')
