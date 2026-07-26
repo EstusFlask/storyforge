@@ -91,9 +91,9 @@
 - AI Manual 改用 TypeScript AST 扫描 59 个唯一 moduleKey / 204 条模板；运行时测试独立校验模板元数据、`100_000` 数字预算与重复 key，消除同源假绿。
 - 参考分析的结果行、状态更新和整批替换进入 `FIELD_REGISTRY`、`ADOPTION_SCHEMAS`、`adopt()`；跨项目 `referenceId` 被 FK 归属校验拒绝。
 - `check:architecture` 扩展到 `src/lib/**` 的受治理表写回和旧 context builder，并带 AST 自测；事实账本与角色合并作为有策略注册表、唯一入口和复审日期的 `ADOPTION_EXTENSIONS`。
-- `check:dependencies` 已进入本地与 GitHub CI；当前门禁报告 React Router
-  `GHSA-qwww-vcr4-c8h2` 的 2 个 high，官方自动建议会强制降级到
-  `react-router-dom@7.11.0`，因此在兼容升级方案确认前不执行破坏性 `--force`。
+- `check:dependencies` 已进入本地与 GitHub CI；React Router
+  `GHSA-qwww-vcr4-c8h2` 已通过受控迁移到 `react-router@8.3.0` 修复，同时按官方
+  v8 兼容线升级 React，未采用会破坏性降级的 `npm audit fix --force`。
 - 覆盖率排除静态 Prompt 数据，真实运行时基线设总门槛以及 AI / import / registry 分层门槛；不再以静态字符串抬分。
 - UI 显示语义版本 + 构建 SHA；Blueprint §1.1 的版本、源码、schema、三注册表和 Prompt 规模由 `check:project-metrics` 自动锁定。
 - Agent 自动入口改为自包含短宪法，任务专用资料由 `docs/CONTEXT-ROUTING.md` 按 UI、AI 读写、数据生命周期、路线图、PR 和历史追溯分流；`check:agent-context` 锁定入口体积、核心红线和禁止全文必读回退。

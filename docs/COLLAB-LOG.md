@@ -2012,3 +2012,20 @@ TypeScript、生产 build、bundle budget 与 `git diff --check` 全绿；Chromi
 👉 Phase 27.1-a/b/c 已完成。AGENT-1 仍没有泛化意图识别、其它领域写入工具、聊天持久化、
 多 Agent、后台 Agent 或 NPC 演进；下一阶段进入 27.1-d 前应逐领域冻结独立候选闭环，
 不能把世界来源单点 MVP 扩写成通用代理。
+
+### [2026-07-26] Codex · REPORT · React Router 安全迁移 / `fix/react-router-rsc-advisory`
+
+没有执行 `npm audit fix --force` 建议的破坏性降级。按官方 v8 迁移边界移除
+`react-router-dom@7.18.1`，升级到 `react-router@8.3.0`，并把 React / React DOM
+提升到 v8 要求的 19.2.7+ 兼容线；当前 lock 实际解析为 React 19.2.8。6 个声明式路由
+调用方统一改从 `react-router` 导入，Vite vendor 分包同步移除旧包名。
+
+生产依赖门禁从 `GHSA-qwww-vcr4-c8h2` 的 2 个 high 变为 0 vulnerabilities。完整
+`npm run ci` 通过：51 required tables、AI Manual、architecture、476 个生产源码可达、
+roadmap、agent context、canon coverage、project metrics、生产依赖、ESLint、
+TypeScript、222 个测试文件 / 777 项测试、覆盖率、生产 build 与 bundle budget 全绿。
+Chromium 18/18 通过，覆盖首页/工作区/设置导航、创建项目、刷新、导入导出和
+ChatCopilot 等真实路由路径。
+
+👉 依赖阻塞已解除；严格路线继续 AGENT-1 Phase 27.1-d，首个增量只增加一个独立领域
+候选闭环，保持可见候选、作者确认、GenerationNode gate 与既有注册表写回边界。
