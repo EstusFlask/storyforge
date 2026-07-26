@@ -855,6 +855,87 @@ test('主 Agent 调度大纲领域任务，确认可见整批候选后同步到�
   expect(generationCalls).toBe(2)
 })
 
+test('主 Agent 为明确章纲生成正文，拒绝零写入并把可见修订稿同步到编辑器', async ({ page }) => {
+  let generationCalls = 0
+  const modelDraft = '模型初稿：退潮后的盐海露出黑色礁脊，守灯人沿着潮痕走向沉默的钟楼。'
+    + '风把旧誓言送回岸边，他意识到这次选择会改变整座港城的命运。'.repeat(4)
+  await page.addInitScript(() => {
+    localStorage.setItem('storyforge-ai-config', JSON.stringify({
+      provider: 'ollama',
+      apiKey: '',
+      model: 'prose-copilot-e2e',
+      baseUrl: 'http://localhost:1234/v1',
+      temperature: 0,
+      maxTokens: 0,
+    }))
+  })
+  await page.route('http://localhost:1234/v1/chat/completions', async route => {
+    const body = route.request().postDataJSON() as {
+      messages?: Array<{ role: string; content: string }>
+    }
+    const combined = body.messages?.map(message => message.content).join('\n') ?? ''
+    const isPlanner = combined.includes('你只把用户目标拆成幕后领域任务')
+    if (!isPlanner) {
+      generationCalls += 1
+      expect(combined).toContain('第一章')
+      expect(combined).toContain('守灯人第一次看见浮空城')
+    }
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        choices: [{
+          message: {
+            content: isPlanner
+              ? JSON.stringify({
+                  summary: '交给正文领域 Agent。',
+                  tasks: [{
+                    id: 'prose-1',
+                    agentId: 'prose',
+                    instruction: '写第一章正文',
+                    dependsOn: [],
+                  }],
+                })
+              : modelDraft,
+          },
+        }],
+        usage: { prompt_tokens: 260, completion_tokens: 180, total_tokens: 440 },
+      }),
+    })
+  })
+
+  await openCleanHome(page)
+  await createProject(page, 'E2E 正文副驾确认闭环')
+  await page.getByRole('button', { name: '大纲', exact: true }).click()
+  await page.getByRole('button', { name: '添加卷', exact: true }).click()
+  await page.getByRole('button', { name: '添加章节', exact: true }).click()
+  const summary = page.getByPlaceholder('章节摘要（可编辑，失焦自动保存）')
+  await summary.fill('退潮后，守灯人第一次看见浮空城。')
+
+  await page.getByRole('button', { name: '打开 AI 对话副驾' }).click()
+  const copilot = page.getByRole('complementary', { name: '主 Agent 创作副驾' })
+  const request = copilot.getByRole('textbox', { name: '告诉主 Agent 你的目标' })
+  const candidate = copilot.getByRole('textbox', { name: '《第1章》正文候选内容' })
+
+  await request.fill('写第一章正文')
+  await copilot.getByRole('button', { name: '交给主 Agent', exact: true }).click()
+  await expect(candidate).toContainText('模型初稿')
+  await copilot.getByRole('button', { name: '拒绝', exact: true }).click()
+
+  await request.fill('重新写第一章正文')
+  await copilot.getByRole('button', { name: '交给主 Agent', exact: true }).click()
+  const edited = modelDraft.replace('模型初稿', '作者确认稿')
+  await candidate.fill(edited)
+  await copilot.getByRole('button', { name: '采纳', exact: true }).click()
+  await expect(copilot.getByText('正文已写入目标章节。', { exact: true }).last()).toBeVisible()
+
+  await copilot.getByRole('button', { name: '关闭主 Agent' }).click()
+  await page.getByTitle('编辑章节').click()
+  await expect(page.locator('.tiptap-editor')).toContainText('作者确认稿')
+  await expect(page.locator('.tiptap-editor')).not.toContainText('模型初稿')
+  expect(generationCalls).toBe(2)
+})
+
 test('外部文档词条先形成带证据候选，作者确认后才进入 Codex', async ({ page }) => {
   await page.addInitScript(() => {
     localStorage.setItem('storyforge-ai-config', JSON.stringify({

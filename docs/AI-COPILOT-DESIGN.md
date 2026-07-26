@@ -404,7 +404,7 @@ loop（受步数/Token 上限约束）:
 - 当前尚未实现泛化意图识别，不能据此宣称“任意对话建完整世界观”；详细边界见
   [`CHAT-COPILOT-MVP-DESIGN.md`](./CHAT-COPILOT-MVP-DESIGN.md)
 
-**Phase 27.1-d 扩展对话覆盖面（进行中）**
+**Phase 27.1-d 扩展对话覆盖面（已完成）**
 - 灵感对话反推的首个独立闭环已接入：作者选择已保存碎片，正式 read tool 有界装配，
   结构化候选可编辑，确认后只复用既有灵感版本写回，不自动采纳项目主档
 - 详细边界与验收见
@@ -419,8 +419,13 @@ loop（受步数/Token 上限约束）:
   世界作用域、同层重复、并发快照和上游候选采纳依赖均由确定性代码阻断
 - 详细边界与验收见
   [`CHAT-COPILOT-OUTLINE-DESIGN.md`](./CHAT-COPILOT-OUTLINE-DESIGN.md)
-- 后续再接入正文的对话生成；每个领域单独冻结读、候选、gate、
-  确认写回与非范围，不提前泛化成任意意图
+- 正文生成的第四个独立闭环已接入：空白章生成与已有正文显式续写复用正式章节上下文、
+  `chapter.content/chapter.continue` 和 `adopt(chapters)`；目标章、正文 fingerprint、
+  旧检索证据失效和非覆盖边界由代码保证
+- 详细边界与验收见
+  [`CHAT-COPILOT-PROSE-DESIGN.md`](./CHAT-COPILOT-PROSE-DESIGN.md)
+- 27.1-d 四个领域已闭环；后续能力仍须逐项冻结读、候选、gate、确认写回与非范围，
+  不提前泛化成任意意图
 
 **Phase 27.1-e 多 agent 团队编排**
 - 总 agent 负责任务拆解、领域分发、收敛与打回

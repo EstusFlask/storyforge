@@ -183,11 +183,11 @@ AI 输出经 `adopt({ target, data })` 写回,只有这里登记的字段可写(
 ## 四、AI 调用点（消耗统计 category · 在哪触发)
 
 共 59 个 category。
-未分类调用: 0 个。动态 category 调用: 4 个。
+未分类调用: 0 个。动态 category 调用: 5 个。
 
 | category | 触发文件 |
 |---|---|
-| `agent.orchestrator` | `src/lib/agent/orchestrator.ts:264` |
+| `agent.orchestrator` | `src/lib/agent/orchestrator.ts:313` |
 | `agent.readonly` | `src/lib/agent/client-adapter.ts:23` |
 | `ai.restructure` | `src/lib/ai/restructure.ts:54` |
 | `canon.setting.extract` | `src/components/facts/WorldConstitutionPanel.tsx:79` |
@@ -252,8 +252,9 @@ AI 输出经 `adopt({ target, data })` 写回,只有这里登记的字段可写(
 - `src/components/editor/ReviewPanel.tsx:152 · ai.start`
 - `src/components/settings/NS0EvalPanel.tsx:50 · chat`
 - `src/lib/agent/outline-copilot.ts:421 · chat`
+- `src/lib/agent/prose-copilot.ts:467 · chat`
 - `src/lib/generation/workflow-generation-node.ts:23 · ai.start`
 
 ---
 
-生成时间基准:commit `dec7f09`
+生成时间基准:commit `f6453f4`

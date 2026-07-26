@@ -2087,3 +2087,31 @@ architecture、source reachability、roadmap、agent context、canon、project m
 
 👉 主 Agent 当前已闭环世界来源、灵感反推、新增角色和新增大纲四个领域；下一开发单位
 进入正文领域，必须先冻结章节目标、已有正文保护、可见 diff、并发快照与确认写回边界。
+
+### [2026-07-26] Codex · REPORT · AGENT-1 Phase 27.1-d 第四个领域 / 正文 ChatCopilot / `feat/agent-prose-copilot`
+
+本阶段为唯一主 Agent 增加正文领域，复用章节编辑器的正式上下文源、
+`chapter.content/chapter.continue` 模型分类和 `adopt(chapters)` 写回。目标只从当前世界
+规范章序的既有章纲解析；空白章可生成，非空章只接受明确续写，覆盖、重写和改写继续走
+正文编辑器的对照入口。同轮要求新建章纲并写正文时只先返回大纲候选，必须由作者确认进入
+正式数据后再发起正文，避免未采纳结构成为写作事实。
+
+正文候选保持纯文本、可见、可编辑和可拒绝；拒绝零写入，确认不再次调用模型。生成时冻结
+目标章纲、目标正文、规范 order 和正文双 hash fingerprint，确认时在同一 Dexie 事务重读，
+任一并发变化都拒绝旧候选。正式写入后同步清除旧检索块、将相关章节摘要标记 stale，再从
+作者确认的最终正文重建检索块，避免 RAG 继续引用旧稿。多世界项目仍必须先选世界；没有
+新增表、迁移、导出格式或第二套章节数据。
+
+真实 Agnes 隔离项目先建立“第1卷 / 第1章”章纲，主 Agent 对明确正文请求只规划 1 个
+prose 任务。模型候选随后被作者完整替换为带“作者确认版”标记的正文，采纳后正文编辑器
+逐字显示该版本，字符数与可见文本一致；隔离项目已走完整删除安全门清理。
+
+完整验证：233 个 Vitest 文件 / 834 项测试全绿；coverage statements/lines 73.46%、
+branches 73.16%、functions 72.47%；Chromium E2E 24/24；55 required tables、
+AI Manual、architecture、source reachability、roadmap、agent context、canon coverage、
+project metrics、production dependency audit 0 vulnerabilities、ESLint、TypeScript、
+生产 build、bundle budget 与 `git diff --check` 全绿。
+
+👉 主 Agent 当前已闭环世界来源、灵感反推、新增角色、新增大纲和正文五个领域。
+27.1-d 已完成；下一开发单位进入 27.1-e，先冻结分 Agent 团队与后台任务的可见性、
+权限、取消、预算、并发和恢复边界，再决定首个可交付的后台能力。

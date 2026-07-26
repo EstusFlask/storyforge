@@ -348,8 +348,12 @@
   `outline.volume/outline.chapter` 提示和 `adopt(outlineNodes)`；整批候选可见可编辑，
   多世界、重复、并发变化及上游候选未采纳均会阻断；同领域重复任务会合并，未获用户明确
   授权的额外领域会从模型计划中移除。
+- Phase 27.1-d 已提供正文生成的第四个独立领域闭环：从当前世界规范章序解析既有章纲，
+  复用章节编辑器正式上下文与 `chapter.content/chapter.continue`；空白章生成和显式续写
+  的候选可见可编辑，确认只经 `adopt(chapters)`。非空正文默认不覆盖，目标章/正文并发
+  变化阻断；旧检索块在写入事务中清除，确认正文随后重建索引。
 - 工作区右栏现在只有一个面向作者的“主 Agent”对话入口；作者无需选择领域标签。主 Agent
-  用紧凑项目状态规划 `world-origin / character / inspiration / outline` 幕后任务，支持
+  用紧凑项目状态规划 `world-origin / character / inspiration / outline / prose` 幕后任务，支持
   依赖排序，并把未采纳的上游候选作为显式非 Canon 证据交给下游任务。
 - `agentConversations/agentEvents` 持久保存用户消息、计划、任务状态、候选编辑、确认、拒绝
   和错误；刷新后候选仍可恢复。候选确认继续复用原领域 GenerationNode gate，刷新后则用
@@ -361,7 +365,7 @@
 ### 当前边界 / 尚未完成
 
 - 原生 `tool_calls` 尚未作为 provider 优化接入；主 Agent 当前编排世界来源、灵感反推、
-  新增角色和新增大纲四个已闭环领域，没有正文领域写入工具。
+  新增角色、新增大纲和正文五个已闭环领域；正文只支持空白章生成和显式续写，不覆盖手稿。
 - 后台领域任务目前按依赖顺序执行，不是并行自治团队；长期后台 Agent 和 NPC 自动演进仍未
   形成正式产品闭环。
 - 协同编辑、账号、云同步、发布发现和社区治理不属于当前纯前端架构的增量功能，必须另立 PLATFORM 架构阶段。
