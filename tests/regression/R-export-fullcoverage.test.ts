@@ -131,6 +131,31 @@ describe('R-export-fullcoverage · 全表多世界往返安全网', () => {
       chapterId: newChapter!.id,
     })
 
+    // SIM-1 运行时 → 世界、父分支与会话引用全部重映射
+    const newSimulationSessions = await db.simulationSessions
+      .where('projectId').equals(newId).toArray()
+    const newSimulationParent = newSimulationSessions.find(row => row.title === '青云山战役')!
+    const newSimulationChild = newSimulationSessions.find(row => row.title === '青云山战役 · 分支')!
+    expect(newSimulationParent.worldGroupId).toBe(newWgA)
+    expect(newSimulationChild).toMatchObject({
+      worldGroupId: newWgA,
+      parentSessionId: newSimulationParent.id,
+      parentThroughSequence: 0,
+    })
+    const newSimulationEvent = await db.simulationEvents.where('projectId').equals(newId).first()
+    const newSimulationCheckpoint = await db.simulationCheckpoints
+      .where('projectId').equals(newId).first()
+    expect(newSimulationEvent).toMatchObject({
+      worldGroupId: newWgA,
+      sessionId: newSimulationChild.id,
+      sequence: 1,
+    })
+    expect(newSimulationCheckpoint).toMatchObject({
+      worldGroupId: newWgA,
+      sessionId: newSimulationChild.id,
+      throughSequence: 1,
+    })
+
     // knowledgeLedger → 世界/角色/章节/事实全部重映射
     const newKnowledge = await db.knowledgeLedger.where('projectId').equals(newId).first()
     const newFact = await db.temporalFacts.where('projectId').equals(newId).first()

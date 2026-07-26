@@ -111,6 +111,48 @@ test('独立节点模式可自由建图、运行、刷新恢复并完整清理',
   await expect(page.getByRole('heading', { name: '独立节点模式', exact: true })).toBeVisible()
 })
 
+test('互动运行时可演进、判定、检查点、分支并刷新恢复', async ({ page }) => {
+  await openCleanHome(page)
+  await createProject(page, 'E2E 互动运行时')
+  await openSidebarLeaf(page, '体验中心', '互动运行时')
+  await expect(page.getByRole('heading', { name: '互动运行时', exact: true })).toBeVisible()
+
+  await page.getByPlaceholder('新会话名称').fill('雾港沙盒')
+  await page.getByLabel('运行时类型').selectOption('ttrpg')
+  await page.getByRole('button', { name: '新建独立会话', exact: true }).click()
+  await expect(page.getByRole('heading', { name: '雾港沙盒', exact: true })).toBeVisible()
+  await expect(page.getByText('体验中心 · 跑团', { exact: true })).toBeVisible()
+
+  await page.getByLabel('推进时间').fill('6')
+  await page.getByRole('button', { name: '推进时间', exact: true }).click()
+  await expect(page.getByText('时间 +6', { exact: true })).toBeVisible()
+  await page.getByLabel('骰式').fill('2d6+1')
+  await page.getByRole('button', { name: '判定', exact: true }).click()
+  await expect(page.getByText(/2d6\+1: \[\d+, \d+\] = \d+/)).toBeVisible()
+  await page.getByPlaceholder('记录只属于该会话的叙事…').fill('钟楼守卫交出了潮汐密钥。')
+  await page.getByRole('button', { name: '追加叙事事件', exact: true }).click()
+  await expect(page.getByText('钟楼守卫交出了潮汐密钥。', { exact: true })).toHaveCount(2)
+
+  await page.getByPlaceholder('检查点名称').fill('进入钟楼前')
+  await page.getByRole('button', { name: '保存', exact: true }).click()
+  await expect(page.getByText('进入钟楼前', { exact: true })).toBeVisible()
+  await page.getByPlaceholder('新分支名称').fill('拒绝密钥分支')
+  await page.getByRole('button', { name: '分支', exact: true }).click()
+  await expect(page.getByRole('heading', { name: '拒绝密钥分支', exact: true })).toBeVisible()
+  await expect(page.getByText('雾港沙盒', { exact: true })).toBeVisible()
+
+  await page.reload()
+  await openSidebarLeaf(page, '体验中心', '互动运行时')
+  await expect(page.getByRole('heading', { name: '拒绝密钥分支', exact: true })).toBeVisible()
+  await expect(page.getByText('钟楼守卫交出了潮汐密钥。', { exact: true })).toBeVisible()
+  await expect(page.getByText('逻辑时间', { exact: true })).toBeVisible()
+
+  await page.getByRole('button', { name: '删除会话 拒绝密钥分支', exact: true }).click()
+  await expect(page.getByRole('heading', { name: '删除互动会话“拒绝密钥分支”？' })).toBeVisible()
+  await page.getByRole('button', { name: '删除', exact: true }).click()
+  await expect(page.getByRole('heading', { name: '雾港沙盒', exact: true })).toBeVisible()
+})
+
 test('可见资料库精确选择字段，节点冻结权重与实际召回', async ({ page }) => {
   await openCleanHome(page)
   await createProject(page, 'E2E RAG 可见资料')

@@ -55,6 +55,9 @@ import type {
   AgentEvent,
   NodeFlow,
   NodeRunRecord,
+  SimulationSession,
+  SimulationEvent,
+  SimulationCheckpoint,
 } from '../types'
 import type { AIUsageEntry } from '../ai/usage-log'
 import type { TemporalFact } from '../types/temporal-fact'
@@ -172,6 +175,11 @@ class StoryForgeDB extends Dexie {
   // FLOW-2 —— 独立自由节点文档与逐节点可见运行记录
   nodeFlows!: Table<NodeFlow, number>
   nodeRuns!: Table<NodeRunRecord, number>
+
+  // SIM-1 —— NPC/跑团/角色聊天共用的独立互动运行时
+  simulationSessions!: Table<SimulationSession, number>
+  simulationEvents!: Table<SimulationEvent, number>
+  simulationCheckpoints!: Table<SimulationCheckpoint, number>
 
   constructor() {
     super('storyforge')
@@ -480,6 +488,14 @@ class StoryForgeDB extends Dexie {
       agentEvents: '++id, projectId, conversationId, [conversationId+sequence], kind, createdAt',
       nodeFlows: '++id, projectId, worldGroupId, updatedAt',
       nodeRuns: '++id, projectId, flowId, status, updatedAt',
+    })
+
+    // v48: SIM-1A 共享互动运行时。三张表均为纯新增空表，不从创作角色、正文、物品栏
+    // 或 Agent 会话猜测存档；只有作者明确建立互动会话后才冻结 Canon 来源快照。
+    this.version(48).stores({
+      simulationSessions: '++id, projectId, worldGroupId, kind, status, parentSessionId, updatedAt',
+      simulationEvents: '++id, projectId, worldGroupId, sessionId, &[sessionId+sequence], type, createdAt',
+      simulationCheckpoints: '++id, projectId, worldGroupId, sessionId, [sessionId+throughSequence], createdAt',
     })
   }
 }

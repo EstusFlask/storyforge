@@ -1,6 +1,6 @@
 # PLATFORM-2 · StoryForge 创作平台、可见数据与模式层级
 
-> 状态：ARCHITECTURE ACCEPTED；AGENT/FLOW CORE MVP IMPLEMENTED（2026-07-26）
+> 状态：ARCHITECTURE ACCEPTED；AGENT/FLOW CORE + SIM-1A IMPLEMENTED（2026-07-27）
 > 施工归属：PLATFORM-2 / AGENT-1 / FLOW-2
 > 用户原始要求：分步骤与节点是可切换创作模式；Agent 是覆盖其上的总入口；
 > 后续跑团、文字游戏、角色聊天冒险在同一创作基座上形成独立体验。
@@ -138,5 +138,8 @@ UI 允许自由组合，不等于允许任意数据库旁路。自由发生在�
   稳定资料 ID 与记录/字段策略随源记录保存，节点精确选择仍经
   `CONTEXT_SOURCES.ragSelection → assembleContext()`，运行冻结实际召回；派生索引可重建/
   删除且不会删除源数据。完整边界见 `RAG-VISIBLE-LIBRARY.md`。
-- `SIM-1`：设计阶段。先建立独立运行状态、事件与存档层，再由跑团、文字游戏和角色聊天
-  三种体验共享，禁止各自复制 Canon 或另造互不兼容的记忆引擎。
+- `SIM-1A CORE + VISIBLE SHELL`：已实现。体验中心已有独立入口；三张项目/世界作用域表
+  保存会话、严格追加事件和可验证检查点，支持确定性骰子、回放、分支、刷新恢复与便携
+  生命周期。当前叙事状态和本会话事件日志分开展示，不修改创作 Canon。
+- `SIM-1B`：下一阶段。从作者明确选择的世界、角色、地点、物品和规则建立结构化只读
+  Canon 冻结快照，再开放运行时实体投影；禁止各体验复制 Canon 或另造记忆引擎。

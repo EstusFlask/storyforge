@@ -1,4 +1,4 @@
-import { BookOpenCheck, DatabaseZap, PenLine, Settings2, WandSparkles } from 'lucide-react'
+import { BookOpenCheck, DatabaseZap, Gamepad2, PenLine, Settings2, WandSparkles } from 'lucide-react'
 import {
   MODULE_CONTENT_TYPE_DEFINITIONS,
   type ModuleContentType,
@@ -16,6 +16,7 @@ const TYPE_STYLES: Record<ModuleContentType, string> = {
   writing: 'border-accent/25 bg-accent/10 text-accent',
   downstream: 'border-success/25 bg-success/10 text-success',
   tool: 'border-warning/25 bg-warning/10 text-warning',
+  experience: 'border-accent/25 bg-accent/10 text-accent',
   system: 'border-border bg-bg-elevated text-text-muted',
 }
 
@@ -24,6 +25,7 @@ const TYPE_ICONS = {
   writing: PenLine,
   downstream: DatabaseZap,
   tool: WandSparkles,
+  experience: Gamepad2,
   system: Settings2,
 } satisfies Record<ModuleContentType, typeof BookOpenCheck>
 

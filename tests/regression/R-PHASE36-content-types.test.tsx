@@ -47,6 +47,7 @@ describe('Phase 36 · 页面上游/下游内容标记', () => {
     }
     expect(getModuleContentType('story-core')).toBe('upstream')
     expect(getModuleContentType('editor')).toBe('writing')
+    expect(getModuleContentType('simulation-runtime')).toBe('experience')
     expect(getModuleContentType('backup')).toBe('system')
   })
 
@@ -66,6 +67,14 @@ describe('Phase 36 · 页面上游/下游内容标记', () => {
     const compactBadge = compact.querySelector('[data-content-type="tool"]')
     expect(compactBadge?.getAttribute('aria-hidden')).toBe('true')
     expect(compactBadge?.getAttribute('title')).toContain('AI 工具')
+
+    const experience = await mount(createElement(ContentTypeBadge, {
+      contentType: 'experience',
+      showDescription: true,
+    }))
+    expect(experience.textContent).toContain('体验')
+    expect(experience.textContent).toContain('独立于创作 Canon')
+    expect(experience.querySelector('[data-content-type="experience"]')).not.toBeNull()
   })
 
   it('侧栏在展开时给每个页面显示类型标记，并保持导航回调', async () => {
@@ -85,5 +94,12 @@ describe('Phase 36 · 页面上游/下游内容标记', () => {
     expect(inventoryButton.textContent).toContain('产物')
     await act(async () => inventoryButton.click())
     expect(onSelect).toHaveBeenCalledWith('inventory')
+
+    const runtimeButton = Array.from(host.querySelectorAll('button')).find(button =>
+      button.textContent?.includes('互动运行时'),
+    )!
+    expect(runtimeButton.textContent).toContain('体验')
+    await act(async () => runtimeButton.click())
+    expect(onSelect).toHaveBeenCalledWith('simulation-runtime')
   })
 })

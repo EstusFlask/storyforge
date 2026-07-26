@@ -213,7 +213,70 @@ class UpgradedV46ReferenceDB extends Dexie {
   }
 }
 
+class OldV47ProcessDB extends Dexie {
+  constructor(name: string) {
+    super(name)
+    this.version(47).stores({
+      agentConversations: '++id, projectId, worldGroupId, status, updatedAt',
+      agentEvents: '++id, projectId, conversationId, [conversationId+sequence], kind, createdAt',
+      nodeFlows: '++id, projectId, worldGroupId, updatedAt',
+      nodeRuns: '++id, projectId, flowId, status, updatedAt',
+    })
+  }
+}
+
+class UpgradedV48SimulationDB extends Dexie {
+  constructor(name: string) {
+    super(name)
+    this.version(47).stores({
+      agentConversations: '++id, projectId, worldGroupId, status, updatedAt',
+      agentEvents: '++id, projectId, conversationId, [conversationId+sequence], kind, createdAt',
+      nodeFlows: '++id, projectId, worldGroupId, updatedAt',
+      nodeRuns: '++id, projectId, flowId, status, updatedAt',
+    })
+    this.version(48).stores({
+      simulationSessions: '++id, projectId, worldGroupId, kind, status, parentSessionId, updatedAt',
+      simulationEvents: '++id, projectId, worldGroupId, sessionId, &[sessionId+sequence], type, createdAt',
+      simulationCheckpoints: '++id, projectId, worldGroupId, sessionId, [sessionId+throughSequence], createdAt',
+    })
+  }
+}
+
 describe('DB upgrade fixtures · real Dexie version transitions', () => {
+  it('v47→v48 只新增空运行时表，保留 Agent 与节点创作过程数据', async () => {
+    const name = nextName('upgrade-v48-simulation')
+    const oldDb = track(new OldV47ProcessDB(name))
+    await oldDb.open()
+    const conversationId = await oldDb.table('agentConversations').add({
+      projectId: 1,
+      worldGroupId: null,
+      title: '保留会话',
+      status: 'archived',
+      createdAt: 1,
+      updatedAt: 2,
+    })
+    await oldDb.table('agentEvents').add({
+      projectId: 1,
+      conversationId,
+      sequence: 1,
+      kind: 'message',
+      content: '保留事件',
+      payload: '{}',
+      createdAt: 2,
+    })
+    oldDb.close()
+
+    const upgraded = track(new UpgradedV48SimulationDB(name))
+    await upgraded.open()
+    expect(await upgraded.table('agentConversations').get(conversationId)).toMatchObject({
+      title: '保留会话',
+    })
+    expect(await upgraded.table('agentEvents').count()).toBe(1)
+    expect(await upgraded.table('simulationSessions').count()).toBe(0)
+    expect(await upgraded.table('simulationEvents').count()).toBe(0)
+    expect(await upgraded.table('simulationCheckpoints').count()).toBe(0)
+  })
+
   it('v45→v46 only adds version/source stores and preserves legacy analysis verbatim', async () => {
     const name = nextName('upgrade-v46-reference')
     const oldDb = track(new OldV45ReferenceDB(name))

@@ -319,6 +319,49 @@ export const PROJECT_TABLES: TableSpec[] = [
     defaults: { inputSnapshotsJson: '{}', nodeResultsJson: '{}' },
     note: 'FLOW-2 逐节点输入/输出/错误/确认记录，保证刷新后仍可见' },
 
+  // ───────────────────── SIM-1 共享互动运行时 ─────────────────────
+  { table: db.simulationSessions, name: 'simulationSessions', owner: 'project',
+    worldScoped: true, exportable: true, exportIdField: true,
+    tree: { parentField: 'parentSessionId' },
+    refs: [
+      { kind: 'simple', field: 'id', target: 'simulationSessions[parentSessionId]', onDelete: 'setNull' },
+      { kind: 'simple', field: 'id', target: 'simulationEvents[sessionId]', onDelete: 'cascade' },
+      { kind: 'simple', field: 'id', target: 'simulationCheckpoints[sessionId]', onDelete: 'cascade' },
+    ],
+    exportRemap: [
+      { field: 'worldGroupId', remapVia: 'worldGroups', exportAs: '_worldGroupExportId' },
+      { field: 'parentSessionId', remapVia: 'simulationSessions', selfTree: true,
+        exportAs: '_parentSessionExportId' },
+    ],
+    defaults: {
+      kind: 'sandbox',
+      status: 'active',
+      rulesetVersion: 1,
+      canonSnapshotJson: '{"version":1,"sources":[]}',
+      initialStateJson: '{"version":1,"clock":0,"entities":{},"memories":[],"narratives":[],"lastSequence":0}',
+    },
+    note: 'SIM-1 独立互动世界实例；冻结创作来源，不反写 Canon；分支拥有独立事件流' },
+
+  { table: db.simulationEvents, name: 'simulationEvents', owner: 'project',
+    worldScoped: true, exportable: true,
+    exportRemap: [
+      { field: 'worldGroupId', remapVia: 'worldGroups', exportAs: '_worldGroupExportId' },
+      { field: 'sessionId', remapVia: 'simulationSessions',
+        exportAs: '_simulationSessionExportId', onUnmapped: 'require' },
+    ],
+    defaults: { actorKey: null, targetKey: null, payloadJson: '{}' },
+    note: 'SIM-1 严格追加事件；(sessionId,sequence) 唯一，状态、骰子、记忆和叙事均从事件回放' },
+
+  { table: db.simulationCheckpoints, name: 'simulationCheckpoints', owner: 'project',
+    worldScoped: true, exportable: true,
+    exportRemap: [
+      { field: 'worldGroupId', remapVia: 'worldGroups', exportAs: '_worldGroupExportId' },
+      { field: 'sessionId', remapVia: 'simulationSessions',
+        exportAs: '_simulationSessionExportId', onUnmapped: 'require' },
+    ],
+    defaults: { throughSequence: 0, name: '检查点' },
+    note: 'SIM-1 可重建状态检查点；hash 异常时从初始状态与追加事件恢复' },
+
   // ───────────────────── NS-4 时序事实账本 ─────────────────────
   // 导出/导入：全部分类型 FK + 三个章节引用 + 自引用 supersedesFactId 都做 exportRemap，
   //   未映射（引用的实体/章已不在导出内）默认置 null，事实不丢、引用不悬空。

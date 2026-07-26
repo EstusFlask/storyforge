@@ -36,6 +36,9 @@ import type {
   AgentEvent,
   NodeFlow,
   NodeRunRecord,
+  SimulationSession,
+  SimulationEvent,
+  SimulationCheckpoint,
 } from '../types'
 import type { TemporalFact } from '../types/temporal-fact'
 
@@ -109,6 +112,22 @@ export interface ProjectExportData {
   nodeRuns?: (
     Omit<NodeRunRecord, 'id' | 'projectId' | 'flowId'>
     & { _flowExportId: number }
+  )[]
+  /** SIM-1 共享互动运行时；创作 Canon 与运行存档严格分层。 */
+  simulationSessions?: (
+    Omit<SimulationSession, 'id' | 'projectId' | 'worldGroupId' | 'parentSessionId'>
+    & WorldGroupExportRef
+    & { _exportId: number; _parentSessionExportId?: number | null }
+  )[]
+  simulationEvents?: (
+    Omit<SimulationEvent, 'id' | 'projectId' | 'worldGroupId' | 'sessionId'>
+    & WorldGroupExportRef
+    & { _simulationSessionExportId: number }
+  )[]
+  simulationCheckpoints?: (
+    Omit<SimulationCheckpoint, 'id' | 'projectId' | 'worldGroupId' | 'sessionId'>
+    & WorldGroupExportRef
+    & { _simulationSessionExportId: number }
   )[]
   /** NS-4 时序事实账本(各 FK 在派生导出里被 remap 成 _xxxExportId) */
   temporalFacts?: (Omit<TemporalFact, 'id' | 'projectId'> & Record<string, unknown>)[]
