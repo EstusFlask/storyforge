@@ -33,6 +33,12 @@ const TASK_KIND_LABELS = {
   extraction: '提取',
   analysis: '分析',
   review: '审查',
+  'agent-orchestrator': '主 Agent',
+  'agent-world-origin': '世界 Agent',
+  'agent-character': '角色 Agent',
+  'agent-inspiration': '灵感 Agent',
+  'agent-outline': '大纲 Agent',
+  'agent-prose': '正文 Agent',
 } as const
 
 export default function UsageStatsPage({ project }: Props) {

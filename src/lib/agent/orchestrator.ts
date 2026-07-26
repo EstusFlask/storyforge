@@ -1,11 +1,12 @@
 import JSON5 from 'json5'
 import { useAIConfigStore } from '../../stores/ai-config'
+import { AGENT_ROLE_CATEGORIES } from '../ai/task-routing'
 import { useChapterStore } from '../../stores/chapter'
 import { useCharacterStore } from '../../stores/character'
 import { useInspirationWorkspaceStore } from '../../stores/inspiration-workspace'
 import { useOutlineStore } from '../../stores/outline'
 import { useWorldviewStore } from '../../stores/worldview'
-import { chat } from '../ai/client'
+import { chat, resolveRequestConfig } from '../ai/client'
 import { db } from '../db/schema'
 import {
   adoptGenerationNodeOutput,
@@ -280,7 +281,10 @@ export async function createMasterAgentPlan(input: {
 }, dependencies: PlannerDependencies = {}): Promise<MasterAgentPlan> {
   const request = input.request.trim()
   if (request.length < 2) throw new Error('请至少输入 2 个字符的创作要求。')
-  const config = useAIConfigStore.getState().config
+  const config = resolveRequestConfig(
+    useAIConfigStore.getState().config,
+    { category: AGENT_ROLE_CATEGORIES.orchestrator },
+  ).config
   const status = await executeAgentTool('read_project_status', {
     projectId: input.projectId,
     worldGroupId: input.worldGroupId,
@@ -363,6 +367,7 @@ export async function executeMasterAgentPlan(input: {
           projectId: input.projectId,
           worldGroupId: input.worldGroupId,
           authorRequest: task.instruction,
+          routingCategory: AGENT_ROLE_CATEGORIES['world-origin'],
           signal: input.signal,
         })
         const result = await runGenerationNode(prepared.node, prepared.prepared)
@@ -391,6 +396,7 @@ export async function executeMasterAgentPlan(input: {
           worldGroupId: input.worldGroupId,
           authorRequest: task.instruction,
           supplementalContext: upstream,
+          routingCategory: AGENT_ROLE_CATEGORIES.character,
           signal: input.signal,
         })
         const result = await runGenerationNode(prepared.node, prepared.prepared)
@@ -423,6 +429,7 @@ export async function executeMasterAgentPlan(input: {
           projectId: input.projectId,
           selectedFragmentIds,
           authorRequest: task.instruction,
+          routingCategory: AGENT_ROLE_CATEGORIES.inspiration,
           signal: input.signal,
         })
         const result = await runGenerationNode(prepared.node, prepared.prepared)
@@ -453,6 +460,7 @@ export async function executeMasterAgentPlan(input: {
           worldGroupId: input.worldGroupId,
           authorRequest: task.instruction,
           supplementalContext: upstream,
+          routingCategory: AGENT_ROLE_CATEGORIES.outline,
           signal: input.signal,
         })
         const result = await runGenerationNode(prepared.node, prepared.prepared)
@@ -483,6 +491,7 @@ export async function executeMasterAgentPlan(input: {
           worldGroupId: input.worldGroupId,
           authorRequest: task.instruction,
           supplementalContext: upstream,
+          routingCategory: AGENT_ROLE_CATEGORIES.prose,
           signal: input.signal,
         })
         const result = await runGenerationNode(prepared.node, prepared.prepared)

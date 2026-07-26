@@ -1,6 +1,6 @@
 import { useAIConfigStore } from '../../stores/ai-config'
 import { buildChapterContentPrompt, buildContinuePrompt } from '../ai/adapters/chapter-adapter'
-import { chat } from '../ai/client'
+import { chat, resolveRequestConfig } from '../ai/client'
 import { buildBestChapterByOutlineMap } from '../chapters/selectors'
 import { db } from '../db/schema'
 import type {
@@ -73,6 +73,7 @@ export interface ProseCopilotInput {
   assembled: Awaited<ReturnType<typeof assembleContext>>
   previousTail: string
   config: AIConfig
+  routingCategory?: string
   signal?: AbortSignal
 }
 
@@ -381,6 +382,7 @@ export async function prepareProseCopilot(input: {
   worldGroupId: number | null
   authorRequest: string
   supplementalContext?: string
+  routingCategory?: string
   signal?: AbortSignal
 }): Promise<PreparedProseCopilot> {
   const project = await db.projects.get(input.projectId)
@@ -401,7 +403,12 @@ export async function prepareProseCopilot(input: {
   const operation = operationFor(request)
   const target = selectTarget(request, nodes, chapters, worldGroupId, operation)
   const snapshot = await snapshotOf(target.outline, target.chapter, target.ordinal)
-  const config = useAIConfigStore.getState().config
+  const defaultCategory = operation === 'continue' ? 'chapter.continue' : 'chapter.content'
+  const routingCategory = input.routingCategory ?? defaultCategory
+  const config = resolveRequestConfig(
+    useAIConfigStore.getState().config,
+    { category: routingCategory },
+  ).config
   const previous = scopedOutlineChapters(nodes, worldGroupId)
     .filter(item => item.ordinal < target.ordinal)
     .reverse()
@@ -434,6 +441,7 @@ export async function prepareProseCopilot(input: {
     assembled,
     previousTail,
     config,
+    routingCategory,
     signal: input.signal,
   }
   const node = createProseCopilotNode(nodeInput)
@@ -465,7 +473,7 @@ export function createProseCopilotNode(
     draft,
   }))
   const runAI = dependencies.runAI ?? (messages => chat(messages, input.config, {
-    category: input.operation === 'continue' ? 'chapter.continue' : 'chapter.content',
+    category: input.routingCategory ?? (input.operation === 'continue' ? 'chapter.continue' : 'chapter.content'),
     projectId: input.project.id!,
     configOverrides: { maxTokens: 16_000 },
     contextOverflowPolicy: 'reject',

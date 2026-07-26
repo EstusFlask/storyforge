@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   appendAgentEvent,
   getOrCreateAgentConversation,
@@ -10,7 +10,8 @@ import {
   createMasterAgentPlan,
 } from '../../src/lib/agent/orchestrator'
 import { db } from '../../src/lib/db/schema'
-import type { Project } from '../../src/lib/types'
+import type { AIConfigPreset, Project } from '../../src/lib/types'
+import { useAIConfigStore } from '../../src/stores/ai-config'
 
 const project: Project = {
   id: 73001,
@@ -32,7 +33,11 @@ describe('AGENT-2 · 主 Agent 编排与持久会话', () => {
     await db.projects.put(project)
   })
 
-  afterEach(() => db.close())
+  afterEach(() => {
+    vi.unstubAllGlobals()
+    useAIConfigStore.setState({ presets: [], taskRoutes: {} })
+    db.close()
+  })
 
   it('主 Agent 把一个用户目标拆成有依赖的幕后领域任务', async () => {
     const plan = await createMasterAgentPlan({
@@ -70,6 +75,66 @@ describe('AGENT-2 · 主 Agent 编排与持久会话', () => {
       id: 'hero',
       agentId: 'character',
       dependsOn: ['world'],
+    })
+  })
+
+  it('主 Agent 编排使用独立模型预设并记录实际路由', async () => {
+    const globalConfig = {
+      ...useAIConfigStore.getState().config,
+      provider: 'deepseek' as const,
+      apiKey: 'global-key',
+      model: 'global-model',
+      baseUrl: 'https://global.example/v1',
+    }
+    const plannerPreset: AIConfigPreset = {
+      id: 'planner-role',
+      name: '主 Agent 规划',
+      config: {
+        ...globalConfig,
+        provider: 'ollama',
+        apiKey: '',
+        model: 'planner-local',
+        baseUrl: 'http://localhost:11434/v1',
+        contextWindow: 131_072,
+      },
+    }
+    useAIConfigStore.setState({
+      config: globalConfig,
+      presets: [plannerPreset],
+      taskRoutes: { 'agent-orchestrator': plannerPreset.id },
+    })
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      expect(url).toBe('http://localhost:11434/v1/chat/completions')
+      expect(JSON.parse(String(init?.body)).model).toBe('planner-local')
+      return new Response(JSON.stringify({
+        choices: [{
+          message: {
+            content: JSON.stringify({
+              summary: '规划一个角色任务。',
+              tasks: [{ id: 'hero', agentId: 'character', instruction: '设计守灯人', dependsOn: [] }],
+            }),
+          },
+        }],
+        usage: { prompt_tokens: 19, completion_tokens: 11, total_tokens: 30 },
+      }), { status: 200 })
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const plan = await createMasterAgentPlan({
+      projectId: project.id!,
+      worldGroupId: null,
+      request: '设计一个守灯人角色',
+    })
+
+    expect(plan.tasks.map(task => task.agentId)).toEqual(['character'])
+    expect(fetchMock).toHaveBeenCalledOnce()
+    await vi.waitFor(async () => {
+      expect(await db.aiUsageLog.toCollection().last()).toMatchObject({
+        category: 'agent.orchestrator',
+        provider: 'ollama',
+        model: 'planner-local',
+        taskKind: 'agent-orchestrator',
+      })
     })
   })
 

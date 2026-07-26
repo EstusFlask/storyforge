@@ -183,11 +183,11 @@ AI 输出经 `adopt({ target, data })` 写回,只有这里登记的字段可写(
 ## 四、AI 调用点（消耗统计 category · 在哪触发)
 
 共 59 个 category。
-未分类调用: 0 个。动态 category 调用: 5 个。
+未分类调用: 0 个。动态 category 调用: 8 个。
 
 | category | 触发文件 |
 |---|---|
-| `agent.orchestrator` | `src/lib/agent/orchestrator.ts:313` |
+| `agent.orchestrator` | `src/lib/agent/orchestrator.ts:317` |
 | `agent.readonly` | `src/lib/agent/client-adapter.ts:23` |
 | `ai.restructure` | `src/lib/ai/restructure.ts:54` |
 | `canon.setting.extract` | `src/components/facts/WorldConstitutionPanel.tsx:79` |
@@ -199,7 +199,7 @@ AI 输出经 `adopt({ target, data })` 写回,只有这里登记的字段可写(
 | `chapter.memory` | `src/components/editor/ChapterEditor.tsx:349` |
 | `chapter.polish` | `src/components/editor/ChapterEditor.tsx:603` |
 | `chapter.toolbar` | `src/components/editor/FloatingToolbar.tsx:105` |
-| `character.generate` | `src/components/character/CharacterPanel.tsx:160`<br/>`src/lib/agent/character-copilot.ts:384` |
+| `character.generate` | `src/components/character/CharacterPanel.tsx:160` |
 | `character.structure` | `src/lib/ai/parse-character-output.ts:80` |
 | `character.supplement` | `src/components/character/CharacterSupplementAction.tsx:80` |
 | `codex.extract` | `src/components/codex/CodexPanel.tsx:226` |
@@ -212,7 +212,7 @@ AI 输出经 `adopt({ target, data })` 写回,只有这里登记的字段可写(
 | `geography.world-map` | `src/components/geography/WorldMapPanel.tsx:107` |
 | `history.consult` | `src/components/history/useHistoryAI.ts:118` |
 | `history.storm` | `src/components/history/useHistoryAI.ts:120` |
-| `inspiration.reverse` | `src/hooks/useIncrementalInspiration.ts:212`<br/>`src/lib/agent/inspiration-copilot.ts:242` |
+| `inspiration.reverse` | `src/hooks/useIncrementalInspiration.ts:212` |
 | `inventory.extract` | `src/components/items/InventoryPanel.tsx:150` |
 | `location.extract` | `src/components/location/LocationPanel.tsx:106` |
 | `node.creation` | `src/lib/node-flow/executor.ts:203` |
@@ -243,7 +243,7 @@ AI 输出经 `adopt({ target, data })` 写回,只有这里登记的字段可写(
 | `style.learn` | `src/components/style/StyleLearningPanel.tsx:125` |
 | `world-group.expand` | `src/components/world-group/WorldGroupDetail.tsx:98` |
 | `world-group.suggest` | `src/components/world-group/WorldGroupOverview.tsx:57` |
-| `worldview.dimension` | `src/components/worldview/WorldviewHumanityPanel.tsx:352`<br/>`src/components/worldview/WorldviewNaturalPanel.tsx:284`<br/>`src/components/worldview/WorldviewOriginPanel.tsx:262`<br/>`src/lib/agent/world-origin-copilot.ts:166` |
+| `worldview.dimension` | `src/components/worldview/WorldviewHumanityPanel.tsx:352`<br/>`src/components/worldview/WorldviewNaturalPanel.tsx:284`<br/>`src/components/worldview/WorldviewOriginPanel.tsx:262` |
 | `worldview.divine` | `src/components/worldview/WorldviewOriginPanel.tsx:361` |
 | `worldview.divine.split` | `src/components/worldview/WorldviewOriginPanel.tsx:385` |
 
@@ -251,10 +251,13 @@ AI 输出经 `adopt({ target, data })` 写回,只有这里登记的字段可写(
 
 - `src/components/editor/ReviewPanel.tsx:152 · ai.start`
 - `src/components/settings/NS0EvalPanel.tsx:50 · chat`
-- `src/lib/agent/outline-copilot.ts:421 · chat`
-- `src/lib/agent/prose-copilot.ts:467 · chat`
+- `src/lib/agent/character-copilot.ts:391 · chat`
+- `src/lib/agent/inspiration-copilot.ts:249 · chat`
+- `src/lib/agent/outline-copilot.ts:429 · chat`
+- `src/lib/agent/prose-copilot.ts:475 · chat`
+- `src/lib/agent/world-origin-copilot.ts:173 · chat`
 - `src/lib/generation/workflow-generation-node.ts:23 · ai.start`
 
 ---
 
-生成时间基准:commit `f6453f4`
+生成时间基准:commit `2069973`

@@ -8,7 +8,7 @@ import {
   type ReverseMultiWorldResult,
   type ReverseResult,
 } from '../ai/inspiration-reverse'
-import { chat } from '../ai/client'
+import { chat, resolveRequestConfig } from '../ai/client'
 import { db } from '../db/schema'
 import type {
   GenerationGateIssue,
@@ -51,6 +51,7 @@ export interface InspirationCopilotInput {
   parentVersionId: string | null
   snapshot: InspirationWorkspaceSnapshot
   config: AIConfig
+  routingCategory?: string
   signal?: AbortSignal
 }
 
@@ -161,6 +162,7 @@ export async function prepareInspirationCopilot(input: {
   projectId: number
   selectedFragmentIds: string[]
   authorRequest: string
+  routingCategory?: string
   signal?: AbortSignal
 }): Promise<PreparedInspirationCopilot> {
   const project = await db.projects.get(input.projectId)
@@ -178,7 +180,11 @@ export async function prepareInspirationCopilot(input: {
     throw new Error('所选灵感碎片已不存在或不属于当前项目。')
   }
 
-  const config = useAIConfigStore.getState().config
+  const routingCategory = input.routingCategory ?? 'inspiration.reverse'
+  const config = resolveRequestConfig(
+    useAIConfigStore.getState().config,
+    { category: routingCategory },
+  ).config
   const context = await executeAgentTool(
     'read_inspiration_workspace',
     {
@@ -208,6 +214,7 @@ export async function prepareInspirationCopilot(input: {
     parentVersionId: parent?.id ?? null,
     snapshot,
     config,
+    routingCategory,
     signal: input.signal,
   }
   const node = createInspirationCopilotNode(nodeInput)
@@ -240,7 +247,7 @@ export function createInspirationCopilotNode(
     })
   })
   const runAI = dependencies.runAI ?? (messages => chat(messages, input.config, {
-    category: 'inspiration.reverse',
+    category: input.routingCategory ?? 'inspiration.reverse',
     projectId: input.projectId,
     configOverrides: { maxTokens: 6000 },
     contextOverflowPolicy: 'reject',
