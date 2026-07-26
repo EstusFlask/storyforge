@@ -157,6 +157,54 @@
 - `src/components/settings/prompt/WorkflowRunner.tsx`
 - `docs/TRANSPARENT-GENERATION-PIPELINE.md`
 
+## FLOW-1 可视化节点创作工作流
+
+### 已有能力
+
+- `PromptWorkflow` 已提供全局系统/用户工作流、线性步骤、Prompt 模块、参数、作者提示、
+  暂停确认和六类显式保存目标。
+- `promptWorkflows` 已作为全局配置表登记在 `PROJECT_TABLES`；工作流可保存、克隆、删除
+  以及通过专用 JSON 导入导出。
+- `WorkflowRunner` 已支持逐步执行、暂停、跳过、重试、编辑输出和作者点击保存；写作品时
+  继续使用既有 `adopt()`。
+- `createWorkflowGenerationNode()` 已把每个步骤适配到统一 `GenerationNode`，运行默认
+  只产生候选，不自动采纳。
+- Prompt 变量装配已经能够从已登记 `CONTEXT_SOURCES` 获取项目事实，模型路由与消耗统计
+  由现有 AI 基础设施承担。
+- 第一阶段已在 `PromptWorkflow` 增加可选 v1 `graph`；图节点只保存步骤 ID 与布局，
+  显式边保存来源、目标和目标变量。旧行无图时只生成内存兼容图，不后台迁移。
+- 纯代码图编译支持分叉、汇合和稳定拓扑顺序，并在保存、导入与执行前阻断悬空引用、
+  重复节点/边、自环、非法端口和环路。
+- 工作区“节点工作流”提供画布、拖动、缩放、输入/输出端口、连线清理、顺序视图、
+  节点检查器和执行状态图；系统工作流只读，克隆后才可编辑。
+- 显式图的目标节点只读取自己的声明入边；较早节点重新生成或编辑会作废后序候选。
+  执行继续复用 `GenerationNode`，作品只有作者点击保存后才经既有 `adopt()` 写回。
+- 节点布局、连线、变量和视口跟随工作流保存、克隆与专用 JSON 导入导出；项目备份和
+  项目删除仍不携带全局配方。
+
+### 当前边界 / 尚未完成
+
+- 工作流运行产物只在当前会话内；尚无运行历史表，这一边界在 FLOW-1 第一阶段保持不变。
+- 循环、条件、并行模型调用、脚本/插件节点、持久运行历史和 Agent 自动生成图尚未交付；
+  后续必须独立登记阶段，不能绕过 Tool Registry、Canon 或作者确认。
+
+### 新功能必须复用
+
+- 图节点业务配置仍以 `PromptWorkflowStep` 为唯一来源，布局不能复制 Prompt/参数。
+- 图执行必须编译回现有步骤与 `GenerationNode`，作品写回必须保留作者确认。
+- 旧工作流无 `graph` 时运行语义不得变化；兼容布局只能在内存生成，不能后台改写用户行。
+- 图是全局可复用配方，不是项目手稿；第一阶段继续跟随 `promptWorkflows` 生命周期。
+
+### 代码与设计入口
+
+- `src/lib/types/workflow.ts`
+- `src/stores/workflow.ts`
+- `src/lib/generation/workflow-generation-node.ts`
+- `src/components/settings/prompt/PromptWorkflowsPanel.tsx`
+- `src/components/settings/prompt/WorkflowEditor.tsx`
+- `src/components/settings/prompt/WorkflowRunner.tsx`
+- `docs/VISUAL-WORKFLOW-DESIGN.md`
+
 ## WORLD-1 世界知识、词条、地图与修炼
 
 ### 已有能力

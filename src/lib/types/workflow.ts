@@ -57,6 +57,39 @@ export interface PromptWorkflowStep {
   saveTarget?: SaveTarget
 }
 
+/** FLOW-1 · 画布节点只保存布局，业务配置仍唯一来自 PromptWorkflowStep。 */
+export interface PromptWorkflowGraphNode {
+  stepId: string
+  x: number
+  y: number
+}
+
+/**
+ * FLOW-1 · 一条显式数据边。
+ *
+ * source 节点的作者确认输出会写入 target 节点的 targetVariable；作品数据仍由
+ * target Prompt 声明的 CONTEXT_SOURCES 读取，边不能变成数据库旁路。
+ */
+export interface PromptWorkflowGraphEdge {
+  edgeId: string
+  sourceStepId: string
+  targetStepId: string
+  targetVariable: string
+}
+
+export interface PromptWorkflowGraphViewport {
+  x: number
+  y: number
+  zoom: number
+}
+
+export interface PromptWorkflowGraph {
+  version: 1
+  nodes: PromptWorkflowGraphNode[]
+  edges: PromptWorkflowGraphEdge[]
+  viewport?: PromptWorkflowGraphViewport
+}
+
 export interface PromptWorkflow {
   id?: number
   scope: 'system' | 'user'
@@ -65,6 +98,11 @@ export interface PromptWorkflow {
   /** 适用题材标签（与 PromptTemplate.genres 对齐） */
   genres?: string[]
   steps: PromptWorkflowStep[]
+  /**
+   * FLOW-1 可视化 DAG。旧行为空时继续按 steps 线性执行，并在编辑器内生成兼容布局；
+   * 不需要 DB schema/index 迁移。
+   */
+  graph?: PromptWorkflowGraph
   /** 是否为默认推荐 */
   isDefault?: boolean
   createdAt: number

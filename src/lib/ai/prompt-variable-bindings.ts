@@ -37,6 +37,8 @@ export interface AssembleBoundPromptInput {
   outlineNodeId?: number | null
   chapterId?: number | null
   previousOutput?: string
+  /** FLOW-1 入边按目标变量分组后的已确认节点输出。 */
+  workflowValues?: Record<string, string>
   userHint?: string
   manualValues?: Record<string, string>
   parameterValues?: Record<string, unknown>
@@ -68,7 +70,9 @@ export async function assembleBoundPrompt(input: AssembleBoundPromptInput): Prom
   if (hasAutomaticProjectInput && !input.project?.id) missingScopes.add('project')
 
   const unresolvedSources = bindings
-    .filter(binding => binding.required && !input.manualValues?.[binding.variable]?.trim())
+    .filter(binding => binding.required
+      && !input.manualValues?.[binding.variable]?.trim()
+      && !input.workflowValues?.[binding.variable]?.trim())
     .flatMap(binding => binding.sourceKeys ?? [])
     .map(key => CONTEXT_SOURCE_BY_KEY.get(key))
     .filter(Boolean)
@@ -97,9 +101,16 @@ export async function assembleBoundPrompt(input: AssembleBoundPromptInput): Prom
     if (binding.sourceKeys?.length) {
       parts.push(`从下方统一项目上下文中选取与“${binding.label}”相关的已确认资料。`)
     }
+    const workflowValue = input.workflowValues?.[binding.variable]?.trim() || ''
+    if (workflowValue) parts.push(`【工作流上游节点输出】\n${workflowValue}`)
     const manual = input.manualValues?.[binding.variable]?.trim() || ''
     if (manual) parts.push(`【作者补充或修正】\n${manual}`)
     variables[binding.variable] = parts.join('\n\n')
+  }
+  for (const [variable, value] of Object.entries(input.workflowValues ?? {})) {
+    if (!bindings.some(binding => binding.variable === variable)) {
+      variables[variable] = value
+    }
   }
 
   const assembled = input.project?.id && sourceKeys.length && !missingScopes.has('world')
@@ -116,6 +127,7 @@ export async function assembleBoundPrompt(input: AssembleBoundPromptInput): Prom
     .filter(binding => {
       if (!binding.required) return false
       if (input.manualValues?.[binding.variable]?.trim()) return false
+      if (input.workflowValues?.[binding.variable]?.trim()) return false
       if (input.project && binding.projectField && readPromptProjectField(input.project, binding.projectField)) return false
       if (binding.sourceKeys?.some(key => includedSources.has(key))) return false
       return true

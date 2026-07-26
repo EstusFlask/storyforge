@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useMemo, useRef } from 'react'
 import { Play, Square } from 'lucide-react'
 import { usePromptStore } from '../../../stores/prompt'
 import { useWorldviewStore } from '../../../stores/worldview'
@@ -25,6 +25,13 @@ import { createWorkflowGenerationNode } from '../../../lib/generation/workflow-g
 import { useToast } from '../../shared/Toast'
 import WorkflowStepCard from './WorkflowStepCard'
 import type { StepResult } from './WorkflowStepCard'
+import WorkflowExecutionGraph from './WorkflowExecutionGraph'
+import {
+  collectWorkflowUpstreamInputs,
+  compileWorkflowGraph,
+  formatWorkflowUpstreamContext,
+  groupWorkflowInputsByVariable,
+} from '../../../lib/workflow/graph'
 
 export { WorkflowStepCard as StepCard } from './WorkflowStepCard'
 export type { StepResult } from './WorkflowStepCard'
@@ -63,6 +70,18 @@ export default function WorkflowRunner({ workflow, project, onClose }: RunnerPro
   const { loadAll: loadForeshadows } = useForeshadowStore()
   const activeGroupId = useWorldGroupStore(s => s.activeGroupId)
   const [savedSteps, setSavedSteps] = useState<Set<string>>(new Set())
+  const graphCompilation = useMemo(() => {
+    try {
+      return { compiled: compileWorkflowGraph(workflow), error: null as string | null }
+    } catch (error) {
+      return {
+        compiled: null,
+        error: error instanceof Error ? error.message : String(error),
+      }
+    }
+  }, [workflow])
+  const executionSteps = graphCompilation.compiled?.orderedSteps ?? []
+  const usesExplicitGraph = workflow.graph != null
 
   /**
    * 步骤输出累加器(FB-1 修复 · 缺陷 A)。
@@ -188,7 +207,7 @@ export default function WorkflowRunner({ workflow, project, onClose }: RunnerPro
 
   const [results, setResults] = useState<Map<string, StepResult>>(() => {
     const m = new Map<string, StepResult>()
-    workflow.steps.forEach(s => m.set(s.stepId, { stepId: s.stepId, output: '', status: 'pending' }))
+    executionSteps.forEach(s => m.set(s.stepId, { stepId: s.stepId, output: '', status: 'pending' }))
     return m
   })
   const [currentIndex, setCurrentIndex] = useState(0)
@@ -204,6 +223,31 @@ export default function WorkflowRunner({ workflow, project, onClose }: RunnerPro
   }
 
   /**
+   * 重新生成或改写较早节点后，旧的后序候选已经基于过期输入，不能继续展示为可保存结果。
+   * v1 仍是按稳定拓扑顺序串行执行，因此保守地作废该位置之后的全部候选，避免为省调用
+   * 错把独立分支与旧依赖结果混在同一次运行里。
+   */
+  const invalidateFromIndex = (startIndex: number) => {
+    const invalidated = executionSteps.slice(startIndex)
+    if (!invalidated.length) return
+    const invalidatedIds = new Set(invalidated.map(step => step.stepId))
+    invalidatedIds.forEach(stepId => stepOutputsRef.current.delete(stepId))
+    setSavedSteps(current => new Set([...current].filter(stepId => !invalidatedIds.has(stepId))))
+    setResults(current => {
+      const next = new Map(current)
+      invalidated.forEach(step => {
+        next.set(step.stepId, {
+          stepId: step.stepId,
+          output: '',
+          status: 'pending',
+        })
+      })
+      return next
+    })
+    setCurrentIndex(startIndex)
+  }
+
+  /**
    * 为第 idx 步装配上下文(FB-1 修复 · 缺陷 B：走 assembleContext,不再裸 renderPrompt)。
    * - 项目元信息 projectName/genres + 维度 dimension + userHint(此前全空,AI 失去依据)
    * - 经注册表 assembleContext 拉取已存项目设定(故事核心/世界观/角色/力量/词条)+ 真实与幻想规则
@@ -215,9 +259,12 @@ export default function WorkflowRunner({ workflow, project, onClose }: RunnerPro
     step: PromptWorkflowStep,
     idx: number,
   ): Promise<Record<string, string | number | undefined>> => {
-    // ① 上一步输出(经 ref 累加器 → 修复闭包陈旧 · 缺陷 A)
-    const prevStep = idx > 0 ? workflow.steps[idx - 1] : undefined
+    // ① FLOW-1 显式图只读取自己的入边；旧工作流保持紧邻上一步兼容语义。
+    const prevStep = idx > 0 ? executionSteps[idx - 1] : undefined
     const prevOut = prevStep ? (stepOutputsRef.current.get(prevStep.stepId) ?? '') : ''
+    const upstreamInputs = usesExplicitGraph && graphCompilation.compiled
+      ? collectWorkflowUpstreamInputs(graphCompilation.compiled, step.stepId, stepOutputsRef.current)
+      : undefined
 
     // ② 走注册表拉取已存项目设定 + 真实与幻想规则(单一事实源,不在此手挑 buildXxxContext · 缺陷 B)
     let assembledText = ''
@@ -249,13 +296,14 @@ export default function WorkflowRunner({ workflow, project, onClose }: RunnerPro
       assembledContext: assembledText,
       worldRulesContext: worldRulesText,
       userInput: userInputsRef.current.get(step.stepId),
+      upstreamInputs,
     })
     return ctx
   }
 
   /** 执行第 idx 步 */
   const runStep = async (idx: number) => {
-    const step = workflow.steps[idx]
+    const step = executionSteps[idx]
     if (!step) return
     const promptState = usePromptStore.getState()
     const tpl = step.templateId != null
@@ -269,11 +317,23 @@ export default function WorkflowRunner({ workflow, project, onClose }: RunnerPro
       let messages
       if (tpl.variableBindings?.length) {
         const wg = project?.enableMultiWorld ? activeGroupId : null
+        const upstreamInputs = usesExplicitGraph && graphCompilation.compiled
+          ? collectWorkflowUpstreamInputs(graphCompilation.compiled, step.stepId, stepOutputsRef.current)
+          : []
+        const legacyPreviousOutput = idx > 0
+          ? stepOutputsRef.current.get(executionSteps[idx - 1].stepId)
+          : ''
+        const workflowContext = usesExplicitGraph
+          ? formatWorkflowUpstreamContext(upstreamInputs)
+          : legacyPreviousOutput
         const bound = await assembleBoundPrompt({
           template: tpl,
           project,
           worldGroupId: wg,
-          previousOutput: idx > 0 ? stepOutputsRef.current.get(workflow.steps[idx - 1].stepId) : '',
+          previousOutput: workflowContext,
+          workflowValues: usesExplicitGraph
+            ? groupWorkflowInputsByVariable(upstreamInputs)
+            : undefined,
           userHint: userInputsRef.current.get(step.stepId),
           manualValues: step.inputValues,
           parameterValues: step.parameterValues,
@@ -308,9 +368,9 @@ export default function WorkflowRunner({ workflow, project, onClose }: RunnerPro
       setCurrentIndex(idx + 1)
 
       // 是否暂停等用户确认
-      if (step.userConfirmRequired && idx < workflow.steps.length - 1) {
+      if (step.userConfirmRequired && idx < executionSteps.length - 1) {
         setGlobalStatus('paused')
-      } else if (idx === workflow.steps.length - 1) {
+      } else if (idx === executionSteps.length - 1) {
         setGlobalStatus('completed')
       } else {
         // 继续下一步
@@ -326,12 +386,14 @@ export default function WorkflowRunner({ workflow, project, onClose }: RunnerPro
   }
 
   const handleStart = () => {
+    if (!graphCompilation.compiled) return
     stepOutputsRef.current.clear() // 全新运行:清空上一轮的步骤输出累加器
     setGlobalStatus('running')
     runStep(currentIndex)
   }
 
   const handleContinue = () => {
+    if (!graphCompilation.compiled) return
     setGlobalStatus('running')
     runStep(currentIndex)
   }
@@ -342,6 +404,7 @@ export default function WorkflowRunner({ workflow, project, onClose }: RunnerPro
   }
 
   const handleRetryStep = (idx: number) => {
+    invalidateFromIndex(idx)
     setGlobalStatus('running')
     runStep(idx)
   }
@@ -362,6 +425,7 @@ export default function WorkflowRunner({ workflow, project, onClose }: RunnerPro
           {globalStatus === 'idle' && (
             <button
               onClick={handleStart}
+              disabled={!graphCompilation.compiled || executionSteps.length === 0}
               className="flex items-center gap-1.5 px-4 py-2 bg-accent text-white text-sm rounded hover:bg-accent-hover"
             >
               <Play className="w-4 h-4" /> 开始
@@ -392,6 +456,12 @@ export default function WorkflowRunner({ workflow, project, onClose }: RunnerPro
         </div>
       </div>
 
+      {graphCompilation.error && (
+        <div role="alert" className="px-3 py-2 rounded bg-error/10 text-error text-xs whitespace-pre-wrap">
+          工作流图无法执行：{graphCompilation.error}
+        </div>
+      )}
+
       {/* 全局状态 */}
       {globalStatus !== 'idle' && (
         <div className={`px-3 py-2 rounded text-xs ${
@@ -400,16 +470,18 @@ export default function WorkflowRunner({ workflow, project, onClose }: RunnerPro
           globalStatus === 'paused' ? 'bg-warning/10 text-warning' :
           'bg-info/10 text-info'
         }`}>
-          {globalStatus === 'running' && `▶ 正在运行第 ${currentIndex + 1} / ${workflow.steps.length} 步...`}
+          {globalStatus === 'running' && `▶ 正在运行第 ${currentIndex + 1} / ${executionSteps.length} 步...`}
           {globalStatus === 'paused' && `⏸ 已暂停（第 ${currentIndex + 1} 步等待你审核）`}
           {globalStatus === 'completed' && `✓ 工作流完成`}
           {globalStatus === 'aborted' && `✗ 已中止`}
         </div>
       )}
 
+      <WorkflowExecutionGraph workflow={workflow} results={results} />
+
       {/* 步骤列表 */}
       <div className="space-y-2">
-        {workflow.steps.map((step, idx) => (
+        {executionSteps.map((step, idx) => (
           <WorkflowStepCard
             key={step.stepId}
             step={step}
@@ -423,9 +495,19 @@ export default function WorkflowRunner({ workflow, project, onClose }: RunnerPro
             onOutputChange={(output) => {
               stepOutputsRef.current.set(step.stepId, output)
               updateResult(step.stepId, { output })
+              setSavedSteps(current => {
+                const next = new Set(current)
+                next.delete(step.stepId)
+                return next
+              })
+              if (idx < executionSteps.length - 1) {
+                invalidateFromIndex(idx + 1)
+                setGlobalStatus('paused')
+              }
             }}
             saved={savedSteps.has(step.stepId)}
             hasProject={!!project?.id}
+            actionsDisabled={globalStatus === 'running'}
           />
         ))}
       </div>

@@ -48,9 +48,12 @@
 | 6 | **AUTHOR-1 长篇编辑与作者风格智能** | 提高长篇改稿、个人风格保持和既有作品续写能力 | `EDITOR-5` 与 `FB-5` 高级校准已完成；`FB-4` 已完成可行性审查并在来源/版本/剧情记忆地基就绪前设计暂缓，TipTap 长期优化独立登记 | 实体引用安全重映射；批量改稿预览/快照/撤销；有界改稿样本与作者确认式风格校准；原稿续写不以低保真摘要冒充剧情事实 | **CURRENT SCOPE COMPLETE；FB-4 DESIGN DEFERRED（2026-07-25）** |
 | 7 | **IDEA-1 灵感与参考资料演化** | 让灵感和参考资料持续融合、更新、追溯 | `CM-1` 与参考分析版本演化已完成；剧情连续性胶囊仍唯一归未来 `FB-4A` | 灵感与参考分析均具备来源、版本、差异和作者确认边界；失败分析不覆盖当前上下文，原文断点不进入便携备份 | **CURRENT SCOPE COMPLETE（2026-07-25）** |
 | 8 | **AGENT-1 对话副驾与 Agent 团队** | 用对话组合调用现有能力，不重写面板业务 | Phase 27.1-a Tool Registry、27.1-b 只读 AgentRunner、27.1-c 世界来源 MVP 与 27.1-d 灵感反推/角色生成两个独立闭环已完成；继续大纲/正文领域、27.1-e、27.2b、整理本章 Agent、一致性 Agent、per-role 模型和预算 | Tool Registry 薄封装；前台写入必确认；后台默认只读；Canon 负责校验 | **IN PROGRESS；27.1-d 两个领域闭环 COMPLETE（2026-07-26）** |
-| 9 | **SIM-1 世界模拟与互动叙事** | 通向跑团、文字游戏、陪伴角色和大型游戏运行时 | Phase 27.3 NPC 演进、世界时间线、位置/状态/能力/生命周期、角色碰撞 | 创作 Canon 与运行时状态分层；模拟不得污染作者原稿 | **LONG-TERM；WORLD + CANON + AGENT** |
-| 10 | **PRODUCT-1 新手转化、数据主权与开源信任** | 让新用户快速得到成果，成熟用户敢托付手稿，贡献者能参与 | `AUDIT-5/8/9/10/11`、升级前快照、加密备份、帮助系统、i18n、安全/贡献/发布政策 | 首次成果闭环、Labs 隐藏、备份恢复可信、隐私和贡献流程清楚 | **DESIGN；可错峰** |
-| 11 | **PLATFORM-1 协作与社区广场** | 支撑作品发布、发现、讨论、协作和社区治理 | 协同编辑、账号/权限、云同步、发布发现、评论社群、内容治理 | 先完成后端、身份、同步冲突、隐私和治理架构；不在纯前端上硬叠 | **LONG-TERM；独立架构立项** |
+| 9 | **FLOW-1 可视化节点创作工作流** | 让作者像使用 ComfyUI 一样拖拽、连线、检查并运行创作流程 | 第一阶段已交付现有 `PromptWorkflow` 的可视化 DAG、画布、持久化图、确定性校验、拓扑执行、候选失效和确认写回；后续条件/规则节点须另立阶段 | 不建第二套 AI/Runner/写回；旧工作流无损兼容；作者可完成创建、连线、保存、刷新、运行与确认的真实闭环 | **PHASE 1 COMPLETE（2026-07-26）** |
+| 10 | **SIM-1 世界模拟与互动运行时** | 为跑团、角色聊天、文字游戏和 NPC 演进提供共同状态与事件地基 | 世界实例、时间线、位置/状态/能力/生命周期、事件流、确定性随机、记忆和角色碰撞 | 创作 Canon 与运行时状态分层；模拟不得污染作者原稿；状态变化可回放、可分支 | **DESIGN；WORLD + CANON + AGENT + FLOW** |
+| 11 | **TTRPG-1 跑团与战役主持** | 在 StoryForge 世界中进行单机跑团、规则判定和长期战役 | 战役、角色卡、AI GM、骰子/技能检定、场景、回合、事件日志和会话续接 | AI 叙事与确定性判定分离；第一阶段不做联网多人；战役日志不冒充创作 Canon | **DEPENDENT；SIM-1** |
+| 12 | **CHATGAME-1 角色聊天与冒险** | 提供类似酒馆的角色聊天、长期记忆、多角色房间和文字冒险 | 单角色聊天、用户身份/场景、分支、长期记忆、多角色调度、地点/物品/能力与冒险选择 | 角色知识边界真实；运行时人格/状态不自动反写角色主档；游戏事件只能候选式回流创作层 | **DEPENDENT；SIM-1，后续 PLATFORM-1** |
+| 13 | **PRODUCT-1 新手转化、数据主权与开源信任** | 让新用户快速得到成果，成熟用户敢托付手稿，贡献者能参与 | `AUDIT-5/8/9/10/11`、升级前快照、加密备份、帮助系统、i18n、安全/贡献/发布政策 | 首次成果闭环、Labs 隐藏、备份恢复可信、隐私和贡献流程清楚 | **DESIGN；可错峰** |
+| 14 | **PLATFORM-1 协作与社区广场** | 支撑作品发布、发现、讨论、协作和社区治理 | 协同编辑、账号/权限、云同步、发布发现、评论社群、内容治理 | 先完成后端、身份、同步冲突、隐私和治理架构；不在纯前端上硬叠 | **LONG-TERM；独立架构立项** |
 
 ## 三、严格施工顺序
 
@@ -62,7 +65,33 @@
 6. ✅ STORY-1（2026-07-25）：CF-9C 持久化角色驱动工作区与 CF-12 中途角色变化影响分析、作者确认式未来大纲 patch 已收口。
 7. ✅ AUTHOR-1 当前范围与 IDEA-1 / CM-1（2026-07-25）：安全实体改名、互动文风校准、FB-4 可行性审查和增量灵感融合已收口。
 8. ✅ IDEA-1 参考资料演化（2026-07-25）：来源声明、分析版本、失败隔离、持久化续跑、差异、激活、回滚和便携生命周期已收口；不冒充剧情连续性胶囊。
-9. 🔄 AGENT-1 → SIM-1 → PRODUCT-1 / PLATFORM-1：按上表依赖和设计状态继续，不越过需要先收敛方案的开发单位。
+9. ✅ FLOW-1 第一阶段（2026-07-26）：以现有 PromptWorkflow、GenerationNode、
+   三注册表和 Agent 地基交付可视化 DAG、持久化、拓扑执行和作者确认闭环；后续扩展不
+   得恢复平行 Runner，也不等于放弃 AGENT-1 的大纲/正文领域。
+10. ⏳ AGENT-1 剩余领域 → SIM-1 共同运行时 → TTRPG-1 / CHATGAME-1 →
+    PRODUCT-1 / PLATFORM-1：互动产品必须先共享 SIM 状态层，不为跑团和角色聊天各建一套引擎。
+
+### FLOW-1 第一阶段交付卡
+
+- **用户故事**：作者可以像使用 ComfyUI 一样，在画布中拖动创作节点、连接数据流、
+  保存并运行工作流；每个 AI 产物仍由作者确认，项目写回仍走现有安全入口。
+- **主归属**：FLOW-1。复用 PIPE-1 的 `GenerationNode`、Phase 16/17 的
+  `PromptWorkflow/WorkflowRunner`、AGENT-1 的模型执行基础和 CANON-1 gate。
+- **读**：节点模板声明所需项目事实继续经 `CONTEXT_SOURCES → assembleContext()`；
+  前序节点已确认输出作为本次运行快照显式注入。
+- **写**：图配置写回已登记的全局 `promptWorkflows`；作品字段只在作者点击保存后经
+  `FIELD_REGISTRY / AdoptionSchema → adopt()`。
+- **表与迁移**：第一阶段不新增表、不升 schema；可选 `graph` 与 `steps` 同行持久化，
+  跟随既有工作流保存、克隆和专用 JSON 导入导出。
+- **非范围**：循环、条件、并行调用、脚本/插件节点、运行历史持久化、自动生成图、
+  跑团状态和聊天记忆。
+- **验收**：旧线性工作流兼容；分叉/汇合、环路拒绝和稳定拓扑有反例；真实项目完成
+  创建、连线、保存刷新、真实 AI 运行和编辑确认，并证明未点击保存时零作品写入；
+  显式写回继续由既有 `adopt()` 回归覆盖；完整 CI 与 Chromium E2E。
+- **交付**：工作区“节点工作流”入口、画布/节点检查器/运行状态图、`PromptWorkflow.graph`
+  v1、稳定拓扑编译、显式入边装配、后序候选失效、专用 JSON 往返和安全删除均已完成。
+  定向 7 文件/26 项与 Chromium 专项已通过；真实 Agnes 两节点链验证作者编辑值进入下游，
+  且未点击保存时作品数据不被主动写入。完整证据见 `VISUAL-WORKFLOW-DESIGN.md`。
 
 ### AGENT-1 当前阶段交付证据
 
@@ -217,6 +246,9 @@
 | `HEALTH-5` 的 i18n 部分 | PRODUCT-1 | 作为产品国际化能力 |
 | `Phase 27.1/27.2b` | AGENT-1 | 工具 → 执行 → 对话 → 多 Agent |
 | `Phase 27.3` | SIM-1 | 世界模拟，不塞进 Agent MVP |
+| 作者提出的 ComfyUI 式节点工作流 | FLOW-1 | 升级现有 PromptWorkflow 并编译到 GenerationNode，不建立平行工作流系统 |
+| 作者提出的跑团功能 | TTRPG-1 | 共用 SIM-1 状态、事件和规则层；多人联网等待 PLATFORM-1 |
+| 作者提出的酒馆式角色聊天冒险 | CHATGAME-1 | 共用 SIM-1 状态/记忆；角色主档与游戏运行时严格分层 |
 
 > 需要查看迁移前完整任务说明时，使用 [ROADMAP-LEGACY.md](../ROADMAP-LEGACY.md) 搜索原任务 ID。已完成任务的当前能力请先看 [CAPABILITY-BASELINE.md](./CAPABILITY-BASELINE.md)，不要直接根据历史标题重新实现。
 
@@ -231,6 +263,8 @@
 | 动态故事规划 | [`CHARACTER-DRIVEN-WORKSPACE-DESIGN.md`](../CHARACTER-DRIVEN-WORKSPACE-DESIGN.md)、[`CHARACTER-REVISION-WORKFLOW-DESIGN.md`](../CHARACTER-REVISION-WORKFLOW-DESIGN.md) |
 | 作者工具 / 灵感 | [`ENTITY-RENAME-DESIGN.md`](../ENTITY-RENAME-DESIGN.md)、[`STYLE-CALIBRATION-DESIGN.md`](../STYLE-CALIBRATION-DESIGN.md)、[`FB4-CONTINUATION-FEASIBILITY.md`](../FB4-CONTINUATION-FEASIBILITY.md)、[`INCREMENTAL-INSPIRATION-DESIGN.md`](../INCREMENTAL-INSPIRATION-DESIGN.md) |
 | Agent | [`AI-COPILOT-DESIGN.md`](../AI-COPILOT-DESIGN.md) |
+| 可视化节点工作流 | [`VISUAL-WORKFLOW-DESIGN.md`](../VISUAL-WORKFLOW-DESIGN.md) |
+| 跑团 / 角色聊天 / 互动运行时 | [`INTERACTIVE-RUNTIME-ROADMAP.md`](../INTERACTIVE-RUNTIME-ROADMAP.md) |
 
 设计文档提供方案细节，`README.md` 提供当前归属和施工顺序；两者冲突时，先停止开发并回到 `CLAUDE.md`、`MASTER-BLUEPRINT.md` 和本路线图裁决。
 

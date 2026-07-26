@@ -73,6 +73,42 @@ test('新用户可创建项目并进入工作区', async ({ page }) => {
   await expect(page.getByRole('button', { name: '章节', exact: true })).toBeVisible()
 })
 
+test('节点工作流可克隆、建立分支、保存刷新并完整清理', async ({ page }) => {
+  await openCleanHome(page)
+  await createProject(page, 'E2E 节点工作流')
+  await openSidebarLeaf(page, '创作区', '节点工作流')
+  await expect(page.getByRole('heading', { name: '节点工作流', exact: true })).toBeVisible()
+
+  await page.getByRole('button', { name: '克隆工作流 极速起书 · 通用', exact: true }).click()
+  await expect(page.getByRole('heading', { name: '极速起书 · 通用 (副本)', exact: true })).toBeVisible()
+  await page.getByRole('button', {
+    name: '编辑工作流 极速起书 · 通用 (副本)',
+    exact: true,
+  }).click()
+
+  await expect(page.getByRole('heading', { name: '节点工作流 · 极速起书 · 通用 (副本)' })).toBeVisible()
+  await expect(page.getByTestId('workflow-canvas')).toBeVisible()
+  await page.locator('aside input').first().fill('E2E FLOW 分支')
+  await page.getByRole('button', { name: '从 一句话故事 输出', exact: true }).click()
+  await page.getByRole('button', { name: '连接到 第一章正文', exact: true }).click()
+  await expect(page.getByText('一句话故事 → 第一章正文.chapterSummary', { exact: true })).toBeVisible()
+  await page.getByRole('button', { name: /^保存/ }).click()
+  await expect(page.getByRole('button', { name: '保存', exact: true })).toBeDisabled()
+
+  await page.reload()
+  await openSidebarLeaf(page, '创作区', '节点工作流')
+  await expect(page.getByRole('heading', { name: 'E2E FLOW 分支', exact: true })).toBeVisible()
+  await page.getByRole('button', { name: '编辑工作流 E2E FLOW 分支', exact: true }).click()
+  await expect(page.getByText('一句话故事 → 第一章正文.chapterSummary', { exact: true })).toBeVisible()
+
+  await page.getByRole('button', { name: '删除整个工作流', exact: true }).click()
+  const confirmDelete = page.locator('div.fixed.inset-0').filter({
+    hasText: '删除工作流「E2E FLOW 分支」？',
+  })
+  await confirmDelete.getByRole('button', { name: '删除', exact: true }).click()
+  await expect(page.getByRole('heading', { name: 'E2E FLOW 分支', exact: true })).toHaveCount(0)
+})
+
 test('人文知识主入口可保存拆分概述，并安全关联与断开城池地点', async ({ page }) => {
   await openCleanHome(page)
   await createProject(page, 'E2E 世界知识归并')

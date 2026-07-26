@@ -5,7 +5,7 @@ import {
   Ruler, BookOpen, FilePen, Eye,
   FileCog, History, Upload, Download, Settings,
   Map, ClipboardList, GitBranch, Clock, MapPin, Scale,
-  Drama, Package, CalendarClock, ScanSearch, Coins, Feather, Database, TrendingUp,
+  Drama, Package, CalendarClock, ScanSearch, Coins, Feather, Database, TrendingUp, Workflow,
 } from 'lucide-react'
 
 /**
@@ -40,6 +40,7 @@ export type SidebarModule =
   | 'rules'
   | 'outline'
   | 'character-driven-plot'  // Phase 26.3 — 角色驱动剧情
+  | 'visual-workflows'       // FLOW-1 — 可视化节点创作工作流
   | 'detailed-outline'      // 占位 (P8)
   | 'chapters-list'         // 占位 (P8)
   | 'editor'
@@ -143,6 +144,7 @@ export const MODULE_CONTENT_TYPES: Record<SidebarModule, ModuleContentType> = {
   rules: 'upstream',
   outline: 'upstream',
   'character-driven-plot': 'tool',
+  'visual-workflows': 'tool',
   'detailed-outline': 'upstream',
   'chapters-list': 'writing',
   editor: 'writing',
@@ -263,6 +265,7 @@ export const NAV_TREE: TreeSection[] = [
       leaf('rules',            '创作规则', Ruler),
       leaf('outline',          '大纲',     BookOpen),
       leaf('character-driven-plot', '角色驱动', Drama),
+      leaf('visual-workflows', '节点工作流', Workflow),
       leaf('story-arc',        '故事线',   GitBranch),
       leaf('chapters-list',    '章节',     FilePen),
       leaf('foreshadow',       '伏笔',     Eye),
