@@ -69,6 +69,14 @@ import {
   type ChapterOrganizationSelection,
 } from '../../lib/agent/chapter-organization'
 import { AgentTeamBudgetTracker } from '../../lib/agent/team-budget'
+import {
+  isConsistencyAgentCurrent,
+  persistConsistencyAgentCandidate,
+  readLatestConsistencyAgentRun,
+  runBackgroundConsistencyAgent,
+  toConsistencyAuditResult,
+  type ConsistencyAgentRun,
+} from '../../lib/agent/consistency-agent'
 
 const StateDiffModal = lazy(() => import('../state/StateDiffModal'))
 const OutlinePreview = lazy(() => import('../outline/OutlinePreview'))
@@ -139,6 +147,7 @@ export default function ChapterEditor({ project, outlineNodeId }: Props) {
   const memoryAI = useAIStream()
   const editorRef = useRef<RichEditorHandle>(null)
   const organizationAbortRef = useRef<AbortController | null>(null)
+  const consistencyRunRef = useRef<ConsistencyAgentRun | null>(null)
   const memoryRebuildInFlightRef = useRef(new Set<number>())
   const creatingChapterForOutlineRef = useRef(new Set<number>())
   const reviseReportRef = useRef<ReviewResult | null>(null)  // G8：记住上次"按报告修改"的报告，供重试
@@ -157,8 +166,14 @@ export default function ChapterEditor({ project, outlineNodeId }: Props) {
   const [organizingChapter, setOrganizingChapter] = useState(false)
   const [organizationError, setOrganizationError] = useState('')
   const [showOrganization, setShowOrganization] = useState(false)
+  const [consistencyRun, setConsistencyRun] = useState<ConsistencyAgentRun | null>(null)
+  const [consistencyCurrent, setConsistencyCurrent] = useState(false)
   const aiConfig = useAIConfigStore(s => s.config)
   const dialog = useDialog()
+
+  useEffect(() => {
+    consistencyRunRef.current = consistencyRun
+  }, [consistencyRun])
 
   // 字数（基于纯文本）
   const wordCount = useMemo(() => countWords(plainText), [plainText])
@@ -193,6 +208,29 @@ export default function ChapterEditor({ project, outlineNodeId }: Props) {
     })().catch(error => {
       if (active) setOrganizationError(error instanceof Error ? error.message : '读取整理记录失败')
     })
+    return () => { active = false }
+  }, [currentChapter?.id, project.id])
+  useEffect(() => {
+    let active = true
+    setConsistencyRun(null)
+    setConsistencyCurrent(false)
+    if (!currentChapter?.id) return () => { active = false }
+    void (async () => {
+      const run = await readLatestConsistencyAgentRun({
+        projectId: project.id!,
+        chapterId: currentChapter.id!,
+      })
+      const current = run ? await isConsistencyAgentCurrent(run.candidate) : false
+      if (!active) return
+      setConsistencyRun(run)
+      setConsistencyCurrent(current)
+      if (run) {
+        useReviewResultStore.getState().setConsistency(
+          currentChapter.id!,
+          toConsistencyAuditResult(run.candidate),
+        )
+      }
+    })()
     return () => { active = false }
   }, [currentChapter?.id, project.id])
   useEffect(() => {
@@ -303,6 +341,56 @@ export default function ChapterEditor({ project, outlineNodeId }: Props) {
     }
     return null
   }, [project.enableMultiWorld, outlineNode, nodes])
+
+  // 后台一致性 Agent：正文稳定落盘后只跑零 token 确定性守卫。
+  // 没有告警时不制造归档记录；LLM fast/deep 必须由质量审校面板中的明确按钮触发。
+  useEffect(() => {
+    let active = true
+    const chapterId = currentChapter?.id
+    const savedPlain = htmlToPlainText(savedContent).trim()
+    if (!chapterId || !savedPlain) return () => { active = false }
+    const timer = setTimeout(() => {
+      void (async () => {
+        if (consistencyRunRef.current) {
+          const current = await isConsistencyAgentCurrent(consistencyRunRef.current.candidate)
+          if (active) setConsistencyCurrent(current)
+        }
+        const budget = new AgentTeamBudgetTracker(
+          useAIConfigStore.getState().agentTeamBudgetProfile,
+        )
+        const candidate = await runBackgroundConsistencyAgent({
+          projectId: project.id!,
+          chapterId,
+          chapterTitle: outlineNode?.title || currentChapter.title || '未知章节',
+          worldGroupId: chapterWorldGroupId ?? null,
+          chapterContent: savedContent,
+          budget,
+        })
+        if (!active || candidate.findings.length === 0) return
+        const run = await persistConsistencyAgentCandidate(candidate)
+        if (!active) return
+        setConsistencyRun(run)
+        setConsistencyCurrent(true)
+        useReviewResultStore.getState().setConsistency(
+          chapterId,
+          toConsistencyAuditResult(candidate),
+        )
+      })().catch(error => {
+        console.error('[ConsistencyAgent] 后台确定性检查失败:', error)
+      })
+    }, 350)
+    return () => {
+      active = false
+      clearTimeout(timer)
+    }
+  }, [
+    chapterWorldGroupId,
+    currentChapter?.id,
+    currentChapter?.title,
+    outlineNode?.title,
+    project.id,
+    savedContent,
+  ])
   const entityReferences = useMemo(() => buildEditorEntityReferences({
     characters,
     itemEntries,
@@ -1106,6 +1194,7 @@ export default function ChapterEditor({ project, outlineNodeId }: Props) {
           hasOutline={!!outlineNodeId}
           showOutlinePreview={showOutlinePreview}
           showReviewPanel={showReviewPanel}
+          consistencyAlertCount={consistencyCurrent ? consistencyRun?.candidate.findings.length ?? 0 : 0}
           showNotePanel={showNotePanel}
           customInstruction={customInstruction}
           onGenerate={() => { void handleGenerate() }}
@@ -1173,6 +1262,15 @@ export default function ChapterEditor({ project, outlineNodeId }: Props) {
               stateContext={stateCards.slice(0, 10).map(sc => `${sc.category}:${sc.entityName} — ${sc.fields?.slice(0, 50)}`).join('\n')}
               onClose={() => setShowReviewPanel(false)}
               onReviseByReport={handleReviseByReport}
+              consistencyRun={consistencyRun}
+              consistencyCurrent={consistencyCurrent}
+              onConsistencyRun={run => {
+                setConsistencyRun(run)
+                setConsistencyCurrent(true)
+              }}
+              onBeforeConsistencyRun={async () => {
+                await persistCurrentEditorContent()
+              }}
             />
           </Suspense>
         </div>

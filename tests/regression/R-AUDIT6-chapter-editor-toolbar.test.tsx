@@ -18,6 +18,7 @@ async function mount(patch: Record<string, unknown> = {}) {
     hasOutline: true,
     showOutlinePreview: false,
     showReviewPanel: false,
+    consistencyAlertCount: 0,
     showNotePanel: false,
     customInstruction: '',
     onGenerate: vi.fn(),
@@ -109,5 +110,12 @@ describe('AUDIT-6 / HEALTH-4 · 正文编辑器工具栏', () => {
       input.dispatchEvent(new Event('input', { bubbles: true }))
     })
     expect(props.onCustomInstructionChange).toHaveBeenCalledWith('保持冷峻语气')
+  })
+
+  it('当前正文存在一致性告警时在审校入口显示计数', async () => {
+    const { host } = await mount({ consistencyAlertCount: 3 })
+    const review = Array.from(host.querySelectorAll('button'))
+      .find(item => item.textContent?.includes('质量审校'))
+    expect(review?.textContent).toContain('3')
   })
 })
