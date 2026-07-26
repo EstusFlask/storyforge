@@ -227,6 +227,29 @@ describe('R-CF20260702-10 · route storage and client boundary', () => {
     })
   })
 
+  it('persists safe Agent context profiles and sanitizes unknown values', async () => {
+    const {
+      AGENT_CONTEXT_PROFILES_KEY,
+      useAIConfigStore,
+    } = await import('../../src/stores/ai-config')
+    expect(useAIConfigStore.getState().agentContextProfiles['agent-prose']).toBe('balanced')
+    useAIConfigStore.getState().setAgentContextProfile('agent-prose', 'lean')
+    expect(JSON.parse(localStorage.getItem(AGENT_CONTEXT_PROFILES_KEY) || '{}')['agent-prose']).toBe('lean')
+
+    localStorage.setItem(AGENT_CONTEXT_PROFILES_KEY, JSON.stringify({
+      'agent-prose': 'lean',
+      'agent-outline': 'unbounded',
+      'future-agent': 'full',
+    }))
+    vi.resetModules()
+    const fresh = await import('../../src/stores/ai-config')
+    expect(fresh.useAIConfigStore.getState().agentContextProfiles).toMatchObject({
+      'agent-prose': 'lean',
+      'agent-outline': 'balanced',
+    })
+    expect(fresh.useAIConfigStore.getState().agentContextProfiles).not.toHaveProperty('future-agent')
+  })
+
   it('routes a real chat request and logs the actual provider, model and task kind', async () => {
     const routed = preset('local-writer', {
       provider: 'ollama',

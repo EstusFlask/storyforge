@@ -280,6 +280,10 @@ export interface AssembleContextInput {
   model?: string
   /** Test/override hook. When set, this is the real input budget used for trimming. */
   inputBudgetTokens?: number
+  /** 调用方的领域级输入上限；与模型窗口取较小值，不覆盖测试用精确预算。 */
+  inputBudgetMaxTokens?: number
+  /** 调用方只能按比例收窄每个登记源的软上限，不能放大或绕过注册表。 */
+  sourceBudgetScale?: number
   citedReferenceIds?: number[]
   previousChapterEnding?: string
   stateReferenceText?: string

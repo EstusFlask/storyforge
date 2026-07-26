@@ -1,4 +1,5 @@
 import type { AIProvider } from '../types/ai'
+import type { AgentContextPolicy } from './context-policy'
 
 export type AgentToolRisk = 'read' | 'generate' | 'write'
 
@@ -11,6 +12,8 @@ export interface AgentToolExecutionContext {
   worldGroupId?: number | null
   provider?: AIProvider
   model?: string
+  /** 只由宿主编排层注入；模型工具参数不能覆盖。 */
+  contextPolicy?: AgentContextPolicy
 }
 
 export interface AgentToolJsonSchema {

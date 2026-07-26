@@ -11,6 +11,13 @@ import { prepareGenerationNode } from '../generation/generation-node'
 import { adopt } from '../registry/adopt'
 import type { AdoptResult } from '../registry/types'
 import type { AIConfig, Worldview } from '../types'
+import {
+  mergeContextEvidence,
+  resolveAgentContextPolicy,
+  splitAgentContextPolicy,
+  type AgentContextEvidence,
+  type AgentContextProfile,
+} from './context-policy'
 import { executeAgentTool } from './tool-registry'
 
 const WORLD_ORIGIN_MAX_CHARS = 12_000
@@ -42,6 +49,7 @@ export interface PreparedWorldOriginCopilot {
   prepared: PreparedGenerationNode
   snapshot: WorldOriginSnapshot
   contextSources: string[]
+  contextEvidence: AgentContextEvidence
 }
 
 interface WorldOriginCopilotDependencies {
@@ -96,6 +104,7 @@ export async function prepareWorldOriginCopilot(
   input: Pick<WorldOriginCopilotScope, 'projectId' | 'worldGroupId'> & {
     authorRequest: string
     routingCategory?: string
+    contextProfile?: AgentContextProfile
     signal?: AbortSignal
   },
 ): Promise<PreparedWorldOriginCopilot> {
@@ -109,15 +118,18 @@ export async function prepareWorldOriginCopilot(
     useAIConfigStore.getState().config,
     { category: routingCategory },
   ).config
-  const toolContext = {
+  const contextProfile = input.contextProfile ?? 'full'
+  const contextPolicy = resolveAgentContextPolicy('agent-world-origin', contextProfile)
+  const [statusPolicy, worldviewPolicy] = splitAgentContextPolicy(contextPolicy, [1_400, 18_000])
+  const toolContextBase = {
     projectId: input.projectId,
     worldGroupId: input.worldGroupId,
     provider: config.provider,
     model: config.model,
   }
   const [status, worldview, row] = await Promise.all([
-    executeAgentTool('read_project_status', toolContext),
-    executeAgentTool('read_worldview', toolContext),
+    executeAgentTool('read_project_status', { ...toolContextBase, contextPolicy: statusPolicy }),
+    executeAgentTool('read_worldview', { ...toolContextBase, contextPolicy: worldviewPolicy }),
     readScopedWorldview(input.projectId, input.worldGroupId),
   ])
   for (const result of [status, worldview]) {
@@ -148,6 +160,7 @@ export async function prepareWorldOriginCopilot(
     prepared: prepareGenerationNode(node, nodeInput),
     snapshot,
     contextSources: [...status.meta.included, ...worldview.meta.included],
+    contextEvidence: mergeContextEvidence(contextProfile, [status.meta, worldview.meta]),
   }
 }
 

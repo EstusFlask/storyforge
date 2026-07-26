@@ -53,10 +53,22 @@ import {
   prepareWorldOriginCopilot,
   type WorldOriginSnapshot,
 } from './world-origin-copilot'
+import type {
+  AgentContextEvidence,
+  AgentContextTaskKind,
+} from './context-policy'
 import { executeAgentTool } from './tool-registry'
 
 export const DOMAIN_AGENT_IDS = ['world-origin', 'character', 'inspiration', 'outline', 'prose'] as const
 export type DomainAgentId = typeof DOMAIN_AGENT_IDS[number]
+
+const CONTEXT_TASK_BY_AGENT: Record<DomainAgentId, AgentContextTaskKind> = {
+  'world-origin': 'agent-world-origin',
+  character: 'agent-character',
+  inspiration: 'agent-inspiration',
+  outline: 'agent-outline',
+  prose: 'agent-prose',
+}
 
 export interface MasterAgentTask {
   id: string
@@ -76,6 +88,7 @@ export interface MasterCandidatePayload {
   agentId: DomainAgentId
   label: string
   contextSources: string[]
+  contextEvidence?: AgentContextEvidence
   baseSnapshot: unknown
   mode?: InspirationResultMode
   selectedFragmentIds?: string[]
@@ -354,6 +367,7 @@ export async function executeMasterAgentPlan(input: {
 }): Promise<ExecutedMasterCandidate[]> {
   const candidates: ExecutedMasterCandidate[] = []
   const outputs = new Map<string, string>()
+  const contextProfiles = useAIConfigStore.getState().agentContextProfiles
   for (const task of topologicalTasks(input.plan)) {
     if (input.signal?.aborted) throw new DOMException('Aborted', 'AbortError')
     input.onTask?.(task, 'running')
@@ -368,6 +382,7 @@ export async function executeMasterAgentPlan(input: {
           worldGroupId: input.worldGroupId,
           authorRequest: task.instruction,
           routingCategory: AGENT_ROLE_CATEGORIES['world-origin'],
+          contextProfile: contextProfiles[CONTEXT_TASK_BY_AGENT[task.agentId]],
           signal: input.signal,
         })
         const result = await runGenerationNode(prepared.node, prepared.prepared)
@@ -382,6 +397,7 @@ export async function executeMasterAgentPlan(input: {
             agentId: task.agentId,
             label: '世界来源',
             contextSources: prepared.contextSources,
+            contextEvidence: prepared.contextEvidence,
             baseSnapshot: prepared.snapshot,
             dependsOnTaskIds: task.dependsOn,
           },
@@ -397,6 +413,7 @@ export async function executeMasterAgentPlan(input: {
           authorRequest: task.instruction,
           supplementalContext: upstream,
           routingCategory: AGENT_ROLE_CATEGORIES.character,
+          contextProfile: contextProfiles[CONTEXT_TASK_BY_AGENT[task.agentId]],
           signal: input.signal,
         })
         const result = await runGenerationNode(prepared.node, prepared.prepared)
@@ -411,6 +428,7 @@ export async function executeMasterAgentPlan(input: {
             agentId: task.agentId,
             label: '新角色',
             contextSources: prepared.contextSources,
+            contextEvidence: prepared.contextEvidence,
             baseSnapshot: prepared.snapshot,
             dependsOnTaskIds: task.dependsOn,
           },
@@ -430,6 +448,7 @@ export async function executeMasterAgentPlan(input: {
           selectedFragmentIds,
           authorRequest: task.instruction,
           routingCategory: AGENT_ROLE_CATEGORIES.inspiration,
+          contextProfile: contextProfiles[CONTEXT_TASK_BY_AGENT[task.agentId]],
           signal: input.signal,
         })
         const result = await runGenerationNode(prepared.node, prepared.prepared)
@@ -444,6 +463,7 @@ export async function executeMasterAgentPlan(input: {
             agentId: task.agentId,
             label: '灵感反推版本',
             contextSources: prepared.contextSources,
+            contextEvidence: prepared.contextEvidence,
             baseSnapshot: prepared.snapshot,
             mode: prepared.mode,
             selectedFragmentIds,
@@ -461,6 +481,7 @@ export async function executeMasterAgentPlan(input: {
           authorRequest: task.instruction,
           supplementalContext: upstream,
           routingCategory: AGENT_ROLE_CATEGORIES.outline,
+          contextProfile: contextProfiles[CONTEXT_TASK_BY_AGENT[task.agentId]],
           signal: input.signal,
         })
         const result = await runGenerationNode(prepared.node, prepared.prepared)
@@ -475,6 +496,7 @@ export async function executeMasterAgentPlan(input: {
             agentId: task.agentId,
             label: prepared.label,
             contextSources: prepared.contextSources,
+            contextEvidence: prepared.contextEvidence,
             baseSnapshot: prepared.snapshot,
             outlineMode: prepared.mode,
             outlineParentId: prepared.parentVolumeId,
@@ -492,6 +514,7 @@ export async function executeMasterAgentPlan(input: {
           authorRequest: task.instruction,
           supplementalContext: upstream,
           routingCategory: AGENT_ROLE_CATEGORIES.prose,
+          contextProfile: contextProfiles[CONTEXT_TASK_BY_AGENT[task.agentId]],
           signal: input.signal,
         })
         const result = await runGenerationNode(prepared.node, prepared.prepared)
@@ -506,6 +529,7 @@ export async function executeMasterAgentPlan(input: {
             agentId: task.agentId,
             label: prepared.label,
             contextSources: prepared.contextSources,
+            contextEvidence: prepared.contextEvidence,
             baseSnapshot: prepared.snapshot,
             proseOperation: prepared.operation,
             proseOutlineNodeId: prepared.outlineNodeId,

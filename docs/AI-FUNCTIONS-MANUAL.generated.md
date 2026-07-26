@@ -187,7 +187,7 @@ AI 输出经 `adopt({ target, data })` 写回,只有这里登记的字段可写(
 
 | category | 触发文件 |
 |---|---|
-| `agent.orchestrator` | `src/lib/agent/orchestrator.ts:317` |
+| `agent.orchestrator` | `src/lib/agent/orchestrator.ts:330` |
 | `agent.readonly` | `src/lib/agent/client-adapter.ts:23` |
 | `ai.restructure` | `src/lib/ai/restructure.ts:54` |
 | `canon.setting.extract` | `src/components/facts/WorldConstitutionPanel.tsx:79` |
@@ -251,13 +251,13 @@ AI 输出经 `adopt({ target, data })` 写回,只有这里登记的字段可写(
 
 - `src/components/editor/ReviewPanel.tsx:152 · ai.start`
 - `src/components/settings/NS0EvalPanel.tsx:50 · chat`
-- `src/lib/agent/character-copilot.ts:391 · chat`
-- `src/lib/agent/inspiration-copilot.ts:249 · chat`
-- `src/lib/agent/outline-copilot.ts:429 · chat`
-- `src/lib/agent/prose-copilot.ts:475 · chat`
-- `src/lib/agent/world-origin-copilot.ts:173 · chat`
+- `src/lib/agent/character-copilot.ts:404 · chat`
+- `src/lib/agent/inspiration-copilot.ts:261 · chat`
+- `src/lib/agent/outline-copilot.ts:442 · chat`
+- `src/lib/agent/prose-copilot.ts:488 · chat`
+- `src/lib/agent/world-origin-copilot.ts:186 · chat`
 - `src/lib/generation/workflow-generation-node.ts:23 · ai.start`
 
 ---
 
-生成时间基准:commit `2069973`
+生成时间基准:commit `091e25b`

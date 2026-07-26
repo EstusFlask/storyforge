@@ -18,12 +18,16 @@ const LAYERS_BY_TRIM_PRIORITY: ContextLayer[] = ['L3', 'L2', 'L1']
  */
 function deriveInputBudget(input: AssembleContextInput): number {
   if (input.inputBudgetTokens && input.inputBudgetTokens > 0) return input.inputBudgetTokens
+  let modelBudget = FALLBACK_INPUT_BUDGET
   if (input.provider && input.model) {
     const preset = getModelPreset(input.provider, input.model)
     const budget = preset.maxContext - preset.maxOutput - Math.round(preset.maxContext * 0.05)
-    if (budget > 0) return budget
+    if (budget > 0) modelBudget = budget
   }
-  return FALLBACK_INPUT_BUDGET
+  if (input.inputBudgetMaxTokens && input.inputBudgetMaxTokens > 0) {
+    return Math.min(modelBudget, input.inputBudgetMaxTokens)
+  }
+  return modelBudget
 }
 
 export async function assembleContext(input: AssembleContextInput): Promise<AssembleContextResult> {
@@ -63,7 +67,11 @@ export async function assembleContext(input: AssembleContextInput): Promise<Asse
     }
     // 单一源也不能突破整个请求预算。L0/protected 只表示不得整段丢弃，
     // 不表示可以绕过总窗口；截断会留下显式标记并进入 tokens 元数据。
-    const capped = capBySourceBudget(content, Math.min(source.budgetTokens, inputBudget))
+    const sourceBudgetScale = Number.isFinite(input.sourceBudgetScale)
+      ? Math.max(0.1, Math.min(1, input.sourceBudgetScale!))
+      : 1
+    const scaledSourceBudget = Math.max(64, Math.floor(source.budgetTokens * sourceBudgetScale))
+    const capped = capBySourceBudget(content, Math.min(scaledSourceBudget, inputBudget))
     keyedSegments.push({
       key: source.key,
       segment: {

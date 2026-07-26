@@ -376,7 +376,11 @@ async function resolveScope(
     provider: context.provider,
     model: context.model,
     sourceKeys: [...spec.sourceKeys],
-    inputBudgetTokens: spec.inputBudgetTokens,
+    inputBudgetMaxTokens: Math.min(
+      spec.inputBudgetTokens,
+      context.contextPolicy?.maxInputTokens ?? spec.inputBudgetTokens,
+    ),
+    sourceBudgetScale: context.contextPolicy?.sourceBudgetScale,
   }
 }
 

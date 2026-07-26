@@ -27,6 +27,13 @@ import type {
   CharacterOrderAxis,
   CharacterRoleWeight,
 } from '../types'
+import {
+  mergeContextEvidence,
+  resolveAgentContextPolicy,
+  splitAgentContextPolicy,
+  type AgentContextEvidence,
+  type AgentContextProfile,
+} from './context-policy'
 import { executeAgentTool } from './tool-registry'
 
 export const MAX_CHARACTER_CANDIDATE_CHARS = 40_000
@@ -67,6 +74,7 @@ export interface PreparedCharacterCopilot {
   prepared: PreparedGenerationNode
   contextSources: string[]
   snapshot: CharacterRosterSnapshot
+  contextEvidence: AgentContextEvidence
 }
 
 interface CharacterCopilotDependencies {
@@ -297,6 +305,7 @@ export async function prepareCharacterCopilot(input: {
   /** 主 Agent 可把尚未写库的上游候选作为本轮显式证据传入，绝不冒充 Canon。 */
   supplementalContext?: string
   routingCategory?: string
+  contextProfile?: AgentContextProfile
   signal?: AbortSignal
 }): Promise<PreparedCharacterCopilot> {
   const project = await db.projects.get(input.projectId)
@@ -311,6 +320,9 @@ export async function prepareCharacterCopilot(input: {
     useAIConfigStore.getState().config,
     { category: routingCategory },
   ).config
+  const contextProfile = input.contextProfile ?? 'full'
+  const contextPolicy = resolveAgentContextPolicy('agent-character', contextProfile)
+  const [worldPolicy, characterPolicy] = splitAgentContextPolicy(contextPolicy, [18_000, 10_500])
   const executionContext = {
     projectId: input.projectId,
     worldGroupId,
@@ -318,8 +330,8 @@ export async function prepareCharacterCopilot(input: {
     model: config.model,
   }
   const [worldview, characters] = await Promise.all([
-    executeAgentTool('read_worldview', executionContext, {}),
-    executeAgentTool('read_characters', executionContext, {}),
+    executeAgentTool('read_worldview', { ...executionContext, contextPolicy: worldPolicy }, {}),
+    executeAgentTool('read_characters', { ...executionContext, contextPolicy: characterPolicy }, {}),
   ])
   if (!worldview.ok) throw new Error(worldview.error || '无法读取当前世界观。')
   if (!characters.ok) throw new Error(characters.error || '无法读取当前角色。')
@@ -351,6 +363,7 @@ export async function prepareCharacterCopilot(input: {
     prepared: prepareGenerationNode(node, nodeInput),
     contextSources: nodeInput.contextSources,
     snapshot: afterRead,
+    contextEvidence: mergeContextEvidence(contextProfile, [worldview.meta, characters.meta]),
   }
 }
 

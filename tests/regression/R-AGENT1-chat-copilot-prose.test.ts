@@ -148,6 +148,22 @@ describe('AGENT-1 27.1-d · ChatCopilot 正文闭环', () => {
     expect(await db.chapters.count()).toBe(0)
   })
 
+  it('主 Agent 正文档位收窄登记源预算并冻结实际输入证据', async () => {
+    const { project } = await seedProject()
+    const prepared = await prepareProseCopilot({
+      projectId: project.id!,
+      worldGroupId: null,
+      authorRequest: '请写第一章正文',
+      routingCategory: 'agent.prose',
+      contextProfile: 'lean',
+    })
+
+    expect(prepared.contextEvidence.profile).toBe('lean')
+    expect(prepared.contextEvidence.inputBudgetTokens).toBeLessThanOrEqual(24_000)
+    expect(prepared.contextEvidence.estimatedInputTokens).toBeGreaterThan(0)
+    expect(prepared.contextEvidence.included).toEqual(prepared.contextSources)
+  })
+
   it('主 Agent 正文角色使用独立模型预设，并按实际 provider/model 记录用量', async () => {
     const { project } = await seedProject()
     const globalConfig = {

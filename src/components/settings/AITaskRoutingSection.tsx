@@ -5,6 +5,12 @@ import {
   type AITaskKind,
   type AITaskRoutes,
 } from '../../lib/ai/task-routing'
+import {
+  AGENT_CONTEXT_TASK_KINDS,
+  type AgentContextProfile,
+  type AgentContextProfiles,
+  type AgentContextTaskKind,
+} from '../../lib/agent/context-policy'
 
 const TASK_ROUTE_META: Record<AITaskKind, { label: string; description: string }> = {
   creation: { label: '创作生成', description: '正文、大纲、细纲、世界观与角色生成' },
@@ -22,15 +28,34 @@ const TASK_ROUTE_META: Record<AITaskKind, { label: string; description: string }
 interface Props {
   presets: AIConfigPreset[]
   routes: AITaskRoutes
+  contextProfiles: AgentContextProfiles
   onSetRoute: (taskKind: AITaskKind, presetId: string | null) => void
+  onSetContextProfile: (taskKind: AgentContextTaskKind, profile: AgentContextProfile) => void
 }
 
-export default function AITaskRoutingSection({ presets, routes, onSetRoute }: Props) {
+const CONTEXT_PROFILE_META: Record<AgentContextProfile, { label: string; description: string }> = {
+  lean: { label: '精简', description: '约 45% 登记源预算，优先节省输入' },
+  balanced: { label: '均衡（推荐）', description: '约 72% 登记源预算，兼顾质量与成本' },
+  full: { label: '完整', description: '沿用登记源完整预算，适合高风险长上下文任务' },
+}
+
+function isContextTaskKind(taskKind: AITaskKind): taskKind is AgentContextTaskKind {
+  return AGENT_CONTEXT_TASK_KINDS.includes(taskKind as AgentContextTaskKind)
+}
+
+export default function AITaskRoutingSection({
+  presets,
+  routes,
+  contextProfiles,
+  onSetRoute,
+  onSetContextProfile,
+}: Props) {
   const renderRoutes = (taskKinds: readonly AITaskKind[]) => (
     <div className="grid gap-2 sm:grid-cols-2">
       {taskKinds.map(taskKind => {
         const selectedPreset = presets.find(preset => preset.id === routes[taskKind])
         const routeMeta = TASK_ROUTE_META[taskKind]
+        const contextTask = isContextTaskKind(taskKind)
         return (
           <label key={taskKind} className="block rounded border border-border bg-bg-base p-2.5">
             <span className="block text-xs font-medium text-text-primary">{routeMeta.label}</span>
@@ -44,6 +69,22 @@ export default function AITaskRoutingSection({ presets, routes, onSetRoute }: Pr
                 <option key={preset.id} value={preset.id}>{preset.name} · {preset.config.provider}/{preset.config.model}</option>
               ))}
             </select>
+            {contextTask && (
+              <>
+                <span className="mb-1 mt-2 block text-[10px] text-text-muted">上下文输入档位</span>
+                <select
+                  value={contextProfiles[taskKind]}
+                  onChange={event => onSetContextProfile(taskKind, event.target.value as AgentContextProfile)}
+                  aria-label={`${routeMeta.label}上下文输入档位`}
+                  className="w-full rounded border border-border bg-bg-surface px-2 py-1.5 text-xs text-text-primary focus:border-accent focus:outline-none"
+                >
+                  {(Object.entries(CONTEXT_PROFILE_META) as Array<[AgentContextProfile, typeof CONTEXT_PROFILE_META[AgentContextProfile]]>)
+                    .map(([profile, meta]) => (
+                      <option key={profile} value={profile}>{meta.label} · {meta.description}</option>
+                    ))}
+                </select>
+              </>
+            )}
           </label>
         )
       })}
@@ -63,6 +104,7 @@ export default function AITaskRoutingSection({ presets, routes, onSetRoute }: Pr
         <h5 className="text-xs font-medium text-text-secondary">主 Agent 团队角色</h5>
         <p className="mt-1 text-[11px] text-text-muted">
           只影响主 Agent 幕后执行；手工面板仍使用上方四类路由。未绑定的角色沿用当前全局模型。
+          五个领域还可独立收窄登记源预算；“完整”保持原上下文上限。
         </p>
       </div>
       {renderRoutes(AGENT_ROLE_TASK_KINDS)}
