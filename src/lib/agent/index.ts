@@ -1,6 +1,7 @@
 export * from './client-adapter'
 export * from './character-copilot'
 export * from './inspiration-copilot'
+export * from './outline-copilot'
 export * from './protocol'
 export * from './runner'
 export * from './tool-registry'

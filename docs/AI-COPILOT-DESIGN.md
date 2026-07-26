@@ -414,7 +414,12 @@ loop（受步数/Token 上限约束）:
   `GenerationNode → adopt(characters)` 新增角色，同名与并发过期阻断
 - 详细边界与验收见
   [`CHAT-COPILOT-CHARACTER-DESIGN.md`](./CHAT-COPILOT-CHARACTER-DESIGN.md)
-- 后续再逐领域接入大纲 / 正文的对话生成；每个领域单独冻结读、候选、gate、
+- 大纲生成的第三个独立闭环已接入：复用手工大纲入口的 17 个正式上下文源、
+  `outline.volume/outline.chapter` 提示和 `adopt(outlineNodes)`；候选整批可编辑，
+  世界作用域、同层重复、并发快照和上游候选采纳依赖均由确定性代码阻断
+- 详细边界与验收见
+  [`CHAT-COPILOT-OUTLINE-DESIGN.md`](./CHAT-COPILOT-OUTLINE-DESIGN.md)
+- 后续再接入正文的对话生成；每个领域单独冻结读、候选、gate、
   确认写回与非范围，不提前泛化成任意意图
 
 **Phase 27.1-e 多 agent 团队编排**

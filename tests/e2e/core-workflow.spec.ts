@@ -773,6 +773,88 @@ test('主 Agent 调度角色领域任务，拒绝零写入并确认新增到角�
   expect(generationCalls).toBe(2)
 })
 
+test('主 Agent 调度大纲领域任务，确认可见整批候选后同步到正式大纲', async ({ page }) => {
+  let generationCalls = 0
+  const modelCandidate = [
+    { title: '第一卷：退潮', summary: '守灯人发现从海床升起的浮空城。' },
+    { title: '第二卷：涨潮', summary: '旧港被海潮包围，潮汐钟的代价公开。' },
+  ]
+  await page.addInitScript(() => {
+    localStorage.setItem('storyforge-ai-config', JSON.stringify({
+      provider: 'ollama',
+      apiKey: '',
+      model: 'outline-copilot-e2e',
+      baseUrl: 'http://localhost:1234/v1',
+      temperature: 0,
+      maxTokens: 0,
+    }))
+  })
+  await page.route('http://localhost:1234/v1/chat/completions', async route => {
+    const body = route.request().postDataJSON() as {
+      messages?: Array<{ role: string; content: string }>
+    }
+    const combined = body.messages?.map(message => message.content).join('\n') ?? ''
+    const isPlanner = combined.includes('你只把用户目标拆成幕后领域任务')
+    if (!isPlanner) {
+      generationCalls += 1
+      expect(combined).toContain('E2E 大纲副驾确认闭环')
+      expect(combined).toContain('规划全书两卷卷纲')
+      expect(combined).toContain('请严格输出 JSON')
+    }
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        choices: [{
+          message: {
+            content: isPlanner
+              ? JSON.stringify({
+                  summary: '交给大纲领域 Agent。',
+                  tasks: [{
+                    id: 'outline-1',
+                    agentId: 'outline',
+                    instruction: '规划全书两卷卷纲',
+                    dependsOn: [],
+                  }],
+                })
+              : JSON.stringify(modelCandidate),
+          },
+        }],
+        usage: { prompt_tokens: 220, completion_tokens: 80, total_tokens: 300 },
+      }),
+    })
+  })
+
+  await openCleanHome(page)
+  await createProject(page, 'E2E 大纲副驾确认闭环')
+  await page.getByRole('button', { name: '大纲', exact: true }).click()
+
+  await page.getByRole('button', { name: '打开 AI 对话副驾' }).click()
+  const copilot = page.getByRole('complementary', { name: '主 Agent 创作副驾' })
+  const request = copilot.getByRole('textbox', { name: '告诉主 Agent 你的目标' })
+  const candidate = copilot.getByRole('textbox', { name: '卷级大纲候选内容' })
+
+  await request.fill('规划全书两卷卷纲')
+  await copilot.getByRole('button', { name: '交给主 Agent', exact: true }).click()
+  await expect(candidate).toContainText('第一卷：退潮')
+  await copilot.getByRole('button', { name: '拒绝', exact: true }).click()
+  await expect(page.locator('main').getByText('第一卷：退潮', { exact: true })).toHaveCount(0)
+
+  await request.fill('重新规划全书两卷卷纲')
+  await copilot.getByRole('button', { name: '交给主 Agent', exact: true }).click()
+  const edited = [
+    { ...modelCandidate[0], summary: '作者确认版：守灯人发现从海床升起的浮空城。' },
+    modelCandidate[1],
+  ]
+  await candidate.fill(JSON.stringify(edited, null, 2))
+  await copilot.getByRole('button', { name: '采纳', exact: true }).click()
+
+  await expect(copilot.getByText('卷级大纲已写入项目。', { exact: true }).last()).toBeVisible()
+  await expect(page.locator('main').getByText('第一卷：退潮', { exact: true }).first()).toBeVisible()
+  await expect(page.locator('main').getByText('第二卷：涨潮', { exact: true }).first()).toBeVisible()
+  expect(generationCalls).toBe(2)
+})
+
 test('外部文档词条先形成带证据候选，作者确认后才进入 Codex', async ({ page }) => {
   await page.addInitScript(() => {
     localStorage.setItem('storyforge-ai-config', JSON.stringify({

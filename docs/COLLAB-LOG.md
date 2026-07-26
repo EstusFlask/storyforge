@@ -2062,3 +2062,28 @@ metrics、0 production vulnerabilities、ESLint、TypeScript、生产 build、bu
 👉 27.1-d 的灵感反推首个领域闭环已完成。AGENT-1 仍没有泛化意图识别、角色/大纲/正文
 领域、聊天持久化、多 Agent 或后台 Agent；下一开发单位应继续按 27.1-d 顺序，为角色
 对话生成先冻结独立 read/candidate/gate/confirm 边界。
+
+### [2026-07-26] Codex · REPORT · AGENT-1 Phase 27.1-d 第三个领域 / 大纲 ChatCopilot / `feat/agent-outline-copilot`
+
+本阶段为唯一主 Agent 增加大纲领域，不建立第二套大纲数据或独立分 Agent 界面。卷纲与
+章纲复用手工入口的 17 个登记上下文源、`outline.volume/outline.chapter` 模型分类和
+`adopt(outlineNodes)` 正式写回；候选是只含标题与摘要的可见 JSON 数组，作者可编辑，
+拒绝零写入，确认不二次调用模型。多世界归属、父卷、同层标题、整棵大纲快照和 order
+均在生成前冻结，确认时在同一事务重读；非法字段、重复、并发变化或整批未完整写入都会
+阻断并回滚。
+
+主编排器新增 `outline` 领域与上游确认门。真实 Agnes 首次把“两卷”拆成两个同领域任务，
+导致共享快照候选互相过期；代码现将同领域批量目标合并为一个任务并恢复用户完整原始要求。
+第二次真实规划又把“已有世界观”“角色变化”扩大成世界和角色写入任务；代码现只允许用户
+明确授权创建或修改的领域，描述性设定元素只作为大纲约束。修复后真实请求只生成 1 个
+outline 任务并一次返回 2 卷；作者编辑第一卷标题和摘要后确认，正式大纲面板立即逐字同步。
+隔离项目随后走完整删除安全门清理。
+
+完整 `npm run ci` 通过：232 个 Vitest 文件 / 826 项测试、55 required tables、
+architecture、source reachability、roadmap、agent context、canon、project metrics、
+0 production vulnerabilities、ESLint、TypeScript、coverage、生产 build 与 bundle budget
+全绿。完整 Chromium E2E 23/23 通过，新增用例覆盖主 Agent 规划、整批候选可见编辑、确认
+写回和正式大纲同步。
+
+👉 主 Agent 当前已闭环世界来源、灵感反推、新增角色和新增大纲四个领域；下一开发单位
+进入正文领域，必须先冻结章节目标、已有正文保护、可见 diff、并发快照与确认写回边界。

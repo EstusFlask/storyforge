@@ -189,6 +189,11 @@ export default function ChatCopilotPanel({
             <p className="mt-1 text-[10px] text-text-muted">
               这是领域 Agent 的真实输出。刷新后仍会保留；只有采纳才会进入项目正式数据。
             </p>
+            {(candidate.payload.dependsOnTaskIds?.length ?? 0) > 0 && (
+              <p className="mt-1 text-[10px] text-warning">
+                采纳前需先采纳上游任务：{candidate.payload.dependsOnTaskIds!.join('、')}
+              </p>
+            )}
             <div className="mt-3 flex justify-end gap-2">
               <button
                 type="button"
@@ -238,7 +243,7 @@ export default function ChatCopilotPanel({
           }}
           placeholder={copilot.pendingCandidates.length
             ? '请先处理当前候选，再继续对话'
-            : '例如：建立一个以诗入道的宋风世界，并设计一名守灯人主角…'}
+            : '例如：建立宋风世界，设计守灯人主角，再规划三卷大纲…'}
           className="w-full resize-none rounded-md border border-border bg-bg-base px-3 py-2 text-xs leading-5 text-text-primary outline-none focus:border-accent disabled:opacity-60"
         />
         <div className="mt-2 flex items-center justify-between">

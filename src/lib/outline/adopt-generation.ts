@@ -7,6 +7,7 @@ export interface GeneratedOutlineItem {
 
 export interface AdoptGeneratedOutlineItemsInput {
   projectId: number
+  worldGroupId?: number | null
   parentId: number | null
   type: 'volume' | 'chapter'
   items: GeneratedOutlineItem[]
@@ -48,6 +49,7 @@ export async function adoptGeneratedOutlineItems(
     const item = input.items[index]
     const result = await adopt({
       projectId: input.projectId,
+      worldGroupId: input.worldGroupId,
       target: 'outlineNodes',
       mode: 'add',
       data: {

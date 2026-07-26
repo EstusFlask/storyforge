@@ -5,7 +5,10 @@ import {
   readAgentEvents,
   updateAgentEventCandidate,
 } from '../../src/lib/agent/conversations'
-import { createMasterAgentPlan } from '../../src/lib/agent/orchestrator'
+import {
+  adoptMasterCandidate,
+  createMasterAgentPlan,
+} from '../../src/lib/agent/orchestrator'
 import { db } from '../../src/lib/db/schema'
 import type { Project } from '../../src/lib/types'
 
@@ -82,6 +85,57 @@ describe('AGENT-2 · 主 Agent 编排与持久会话', () => {
     expect(plan.tasks[1].dependsOn).toEqual(['world-1'])
   })
 
+  it('确定性降级会把大纲放在本轮世界与角色候选之后', async () => {
+    const plan = await createMasterAgentPlan({
+      projectId: project.id!,
+      worldGroupId: null,
+      request: '建立潮汐世界，设计守灯人主角，再规划全书卷纲',
+    }, {
+      complete: async () => { throw new Error('planner unavailable') },
+    })
+    expect(plan.tasks.map(task => task.agentId)).toEqual(['world-origin', 'character', 'outline'])
+    expect(plan.tasks[2].dependsOn).toEqual(['world-1', 'character-1'])
+  })
+
+  it('清洗规划模型重复领域任务，避免同快照候选互相作废', async () => {
+    const plan = await createMasterAgentPlan({
+      projectId: project.id!,
+      worldGroupId: null,
+      request: '规划两卷卷纲',
+    }, {
+      complete: async () => JSON.stringify({
+        summary: '规划两卷。',
+        tasks: [
+          { id: 'outline-v1', agentId: 'outline', instruction: '生成第一卷', dependsOn: [] },
+          { id: 'outline-v2', agentId: 'outline', instruction: '生成第二卷', dependsOn: ['outline-v1'] },
+        ],
+      }),
+    })
+    expect(plan.tasks).toEqual([
+      { id: 'outline-v1', agentId: 'outline', instruction: '规划两卷卷纲', dependsOn: [] },
+    ])
+  })
+
+  it('只允许用户明确授权的领域，设定元素和角色名不扩大为额外写入任务', async () => {
+    const plan = await createMasterAgentPlan({
+      projectId: project.id!,
+      worldGroupId: null,
+      request: '基于已有世界观，用浮空城和守灯人规划两卷卷纲，每卷要有角色变化',
+    }, {
+      complete: async () => JSON.stringify({
+        summary: '先补设定角色，再写大纲。',
+        tasks: [
+          { id: 'world', agentId: 'world-origin', instruction: '创建浮空城设定', dependsOn: [] },
+          { id: 'character', agentId: 'character', instruction: '创建守灯人', dependsOn: ['world'] },
+          { id: 'outline', agentId: 'outline', instruction: '规划两卷', dependsOn: ['world', 'character'] },
+        ],
+      }),
+    })
+    expect(plan.tasks).toEqual([
+      { id: 'outline', agentId: 'outline', instruction: '规划两卷', dependsOn: [] },
+    ])
+  })
+
   it('事件按严格序号持久化，候选编辑和刷新恢复不丢失', async () => {
     const conversation = await getOrCreateAgentConversation({
       projectId: project.id!,
@@ -107,5 +161,52 @@ describe('AGENT-2 · 主 Agent 编排与持久会话', () => {
     expect(restored[0].id).toBe(first.id)
     expect(restored[1].content).toBe('作者修订稿')
     expect((await db.agentConversations.get(conversation.id!))?.title).toBe('建立潮汐世界')
+  })
+
+  it('下游候选不能在依赖的上游候选确认前写入', async () => {
+    const conversation = await getOrCreateAgentConversation({
+      projectId: project.id!,
+      worldGroupId: null,
+    })
+    await appendAgentEvent({
+      projectId: project.id!,
+      conversationId: conversation.id!,
+      kind: 'candidate',
+      content: '世界候选',
+      payload: {
+        version: 1,
+        taskId: 'world-1',
+        agentId: 'world-origin',
+        label: '世界来源',
+        contextSources: [],
+        baseSnapshot: {},
+      },
+    })
+    const downstream = await appendAgentEvent({
+      projectId: project.id!,
+      conversationId: conversation.id!,
+      kind: 'candidate',
+      content: JSON.stringify([{ title: '第一卷', summary: '摘要' }]),
+      payload: {
+        version: 1,
+        taskId: 'outline-1',
+        agentId: 'outline',
+        label: '卷级大纲',
+        contextSources: [],
+        baseSnapshot: { serialized: '[]', existingTitles: [], startingOrder: 0 },
+        outlineMode: 'volumes',
+        outlineParentId: null,
+        dependsOnTaskIds: ['world-1'],
+      },
+    })
+
+    await expect(adoptMasterCandidate({
+      projectId: project.id!,
+      worldGroupId: null,
+      event: downstream,
+      payload: JSON.parse(downstream.payload),
+      draft: downstream.content,
+    })).rejects.toThrow('请先采纳')
+    expect(await db.outlineNodes.count()).toBe(0)
   })
 })
