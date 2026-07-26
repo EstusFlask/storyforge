@@ -444,7 +444,10 @@ loop（受步数/Token 上限约束）:
   与 [`AGENT-TEAM-BUDGET-CANON-DESIGN.md`](./AGENT-TEAM-BUDGET-CANON-DESIGN.md)。
 
 **Phase 27.2b / 5.2 后台 Agent**
-- 整理本章 Agent（先）→ 一致性 Agent → NPC 演进 Agent（最后，最复杂）
+- 整理本章 Agent 已完成：一次调用生成状态/事实/物品/年表/关系/伏笔六域证据候选，
+  复用归档 Agent 事件流恢复，作者确认与正文 hash 守卫后才写回。详细边界见
+  [`CHAPTER-ORGANIZATION-AGENT-DESIGN.md`](./CHAPTER-ORGANIZATION-AGENT-DESIGN.md)。
+- 下一顺序：一致性 Agent → NPC 演进 Agent（最后，最复杂）
 
 **每期独立可用**：工具层本身有用；只读 Agent 不写数据先验证；对话副驾从世界观单点切入。
 

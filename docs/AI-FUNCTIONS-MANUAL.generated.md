@@ -135,6 +135,7 @@ AI 输出经 `adopt({ target, data })` 写回,只有这里登记的字段可写(
 | 目标表 | 可写字段 |
 |---|---|
 | `chapters` | `content` `continuityHandoff` `notes` `order` `outlineNodeId` `planReconciliation` `status` `summary` `summarySourceTextHash` `summaryTextNormalizationVersion` `title` `wordCount` |
+| `characterRelations` | `description` `fromCharacterId` `isBidirectional` `label` `relationType` `toCharacterId` |
 | `characters` | `abilities` `activeChapterRange` `alignment` `appearance` `arc` `background` `cultivationStageId` `cultivationSystemId` `ending` `exitChapterId` `fears` `firstAppearChapterId` `firstAppearance` `goals` `habits` `homeWorldGroupId` `identity` `innerConflict` `isCrossWorld` `keyEvents` `location` `moralAxis` `motivation` `name` `orderAxis` `personality` `powerLevel` `profile` `raceEntryId` `relationships` `role` `roleWeight` `shortDescription` `signatureItem` `speechStyle` `storyRole` `strengths` `values` `weaknesses` |
 | `codexCategories` | `builtInKey` `domain` `fieldSchema` `hidden` `icon` `name` `order` `parentId` `worldGroupId` |
 | `codexEntries` | `categoryId` `cultivationStageId` `cultivationSystemId` `description` `fields` `icon` `importance` `importantLocationId` `name` `order` `refs` `summary` `tags` `worldGroupId` |
@@ -182,7 +183,7 @@ AI 输出经 `adopt({ target, data })` 写回,只有这里登记的字段可写(
 
 ## 四、AI 调用点（消耗统计 category · 在哪触发)
 
-共 59 个 category。
+共 60 个 category。
 未分类调用: 0 个。动态 category 调用: 8 个。
 
 | category | 触发文件 |
@@ -194,10 +195,11 @@ AI 输出经 `adopt({ target, data })` 写回,只有这里登记的字段可写(
 | `chapter.content` | `src/lib/generation/chapter-generation-node.ts:22` |
 | `chapter.content.batch` | `src/lib/ai/batch-detail-runner.ts:256` |
 | `chapter.continue` | `src/lib/generation/chapter-generation-node.ts:23` |
-| `chapter.deai` | `src/components/editor/ChapterEditor.tsx:631` |
-| `chapter.expand` | `src/components/editor/ChapterEditor.tsx:611` |
-| `chapter.memory` | `src/components/editor/ChapterEditor.tsx:349` |
-| `chapter.polish` | `src/components/editor/ChapterEditor.tsx:603` |
+| `chapter.deai` | `src/components/editor/ChapterEditor.tsx:665` |
+| `chapter.expand` | `src/components/editor/ChapterEditor.tsx:645` |
+| `chapter.memory` | `src/components/editor/ChapterEditor.tsx:383` |
+| `chapter.organize` | `src/components/editor/ChapterEditor.tsx:748` |
+| `chapter.polish` | `src/components/editor/ChapterEditor.tsx:637` |
 | `chapter.toolbar` | `src/components/editor/FloatingToolbar.tsx:105` |
 | `character.generate` | `src/components/character/CharacterPanel.tsx:160` |
 | `character.structure` | `src/lib/ai/parse-character-output.ts:80` |
@@ -232,7 +234,7 @@ AI 输出经 `adopt({ target, data })` 写回,只有这里登记的字段可写(
 | `review.outline-workshop` | `src/lib/outline/workshop.ts:451` |
 | `review.quality` | `src/components/editor/ReviewPanel.tsx:92` |
 | `review.readability` | `src/components/editor/ReviewPanel.tsx:109` |
-| `review.revise` | `src/components/editor/ChapterEditor.tsx:646` |
+| `review.revise` | `src/components/editor/ChapterEditor.tsx:680` |
 | `rules.generate` | `src/components/rules/CreativeRulesPanel.tsx:80` |
 | `scene.verify` | `src/components/scene/SceneVerifyPanel.tsx:81` |
 | `story-arc.generate` | `src/components/outline/StoryArcPanel.tsx:85` |
@@ -260,4 +262,4 @@ AI 输出经 `adopt({ target, data })` 写回,只有这里登记的字段可写(
 
 ---
 
-生成时间基准:commit `73de314`
+生成时间基准:commit `d9419bf`

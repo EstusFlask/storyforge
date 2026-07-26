@@ -15,6 +15,20 @@ export const ADOPTION_SCHEMAS: CollectionAdoptionSpec[] = [
     autoStamps: ['projectId', 'homeWorldGroupId', 'createdAt', 'updatedAt'],
   },
   {
+    target: 'characterRelations',
+    identity: {
+      kind: 'composite',
+      fields: ['fromCharacterId', 'toCharacterId', 'relationType'],
+    },
+    duplicatePolicy: 'skip',
+    required: ['fromCharacterId', 'toCharacterId', 'relationType', 'label', 'isBidirectional'],
+    autoStamps: ['projectId', 'createdAt', 'updatedAt'],
+    fkChecks: [
+      { field: 'fromCharacterId', target: 'characters' },
+      { field: 'toCharacterId', target: 'characters' },
+    ],
+  },
+  {
     target: 'foreshadows',
     identity: 'name',
     duplicatePolicy: 'merge',
@@ -144,6 +158,7 @@ export const ADOPTION_SCHEMAS: CollectionAdoptionSpec[] = [
     required: ['itemName', 'action', 'quantity', 'heldByName'],
     autoStamps: ['projectId', 'createdAt'],
     fkChecks: [{ field: 'chapterId', target: 'chapters' }, { field: 'characterId', target: 'characters' }],
+    replaceScope: ['chapterId'],
   },
   {
     target: 'knowledgeLedger',
@@ -167,6 +182,7 @@ export const ADOPTION_SCHEMAS: CollectionAdoptionSpec[] = [
     required: ['title', 'importance'],
     autoStamps: ['projectId', 'createdAt'],
     fkChecks: [{ field: 'chapterId', target: 'chapters' }],
+    replaceScope: ['chapterId'],
   },
   {
     target: 'historicalTimelineEvents',

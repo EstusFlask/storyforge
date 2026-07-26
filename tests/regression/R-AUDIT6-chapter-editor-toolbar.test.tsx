@@ -11,9 +11,8 @@ async function mount(patch: Record<string, unknown> = {}) {
   const props = {
     isStreaming: false,
     hasText: true,
-    extractingState: false,
-    extractingFacts: false,
-    factStreaming: false,
+    organizingChapter: false,
+    hasOrganizationCandidate: false,
     analyzingImpact: false,
     impactInfo: null,
     hasOutline: true,
@@ -26,8 +25,7 @@ async function mount(patch: Record<string, unknown> = {}) {
     onExpand: vi.fn(),
     onPolish: vi.fn(),
     onDeAI: vi.fn(),
-    onExtractState: vi.fn(),
-    onExtractFacts: vi.fn(),
+    onOrganizeChapter: vi.fn(),
     onAnalyzeImpact: vi.fn(),
     onDismissImpact: vi.fn(),
     onToggleOutlinePreview: vi.fn(),
@@ -61,7 +59,7 @@ afterEach(async () => {
 describe('AUDIT-6 / HEALTH-4 · 正文编辑器工具栏', () => {
   it('逐项转发现有 AI、提取和面板命令', async () => {
     const { host, props } = await mount()
-    for (const label of ['✨ 生成正文', '📝 续写', '📖 扩写', '💎 润色', '🔥 去AI味', '提取状态', '提取事实', '影响分析', '大纲预览', '质量审校', '便签']) {
+    for (const label of ['✨ 生成正文', '📝 续写', '📖 扩写', '💎 润色', '🔥 去AI味', '整理本章', '影响分析', '大纲预览', '质量审校', '便签']) {
       await act(async () => button(host, label).click())
     }
     expect(props.onGenerate).toHaveBeenCalledOnce()
@@ -69,8 +67,7 @@ describe('AUDIT-6 / HEALTH-4 · 正文编辑器工具栏', () => {
     expect(props.onExpand).toHaveBeenCalledOnce()
     expect(props.onPolish).toHaveBeenCalledOnce()
     expect(props.onDeAI).toHaveBeenCalledOnce()
-    expect(props.onExtractState).toHaveBeenCalledOnce()
-    expect(props.onExtractFacts).toHaveBeenCalledOnce()
+    expect(props.onOrganizeChapter).toHaveBeenCalledOnce()
     expect(props.onAnalyzeImpact).toHaveBeenCalledOnce()
     expect(props.onToggleOutlinePreview).toHaveBeenCalledOnce()
     expect(props.onToggleReviewPanel).toHaveBeenCalledOnce()
@@ -81,14 +78,13 @@ describe('AUDIT-6 / HEALTH-4 · 正文编辑器工具栏', () => {
     const { host } = await mount({
       isStreaming: true,
       hasText: false,
-      extractingState: true,
-      extractingFacts: true,
-      factStreaming: true,
+      organizingChapter: true,
       analyzingImpact: true,
     })
-    for (const label of ['✨ 生成正文', '📝 续写', '📖 扩写', '💎 润色', '🔥 去AI味', '提取中...', '抽取中...', '分析中...', '质量审校']) {
+    for (const label of ['✨ 生成正文', '📝 续写', '📖 扩写', '💎 润色', '🔥 去AI味', '分析中...', '质量审校']) {
       expect(button(host, label).disabled).toBe(true)
     }
+    expect(button(host, '停止整理').disabled).toBe(true)
     expect(button(host, '便签').disabled).toBe(false)
   })
 
