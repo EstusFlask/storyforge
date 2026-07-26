@@ -10,6 +10,7 @@ import {
   X,
 } from 'lucide-react'
 import type { Project } from '../../lib/types'
+import { useCharacterCopilot } from './useCharacterCopilot'
 import { useInspirationCopilot } from './useInspirationCopilot'
 import { useWorldOriginCopilot } from './useWorldOriginCopilot'
 
@@ -26,16 +27,23 @@ export default function ChatCopilotPanel({
   worldName,
   onClose,
 }: Props) {
-  const [domain, setDomain] = useState<'world-origin' | 'inspiration'>('world-origin')
+  const [domain, setDomain] = useState<'world-origin' | 'inspiration' | 'character'>('world-origin')
   const worldCopilot = useWorldOriginCopilot({ project, worldGroupId })
   const inspirationCopilot = useInspirationCopilot({ project })
-  const copilot = domain === 'world-origin' ? worldCopilot : inspirationCopilot
+  const characterCopilot = useCharacterCopilot({ project, worldGroupId })
+  const copilot = domain === 'world-origin'
+    ? worldCopilot
+    : domain === 'inspiration'
+      ? inspirationCopilot
+      : characterCopilot
   const messagesEndRef = useRef<HTMLDivElement | null>(null)
   const domainLocked = (
     worldCopilot.busy
     || inspirationCopilot.busy
+    || characterCopilot.busy
     || Boolean(worldCopilot.candidate)
     || Boolean(inspirationCopilot.candidate)
+    || Boolean(characterCopilot.candidate)
   )
 
   useEffect(() => {
@@ -70,7 +78,7 @@ export default function ChatCopilotPanel({
             <X className="h-4 w-4" />
           </button>
         </div>
-        <div aria-label="对话领域" className="mt-3 grid grid-cols-2 gap-1 rounded-md bg-bg-base p-1">
+        <div aria-label="对话领域" className="mt-3 grid grid-cols-3 gap-1 rounded-md bg-bg-base p-1">
           <button
             type="button"
             aria-pressed={domain === 'world-origin'}
@@ -97,12 +105,27 @@ export default function ChatCopilotPanel({
           >
             灵感反推
           </button>
+          <button
+            type="button"
+            aria-pressed={domain === 'character'}
+            disabled={domainLocked && domain !== 'character'}
+            onClick={() => setDomain('character')}
+            className={`rounded px-2 py-1.5 text-xs ${
+              domain === 'character'
+                ? 'bg-bg-surface font-medium text-text-primary shadow-sm'
+                : 'text-text-muted hover:text-text-primary'
+            } disabled:opacity-40`}
+          >
+            角色生成
+          </button>
         </div>
         <div className="mt-3 flex items-start gap-2 rounded-md border border-accent/20 bg-accent/5 p-2 text-[11px] leading-4 text-text-secondary">
           <ShieldCheck className="mt-0.5 h-3.5 w-3.5 shrink-0 text-accent" />
           {domain === 'world-origin'
             ? '当前处理“世界来源”。生成阶段只读；写入必须经过你的明确确认。'
-            : '只读取你勾选的已保存碎片；确认后仅新增灵感版本，不自动改动项目主档。'}
+            : domain === 'inspiration'
+              ? '只读取你勾选的已保存碎片；确认后仅新增灵感版本，不自动改动项目主档。'
+              : '只读取当前世界观与可见角色；确认后新增一个角色，不改已有角色或其他模块。'}
         </div>
       </header>
 
@@ -283,6 +306,51 @@ export default function ChatCopilotPanel({
             </div>
           </section>
         )}
+        {domain === 'character' && characterCopilot.candidate && (
+          <section className="rounded-lg border border-accent/30 bg-bg-base p-3">
+            <div className="mb-2 flex items-center justify-between gap-2">
+              <div className="flex items-center gap-1.5 text-xs font-semibold text-text-primary">
+                <Sparkles className="h-3.5 w-3.5 text-accent" />
+                待确认 · 新角色
+              </div>
+              <span className="text-[10px] text-text-muted">
+                {characterCopilot.candidate.contextSources.length} 个上下文源
+              </span>
+            </div>
+            <textarea
+              aria-label="角色候选 JSON"
+              value={characterCopilot.candidate.draft}
+              disabled={characterCopilot.busy}
+              onChange={event => characterCopilot.updateCandidate(event.target.value)}
+              className="h-72 w-full resize-y rounded border border-border bg-bg-surface p-2 font-mono text-[11px] leading-5 text-text-primary outline-none focus:border-accent disabled:opacity-60"
+            />
+            <p className="mt-1 text-[10px] text-text-muted">
+              确认前会重新检查字段、三轴、同名角色与角色名单是否过期。
+            </p>
+            <div className="mt-3 flex justify-end gap-2">
+              <button
+                type="button"
+                disabled={characterCopilot.busy}
+                onClick={characterCopilot.rejectCandidate}
+                className="flex items-center gap-1 rounded px-2.5 py-1.5 text-xs text-text-muted hover:bg-bg-hover hover:text-text-primary disabled:opacity-50"
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+                拒绝
+              </button>
+              <button
+                type="button"
+                disabled={characterCopilot.busy}
+                onClick={characterCopilot.adoptCandidate}
+                className="flex items-center gap-1 rounded bg-accent px-3 py-1.5 text-xs text-white hover:opacity-90 disabled:opacity-50"
+              >
+                {characterCopilot.busy
+                  ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  : <Check className="h-3.5 w-3.5" />}
+                新增角色
+              </button>
+            </div>
+          </section>
+        )}
         <div ref={messagesEndRef} />
       </div>
 
@@ -310,14 +378,20 @@ export default function ChatCopilotPanel({
             ? '请先采纳或拒绝当前候选'
             : domain === 'world-origin'
               ? '例如：保留现有设定，补充文明诞生的关键事件…'
-              : '例如：保留潮汐城市意象，强化角色冲突与开篇钩子…'}
+              : domain === 'inspiration'
+                ? '例如：保留潮汐城市意象，强化角色冲突与开篇钩子…'
+                : '例如：设计一名守灯人，克制寡言，与现有主角存在旧怨…'}
           className="w-full resize-none rounded-md border border-border bg-bg-base px-3 py-2 text-xs leading-5 text-text-primary outline-none focus:border-accent disabled:opacity-60"
         />
         <div className="mt-2 flex items-center justify-between">
           <span className="text-[10px] text-text-muted">Enter 发送 · Shift+Enter 换行</span>
           <button
             type="submit"
-            aria-label={domain === 'world-origin' ? '生成世界来源候选' : '生成灵感反推候选'}
+            aria-label={domain === 'world-origin'
+              ? '生成世界来源候选'
+              : domain === 'inspiration'
+                ? '生成灵感反推候选'
+                : '生成角色候选'}
             disabled={
               copilot.busy
               || Boolean(copilot.candidate)

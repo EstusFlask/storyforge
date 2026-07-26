@@ -409,7 +409,12 @@ loop（受步数/Token 上限约束）:
   结构化候选可编辑，确认后只复用既有灵感版本写回，不自动采纳项目主档
 - 详细边界与验收见
   [`CHAT-COPILOT-INSPIRATION-DESIGN.md`](./CHAT-COPILOT-INSPIRATION-DESIGN.md)
-- 后续再逐领域接入角色 / 大纲 / 正文的对话生成；每个领域单独冻结读、候选、gate、
+- 角色生成的第二个独立闭环已接入：正式 `read_worldview/read_characters` 装配当前世界
+  关联闭包，复用 `character.generate` 生成闭集 JSON；作者编辑确认后只经
+  `GenerationNode → adopt(characters)` 新增角色，同名与并发过期阻断
+- 详细边界与验收见
+  [`CHAT-COPILOT-CHARACTER-DESIGN.md`](./CHAT-COPILOT-CHARACTER-DESIGN.md)
+- 后续再逐领域接入大纲 / 正文的对话生成；每个领域单独冻结读、候选、gate、
   确认写回与非范围，不提前泛化成任意意图
 
 **Phase 27.1-e 多 agent 团队编排**

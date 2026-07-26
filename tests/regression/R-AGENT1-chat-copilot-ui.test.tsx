@@ -17,6 +17,12 @@ const mocks = vi.hoisted(() => ({
   inspirationSetAuthorRequest: vi.fn(),
   inspirationToggleFragment: vi.fn(),
   inspirationCandidate: null as null | Record<string, unknown>,
+  characterAdoptCandidate: vi.fn(),
+  characterRejectCandidate: vi.fn(),
+  characterUpdateCandidate: vi.fn(),
+  characterSubmit: vi.fn(),
+  characterSetAuthorRequest: vi.fn(),
+  characterCandidate: null as null | Record<string, unknown>,
 }))
 
 vi.mock('../../src/components/agent/useWorldOriginCopilot', () => ({
@@ -62,6 +68,20 @@ vi.mock('../../src/components/agent/useInspirationCopilot', () => ({
   }),
 }))
 
+vi.mock('../../src/components/agent/useCharacterCopilot', () => ({
+  useCharacterCopilot: () => ({
+    authorRequest: '',
+    setAuthorRequest: mocks.characterSetAuthorRequest,
+    messages: [{ id: 1, role: 'assistant', content: '请描述一个新角色。' }],
+    candidate: mocks.characterCandidate,
+    busy: false,
+    submit: mocks.characterSubmit,
+    updateCandidate: mocks.characterUpdateCandidate,
+    rejectCandidate: mocks.characterRejectCandidate,
+    adoptCandidate: mocks.characterAdoptCandidate,
+  }),
+}))
+
 import ChatCopilotPanel from '../../src/components/agent/ChatCopilotPanel'
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true
@@ -72,6 +92,7 @@ afterEach(async () => {
   vi.clearAllMocks()
   mocks.worldCandidate = null
   mocks.inspirationCandidate = null
+  mocks.characterCandidate = null
   while (mounted.length) {
     const item = mounted.pop()!
     await act(async () => item.root.unmount())
@@ -196,5 +217,63 @@ describe('AGENT-1 · ChatCopilot 确认卡片 UI', () => {
     await act(async () => buttons.find(button => button.textContent?.includes('保存版本'))!.click())
     expect(mocks.inspirationRejectCandidate).toHaveBeenCalledTimes(1)
     expect(mocks.inspirationAdoptCandidate).toHaveBeenCalledTimes(1)
+  })
+
+  it('角色域展示当前作用域边界，并把可见 JSON 的拒绝与新增分成显式动作', async () => {
+    const host = document.createElement('div')
+    document.body.append(host)
+    const root = createRoot(host)
+    mounted.push({ host, root })
+    const project = {
+      id: 1,
+      name: '潮汐纪元',
+      genre: 'fantasy',
+      genres: ['fantasy'],
+    } as Project
+    const props = {
+      project,
+      worldGroupId: 3,
+      worldName: '盐海世界',
+      onClose: vi.fn(),
+    }
+
+    await act(async () => root.render(createElement(ChatCopilotPanel, props)))
+    const characterTab = Array.from(host.querySelectorAll('button'))
+      .find(button => button.textContent === '角色生成')!
+    await act(async () => characterTab.click())
+
+    expect(host.textContent).toContain('只读取当前世界观与可见角色')
+    expect(host.querySelector('textarea[placeholder*="守灯人"]')).not.toBeNull()
+
+    mocks.characterCandidate = {
+      node: {},
+      draft: '{\n  "name": "沈灯"\n}',
+      contextSources: ['worldview', 'characters'],
+      scopeKey: '1:3',
+    }
+    await act(async () => root.render(createElement(ChatCopilotPanel, props)))
+
+    expect(host.textContent).toContain('待确认 · 新角色')
+    expect(host.textContent).toContain('2 个上下文源')
+    const candidate = host.querySelector<HTMLTextAreaElement>(
+      'textarea[aria-label="角色候选 JSON"]',
+    )!
+    await act(async () => {
+      const setter = Object.getOwnPropertyDescriptor(
+        HTMLTextAreaElement.prototype,
+        'value',
+      )!.set!
+      setter.call(candidate, '{\n  "name": "作者修订角色"\n}')
+      candidate.dispatchEvent(new Event('input', { bubbles: true }))
+    })
+    expect(mocks.characterUpdateCandidate).toHaveBeenCalledWith(
+      '{\n  "name": "作者修订角色"\n}',
+    )
+
+    const buttons = Array.from(host.querySelectorAll('button'))
+    await act(async () => buttons.find(button => button.textContent?.includes('拒绝'))!.click())
+    await act(async () => buttons.find(button => button.textContent?.includes('新增角色'))!.click())
+    expect(mocks.characterRejectCandidate).toHaveBeenCalledTimes(1)
+    expect(mocks.characterAdoptCandidate).toHaveBeenCalledTimes(1)
   })
 })

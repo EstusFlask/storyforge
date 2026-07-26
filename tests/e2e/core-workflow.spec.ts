@@ -582,6 +582,87 @@ test('对话副驾只用勾选灵感碎片生成候选，拒绝零写入并保�
   expect(chatCalls).toBe(2)
 })
 
+test('对话副驾生成可编辑角色候选，拒绝零写入并确认新增到既有角色面板', async ({ page }) => {
+  let chatCalls = 0
+  const modelCandidate = {
+    name: '模型守灯人',
+    roleWeight: 'secondary',
+    moralAxis: 'good',
+    orderAxis: 'lawful',
+    relationships: '',
+    shortDescription: '守护旧港灯塔的年轻钟匠。',
+    personality: '克制谨慎，不轻易许诺。',
+    background: '出身旧港钟匠世家。',
+    motivation: '修复失踪的潮汐钟。',
+  }
+  await page.addInitScript(() => {
+    localStorage.setItem('storyforge-ai-config', JSON.stringify({
+      provider: 'ollama',
+      apiKey: '',
+      model: 'character-copilot-e2e',
+      baseUrl: 'http://localhost:1234/v1',
+      temperature: 0,
+      maxTokens: 0,
+    }))
+  })
+  await page.route('http://localhost:1234/v1/chat/completions', async route => {
+    chatCalls += 1
+    const body = route.request().postDataJSON() as {
+      messages?: Array<{ role: string; content: string }>
+    }
+    const combined = body.messages?.map(message => message.content).join('\n') ?? ''
+    expect(combined).toContain('E2E 角色副驾确认闭环')
+    expect(combined).toContain('"roleWeight": "main | secondary | npc | extra"')
+    expect(combined).toContain('设计一名守灯钟匠')
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        choices: [{ message: { content: JSON.stringify(modelCandidate) } }],
+        usage: { prompt_tokens: 180, completion_tokens: 70, total_tokens: 250 },
+      }),
+    })
+  })
+
+  await openCleanHome(page)
+  await createProject(page, 'E2E 角色副驾确认闭环')
+  await openSidebarLeaf(page, '角色设计', '角色生成')
+  await expect(page.getByText('角色生成 · 0', { exact: true })).toBeVisible()
+
+  await page.getByRole('button', { name: '打开 AI 对话副驾' }).click()
+  const copilot = page.getByRole('complementary', { name: 'AI 对话副驾' })
+  await copilot.getByRole('button', { name: '角色生成', exact: true }).click()
+  await expect(copilot.getByText(/只读取当前世界观与可见角色/)).toBeVisible()
+  const request = copilot.getByRole('textbox', { name: '给 AI 对话副驾的要求' })
+  const candidate = copilot.getByRole('textbox', { name: '角色候选 JSON' })
+
+  await request.fill('设计一名守灯钟匠，克制寡言')
+  await copilot.getByRole('button', { name: '生成角色候选' }).click()
+  await expect(candidate).toContainText('模型守灯人')
+  await copilot.getByRole('button', { name: '拒绝', exact: true }).click()
+  await expect(copilot.getByText('角色候选已拒绝，没有新增角色。', { exact: true })).toBeVisible()
+  await expect(page.getByText('角色生成 · 0', { exact: true })).toBeVisible()
+
+  await request.fill('重新设计一名守灯钟匠')
+  await copilot.getByRole('button', { name: '生成角色候选' }).click()
+  await expect(candidate).toContainText('模型守灯人')
+  const edited = {
+    ...modelCandidate,
+    name: '沈砚灯',
+    shortDescription: '作者确认的旧港守灯钟匠。',
+  }
+  await candidate.fill(JSON.stringify(edited, null, 2))
+  await copilot.getByRole('button', { name: '新增角色', exact: true }).click()
+
+  await expect(copilot.getByText(
+    '已新增角色“沈砚灯”，角色相关面板已同步刷新。',
+    { exact: true },
+  )).toBeVisible()
+  await expect(page.getByText('角色生成 · 1', { exact: true })).toBeVisible()
+  await expect(page.getByText('沈砚灯', { exact: true })).toBeVisible()
+  expect(chatCalls).toBe(2)
+})
+
 test('外部文档词条先形成带证据候选，作者确认后才进入 Codex', async ({ page }) => {
   await page.addInitScript(() => {
     localStorage.setItem('storyforge-ai-config', JSON.stringify({
