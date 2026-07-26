@@ -114,9 +114,9 @@ export default function PromptWorkflowsPanel({ project }: Props = {}) {
     <div className="p-5 space-y-3">
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-base font-semibold text-text-primary mb-1">节点工作流</h2>
+          <h2 className="text-base font-semibold text-text-primary mb-1">节点模式</h2>
           <p className="text-sm text-text-muted">
-            像 ComfyUI 一样连接创作节点；执行仍复用现有 GenerationNode，每步可暂停审核。
+            ComfyUI 式创作模式：连接节点组成流程；每步仍可暂停、编辑和确认。
           </p>
         </div>
         <div className="flex items-center gap-2 flex-shrink-0">

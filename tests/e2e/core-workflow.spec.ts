@@ -73,11 +73,11 @@ test('新用户可创建项目并进入工作区', async ({ page }) => {
   await expect(page.getByRole('button', { name: '章节', exact: true })).toBeVisible()
 })
 
-test('节点工作流可克隆、建立分支、保存刷新并完整清理', async ({ page }) => {
+test('节点模式可克隆、建立分支、保存刷新并完整清理', async ({ page }) => {
   await openCleanHome(page)
-  await createProject(page, 'E2E 节点工作流')
-  await openSidebarLeaf(page, '创作区', '节点工作流')
-  await expect(page.getByRole('heading', { name: '节点工作流', exact: true })).toBeVisible()
+  await createProject(page, 'E2E 节点模式')
+  await openSidebarLeaf(page, '创作区', '节点模式')
+  await expect(page.getByRole('heading', { name: '节点模式', exact: true })).toBeVisible()
 
   await page.getByRole('button', { name: '克隆工作流 极速起书 · 通用', exact: true }).click()
   await expect(page.getByRole('heading', { name: '极速起书 · 通用 (副本)', exact: true })).toBeVisible()
@@ -86,7 +86,7 @@ test('节点工作流可克隆、建立分支、保存刷新并完整清理', as
     exact: true,
   }).click()
 
-  await expect(page.getByRole('heading', { name: '节点工作流 · 极速起书 · 通用 (副本)' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: '节点模式 · 极速起书 · 通用 (副本)' })).toBeVisible()
   await expect(page.getByTestId('workflow-canvas')).toBeVisible()
   await page.locator('aside input').first().fill('E2E FLOW 分支')
   await page.getByRole('button', { name: '从 一句话故事 输出', exact: true }).click()
@@ -96,7 +96,7 @@ test('节点工作流可克隆、建立分支、保存刷新并完整清理', as
   await expect(page.getByRole('button', { name: '保存', exact: true })).toBeDisabled()
 
   await page.reload()
-  await openSidebarLeaf(page, '创作区', '节点工作流')
+  await openSidebarLeaf(page, '创作区', '节点模式')
   await expect(page.getByRole('heading', { name: 'E2E FLOW 分支', exact: true })).toBeVisible()
   await page.getByRole('button', { name: '编辑工作流 E2E FLOW 分支', exact: true }).click()
   await expect(page.getByText('一句话故事 → 第一章正文.chapterSummary', { exact: true })).toBeVisible()

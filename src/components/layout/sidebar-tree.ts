@@ -265,7 +265,7 @@ export const NAV_TREE: TreeSection[] = [
       leaf('rules',            '创作规则', Ruler),
       leaf('outline',          '大纲',     BookOpen),
       leaf('character-driven-plot', '角色驱动', Drama),
-      leaf('visual-workflows', '节点工作流', Workflow),
+      leaf('visual-workflows', '节点模式', Workflow),
       leaf('story-arc',        '故事线',   GitBranch),
       leaf('chapters-list',    '章节',     FilePen),
       leaf('foreshadow',       '伏笔',     Eye),
