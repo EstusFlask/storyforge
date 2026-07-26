@@ -1,5 +1,6 @@
 import JSON5 from 'json5'
 import { useAIConfigStore } from '../../stores/ai-config'
+import { useChapterStore } from '../../stores/chapter'
 import { useCharacterStore } from '../../stores/character'
 import { useInspirationWorkspaceStore } from '../../stores/inspiration-workspace'
 import { useOutlineStore } from '../../stores/outline'
@@ -41,12 +42,19 @@ import {
   type OutlineCopilotSnapshot,
 } from './outline-copilot'
 import {
+  adoptRestoredProseCandidate,
+  parseProseCandidateDraft,
+  prepareProseCopilot,
+  type ProseCopilotOperation,
+  type ProseCopilotSnapshot,
+} from './prose-copilot'
+import {
   prepareWorldOriginCopilot,
   type WorldOriginSnapshot,
 } from './world-origin-copilot'
 import { executeAgentTool } from './tool-registry'
 
-export const DOMAIN_AGENT_IDS = ['world-origin', 'character', 'inspiration', 'outline'] as const
+export const DOMAIN_AGENT_IDS = ['world-origin', 'character', 'inspiration', 'outline', 'prose'] as const
 export type DomainAgentId = typeof DOMAIN_AGENT_IDS[number]
 
 export interface MasterAgentTask {
@@ -72,6 +80,8 @@ export interface MasterCandidatePayload {
   selectedFragmentIds?: string[]
   outlineMode?: OutlineCopilotMode
   outlineParentId?: number | null
+  proseOperation?: ProseCopilotOperation
+  proseOutlineNodeId?: number
   dependsOnTaskIds?: string[]
 }
 
@@ -100,7 +110,13 @@ function extractJsonObject(text: string): Record<string, unknown> {
 
 function explicitlyRequestedDomains(request: string): Set<DomainAgentId> {
   const hasInspiration = /灵感|反推|碎片|脑洞/.test(request)
-  const hasOutline = /大纲|卷纲|章纲|章节规划|剧情结构|情节结构/.test(request)
+  const hasProse = /正文|续写|接着写|继续写|写(?:作|出|完)?第\s*[零〇一二两三四五六七八九十\d]+\s*章/.test(request)
+  const outlineMention = /大纲|卷纲|章纲|章节规划|剧情结构|情节结构/.test(request)
+  const outlineAction = (
+    /(?:生成|创建|新增|规划|设计|展开|补充|完善|修改|重做).{0,12}(?:大纲|卷纲|章纲|章节规划|剧情结构|情节结构)/.test(request)
+    || /(?:大纲|卷纲|章纲|章节规划|剧情结构|情节结构).{0,12}(?:生成|创建|新增|规划|设计|展开|补充|完善|修改|重做)/.test(request)
+  )
+  const hasOutline = hasProse ? outlineAction : outlineMention
   const worldMention = /世界|设定|起源|文明|力量|体系|时代|地理/.test(request)
   const worldObject = '(?:世界观|世界|背景设定|世界起源|文明设定|力量体系|时代背景|地理设定)'
   const worldAction = (
@@ -112,14 +128,16 @@ function explicitlyRequestedDomains(request: string): Set<DomainAgentId> {
     /(?:创建|生成|设计|新增|塑造|补充|完善|修改|重做).{0,12}(?:角色|人物|主角|配角|反派|npc)/i.test(request)
     || /(?:角色|人物|主角|配角|反派|npc).{0,12}(?:创建|生成|设计|新增|塑造|补充|完善|修改|重做)/i.test(request)
   )
-  const hasWorld = hasOutline ? worldAction : worldMention
+  const downstreamWriting = hasOutline || hasProse
+  const hasWorld = downstreamWriting ? worldAction : worldMention
   // 大纲里的“角色变化/角色弧光”是输出约束，不是创建或修改角色主档的授权。
-  const hasCharacter = hasOutline ? characterAction : characterMention
+  const hasCharacter = downstreamWriting ? characterAction : characterMention
   return new Set<DomainAgentId>([
     ...(hasWorld ? ['world-origin' as const] : []),
     ...(hasCharacter ? ['character' as const] : []),
     ...(hasInspiration ? ['inspiration' as const] : []),
     ...(hasOutline ? ['outline' as const] : []),
+    ...(hasProse ? ['prose' as const] : []),
   ])
 }
 
@@ -130,6 +148,7 @@ function fallbackPlan(request: string): MasterAgentPlan {
   const hasCharacter = requested.has('character')
   const hasInspiration = requested.has('inspiration')
   const hasOutline = requested.has('outline')
+  const hasProse = requested.has('prose')
   if (hasWorld) tasks.push({
     id: 'world-1',
     agentId: 'world-origin',
@@ -157,13 +176,28 @@ function fallbackPlan(request: string): MasterAgentPlan {
       ...(hasCharacter ? ['character-1'] : []),
     ],
   })
+  if (hasProse && !hasOutline) tasks.push({
+    id: 'prose-1',
+    agentId: 'prose',
+    instruction: request,
+    dependsOn: [
+      ...(hasWorld ? ['world-1'] : []),
+      ...(hasCharacter ? ['character-1'] : []),
+      ...(hasOutline ? ['outline-1'] : []),
+    ],
+  })
   if (!tasks.length) tasks.push({
     id: 'character-1',
     agentId: 'character',
     instruction: request,
     dependsOn: [],
   })
-  return { summary: '根据用户要求调度相关创作领域。', tasks }
+  return {
+    summary: hasProse && hasOutline
+      ? '先生成并确认章节大纲；确认进入正式数据后，再继续生成正文。'
+      : '根据用户要求调度相关创作领域。',
+    tasks,
+  }
 }
 
 function sanitizePlan(raw: Record<string, unknown>, request: string): MasterAgentPlan {
@@ -216,8 +250,22 @@ function sanitizePlan(raw: Record<string, unknown>, request: string): MasterAgen
   tasks.forEach(task => {
     task.dependsOn = task.dependsOn.filter(id => id !== task.id && knownIds.has(id))
   })
+  const outlineTaskIds = new Set(tasks
+    .filter(task => task.agentId === 'outline')
+    .map(task => task.id))
+  const stagedProse = tasks.some(task => (
+    task.agentId === 'prose'
+    && (outlineTaskIds.size > 0 || task.dependsOn.some(id => outlineTaskIds.has(id)))
+  ))
+  if (stagedProse) {
+    for (let index = tasks.length - 1; index >= 0; index--) {
+      if (tasks[index].agentId === 'prose') tasks.splice(index, 1)
+    }
+  }
   return {
-    summary: typeof raw.summary === 'string' && raw.summary.trim()
+    summary: stagedProse
+      ? '先生成并确认章节大纲；确认进入正式数据后，再继续生成正文。'
+      : typeof raw.summary === 'string' && raw.summary.trim()
       ? raw.summary.trim().slice(0, 500)
       : '主 Agent 已拆分本轮创作任务。',
     tasks,
@@ -247,12 +295,13 @@ export async function createMasterAgentPlan(input: {
 - character：设计一个新角色；
 - inspiration：基于项目内已保存灵感碎片做结构化反推。
 - outline：生成卷级大纲，或把当前卷纲展开为章节大纲。
+- prose：为已有章纲生成空白章正文，或显式续写已有正文；不得覆盖已有手稿。
 只调度用户明确要求生成或修改的领域。用户在大纲要求中提到世界元素或角色姓名，只是大纲
 约束，不代表授权新建世界观或角色；不得擅自扩大写入范围。
 依赖任务必须写 dependsOn。世界设定与角色同时出现时，角色应依赖世界任务。
-大纲依赖本轮新生成的世界或角色任务。只输出 JSON：
-{"summary":"给用户的简短计划","tasks":[{"id":"稳定ID","agentId":"world-origin|character|inspiration|outline","instruction":"给分 Agent 的完整要求","dependsOn":[]}]}。
-每个领域最多一个任务；同一领域的批量目标必须合并到这个任务中一次产出。最多 4 个任务；
+大纲依赖本轮新生成的世界或角色任务；正文依赖本轮新生成的大纲、世界或角色任务。只输出 JSON：
+{"summary":"给用户的简短计划","tasks":[{"id":"稳定ID","agentId":"world-origin|character|inspiration|outline|prose","instruction":"给分 Agent 的完整要求","dependsOn":[]}]}。
+每个领域最多一个任务；同一领域的批量目标必须合并到这个任务中一次产出。最多 5 个任务；
 不要输出 Markdown。`,
   }, {
     role: 'user' as const,
@@ -398,7 +447,7 @@ export async function executeMasterAgentPlan(input: {
           runtimeOutput: result.output,
         })
         outputs.set(task.id, draft)
-      } else {
+      } else if (task.agentId === 'outline') {
         const prepared = await prepareOutlineCopilot({
           projectId: input.projectId,
           worldGroupId: input.worldGroupId,
@@ -421,6 +470,36 @@ export async function executeMasterAgentPlan(input: {
             baseSnapshot: prepared.snapshot,
             outlineMode: prepared.mode,
             outlineParentId: prepared.parentVolumeId,
+            dependsOnTaskIds: task.dependsOn,
+          },
+          draft,
+          runtimeNode: prepared.node,
+          runtimeOutput: result.output,
+        })
+        outputs.set(task.id, draft)
+      } else {
+        const prepared = await prepareProseCopilot({
+          projectId: input.projectId,
+          worldGroupId: input.worldGroupId,
+          authorRequest: task.instruction,
+          supplementalContext: upstream,
+          signal: input.signal,
+        })
+        const result = await runGenerationNode(prepared.node, prepared.prepared)
+        if (result.gate?.status === 'blocked') {
+          throw new Error(result.gate.issues.map(issue => issue.message).join('；'))
+        }
+        const draft = result.output
+        candidates.push({
+          payload: {
+            version: 1,
+            taskId: task.id,
+            agentId: task.agentId,
+            label: prepared.label,
+            contextSources: prepared.contextSources,
+            baseSnapshot: prepared.snapshot,
+            proseOperation: prepared.operation,
+            proseOutlineNodeId: prepared.outlineNodeId,
             dependsOnTaskIds: task.dependsOn,
           },
           draft,
@@ -533,7 +612,9 @@ export async function adoptMasterCandidate(input: {
         ? parseCharacterCandidateDraft(input.draft)
         : input.payload.agentId === 'inspiration'
           ? parseInspirationCandidateDraft(input.draft, input.payload.mode ?? 'single')
-          : parseOutlineCandidateDraft(input.draft)
+          : input.payload.agentId === 'outline'
+            ? parseOutlineCandidateDraft(input.draft)
+            : parseProseCandidateDraft(input.draft)
     const result = await adoptGenerationNodeOutput(input.runtime.runtimeNode, output)
     if (!result.adopted) {
       throw new Error(result.gate?.issues.map(issue => issue.message).join('；') || '候选没有通过确认闸门。')
@@ -579,7 +660,7 @@ export async function adoptMasterCandidate(input: {
       fragmentIds: input.payload.selectedFragmentIds ?? [],
       result: result as InspirationCopilotResult,
     })
-  } else {
+  } else if (input.payload.agentId === 'outline') {
     const mode = input.payload.outlineMode
     if (!mode) throw new Error('大纲候选缺少写回模式，请重新生成。')
     await adoptRestoredOutlineCandidate({
@@ -590,12 +671,25 @@ export async function adoptMasterCandidate(input: {
       snapshot: input.payload.baseSnapshot as OutlineCopilotSnapshot,
       draft: input.draft,
     })
+  } else {
+    if (!input.payload.proseOperation || input.payload.proseOutlineNodeId == null) {
+      throw new Error('正文候选缺少目标章节或写回模式，请重新生成。')
+    }
+    await adoptRestoredProseCandidate({
+      projectId: input.projectId,
+      worldGroupId: input.worldGroupId,
+      operation: input.payload.proseOperation,
+      outlineNodeId: input.payload.proseOutlineNodeId,
+      snapshot: input.payload.baseSnapshot as ProseCopilotSnapshot,
+      draft: input.draft,
+    })
   }
 
   await Promise.all([
     useWorldviewStore.getState().loadAll(input.projectId, input.worldGroupId),
     useCharacterStore.getState().loadAll(input.projectId),
     useOutlineStore.getState().loadAll(input.projectId),
+    useChapterStore.getState().loadAll(input.projectId),
   ])
   return input.payload.agentId === 'world-origin'
     ? '世界来源已写入项目。'
@@ -603,7 +697,11 @@ export async function adoptMasterCandidate(input: {
       ? `角色“${(parseCharacterCandidateDraft(input.draft) as CharacterCopilotCandidate).name}”已加入项目。`
       : input.payload.agentId === 'inspiration'
         ? `已保存新的${input.payload.mode === 'multiworld' ? '多世界' : '单世界'}灵感版本。`
-        : input.payload.outlineMode === 'volumes'
-          ? '卷级大纲已写入项目。'
-          : '章节大纲已写入目标卷。'
+        : input.payload.agentId === 'outline'
+          ? input.payload.outlineMode === 'volumes'
+            ? '卷级大纲已写入项目。'
+            : '章节大纲已写入目标卷。'
+          : input.payload.proseOperation === 'continue'
+            ? '续写内容已追加到目标章节。'
+            : '正文已写入目标章节。'
 }

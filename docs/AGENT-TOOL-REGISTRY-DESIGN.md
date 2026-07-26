@@ -2,8 +2,8 @@
 
 > 状态：Phase 27.1-a 已完成（2026-07-25）。本文覆盖只读工具层；后续
 > AgentRunner 与 ChatCopilot 的实际边界分别见 `AGENT-RUNNER-DESIGN.md` 和
-> `CHAT-COPILOT-MVP-DESIGN.md`；27.1-d 首个领域扩展见
-> `CHAT-COPILOT-INSPIRATION-DESIGN.md`。仍不宣称多 Agent 或后台 Agent 已完成。
+> `CHAT-COPILOT-MVP-DESIGN.md`；27.1-d 四个领域扩展分别见 `CHAT-COPILOT-*` 设计文档。
+> 仍不宣称多 Agent 或后台 Agent 已完成。
 
 ## 1. 为什么先做这一层
 
@@ -94,8 +94,8 @@ Tool 定义声明 `risk: read | generate | write`。Phase 27.1-a 注册表只有
    保留为后续优化。
 3. **27.1-c（已完成）**：ChatCopilot UI；只接
    “当前世界来源候选 → 用户确认 → GenerationNode gate → adopt”的最小写闭环。
-4. **27.1-d（进行中）**：灵感反推独立候选闭环已接入；角色、大纲、正文仍须逐领域
-   设计和验收。
+4. **27.1-d（已完成）**：灵感反推、角色、大纲和正文四个独立候选闭环均已逐领域
+   设计和验收；写入继续由各领域 GenerationNode 与 adoption 边界负责。
 5. **27.1-e**：领域闭环稳定后再讨论多 Agent；不提前常驻。
 
 ## 5. 验证要求

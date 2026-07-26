@@ -136,6 +136,45 @@ describe('AGENT-2 · 主 Agent 编排与持久会话', () => {
     ])
   })
 
+  it('正文请求不会把已有章纲、世界观或角色约束扩大成额外写入任务', async () => {
+    const plan = await createMasterAgentPlan({
+      projectId: project.id!,
+      worldGroupId: null,
+      request: '根据已有章纲和世界观，续写第一章正文，保持主角性格',
+    }, {
+      complete: async () => JSON.stringify({
+        summary: '先改设定和大纲，再写正文。',
+        tasks: [
+          { id: 'world', agentId: 'world-origin', instruction: '修改世界观', dependsOn: [] },
+          { id: 'character', agentId: 'character', instruction: '修改主角', dependsOn: [] },
+          { id: 'outline', agentId: 'outline', instruction: '修改章纲', dependsOn: [] },
+          { id: 'prose', agentId: 'prose', instruction: '续写第一章正文', dependsOn: ['world', 'character', 'outline'] },
+        ],
+      }),
+    })
+    expect(plan.tasks).toEqual([
+      { id: 'prose', agentId: 'prose', instruction: '续写第一章正文', dependsOn: [] },
+    ])
+  })
+
+  it('同轮新建章纲和正文会分阶段，只先返回可确认的大纲任务', async () => {
+    const plan = await createMasterAgentPlan({
+      projectId: project.id!,
+      worldGroupId: null,
+      request: '先规划第一卷章纲，再写第一章正文',
+    }, {
+      complete: async () => JSON.stringify({
+        summary: '一次完成。',
+        tasks: [
+          { id: 'outline', agentId: 'outline', instruction: '规划第一卷章纲', dependsOn: [] },
+          { id: 'prose', agentId: 'prose', instruction: '写第一章正文', dependsOn: ['outline'] },
+        ],
+      }),
+    })
+    expect(plan.summary).toContain('先生成并确认章节大纲')
+    expect(plan.tasks.map(task => task.agentId)).toEqual(['outline'])
+  })
+
   it('事件按严格序号持久化，候选编辑和刷新恢复不丢失', async () => {
     const conversation = await getOrCreateAgentConversation({
       projectId: project.id!,

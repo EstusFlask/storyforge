@@ -243,7 +243,7 @@ export default function ChatCopilotPanel({
           }}
           placeholder={copilot.pendingCandidates.length
             ? '请先处理当前候选，再继续对话'
-            : '例如：建立宋风世界，设计守灯人主角，再规划三卷大纲…'}
+            : '例如：建立宋风世界，设计守灯人主角，规划三卷大纲，再写第一章正文…'}
           className="w-full resize-none rounded-md border border-border bg-bg-base px-3 py-2 text-xs leading-5 text-text-primary outline-none focus:border-accent disabled:opacity-60"
         />
         <div className="mt-2 flex items-center justify-between">
