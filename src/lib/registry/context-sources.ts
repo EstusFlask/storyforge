@@ -21,6 +21,7 @@ import {
   getContextMemo,
 } from '../ai/context-builder'
 import { buildCodexContext } from '../ai/codex-context'
+import { buildCultivationContext } from '../ai/cultivation-context'
 import { buildWorldRulesContext } from '../ai/world-rules-manifest'
 import { formatHandoff } from '../ai/chapter-memory/handoff-format'
 import { getChapterDerivedMemoryStatus, normalizeChapterText } from '../ai/chapter-memory/text-normalization'
@@ -29,9 +30,35 @@ import { parseFields } from '../types/state-card'
 import { parseBeats } from '../types/emotion-beat'
 import { buildForeshadowTaskContext } from '../foreshadow/context'
 import { formatHeldItemsContext, readProjectHeldItems } from '../consistency/held-items'
+import { formatCharacterKnowledgeContext, readProjectCharacterKnowledge } from '../knowledge-ledger/knowledge-ledger'
+import { formatCanonAssertionsContext, readCanonAssertions } from '../fact-ledger/setting-assertions'
+import { readStorylineProgressContext } from '../storyline/storyline-progress'
+import { readCultivationProgressContext } from '../cultivation/progress'
 import type { Chapter, Character, OutlineNode, PowerSystem, Worldview } from '../types'
+import {
+  parseCharacterDrivenPlanArcs,
+  parseCharacterDrivenPlotVolumes,
+} from '../types/character-driven-plan'
 import type { ContextSource } from './types'
 import { countWords, htmlToPlainText } from '../utils/html'
+import {
+  formatStyleCalibrationFeedback,
+  formatStyleFewShotPairs,
+  parseStyleCalibrationFeedback,
+  parseStyleRevisionPairs,
+} from '../style/style-learning'
+import {
+  buildInspirationFusionInput,
+  latestInspirationVersion,
+  parseInspirationFragments,
+  parseInspirationVersions,
+} from '../inspiration/workspace'
+import {
+  readAgentOutlineTree,
+  readAgentProjectStatus,
+  readAgentSearchResults,
+  readAgentWorldGroups,
+} from '../agent/read-sources'
 
 async function readWorldview(projectId: number, worldGroupId?: number | null): Promise<Worldview | null> {
   const rows = await db.worldviews.where('projectId').equals(projectId).toArray()
@@ -73,7 +100,73 @@ async function readForeshadows(projectId: number, chapterId?: number | null): Pr
 async function readUserStyleProfile(projectId: number): Promise<string> {
   const profile = await db.userStyleProfiles.where('projectId').equals(projectId).first()
   if (!profile || !profile.enabled || !profile.profile.trim()) return ''
-  return `【作者文风偏好】\n请在本次写作中尽量贴合作者一贯的文风习惯:\n${profile.profile.trim()}`
+  const pairExamples = formatStyleFewShotPairs(parseStyleRevisionPairs(profile.revisionPairs))
+  const feedback = formatStyleCalibrationFeedback(
+    parseStyleCalibrationFeedback(profile.calibrationFeedback),
+  )
+  return [
+    '【作者文风偏好】',
+    '请在本次写作中贴合作者一贯的表达习惯，但不要照搬样本中的剧情、人物名、地点名或专有名词。',
+    profile.profile.trim(),
+    pairExamples ? `【作者改稿对照（仅学习改写方向）】\n${pairExamples}` : '',
+    feedback ? `【最近校准反馈】\n${feedback}` : '',
+  ].filter(Boolean).join('\n\n')
+}
+
+async function readInspirationWorkspaceContext(
+  projectId: number,
+  selectedIds: string[] | undefined,
+  mode: 'single' | 'multiworld' = 'single',
+): Promise<string> {
+  if (!selectedIds?.length) return ''
+  const workspace = await db.inspirationWorkspaces.where('projectId').equals(projectId).first()
+  if (!workspace) return ''
+  const fragments = parseInspirationFragments(workspace.fragments)
+  const versions = parseInspirationVersions(workspace.versions)
+  return buildInspirationFusionInput({
+    fragments,
+    selectedIds: new Set(selectedIds),
+    previousVersion: latestInspirationVersion(versions, mode),
+  })
+}
+
+export async function readActiveCharacterDrivenPlanContext(projectId: number): Promise<string> {
+  const project = await db.projects.get(projectId)
+  const activeId = project?.activeCharacterDrivenPlanId
+  if (activeId == null) return ''
+
+  const plan = await db.characterDrivenPlans.get(activeId)
+  if (!plan || plan.projectId !== projectId) return ''
+
+  const [characters, arcs] = await Promise.all([
+    db.characters.where('projectId').equals(projectId).toArray(),
+    Promise.resolve(parseCharacterDrivenPlanArcs(plan.arcs)),
+  ])
+  const byId = new Map(characters.flatMap(character =>
+    character.id == null ? [] : [[character.id, character] as const],
+  ))
+  const lines = [
+    `【当前生效的角色驱动方案】${plan.name}（v${plan.version}，${plan.status}）`,
+  ]
+  if (plan.userHint.trim()) lines.push(`作者要求：${plan.userHint.trim()}`)
+  for (const arc of arcs) {
+    const current = arc.characterId == null ? null : byId.get(arc.characterId)
+    const identity = current
+      ? `${current.name}${current.name !== arc.name ? `（方案快照名：${arc.name}）` : ''}`
+      : `${arc.name}（原角色已删除，仅保留方案快照）`
+    lines.push(
+      `- ${identity}｜${arc.role || '未标注身份'}：${arc.initialState || '未填写'} → ${arc.targetState || '未填写'}`,
+    )
+  }
+  const volumes = parseCharacterDrivenPlotVolumes(plan.generatedVolumes)
+  for (const volume of volumes) {
+    lines.push(`卷：${volume.volumeTitle}｜${volume.volumeSummary}`)
+    if (volume.characterArcs) lines.push(`  弧光：${volume.characterArcs}`)
+    for (const chapter of volume.chapters) {
+      lines.push(`  - ${chapter.title}：${chapter.summary}${chapter.arcProgress ? `；弧光推进：${chapter.arcProgress}` : ''}`)
+    }
+  }
+  return lines.join('\n')
 }
 
 async function readStoryArcs(projectId: number): Promise<string> {
@@ -268,6 +361,9 @@ async function readDetailedOutline(projectId: number, outlineNodeId?: number | n
       .filter(Boolean).join(' / ')
     parts.push(`场景${i + 1} ${s.title || ''}: ${bits}`)
   })
+  if (detail.prohibitions?.length) {
+    parts.push(`不可写清单:${detail.prohibitions.join('；')}`)
+  }
   if (detail.endingCliffhanger) parts.push(`结尾悬念:${detail.endingCliffhanger}`)
   return parts.join('\n')
 }
@@ -285,9 +381,21 @@ async function readItemLedger(projectId: number, characterId?: number | null): P
   ].join('\n')
 }
 
-async function readHeldItems(projectId: number, chapterId?: number | null, worldGroupId?: number | null, characterId?: number | null): Promise<string> {
-  if (chapterId == null) return ''
-  return formatHeldItemsContext(await readProjectHeldItems(projectId, chapterId, worldGroupId, characterId))
+async function readHeldItems(
+  projectId: number,
+  chapterId?: number | null,
+  worldGroupId?: number | null,
+  characterId?: number | null,
+  outlineNodeId?: number | null,
+): Promise<string> {
+  if (chapterId == null && outlineNodeId == null) return ''
+  return formatHeldItemsContext(await readProjectHeldItems(
+    projectId,
+    chapterId,
+    worldGroupId,
+    characterId,
+    outlineNodeId,
+  ))
 }
 
 async function readStoryTimeline(projectId: number): Promise<string> {
@@ -300,29 +408,40 @@ async function readStoryTimeline(projectId: number): Promise<string> {
   ].join('\n')
 }
 
-async function readCharacterRelations(projectId: number): Promise<string> {
+async function readCharacterRelations(projectId: number, worldGroupId?: number | null): Promise<string> {
   const [rows, characters] = await Promise.all([
     db.characterRelations.where('projectId').equals(projectId).toArray(),
     db.characters.where('projectId').equals(projectId).toArray(),
   ])
-  if (!rows.length) return ''
-  const names = new Map(characters.filter(item => item.id != null).map(item => [item.id!, item.name]))
+  const visibleCharacters = worldGroupId === undefined
+    ? characters
+    : characters.filter(character => (
+        character.isCrossWorld || (character.homeWorldGroupId ?? null) === (worldGroupId ?? null)
+      ))
+  const names = new Map(visibleCharacters.filter(item => item.id != null).map(item => [item.id!, item.name]))
+  const visibleRows = worldGroupId === undefined
+    ? rows
+    : rows.filter(row => names.has(row.fromCharacterId) && names.has(row.toCharacterId))
+  if (!visibleRows.length) return ''
   return [
     '【角色关系证据】',
-    ...rows.slice(0, 160).map(row =>
+    ...visibleRows.slice(0, 160).map(row =>
       `#${row.id ?? 0} ${names.get(row.fromCharacterId) ?? `角色#${row.fromCharacterId}`} → ${names.get(row.toCharacterId) ?? `角色#${row.toCharacterId}`}：${row.label}${row.description ? `（${row.description}）` : ''}`),
   ].join('\n')
 }
 
 /**
  * NS-4 · 当前有效事实投影（事实账本 → 生成上下文）。
- * 只注入 confirmed（Canon）事实，按【规范章序】实时解析 validFrom/To（绝不缓存 order）判定"截止本章是否有效"，
+ * 注入当前有效的 confirmed，以及在目标时点仍有效的 superseded 历史 Canon。
+ * 按【规范章序】实时解析 validFrom/To（绝不缓存 order）判定"截止本章是否有效"，
  * 并按当前世界（∪ 默认 null 世界）过滤。这是事实账本改善长期一致性的回报通道。
  */
 async function readCurrentFacts(projectId: number, chapterId?: number | null, worldGroupId?: number | null): Promise<string> {
   if (chapterId == null) return ''
   const [facts, outlineNodes, chapters] = await Promise.all([
-    db.temporalFacts.where('projectId').equals(projectId).filter(f => f.status === 'confirmed').toArray(),
+    db.temporalFacts.where('projectId').equals(projectId)
+      .filter(f => f.status === 'confirmed' || f.status === 'superseded')
+      .toArray(),
     db.outlineNodes.where('projectId').equals(projectId).toArray(),
     db.chapters.where('projectId').equals(projectId).toArray(),
   ])
@@ -431,6 +550,45 @@ async function readCharacterPassages(projectId: number, name?: string, worldGrou
 
 export const CONTEXT_SOURCES: ContextSource[] = [
   {
+    // AGENT-1: 对话副驾只读工具使用的紧凑项目摘要，不返回整表原始数据。
+    key: 'projectStatus',
+    label: '项目概况',
+    scope: 'project',
+    layer: 'L2',
+    budgetTokens: 1200,
+    read: readAgentProjectStatus,
+  },
+  {
+    // AGENT-1: 世界组与连接关系的有界目录。
+    key: 'worldGroups',
+    label: '世界组目录',
+    scope: 'project',
+    layer: 'L2',
+    budgetTokens: 1500,
+    read: readAgentWorldGroups,
+  },
+  {
+    // AGENT-1: 按当前执行世界过滤的有界大纲树。
+    key: 'outlineTree',
+    label: '大纲树',
+    scope: 'world',
+    layer: 'L2',
+    budgetTokens: 6000,
+    requiresWorldGroupId: true,
+    read: readAgentOutlineTree,
+  },
+  {
+    // AGENT-1: 零网络、零 embedding 的本地包含匹配，仅返回短摘。
+    key: 'searchResults',
+    label: '项目内搜索结果',
+    scope: 'world',
+    layer: 'L2',
+    budgetTokens: 2200,
+    requiresWorldGroupId: true,
+    enabled: input => !!input.searchQuery?.trim(),
+    read: readAgentSearchResults,
+  },
+  {
     key: 'manualText',
     label: '用户指定内容',
     scope: 'manual',
@@ -495,6 +653,35 @@ export const CONTEXT_SOURCES: ContextSource[] = [
     budgetTokens: 2000,
     requiresChapterId: true,
     read: input => readCurrentFacts(input.projectId, input.chapterId, input.worldGroupId),
+  },
+  {
+    key: 'canonAssertions',
+    label: '世界宪法(已确认设定断言)',
+    scope: 'world',
+    layer: 'L1',
+    budgetTokens: 1800,
+    protectedFromTrim: true,
+    requiresWorldGroupId: true,
+    read: async input => formatCanonAssertionsContext(
+      await readCanonAssertions(input.projectId, input.worldGroupId),
+    ),
+  },
+  {
+    key: 'characterKnowledge',
+    label: '角色认知边界(认知账本投影)',
+    scope: 'chapter',
+    layer: 'L1',
+    budgetTokens: 1600,
+    protectedFromTrim: true,
+    requiresChapterId: true,
+    acceptsOutlineNodeAsChapterBoundary: true,
+    read: async input => formatCharacterKnowledgeContext(await readProjectCharacterKnowledge(
+      input.projectId,
+      input.chapterId,
+      input.worldGroupId,
+      input.characterId,
+      input.outlineNodeId,
+    )),
   },
   {
     key: 'retrievedPassages',
@@ -572,13 +759,29 @@ export const CONTEXT_SOURCES: ContextSource[] = [
     read: async input => formatStoryCoreBlock(await db.storyCores.where('projectId').equals(input.projectId).first() ?? null),
   },
   {
+    key: 'characterDrivenPlan',
+    label: '当前生效角色驱动方案',
+    scope: 'project',
+    layer: 'L1',
+    budgetTokens: 5000,
+    protectedFromTrim: true,
+    read: input => readActiveCharacterDrivenPlanContext(input.projectId),
+  },
+  {
     key: 'powerSystem',
     label: '力量体系',
     scope: 'world',
     layer: 'L2',
     budgetTokens: 4000, // 放宽:容下完整力量体系(描述/等级/规则)
     requiresWorldGroupId: true,
-    read: async input => formatPowerSystemBlock(await readPowerSystem(input.projectId, input.worldGroupId)),
+    read: async input => {
+      const [foundation, cultivation] = await Promise.all([
+        readPowerSystem(input.projectId, input.worldGroupId)
+          .then(formatPowerSystemBlock),
+        buildCultivationContext(input.projectId, input.worldGroupId),
+      ])
+      return [foundation, cultivation].filter(Boolean).join('\n')
+    },
   },
   {
     key: 'codex',
@@ -649,6 +852,30 @@ export const CONTEXT_SOURCES: ContextSource[] = [
     read: input => readStoryArcs(input.projectId),
   },
   {
+    key: 'storylineProgress',
+    label: '作者确认的故事线进度与交汇',
+    scope: 'project',
+    layer: 'L1',
+    budgetTokens: 1400,
+    protectedFromTrim: true,
+    read: input => readStorylineProgressContext(input.projectId, input.chapterId),
+  },
+  {
+    key: 'cultivationProgress',
+    label: '作者确认的正文修炼进度',
+    scope: 'world',
+    layer: 'L1',
+    budgetTokens: 1000,
+    protectedFromTrim: true,
+    requiresWorldGroupId: true,
+    read: input => readCultivationProgressContext(
+      input.projectId,
+      input.worldGroupId,
+      input.chapterId,
+      input.outlineNodeId,
+    ),
+  },
+  {
     key: 'emotionBeats',
     label: '情感节拍',
     scope: 'chapter',
@@ -681,7 +908,14 @@ export const CONTEXT_SOURCES: ContextSource[] = [
     budgetTokens: 1000,
     protectedFromTrim: true,
     requiresChapterId: true,
-    read: input => readHeldItems(input.projectId, input.chapterId, input.worldGroupId, input.characterId),
+    acceptsOutlineNodeAsChapterBoundary: true,
+    read: input => readHeldItems(
+      input.projectId,
+      input.chapterId,
+      input.worldGroupId,
+      input.characterId,
+      input.outlineNodeId,
+    ),
   },
   {
     key: 'storyTimeline',
@@ -697,7 +931,7 @@ export const CONTEXT_SOURCES: ContextSource[] = [
     scope: 'project',
     layer: 'L2',
     budgetTokens: 2200,
-    read: input => readCharacterRelations(input.projectId),
+    read: input => readCharacterRelations(input.projectId, input.worldGroupId),
   },
   {
     key: 'references',
@@ -714,8 +948,22 @@ export const CONTEXT_SOURCES: ContextSource[] = [
     label: '我的文风',
     scope: 'project',
     layer: 'L2',
-    budgetTokens: 700,
+    budgetTokens: 1800,
     read: input => readUserStyleProfile(input.projectId),
+  },
+  {
+    // CM-1:只读取作者本次明确勾选的短灵感和同模式最近确认版本。
+    key: 'inspirationWorkspace',
+    label: '增量灵感工作区',
+    scope: 'project',
+    layer: 'L0',
+    budgetTokens: 11_000,
+    enabled: input => !!input.inspirationFragmentIds?.length,
+    read: input => readInspirationWorkspaceContext(
+      input.projectId,
+      input.inspirationFragmentIds,
+      input.inspirationMode,
+    ),
   },
   {
     // C2 反向哺喂：某角色在剧情里已确认的事实（需 subjectCharacterName）。

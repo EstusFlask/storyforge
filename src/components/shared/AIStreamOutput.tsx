@@ -15,8 +15,8 @@ interface AIStreamOutputProps {
   tokenUsage?: TokenUsage | null
   /** 停止生成 */
   onStop: () => void
-  /** 采纳内容 */
-  onAccept: (text: string) => void
+  /** 采纳内容；结构化结果由调用方单独审查/应用时可省略 */
+  onAccept?: (text: string) => void
   /** 重试 */
   onRetry: () => void
   /** 关闭/弃用本次结果（不写回正文）。传入则显示「关闭」按钮 */
@@ -107,10 +107,17 @@ export default function AIStreamOutput({
               <Braces className="w-4 h-4 text-accent shrink-0" />
               {isStreaming ? (
                 <span className="flex items-center gap-1.5">
-                  <Loader2 className="w-3.5 h-3.5 animate-spin" /> AI 正在生成结构化内容…（完成后点「采纳」自动整理为可编辑内容）
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  {onAccept
+                    ? 'AI 正在生成结构化内容…（完成后点「采纳」自动整理为可编辑内容）'
+                    : 'AI 正在生成结构化内容…（完成后将在下方生成可审查计划）'}
                 </span>
               ) : (
-                <span>✓ 已生成结构化内容，点「采纳」自动整理填入对应栏目。</span>
+                <span>
+                  {onAccept
+                    ? '✓ 已生成结构化内容，点「采纳」自动整理填入对应栏目。'
+                    : '✓ 已生成结构化内容，系统已解析为下方可审查计划。'}
+                </span>
               )}
             </div>
             <button
@@ -206,7 +213,7 @@ export default function AIStreamOutput({
                   </button>
                 </>
               )}
-              {hasOutput && !error && (
+              {hasOutput && !error && onAccept && (
                 <button
                   onClick={() => onAccept(output)}
                   className="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-accent text-white rounded-md hover:bg-accent-hover transition-colors"

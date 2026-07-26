@@ -3,6 +3,7 @@ import { useWorldviewStore } from '../../stores/worldview'
 import { useWorldGroupStore } from '../../stores/world-group'
 import WorldGroupSwitcher from '../world-group/WorldGroupSwitcher'
 import type { Project } from '../../lib/types'
+import CultivationSystemsPanel from './CultivationSystemsPanel'
 
 interface Props {
   project: Project
@@ -84,6 +85,7 @@ export default function PowerSystemPanel({ project }: Props) {
           />
         </div>
       </div>
+      <CultivationSystemsPanel project={project} />
     </div>
   )
 }

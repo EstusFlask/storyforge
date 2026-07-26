@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { ImportDocIntro, ImportReusableSessionBanner } from '../../src/components/system/import/ImportDocOverview'
 import { ImportPipelineControls } from '../../src/components/system/import/ImportRuntimeView'
+import CodexImportReviewModal from '../../src/components/system/import/CodexImportReviewModal'
 import useImportDocumentPreparation from '../../src/components/system/import/useImportDocumentPreparation'
 import type { ImportSession } from '../../src/lib/types/import-session'
 
@@ -87,6 +88,70 @@ describe('AUDIT-6 · 文档导入视图', () => {
     expect(onApplyReference).toHaveBeenNthCalledWith(2, 'deep')
     expect(onIgnore).toHaveBeenCalledOnce()
     expect(host.textContent).toContain('原文已不在内存')
+  })
+
+  it('词条候选审查允许取消、改名和改分类，确认时只交回选中项', async () => {
+    const onConfirm = vi.fn().mockResolvedValue(undefined)
+    const host = await mount(createElement(CodexImportReviewModal, {
+      filename: '设定集.md',
+      categories: [
+        {
+          ref: 'builtin:city',
+          categoryId: 1,
+          domain: 'humanity',
+          label: '城池重镇',
+          fields: [],
+        },
+        {
+          ref: 'builtin:faction',
+          categoryId: 2,
+          domain: 'humanity',
+          label: '势力',
+          fields: [],
+        },
+      ],
+      candidates: [
+        {
+          categoryRef: 'builtin:city',
+          name: '临渊城',
+          summary: '海门重镇',
+          description: '',
+          fields: {},
+          tags: [],
+          confidence: 0.91,
+          evidence: [{ chunkIndex: 0, quote: '临渊城扼守海峡' }],
+        },
+        {
+          categoryRef: 'builtin:faction',
+          name: '海盟',
+          summary: '',
+          description: '',
+          fields: {},
+          tags: [],
+          confidence: 0.6,
+          evidence: [{ chunkIndex: 1, quote: '海盟七部' }],
+        },
+      ],
+      onConfirm,
+      onCancel: vi.fn(),
+    }))
+
+    const firstName = host.querySelectorAll<HTMLInputElement>('input')[0]
+    const valueSetter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!
+    await act(async () => {
+      valueSetter.call(firstName, '新临渊城')
+      firstName.dispatchEvent(new Event('input', { bubbles: true }))
+    })
+    const secondToggle = host.querySelector<HTMLButtonElement>('button[aria-label="取消选择 海盟"]')!
+    await act(async () => secondToggle.click())
+    const confirm = Array.from(host.querySelectorAll('button'))
+      .find(button => button.textContent?.includes('确认导入 1 条'))!
+    await act(async () => confirm.click())
+
+    expect(onConfirm).toHaveBeenCalledOnce()
+    expect(onConfirm.mock.calls[0][0]).toHaveLength(1)
+    expect(onConfirm.mock.calls[0][0][0].name).toBe('新临渊城')
+    expect(host.textContent).toContain('逐字证据')
   })
 
   it('流水线控制栏按 phase 显示暂停、恢复和取消命令', async () => {

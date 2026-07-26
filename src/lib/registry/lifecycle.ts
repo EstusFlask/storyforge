@@ -14,7 +14,9 @@
  */
 import type { Table } from 'dexie'
 import { db } from '../db/schema'
-import { PROJECT_TABLES } from './project-tables'
+import { removeCodexEntryReferences } from '../codex/references'
+import { clearCultivationSystemReferences } from '../cultivation/lifecycle'
+import { PROJECT_TABLES, REGISTRY_BY_NAME } from './project-tables'
 import type { TableSpec } from './types'
 
 // ─────────────────────────────────────────────────────────────
@@ -52,6 +54,7 @@ export function transactionTablesFor(
     // 删世界组:所有 worldScoped 表 + 角色(homeWorldGroupId setNull)+ 大纲(worldGroupId setNull)+ 世界组本身
     const set = new Set<Table>(worldScopedTables().map(s => s.table))
     set.add(db.characters)
+    set.add(db.codexCategories)
     set.add(db.outlineNodes)
     set.add(db.worldGroups)
     set.add(db.worldGroupLinks)
@@ -59,6 +62,26 @@ export function transactionTablesFor(
   }
   // migrate:所有 worldScoped 表
   return worldScopedTables().map(s => s.table)
+}
+
+/**
+ * 根记录及其在 PROJECT_TABLES.refs 中声明的直接引用方。
+ * 供领域级生命周期事务使用；新增引用表时只改注册表，事务边界会自动扩展。
+ */
+export function transactionTablesForReferences(sourceTableName: string): Table[] {
+  const source = REGISTRY_BY_NAME.get(sourceTableName)
+  if (!source) throw new Error(`未知 PROJECT_TABLES 表: ${sourceTableName}`)
+  const names = new Set([sourceTableName])
+  for (const ref of source.refs ?? []) {
+    if (ref.kind !== 'simple' && ref.kind !== 'json') continue
+    const targetName = ref.target.match(/^([^[]+)\[/)?.[1]
+    if (targetName) names.add(targetName)
+  }
+  return [...names].map(name => {
+    const spec = REGISTRY_BY_NAME.get(name)
+    if (!spec) throw new Error(`PROJECT_TABLES 引用目标未登记: ${sourceTableName} → ${name}`)
+    return spec.table
+  })
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -144,23 +167,43 @@ async function deleteBlobsInTransaction(
 
 export async function cascadeDeleteGroup(projectId: number, wgId: number): Promise<void> {
   await db.transaction('rw', transactionTablesFor('deleteGroup'), async () => {
+    // 分类 schema 已改为项目级共享；旧备份可能仍带 worldGroupId。删除世界时只清
+    // 这个历史归属值，绝不删除分类及其它世界复用的字段结构。
+    const legacyCategories = await db.codexCategories.where('projectId').equals(projectId).toArray()
+    for (const category of legacyCategories) {
+      if (category.id != null && category.worldGroupId === wgId) {
+        await db.codexCategories.update(category.id, { worldGroupId: null, updatedAt: Date.now() })
+      }
+    }
     for (const spec of worldScopedTables()) {
       const wgField = spec.worldGroupField ?? 'worldGroupId'
 
-      // codexCategories 特殊:内置分类(builtInKey 非空)保持全局,不按世界删
-      if (spec.name === 'codexCategories') {
-        const all = await spec.table.where('projectId').equals(projectId).toArray()
-        for (const row of all as any[]) {
-          if (row[wgField] === wgId && !row.builtInKey) await spec.table.delete(row.id)
-        }
-        continue
-      }
       // outlineNodes 特殊:不删,只 setNull(卷脱离该世界)
       if (spec.name === 'outlineNodes') {
         const all = await spec.table.where('projectId').equals(projectId).toArray()
         for (const row of all as any[]) {
           if (row[wgField] === wgId) await spec.table.update(row.id, { [wgField]: null })
         }
+        continue
+      }
+      if (spec.name === 'codexEntries') {
+        const rows = await db.codexEntries.where('projectId').equals(projectId).toArray()
+        const deletedIds = new Set(rows
+          .filter(row => row.worldGroupId === wgId)
+          .map(row => row.id)
+          .filter((id): id is number => id != null))
+        await removeCodexEntryReferences(projectId, deletedIds)
+        if (deletedIds.size) await db.codexEntries.bulkDelete([...deletedIds])
+        continue
+      }
+      if (spec.name === 'cultivationSystems') {
+        const rows = await db.cultivationSystems.where('projectId').equals(projectId).toArray()
+        const deletedIds = new Set(rows
+          .filter(row => row.worldGroupId === wgId)
+          .map(row => row.id)
+          .filter((id): id is number => id != null))
+        await clearCultivationSystemReferences(projectId, deletedIds)
+        if (deletedIds.size) await db.cultivationSystems.bulkDelete([...deletedIds])
         continue
       }
 
@@ -190,9 +233,6 @@ export async function cascadeDeleteGroup(projectId: number, wgId: number): Promi
 export async function stampPrimaryWorld(projectId: number, primaryId: number): Promise<void> {
   await db.transaction('rw', transactionTablesFor('migrate'), async () => {
     for (const spec of worldScopedTables()) {
-      // codexCategories(分类结构)永远保持全局共用(内置 + 自定义都不盖章),
-      // 只有「词条」codexEntries 才盖章归属主世界。与手写版 migrate 一致。
-      if (spec.name === 'codexCategories') continue
       const wgField = spec.worldGroupField ?? 'worldGroupId'
       const rows = await spec.table.where('projectId').equals(projectId).toArray()
       for (const row of rows as any[]) {

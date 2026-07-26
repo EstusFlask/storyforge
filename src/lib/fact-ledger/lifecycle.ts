@@ -35,6 +35,10 @@ export async function remapTemporalFactCharacterRefs(args: {
       patch.objectCharacterId = args.toCharacterId ?? null
       changed = true
     }
+    if (fact.sourceCharacterId === args.fromCharacterId) {
+      patch.sourceCharacterId = args.toCharacterId ?? null
+      changed = true
+    }
 
     if (!changed) continue
     if (args.toCharacterId == null) {

@@ -1,5 +1,7 @@
 import { db } from '../db/schema'
 import { remapTemporalFactCharacterRefs } from '../fact-ledger/lifecycle'
+import { remapKnowledgeCharacterRefs } from '../knowledge-ledger/lifecycle'
+import { remapCultivationProgressCharacterRefs } from '../cultivation/progress-lifecycle'
 import { parseFields, stringifyFields } from '../types/state-card'
 import { PROJECT_TABLES } from './project-tables'
 import type { ArrayRef, JsonRef } from './types'
@@ -19,14 +21,60 @@ export async function applyCharacterReferenceRemap(input: CharacterReferenceRema
 
   await remapSimpleCharacterRefs(input.projectId, input.fromCharacterId, toCharacterId)
   await remapRegisteredCharacterArrays(input.projectId, input.fromCharacterId, toCharacterId)
-  await remapRegisteredCharacterJson(input.projectId, input.fromCharacterId, toCharacterId)
+  await remapRegisteredCharacterJson(
+    input.projectId,
+    input.fromCharacterId,
+    toCharacterId,
+    toName,
+  )
   await remapCharacterStateCards(input.projectId, input.fromName, toName)
+  await remapItemLedgerCharacterRefs(
+    input.projectId,
+    input.fromCharacterId,
+    toCharacterId,
+    toName,
+  )
   await remapTemporalFactCharacterRefs({
     projectId: input.projectId,
     fromCharacterId: input.fromCharacterId,
     toCharacterId,
     toName,
   })
+  await remapKnowledgeCharacterRefs({
+    projectId: input.projectId,
+    fromCharacterId: input.fromCharacterId,
+    toCharacterId,
+    toName,
+  })
+  await remapCultivationProgressCharacterRefs({
+    projectId: input.projectId,
+    fromCharacterId: input.fromCharacterId,
+    toCharacterId,
+    toName,
+  })
+}
+
+/**
+ * itemLedger 是角色的软引用：删除角色时只断开 ID 并保留原持有人名；
+ * 合并角色时同时把 ID 和持有人名改为 canonical，避免物品留在已删除别名下。
+ */
+async function remapItemLedgerCharacterRefs(
+  projectId: number,
+  fromCharacterId: number,
+  toCharacterId?: number,
+  toName?: string,
+): Promise<void> {
+  const rows = await db.itemLedger
+    .where('projectId').equals(projectId)
+    .filter(entry => entry.characterId === fromCharacterId)
+    .toArray()
+  for (const row of rows) {
+    if (row.id == null) continue
+    await db.itemLedger.update(row.id, {
+      characterId: toCharacterId ?? null,
+      ...(toCharacterId != null && toName ? { heldByName: toName } : {}),
+    })
+  }
 }
 
 function targetTable(target: string): string {
@@ -98,6 +146,7 @@ async function remapRegisteredCharacterJson(
   projectId: number,
   fromId: number,
   toId?: number,
+  toName?: string,
 ): Promise<void> {
   for (const spec of PROJECT_TABLES) {
     const refs = (spec.refs ?? []).filter((ref): ref is JsonRef =>
@@ -111,6 +160,9 @@ async function remapRegisteredCharacterJson(
         if (ref.jsonPath === '$[].characterIds[]') {
           const next = remapSceneCharacterIds(row[ref.field], fromId, toId)
           if (next.changed) patch[ref.field] = next.value
+        } else if (ref.jsonPath === '$[].characterId') {
+          const next = remapCharacterPlanArcs(row[ref.field], fromId, toId, toName)
+          if (next.changed) patch[ref.field] = next.value
         }
       }
       if (Object.keys(patch).length) {
@@ -118,6 +170,42 @@ async function remapRegisteredCharacterJson(
         await spec.table.update(row.id, patch as any)
       }
     }
+  }
+}
+
+function remapCharacterPlanArcs(
+  value: unknown,
+  fromId: number,
+  toId?: number,
+  toName?: string,
+): { value: unknown; changed: boolean } {
+  const storedAsJson = typeof value === 'string'
+  let arcs: unknown = value
+  if (storedAsJson) {
+    try {
+      arcs = JSON.parse(value)
+    } catch {
+      return { value, changed: false }
+    }
+  }
+  if (!Array.isArray(arcs)) return { value, changed: false }
+
+  let changed = false
+  const next = arcs.map(arc => {
+    if (!arc || typeof arc !== 'object') return arc
+    const record = arc as Record<string, unknown>
+    if (record.characterId !== fromId) return arc
+    changed = true
+    return {
+      ...record,
+      characterId: toId ?? null,
+      // 删除只断开 ID 并保留快照名；合并才更新到 canonical 名称。
+      ...(toId != null && toName ? { name: toName } : {}),
+    }
+  })
+  return {
+    value: storedAsJson ? JSON.stringify(next) : next,
+    changed,
   }
 }
 
@@ -189,17 +277,4 @@ async function remapCharacterStateCards(
   await db.stateCards.update(primary.id, { fields: stringifyFields(mergedFields), updatedAt: Date.now() })
   const fromIds = fromCards.map(c => c.id).filter((id): id is number => id != null)
   if (fromIds.length) await db.stateCards.bulkDelete(fromIds)
-}
-
-/** 删除角色时，遍历 itemLedger 将 characterId 置 null，保留 heldByName。 */
-export async function nullifyItemLedgerCharacterRefs(projectId: number, fromCharacterId: number): Promise<void> {
-  const rows = await db.itemLedger
-    .where('projectId').equals(projectId)
-    .filter(e => e.characterId === fromCharacterId)
-    .toArray()
-  for (const row of rows) {
-    if (row.id != null) {
-      await db.itemLedger.update(row.id, { characterId: null })
-    }
-  }
 }

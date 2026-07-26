@@ -9,6 +9,7 @@ import AIStreamOutput from '../shared/AIStreamOutput'
 import PromptRunPanel from '../shared/PromptRunPanel'
 import { InlineTextarea } from '../shared/InlineEdit'
 import AIFieldModeTabs from '../shared/AIFieldModeTabs'
+import { assembleContext } from '../../lib/registry/assemble-context'
 import type { Project } from '../../lib/types'
 import type { FieldGenerationMode } from '../../lib/ai/field-generation-context'
 
@@ -76,7 +77,6 @@ export default function StoryCorePanel({ project }: Props) {
     const fields: [string, string | undefined][] = [
       ['世界起源', worldview.worldOrigin], ['力量体系', worldview.powerHierarchy],
       ['种族民族', worldview.races], ['势力分布', worldview.factionLayout],
-      ['世界历史线', worldview.historyLine],
     ]
     for (const [label, val] of fields) {
       if (val) parts.push(`【${label}】${val.slice(0, 180)}`)
@@ -179,7 +179,14 @@ function FieldEditor({
     onStreamingChange(ai.isStreaming)
   }, [ai.isStreaming, onStreamingChange])
 
-  const handleGenerate = () => {
+  const activeGroupId = useWorldGroupStore(state => state.activeGroupId)
+  const handleGenerate = async () => {
+    const historical = await assembleContext({
+      projectId: project.id!,
+      worldGroupId: project.enableMultiWorld ? activeGroupId : null,
+      sourceKeys: ['historical'],
+    })
+    const fullWorldContext = [worldCtx(), historical.text].filter(Boolean).join('\n\n')
     const opts = {
       parameterValues: Object.keys(parameterValues).length > 0 ? parameterValues : undefined,
       overrides: (systemOverride != null || userOverride != null) ? {
@@ -188,7 +195,7 @@ function FieldEditor({
       } : undefined,
     }
     const messages = buildStoryGeneratePrompt(
-      field.dimension, project.name, project.genre || '', worldCtx(), hint, opts, value, mode,
+      field.dimension, project.name, project.genre || '', fullWorldContext, hint, opts, value, mode,
     )
     ai.start(messages, undefined, { category: 'story.generate', projectId: project.id! })
   }

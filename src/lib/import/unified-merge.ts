@@ -7,6 +7,11 @@
 
 import type { UnifiedParseResult } from '../types'
 import type { ImportSession } from '../types'
+import type { CodexImportCategoryOption } from './codex-classification'
+import {
+  mergeCodexImportCandidates,
+  normalizeCodexImportCandidates,
+} from './codex-classification'
 
 const CHARACTER_LIKE_SYSTEM_WORDS = /精灵|器灵|人格|助手|伙伴|化身|宿主|管理员|管家/
 
@@ -120,6 +125,7 @@ export function mergeUnified(
     worldview: { ...(acc.worldview || {}) },
     characters: [...(acc.characters || [])],
     outline: [...(acc.outline || [])],
+    codexCandidates: [...(acc.codexCandidates || [])],
     writingTechniques: { ...(acc.writingTechniques || {}) },
   }
   // 世界观：段落级去重——每块常重述同一段设定，旧代码无脑 \n\n 拼接会拼成 N 份
@@ -161,6 +167,12 @@ export function mergeUnified(
       seen.add(key)
       out.outline!.push(n)
     }
+  }
+  if (Array.isArray(fresh.codexCandidates)) {
+    out.codexCandidates = mergeCodexImportCandidates(
+      out.codexCandidates || [],
+      fresh.codexCandidates,
+    )
   }
   // 写作技法：每个字段追加拼接
   if (fresh.writingTechniques && typeof fresh.writingTechniques === 'object') {
@@ -205,18 +217,34 @@ export function buildRollingContext(merged: UnifiedParseResult): string {
       lines.push(keep.join(' / '))
     }
   }
+  if (merged.codexCandidates?.length) {
+    lines.push(`【已识别词条候选（${merged.codexCandidates.length} 条）】`)
+    lines.push(merged.codexCandidates.slice(-30).map(candidate => candidate.name).join('、'))
+  }
   let txt = lines.join('\n')
   if (txt.length > 1500) txt = txt.slice(0, 1500) + '...（截断）'
   return txt
 }
 
 /** 把 AI 原始 JSON 规整成 UnifiedParseResult 的标准形状，缺项用空对象/空数组兜底。 */
-export function normalizeUnified(raw: unknown): UnifiedParseResult {
+export function normalizeUnified(raw: unknown, codex?: {
+  sourceText: string
+  chunkIndex: number
+  options: readonly CodexImportCategoryOption[]
+}): UnifiedParseResult {
   const r = (raw as UnifiedParseResult) || {}
   return normalizeNonCharacterConcepts({
     worldview: r.worldview && typeof r.worldview === 'object' ? r.worldview : {},
     characters: Array.isArray(r.characters) ? r.characters : [],
     outline: Array.isArray(r.outline) ? r.outline : [],
+    codexCandidates: codex
+      ? normalizeCodexImportCandidates(
+          (r as unknown as Record<string, unknown>).codexCandidates,
+          codex.sourceText,
+          codex.chunkIndex,
+          codex.options,
+        )
+      : (Array.isArray(r.codexCandidates) ? r.codexCandidates : []),
     writingTechniques: r.writingTechniques && typeof r.writingTechniques === 'object'
       ? r.writingTechniques : {},
   })
@@ -235,12 +263,14 @@ export function buildFinalReport(session: ImportSession): string {
   const totalOl = session.chunks
     .map(c => c.extractedCounts?.outlineNodes || 0)
     .reduce((a, b) => a + b, 0)
+  const codexCandidates = session.merged?.codexCandidates?.length || 0
   const lines = [
     `📊 任务汇报：${session.filename}`,
     `· 文件总字数：${session.totalChars.toLocaleString()} 字`,
     `· 分块：${session.totalChunks} 块（每块约 ${session.chunkSize.toLocaleString()} 字）`,
     `· 成功：${done} 块；失败：${failed} 块`,
     `· 累计入库：世界观字段 ${totalWv}、角色 ${totalChars}（合并前）、大纲节点 ${totalOl}、写作技法已分析`,
+    `· 待作者审查：Codex 词条候选 ${codexCandidates} 条（尚未自动入库）`,
   ]
   if (failed > 0) {
     lines.push('')

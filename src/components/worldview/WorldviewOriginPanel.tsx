@@ -19,11 +19,16 @@ import WorldviewOriginSidebar, {
   WORLDVIEW_ORIGIN_FIELDS,
   type WorldviewOriginFieldKey,
 } from './WorldviewOriginSidebar'
+import CultivationSystemsPanel from './CultivationSystemsPanel'
 import type { Project, DivineDesign } from '../../lib/types'
 import type { FieldGenerationMode } from '../../lib/ai/field-generation-context'
 
 async function buildRulesSourceContext(projectId: number, worldGroupId: number | null): Promise<string> {
-  return (await assembleContext({ projectId, worldGroupId, sourceKeys: ['worldRules'] })).text
+  return (await assembleContext({
+    projectId,
+    worldGroupId,
+    sourceKeys: ['canonAssertions', 'worldRules', 'historical'],
+  })).text
 }
 
 /**
@@ -37,7 +42,7 @@ async function buildDownstreamReverseContext(projectId: number, worldGroupId: nu
   return (await assembleContext({
     projectId,
     worldGroupId,
-    sourceKeys: ['storyCore', 'characters', 'storyArcs'],
+    sourceKeys: ['canonAssertions', 'storyCore', 'characters', 'storyArcs'],
   })).text
 }
 
@@ -96,7 +101,6 @@ export default function WorldviewOriginPanel({ project }: Props) {
     if (worldview?.continentLayout) parts.push(`【地貌分布】${worldview.continentLayout.slice(0, 150)}`)
     if (worldview?.climateByRegion) parts.push(`【气候环境】${worldview.climateByRegion.slice(0, 100)}`)
     // ── 人文环境面板关键字段 ──
-    if (worldview?.historyLine)     parts.push(`【世界历史线】${worldview.historyLine.slice(0, 150)}`)
     if (worldview?.races)           parts.push(`【种族与民族】${worldview.races.slice(0, 100)}`)
     if (worldview?.factionLayout)   parts.push(`【势力分布】${worldview.factionLayout.slice(0, 100)}`)
     return parts.join('\n')
@@ -161,6 +165,7 @@ export default function WorldviewOriginPanel({ project }: Props) {
               contextSummary={buildCtx('power')}
               onStreamingChange={streaming => handleStreamingChange('power', streaming)}
             />
+            <CultivationSystemsPanel project={project} />
             <div className="mt-6">
               <h3 className="text-sm font-semibold text-text-primary mb-1">📚 力量层级 · 具体词条</h3>
               <p className="text-xs text-text-muted mb-3">在上面写完力量体系「全貌」后，这里把各等级/层级逐条登记，可自定义字段、打重要度星级，并进入 AI 生成上下文。</p>

@@ -6,6 +6,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { db } from '../../src/lib/db/schema'
 import { aggregateInventory } from '../../src/lib/types/item-ledger'
 import type { ItemLedgerEntry } from '../../src/lib/types'
+import { adopt } from '../../src/lib/registry/adopt'
 
 const now = Date.now()
 
@@ -81,5 +82,38 @@ describe('INV-1 · aggregateInventory 按角色过滤', () => {
     await db.itemLedger.add(unowned as any)
     const all = aggregateInventory([...entries, unowned])
     expect(all.map(i => i.itemName)).toContain('祖传玉佩')
+  })
+
+  it('全部角色视图不会把不同角色的同名物品合并', async () => {
+    const { projectId, charA, charB } = await seedProject()
+    const sameName: ItemLedgerEntry[] = [
+      { projectId, itemName: '令牌', heldByName: '林风', characterId: charA, action: 'gain', quantity: 1, createdAt: now + 10 },
+      { projectId, itemName: '令牌', heldByName: '张铁', characterId: charB, action: 'gain', quantity: 2, createdAt: now + 11 },
+    ]
+    const all = aggregateInventory(sameName)
+    expect(all).toHaveLength(2)
+    expect(all.map(item => [item.heldByName, item.quantity])).toEqual(
+      expect.arrayContaining([['林风', 1], ['张铁', 2]]),
+    )
+  })
+
+  it('adopt 仅凭唯一 heldByName 也会解析 characterId', async () => {
+    const { projectId, charB } = await seedProject()
+    const result = await adopt({
+      projectId,
+      target: 'itemLedger',
+      mode: 'add',
+      data: {
+        itemName: '信物',
+        heldByName: '张铁',
+        action: 'gain',
+        quantity: 1,
+        note: '手递',
+      },
+    })
+    expect(result.written).toHaveLength(1)
+    const row = await db.itemLedger.get(result.written[0].id)
+    expect(row?.characterId).toBe(charB)
+    expect(row?.heldByName).toBe('张铁')
   })
 })

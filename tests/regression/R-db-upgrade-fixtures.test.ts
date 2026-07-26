@@ -186,7 +186,72 @@ class UpgradedV35StateCardsDB extends Dexie {
   }
 }
 
+class OldV45ReferenceDB extends Dexie {
+  constructor(name: string) {
+    super(name)
+    this.version(45).stores({
+      references: '++id, projectId, type, createdAt',
+      referenceChunkAnalysis: '++id, referenceId, chunkIndex',
+      inspirationWorkspaces: '++id, projectId, updatedAt',
+    })
+  }
+}
+
+class UpgradedV46ReferenceDB extends Dexie {
+  constructor(name: string) {
+    super(name)
+    this.version(45).stores({
+      references: '++id, projectId, type, createdAt',
+      referenceChunkAnalysis: '++id, referenceId, chunkIndex',
+      inspirationWorkspaces: '++id, projectId, updatedAt',
+    })
+    this.version(46).stores({
+      referenceAnalysisRuns: '++id, projectId, referenceId, [referenceId+version], status, updatedAt',
+      referenceAnalysisSources: 'analysisRunId, fileHash, createdAt',
+      referenceChunkAnalysis: '++id, referenceId, analysisRunId, [analysisRunId+chunkIndex], chunkIndex',
+    })
+  }
+}
+
 describe('DB upgrade fixtures · real Dexie version transitions', () => {
+  it('v45→v46 only adds version/source stores and preserves legacy analysis verbatim', async () => {
+    const name = nextName('upgrade-v46-reference')
+    const oldDb = track(new OldV45ReferenceDB(name))
+    await oldDb.open()
+    const refId = await oldDb.table('references').add({
+      projectId: 1,
+      title: '旧参考',
+      type: 'story',
+      analysisStatus: 'done',
+      analysisSummary: '{"openingTechnique":"旧总结"}',
+      createdAt: 1,
+      updatedAt: 2,
+    })
+    const chunkId = await oldDb.table('referenceChunkAnalysis').add({
+      referenceId: refId,
+      chunkIndex: 0,
+      openingTechnique: '旧钩子',
+      createdAt: 3,
+    })
+    oldDb.close()
+
+    const upgraded = track(new UpgradedV46ReferenceDB(name))
+    await upgraded.open()
+    expect(await upgraded.table('referenceAnalysisRuns').count()).toBe(0)
+    expect(await upgraded.table('referenceAnalysisSources').count()).toBe(0)
+    expect(await upgraded.table('references').get(refId)).toMatchObject({
+      analysisStatus: 'done',
+      analysisSummary: '{"openingTechnique":"旧总结"}',
+    })
+    expect(await upgraded.table('referenceChunkAnalysis').get(chunkId)).toEqual({
+      id: chunkId,
+      referenceId: refId,
+      chunkIndex: 0,
+      openingTechnique: '旧钩子',
+      createdAt: 3,
+    })
+  })
+
   it('v30→v31 clears old reference analysis but preserves import session blobs', async () => {
     const name = nextName('upgrade-v31')
     const oldDb = track(new OldV30AnalysisDB(name))

@@ -8,6 +8,7 @@ import type { Table } from 'dexie'
 import type { AIProvider } from '../types/ai'
 import type { ContextLayer, ContextSegment } from '../ai/context-budget'
 import type { PreparedContinuityContext } from '../ai/chapter-memory/continuity-context'
+import type { InspirationResultMode } from '../types/inspiration-workspace'
 
 /**
  * 表的归属方式 —— 决定删项目时如何定位该表的记录。
@@ -113,6 +114,12 @@ export type ExportRefRemap = {
   field: string
   remapVia: string
   kind: 'scene-character-ids'
+  exportAs: string
+} | {
+  /** CharacterDrivenPlan.arcs JSON 内逐项 characterId 的便携影子数组。 */
+  field: string
+  remapVia: string
+  kind: 'character-plan-arcs'
   exportAs: string
 }
 
@@ -282,6 +289,16 @@ export interface AssembleContextInput {
   subjectCharacterName?: string
   /** INV-1: 按角色过滤物品流水/持有投影。 */
   characterId?: number | null
+  /** CM-1: 本次明确参与增量融合的碎片；由 inspirationWorkspace source 读取。 */
+  inspirationFragmentIds?: string[]
+  /** CM-1: 单世界与多世界各自维护最近确认版本。 */
+  inspirationMode?: InspirationResultMode
+  /** AGENT-1: 本地确定性项目搜索；只由 searchResults 上下文源消费。 */
+  searchQuery?: string
+  /** AGENT-1: 搜索最多返回 10 条短摘。 */
+  searchLimit?: number
+  /** AGENT-1: 搜索限定的数据类型。 */
+  searchKinds?: string[]
   /** assembleContext 内部批量预取；调用方无需传。 */
   continuitySnapshot?: PreparedContinuityContext
 }
@@ -298,6 +315,8 @@ export interface ContextSource {
   requiresWorldGroupId?: boolean
   requiresOutlineNodeId?: boolean
   requiresChapterId?: boolean
+  /** 规划尚未创建正文 Chapter 时，允许用 outlineNodeId 作为规范章序边界。 */
+  acceptsOutlineNodeAsChapterBoundary?: boolean
   enabled?: (input: AssembleContextInput) => boolean | Promise<boolean>
   read: (input: AssembleContextInput) => Promise<string>
 }

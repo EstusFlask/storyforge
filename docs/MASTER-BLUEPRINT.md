@@ -89,13 +89,13 @@
 
 | 当前事实 | 数值 | 单一事实源 |
 |---|---:|---|
-| 应用语义版本 | `3.8.1` | `package.json` |
-| TypeScript 生产源码 | 406 个文件 / 77432 行 | `tsconfig.json` |
-| IndexedDB schema | v38 / 42 张 required tables | `schema.ts` / `REQUIRED_TABLES` |
-| PROJECT_TABLES | 42 张表 | `project-tables.ts` |
-| Prompt 主线 | 59 个 moduleKey / 204 条内置模板 | `PromptModuleKey` / `prompt-seeds*.ts` |
-| CONTEXT_SOURCES | 34 个上下文源 | `context-sources.ts` |
-| 写回治理 | 16 个通用 adopt target / 2 个领域扩展 | `adoption-schema.ts` |
+| 应用语义版本 | `3.9.0` | `package.json` |
+| TypeScript 生产源码 | 492 个文件 / 99761 行 | `tsconfig.json` |
+| IndexedDB schema | v47 / 55 张 required tables | `schema.ts` / `REQUIRED_TABLES` |
+| PROJECT_TABLES | 55 张表 | `project-tables.ts` |
+| Prompt 主线 | 61 个 moduleKey / 206 条内置模板 | `PromptModuleKey` / `prompt-seeds*.ts` |
+| CONTEXT_SOURCES | 44 个上下文源 | `context-sources.ts` |
+| 写回治理 | 22 个通用 adopt target / 14 个领域扩展 | `adoption-schema.ts` |
 <!-- project-metrics:end -->
 
 技术栈：React 19 / TypeScript 5 / Zustand 5 / Dexie.js / Vite / TipTap。项目为纯前端应用，无自建后端；用户数据保存在浏览器 IndexedDB，AI 通过 OpenAI 兼容协议直连用户配置的 provider。
@@ -152,7 +152,7 @@
 
 - Phase 35-b/c 词条化迁移
 - Phase 38 一致性检测
-- Phase 39 多故事线追踪
+- Phase 39 多故事线追踪（已交付：v40 动态投影、交汇、作者确认与回注）
 - Phase 27 Agent 化
 - Phase 34 力量阶段追踪
 

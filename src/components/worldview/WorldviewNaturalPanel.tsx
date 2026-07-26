@@ -17,7 +17,11 @@ import type { Project, NaturalResources } from '../../lib/types'
 import type { FieldGenerationMode } from '../../lib/ai/field-generation-context'
 
 async function buildRulesSourceContext(projectId: number, worldGroupId: number | null): Promise<string> {
-  return (await assembleContext({ projectId, worldGroupId, sourceKeys: ['worldRules'] })).text
+  return (await assembleContext({
+    projectId,
+    worldGroupId,
+    sourceKeys: ['canonAssertions', 'worldRules', 'historical'],
+  })).text
 }
 
 interface Props { project: Project }
@@ -91,7 +95,6 @@ export default function WorldviewNaturalPanel({ project }: Props) {
       }
     }
     // ── 人文环境面板关键字段 ──
-    if (worldview?.historyLine)   parts.push(`【世界历史线】${worldview.historyLine.slice(0, 150)}`)
     if (worldview?.races)         parts.push(`【种族与民族】${worldview.races.slice(0, 100)}`)
     if (worldview?.factionLayout) parts.push(`【势力分布】${worldview.factionLayout.slice(0, 100)}`)
     return parts.join('\n')

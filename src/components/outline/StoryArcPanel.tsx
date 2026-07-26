@@ -15,9 +15,10 @@ import { CInput } from '../shared/CompositionInput'
 import { CTextarea } from '../shared/CompositionInput'
 import AIStreamOutput from '../shared/AIStreamOutput'
 import { useDialog } from '../shared/Dialog'
-import type { Project, StoryArcType } from '../../lib/types'
+import type { Project, StoryArc, StoryArcType } from '../../lib/types'
 import { parseStages, stringifyStages, type StoryStage } from '../../lib/types/story-arc'
 import { nanoid } from 'nanoid'
+import StorylineProgressPanel from './StorylineProgressPanel'
 
 interface Props {
   project: Project
@@ -58,7 +59,7 @@ export default function StoryArcPanel({ project }: Props) {
     const assembled = await assembleContext({
       projectId: project.id!,
       worldGroupId: null,
-      sourceKeys: ['worldview', 'storyCore', 'powerSystem', 'codex', 'characters', 'creativeRules', 'worldRules', 'historical', 'locations'],
+      sourceKeys: ['canonAssertions', 'worldview', 'storyCore', 'powerSystem', 'cultivationProgress', 'codex', 'characters', 'creativeRules', 'worldRules', 'historical', 'locations'],
     })
     const worldCtx = assembled.text
     const storyCoreCtx = [
@@ -197,13 +198,20 @@ export default function StoryArcPanel({ project }: Props) {
 
       {/* 故事线编辑 */}
       {activeArc ? (
-        <StoryArcEditor
-          arc={activeArc}
-          stages={activeStages}
-          onUpdateArc={(data) => updateArc(activeArc.id!, data)}
-          onUpdateStages={(stages) => updateStages(activeArc.id!, stages)}
-          onDelete={() => handleDeleteArc(activeArc.id!)}
-        />
+        <>
+          <StoryArcEditor
+            arc={activeArc}
+            stages={activeStages}
+            onUpdateArc={(data) => updateArc(activeArc.id!, data)}
+            onUpdateStages={(stages) => updateStages(activeArc.id!, stages)}
+            onDelete={() => handleDeleteArc(activeArc.id!)}
+          />
+          <StorylineProgressPanel
+            projectId={project.id!}
+            arcs={arcs}
+            onArcsChanged={() => loadAll(project.id!)}
+          />
+        </>
       ) : (
         <div className="text-center py-16 text-text-muted">
           <p className="text-sm mb-3">还没有故事线。</p>
@@ -219,7 +227,7 @@ export default function StoryArcPanel({ project }: Props) {
 function StoryArcEditor({ arc, stages, onUpdateArc, onUpdateStages, onDelete }: {
   arc: NonNullable<ReturnType<typeof useStoryArcStore.getState>['arcs'][0]>
   stages: StoryStage[]
-  onUpdateArc: (data: Partial<typeof arc>) => void
+  onUpdateArc: (data: Partial<Pick<StoryArc, 'name' | 'description' | 'type'>>) => void
   onUpdateStages: (stages: StoryStage[]) => void
   onDelete: () => void
 }) {

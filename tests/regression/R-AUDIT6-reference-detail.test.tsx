@@ -58,7 +58,9 @@ async function mountCard() {
 describe('AUDIT-6 / HEALTH-4 · 项目参考详情', () => {
   it('保留作品分析入口并正确切换世界观、角色和大纲导入内容', async () => {
     const { host } = await mountCard()
-    expect(host.textContent).toContain('上传文件并分析')
+    expect(host.textContent).toContain('上传并建立新版本')
+    expect(host.textContent).toContain('只有你激活的版本会进入创作上下文')
+    expect(host.querySelector<HTMLInputElement>('input[type="file"]')?.accept).toBe('.txt,.md')
 
     const worldview = Array.from(host.querySelectorAll('button')).find(button => button.textContent?.includes('世界观'))!
     await act(async () => worldview.click())

@@ -180,7 +180,7 @@ export const useWorldGroupStore = create<WorldGroupStore>((set, get) => ({
     const primaryId = await get().ensurePrimaryGroup(projectId)
 
     // 2. Phase 1.1b: 盖章从 PROJECT_TABLES 注册表派生(所有 worldScoped 表的 null 记录
-    //    盖章到主世界;codexCategories 分类结构保持全局不盖)。行为与手写版等价(R-02 保证)。
+    //    盖章到主世界；codexCategories 是项目级共享 schema，不在 worldScoped 清单中)。
     await stampPrimaryWorld(projectId, primaryId)
   },
 

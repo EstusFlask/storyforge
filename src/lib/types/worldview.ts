@@ -50,7 +50,10 @@ export interface Worldview {
   worldEvents?: string                    // 世界大事记
   races?: string                          // 种族设定
   factionLayout?: string                  // 势力分布（替代独立 factions 表）
-  politicsEconomyCulture?: string         // 政治/经济/文化设计
+  politicsEconomyCulture?: string         // 旧版政治/经济/文化合并字段（兼容保留）
+  politicsOverview?: string               // 政治制度与权力结构概述
+  economyOverview?: string                // 经济、货币、产业与贸易概述
+  cultureOverview?: string                // 文化、宗教、语言与风俗概述
   internalConflicts?: string              // 矛盾冲突设计
   itemDesign?: string                     // 道具设计（替代独立 itemSystems 表）
 

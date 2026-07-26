@@ -1,11 +1,13 @@
 import type { Chapter, ItemLedgerEntry, OutlineNode } from '../types'
-import { resolveCanonicalChapterSequence } from '../ai/chapter-memory/canonical-chapter-sequence'
 import type { ConsistencyFinding } from '../ai/adapters/consistency-audit-adapter'
 import { db } from '../db/schema'
+import { resolveProjectionBoundary } from './projection-boundary'
 
 export interface HeldItemProjection {
   itemName: string
   quantity: number
+  heldByName: string
+  characterId: number | null
   evidence: ItemLedgerEntry[]
 }
 
@@ -13,7 +15,8 @@ export interface ProjectHeldItemsInput {
   entries: ItemLedgerEntry[]
   outlineNodes: OutlineNode[]
   chapters: Chapter[]
-  chapterId: number
+  chapterId?: number | null
+  outlineNodeId?: number | null
   worldGroupId?: number | null
   characterId?: number | null
 }
@@ -50,30 +53,39 @@ function includesInWorld(entry: ItemLedgerEntry, chapterWorld: Map<number, numbe
  * 按 resolveCanonicalChapterSequence 的规范章序实时计算，不缓存 order。
  */
 export function projectHeldItems(input: ProjectHeldItemsInput): HeldItemProjection[] {
-  const { sequence } = resolveCanonicalChapterSequence(input.outlineNodes, input.chapters)
-  const orderOf = new Map<number, number>()
-  const chapterWorld = new Map<number, number | null>()
-  sequence.forEach((entry, index) => {
-    if (entry.chapter.id == null) return
-    orderOf.set(entry.chapter.id, index)
-    chapterWorld.set(entry.chapter.id, entry.worldGroupId)
-  })
-
-  const currentOrder = orderOf.get(input.chapterId)
+  const {
+    targetOrder: currentOrder,
+    orderOfChapter: orderOf,
+    worldOfChapter: chapterWorld,
+  } = resolveProjectionBoundary(input)
   if (currentOrder == null) return []
 
-  const grouped = new Map<string, { displayName: string; quantity: number; evidence: ItemLedgerEntry[] }>()
+  const grouped = new Map<string, {
+    displayName: string
+    heldByName: string
+    characterId: number | null
+    quantity: number
+    evidence: ItemLedgerEntry[]
+  }>()
   for (const entry of input.entries) {
     if (input.characterId != null && (entry.characterId ?? null) !== (input.characterId ?? null)) continue
-    const key = normalizeItemName(entry.itemName)
-    if (!key) continue
+    const itemKey = normalizeItemName(entry.itemName)
+    if (!itemKey) continue
+    const ownerKey = entry.characterId != null ? `id:${entry.characterId}` : `name:${entry.heldByName.trim()}`
+    const key = JSON.stringify([ownerKey, itemKey])
     const entryChapterId = entry.chapterId ?? null
     if (entryChapterId != null) {
       const entryOrder = orderOf.get(entryChapterId)
       if (entryOrder == null || entryOrder >= currentOrder) continue
     }
     if (!includesInWorld(entry, chapterWorld, input.worldGroupId)) continue
-    const bucket = grouped.get(key) ?? { displayName: entry.itemName.trim(), quantity: 0, evidence: [] }
+    const bucket = grouped.get(key) ?? {
+      displayName: entry.itemName.trim(),
+      heldByName: entry.heldByName.trim(),
+      characterId: entry.characterId ?? null,
+      quantity: 0,
+      evidence: [],
+    }
     bucket.quantity += entry.action === 'gain' ? entry.quantity : -entry.quantity
     bucket.evidence.push(entry)
     grouped.set(key, bucket)
@@ -82,16 +94,36 @@ export function projectHeldItems(input: ProjectHeldItemsInput): HeldItemProjecti
   return [...grouped.values()]
     .filter(item => item.quantity > 0)
     .sort((a, b) => b.quantity - a.quantity || a.displayName.localeCompare(b.displayName, 'zh-Hans-CN'))
-    .map(item => ({ itemName: item.displayName, quantity: item.quantity, evidence: item.evidence }))
+    .map(item => ({
+      itemName: item.displayName,
+      quantity: item.quantity,
+      heldByName: item.heldByName,
+      characterId: item.characterId,
+      evidence: item.evidence,
+    }))
 }
 
-export async function readProjectHeldItems(projectId: number, chapterId: number, worldGroupId?: number | null, characterId?: number | null): Promise<HeldItemProjection[]> {
+export async function readProjectHeldItems(
+  projectId: number,
+  chapterId?: number | null,
+  worldGroupId?: number | null,
+  characterId?: number | null,
+  outlineNodeId?: number | null,
+): Promise<HeldItemProjection[]> {
   const [entries, outlineNodes, chapters] = await Promise.all([
     db.itemLedger.where('projectId').equals(projectId).toArray(),
     db.outlineNodes.where('projectId').equals(projectId).toArray(),
     db.chapters.where('projectId').equals(projectId).toArray(),
   ])
-  return projectHeldItems({ entries, outlineNodes, chapters, chapterId, worldGroupId, characterId })
+  return projectHeldItems({
+    entries,
+    outlineNodes,
+    chapters,
+    chapterId,
+    outlineNodeId,
+    worldGroupId,
+    characterId,
+  })
 }
 
 export function formatHeldItemsContext(items: HeldItemProjection[]): string {
@@ -102,7 +134,7 @@ export function formatHeldItemsContext(items: HeldItemProjection[]): string {
       const latest = [...item.evidence]
         .sort((a, b) => (b.chapterId ?? 0) - (a.chapterId ?? 0) || b.createdAt - a.createdAt)[0]
       const source = latest?.chapterTitle || (latest?.chapterId != null ? `章节#${latest.chapterId}` : '未绑定章节')
-      return `- ${item.itemName} ×${item.quantity}（已有记录，最近证据:${source}）`
+      return `- ${item.heldByName ? `${item.heldByName}：` : ''}${item.itemName} ×${item.quantity}（已有记录，最近证据:${source}）`
     }),
   ].join('\n')
 }
@@ -137,6 +169,7 @@ export function checkHeldItemAcquisition(
   generatedText: string,
   heldItems: HeldItemProjection[],
   knownItemNames: string[] = [],
+  knownCharacterNames: string[] = [],
 ): ConsistencyFinding[] {
   const names = new Set<string>()
   for (const item of heldItems) names.add(item.itemName.trim())
@@ -144,7 +177,17 @@ export function checkHeldItemAcquisition(
 
   const findings: ConsistencyFinding[] = []
   const seenQuotes = new Set<string>()
-  const heldByNormalized = new Map(heldItems.map(item => [normalizeItemName(item.itemName), item]))
+  const heldByNormalized = new Map<string, HeldItemProjection[]>()
+  for (const item of heldItems) {
+    const key = normalizeItemName(item.itemName)
+    const values = heldByNormalized.get(key) ?? []
+    values.push(item)
+    heldByNormalized.set(key, values)
+  }
+  const characterNames = new Set([
+    ...knownCharacterNames.map(name => name.trim()),
+    ...heldItems.map(item => item.heldByName.trim()),
+  ].filter(Boolean))
 
   for (const rawName of names) {
     if (!rawName || rawName.length < 2) continue
@@ -153,7 +196,9 @@ export function checkHeldItemAcquisition(
       if (hasNearbyGainTrigger(generatedText, index)) {
         const quote = findSentence(generatedText, index)
         const normalized = normalizeItemName(rawName)
-        const held = heldByNormalized.get(normalized)
+        const holdersInQuote = [...characterNames].filter(name => quote.includes(name))
+        const held = (heldByNormalized.get(normalized) ?? []).find(item =>
+          holdersInQuote.length === 0 || holdersInQuote.includes(item.heldByName))
         if (held && quote && generatedText.includes(quote) && !seenQuotes.has(`${rawName}:${quote}`)) {
           seenQuotes.add(`${rawName}:${quote}`)
           const evidenceEntry = held.evidence[held.evidence.length - 1]
@@ -167,7 +212,7 @@ export function checkHeldItemAcquisition(
               sourceId: evidenceEntry?.id ?? 0,
               quote: evidenceQuote,
             }],
-            reason: `“${held.itemName}”在当前章之前已处于持有状态，正文又把它写成获得/拿到/捡到，可能造成重复获得。`,
+            reason: `“${held.itemName}”在当前章之前已处于持有状态（持有人：${held.heldByName || '该角色'}），正文又把它写成获得/拿到/捡到，可能造成重复获得。`,
             suggestion: '改为使用、确认、取出或提及该物品来源，避免再次写成首次获得。',
           })
         }

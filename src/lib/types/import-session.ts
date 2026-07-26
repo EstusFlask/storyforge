@@ -51,6 +51,7 @@ export interface ChunkState {
     worldviewFields?: number
     characters?: number
     outlineNodes?: number
+    codexCandidates?: number
   }
   startedAt?: number
   finishedAt?: number
@@ -88,6 +89,13 @@ export interface ImportSession {
   fatalError?: string
   /** 跑完后的汇总文字（给 Report Modal 直接展示） */
   finalReport?: string
+  /** Phase 35-c：作者确认词条候选后的写回回执；缺失表示尚未采纳。 */
+  codexAdoption?: {
+    adoptedAt: number
+    imported: number
+    updated: number
+    skipped: number
+  }
   createdAt: number
   updatedAt: number
 }

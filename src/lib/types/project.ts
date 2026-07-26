@@ -109,6 +109,12 @@ export interface Project {
   /** 是否启用多世界模式（默认 false） */
   enableMultiWorld?: boolean
 
+  /** Phase 34：把作者确认的正文修炼进度注入后续 AI 写作；默认关闭。 */
+  includeCultivationProgressInAI?: boolean
+
+  /** STORY-1：作者明确设为后续 AI 参考的角色驱动方案；不自动猜最近方案。 */
+  activeCharacterDrivenPlanId?: number | null
+
   createdAt: number        // timestamp
   updatedAt: number        // timestamp
 }

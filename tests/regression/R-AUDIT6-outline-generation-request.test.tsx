@@ -123,4 +123,20 @@ describe('AUDIT-6 · 大纲生成请求边界', () => {
     await act(async () => confirm.click())
     expect(onConfirm).toHaveBeenCalledOnce()
   })
+
+  it('透明模式明确为高级临时覆盖，并将确认动作改成预览', async () => {
+    const onTransparentModeChange = vi.fn()
+    const host = await mount({ kind: 'chapters', volumeId: 7 }, {
+      preparedContext: preparedContext('outline.chapter:batch:7'),
+      transparentMode: true,
+      onTransparentModeChange,
+    })
+    expect(host.textContent).toContain('透明模式（高级）')
+    expect(host.textContent).toContain('本次编辑不会保存')
+    expect(host.textContent).toContain('预览最终提示词')
+
+    const checkbox = host.querySelector('input[type="checkbox"]') as HTMLInputElement
+    await act(async () => checkbox.click())
+    expect(onTransparentModeChange).toHaveBeenCalledWith(false)
+  })
 })

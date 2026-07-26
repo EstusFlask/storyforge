@@ -28,6 +28,7 @@ function deriveInputBudget(input: AssembleContextInput): number {
 
 export async function assembleContext(input: AssembleContextInput): Promise<AssembleContextResult> {
   const selected = selectSources(input)
+  const inputBudget = deriveInputBudget(input)
   const needsContinuity = selected.some(source => (
     source.key === 'previousChapterEnding'
     || source.key === 'chapterContinuityHandoff'
@@ -60,7 +61,9 @@ export async function assembleContext(input: AssembleContextInput): Promise<Asse
       omitted.push(source.key)
       continue
     }
-    const capped = capBySourceBudget(content, source.budgetTokens)
+    // 单一源也不能突破整个请求预算。L0/protected 只表示不得整段丢弃，
+    // 不表示可以绕过总窗口；截断会留下显式标记并进入 tokens 元数据。
+    const capped = capBySourceBudget(content, Math.min(source.budgetTokens, inputBudget))
     keyedSegments.push({
       key: source.key,
       segment: {
@@ -74,7 +77,6 @@ export async function assembleContext(input: AssembleContextInput): Promise<Asse
   }
 
   const totalBeforeTrim = keyedSegments.reduce((sum, s) => sum + s.segment.tokens, 0)
-  const inputBudget = deriveInputBudget(input)
   const overBudgetBeforeTrim = totalBeforeTrim > inputBudget
   const { kept, trimmed } = trimToFit(keyedSegments, inputBudget)
   const segments = kept.map(s => s.segment)
@@ -103,14 +105,25 @@ function selectSources(input: AssembleContextInput): ContextSource[] {
 function requirementsMet(source: ContextSource, input: AssembleContextInput): boolean {
   if (source.requiresWorldGroupId && !Object.prototype.hasOwnProperty.call(input, 'worldGroupId')) return false
   if (source.requiresOutlineNodeId && input.outlineNodeId == null && input.chapterId == null) return false
-  if (source.requiresChapterId && input.chapterId == null) return false
+  if (
+    source.requiresChapterId
+    && input.chapterId == null
+    && !(source.acceptsOutlineNodeAsChapterBoundary && input.outlineNodeId != null)
+  ) return false
   return true
 }
 
 function capBySourceBudget(content: string, budgetTokens: number): string {
   if (!budgetTokens || estimateTokens(content) <= budgetTokens) return content
-  const approxChars = Math.max(100, Math.floor(budgetTokens * 1.4))
-  return `${content.slice(0, approxChars)}\n…（该上下文源已按预算截断）`
+  const marker = '\n…（该上下文源已按预算截断）'
+  let low = 0
+  let high = content.length
+  while (low < high) {
+    const middle = Math.ceil((low + high) / 2)
+    if (estimateTokens(`${content.slice(0, middle)}${marker}`) <= budgetTokens) low = middle
+    else high = middle - 1
+  }
+  return `${content.slice(0, low)}${marker}`
 }
 
 function trimToFit(

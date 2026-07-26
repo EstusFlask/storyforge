@@ -44,8 +44,20 @@ describe('Phase 1.2a · 统一写回层', () => {
       expect(ADOPTION_BY_TARGET.get(schema.target)).toBe(schema)
     }
     expect(ADOPTION_EXTENSIONS.map(extension => extension.id)).toEqual([
+      'reference-analysis-run-lifecycle',
+      'reference-analysis-source-lifecycle',
+      'reference-analysis-chunk-lifecycle',
+      'reference-analysis-reference-lifecycle',
+      'reference-analysis-citation-lifecycle',
       'fact-ledger',
       'character-merge-lifecycle',
+      'knowledge-ledger',
+      'storyline-progress-lifecycle',
+      'storyline-crossing-lifecycle',
+      'story-arc-dynamic-lifecycle',
+      'cultivation-codex-reference-lifecycle',
+      'cultivation-progress-lifecycle',
+      'codex-category-scope-lifecycle',
     ])
     for (const extension of ADOPTION_EXTENSIONS) {
       expect(REGISTRY_BY_NAME.has(extension.target), `ADOPTION_EXTENSION target 缺表:${extension.target}`).toBe(true)
@@ -260,12 +272,32 @@ describe('Phase 1.2a · 统一写回层', () => {
       createdAt: now,
       updatedAt: now,
     } as any) as number
+    const analysisRunId = await db.referenceAnalysisRuns.add({
+      projectId,
+      referenceId,
+      version: 1,
+      status: 'analyzing',
+      depth: 'quick',
+      sourceFilename: 'reference.txt',
+      fileHash: 'reference-hash',
+      totalChars: 100,
+      sourceKind: 'own-work',
+      usageScope: 'creative-reference',
+      rightsNote: '',
+      rightsConfirmed: true,
+      rightsDeclaredAt: now,
+      expectedChunks: 2,
+      completedChunks: 0,
+      progress: 0,
+      createdAt: now,
+      updatedAt: now,
+    }) as number
 
     const rejected = await adopt({
       projectId: otherProjectId,
       target: 'referenceChunkAnalysis',
       mode: 'add',
-      data: { referenceId, chunkIndex: 0, narrativeStyle: '不应跨项目写入' },
+      data: { referenceId, analysisRunId, chunkIndex: 0, narrativeStyle: '不应跨项目写入' },
     })
     expect(rejected.fkErrors).toContainEqual({ field: 'referenceId', refValue: referenceId })
     expect(await db.referenceChunkAnalysis.count()).toBe(0)
@@ -275,8 +307,8 @@ describe('Phase 1.2a · 统一写回层', () => {
       target: 'referenceChunkAnalysis',
       mode: 'add',
       data: [
-        { referenceId, chunkIndex: 0, narrativeStyle: '第一块' },
-        { referenceId, chunkIndex: 1, narrativeStyle: '第二块' },
+        { referenceId, analysisRunId, chunkIndex: 0, narrativeStyle: '第一块' },
+        { referenceId, analysisRunId, chunkIndex: 1, narrativeStyle: '第二块' },
       ],
     })
     expect(await db.referenceChunkAnalysis.where('referenceId').equals(referenceId).count()).toBe(2)
@@ -284,7 +316,7 @@ describe('Phase 1.2a · 统一写回层', () => {
     const deleted = await clearAdoptedCollection({
       projectId,
       target: 'referenceChunkAnalysis',
-      scope: { referenceId },
+      scope: { analysisRunId },
     })
     expect(deleted).toBe(2)
     expect(await db.referenceChunkAnalysis.where('referenceId').equals(referenceId).count()).toBe(0)

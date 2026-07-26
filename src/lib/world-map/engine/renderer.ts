@@ -48,7 +48,7 @@ export function renderMap(
     ? { scale: scaleOrOptions }
     : scaleOrOptions
   const scale = opts.scale ?? 1
-  const kmPerPixel = opts.kmPerPixel ?? 1
+  const kmPerPixel = opts.kmPerPixel ?? data.scaleResolution?.kmPerPixel ?? 1
   const style = getStyleConfig(opts.stylePreset)
   const layers = { ...DEFAULT_LAYERS, ...opts.layers }
 
@@ -80,6 +80,7 @@ export function renderMap(
   if (layers.stateLabels) drawStateLabels(ctx, data, style)
   if (layers.burgIcons) drawBurgs(ctx, data, style)
   if (layers.burgLabels) drawBurgLabels(ctx, data, style)
+  if (layers.burgLabels) drawSpatialLabels(ctx, data, style)
   if (layers.scaleBar) drawScaleBar(ctx, width, height, kmPerPixel, style)
   if (layers.vignette) drawVignette(ctx, width, height, style)
 
@@ -375,29 +376,31 @@ function drawBurgs(ctx: CanvasRenderingContext2D, data: VoronoiMapData, style: S
 
   for (const burg of towns) {
     const { x, y } = burg
+    const radius = burgIconRadius(burg.scaleTier, false)
     ctx.fillStyle = 'rgba(0,0,0,0.2)'
-    ctx.beginPath(); ctx.arc(x + 0.5, y + 0.5, 3.5, 0, Math.PI * 2); ctx.fill()
+    ctx.beginPath(); ctx.arc(x + 0.5, y + 0.5, radius + 0.5, 0, Math.PI * 2); ctx.fill()
     ctx.fillStyle = '#fff'
     ctx.strokeStyle = style.townStroke
     ctx.lineWidth = 1.2
-    ctx.beginPath(); ctx.arc(x, y, 3, 0, Math.PI * 2); ctx.fill(); ctx.stroke()
+    ctx.beginPath(); ctx.arc(x, y, radius, 0, Math.PI * 2); ctx.fill(); ctx.stroke()
     ctx.fillStyle = burg.port ? '#5b9fd4' : '#666'
-    ctx.beginPath(); ctx.arc(x, y, 1.2, 0, Math.PI * 2); ctx.fill()
+    ctx.beginPath(); ctx.arc(x, y, Math.max(1.2, radius * 0.4), 0, Math.PI * 2); ctx.fill()
   }
 
   for (const burg of capitals) {
     const { x, y } = burg
+    const radius = burgIconRadius(burg.scaleTier, true)
     const stateColor = data.states[burg.state]?.color || '#e15759'
     ctx.fillStyle = 'rgba(0,0,0,0.3)'
-    ctx.beginPath(); ctx.arc(x + 1, y + 1, 7, 0, Math.PI * 2); ctx.fill()
+    ctx.beginPath(); ctx.arc(x + 1, y + 1, radius + 1, 0, Math.PI * 2); ctx.fill()
     ctx.fillStyle = '#fff'
     ctx.strokeStyle = style.capitalStroke
     ctx.lineWidth = 2
-    ctx.beginPath(); ctx.arc(x, y, 6, 0, Math.PI * 2); ctx.fill(); ctx.stroke()
+    ctx.beginPath(); ctx.arc(x, y, radius, 0, Math.PI * 2); ctx.fill(); ctx.stroke()
     ctx.fillStyle = stateColor
-    ctx.beginPath(); ctx.arc(x, y, 4, 0, Math.PI * 2); ctx.fill()
+    ctx.beginPath(); ctx.arc(x, y, radius * 0.67, 0, Math.PI * 2); ctx.fill()
     ctx.fillStyle = 'rgba(255,255,255,0.5)'
-    ctx.beginPath(); ctx.arc(x - 1.5, y - 1.5, 1.5, 0, Math.PI * 2); ctx.fill()
+    ctx.beginPath(); ctx.arc(x - radius * 0.25, y - radius * 0.25, radius * 0.25, 0, Math.PI * 2); ctx.fill()
   }
 }
 
@@ -418,7 +421,10 @@ function drawStateLabels(ctx: CanvasRenderingContext2D, data: VoronoiMapData, st
     if (count === 0) continue
     cx /= count; cy /= count
 
-    const fontSize = Math.max(13, Math.min(26, Math.sqrt(count) * 1.5))
+    const fontSize = Math.max(
+      13,
+      Math.min(32, Math.sqrt(count) * 1.5 * stateLabelFactor(state.scaleTier)),
+    )
     const spacing = fontSize * 0.3
 
     ctx.font = `bold ${fontSize}px ${style.stateLabelFont}`
@@ -448,12 +454,12 @@ function drawBurgLabels(ctx: CanvasRenderingContext2D, data: VoronoiMapData, sty
   for (const burg of data.burgs) {
     if (burg.i === 0) continue
 
-    const fontSize = burg.capital ? 12 : 9
+    const fontSize = burgLabelSize(burg.scaleTier, burg.capital)
     ctx.font = `${burg.capital ? 'bold ' : ''}${fontSize}px ${style.burgLabelFont}`
     ctx.textAlign = 'center'
     ctx.textBaseline = 'top'
 
-    const labelY = burg.y + (burg.capital ? 10 : 6)
+    const labelY = burg.y + burgIconRadius(burg.scaleTier, burg.capital) + 4
 
     ctx.strokeStyle = style.burgLabelStroke
     ctx.lineWidth = 3
@@ -463,6 +469,67 @@ function drawBurgLabels(ctx: CanvasRenderingContext2D, data: VoronoiMapData, sty
     ctx.fillStyle = burg.capital ? style.burgLabelColor : (style.burgLabelColor === '#111' ? '#2a2a2a' : style.burgLabelColor)
     ctx.fillText(burg.name, burg.x, labelY)
   }
+}
+
+function drawSpatialLabels(
+  ctx: CanvasRenderingContext2D,
+  data: VoronoiMapData,
+  style: StyleConfig,
+): void {
+  const occupiedNames = new Set([
+    ...data.burgs.map(burg => burg.name),
+    ...data.states.map(state => state.name),
+  ])
+  for (const placement of data.spatialPlacements ?? []) {
+    if (occupiedNames.has(placement.name)) continue
+    const river = data.rivers.find(item => item.name === placement.name)
+    const kind = river ? 'river' : placement.kind
+    const fontSize = kind === 'region' || kind === 'mountain' ? 13 : 10
+    ctx.font = `${kind === 'region' ? 'bold ' : ''}${fontSize}px ${style.burgLabelFont}`
+    ctx.textAlign = 'center'
+    ctx.textBaseline = 'middle'
+    ctx.lineWidth = 3
+    ctx.lineJoin = 'round'
+    ctx.strokeStyle = style.burgLabelStroke
+    ctx.strokeText(placement.name, placement.x, placement.y)
+    ctx.fillStyle = kind === 'river'
+      ? '#4a96d0'
+      : kind === 'mountain'
+        ? '#6b5748'
+        : style.burgLabelColor
+    ctx.fillText(placement.name, placement.x, placement.y)
+  }
+}
+
+function burgIconRadius(tier: VoronoiMapData['burgs'][number]['scaleTier'], capital: boolean): number {
+  if (capital) return tier === 'metropolis' ? 8 : 6
+  switch (tier) {
+    case 'metropolis': return 6
+    case 'city': return 5
+    case 'town': return 4
+    case 'village': return 2.5
+    case 'fortress': return 4.5
+    default: return 3
+  }
+}
+
+function burgLabelSize(tier: VoronoiMapData['burgs'][number]['scaleTier'], capital: boolean): number {
+  if (capital) return tier === 'metropolis' ? 14 : 12
+  switch (tier) {
+    case 'metropolis': return 14
+    case 'city': return 12
+    case 'town': return 10
+    case 'village': return 8
+    case 'fortress': return 10
+    default: return 9
+  }
+}
+
+function stateLabelFactor(tier: VoronoiMapData['states'][number]['scaleTier']): number {
+  if (tier === 'empire') return 1.3
+  if (tier === 'kingdom') return 1.1
+  if (tier === 'province') return 0.9
+  return 1
 }
 
 // ── 比例尺 ──────────────────────────────────────────

@@ -37,6 +37,7 @@ const ANALYSIS_PREFIXES = [
 ]
 
 const REVIEW_PREFIXES = [
+  'agent.',
   'review.',
   'scene.verify',
   'history.consult',
@@ -60,6 +61,8 @@ const CREATION_PREFIXES = [
   'technology',
   'emotion.beat',
   'inspiration.',
+  'node.',
+  'style.calibrate',
 ]
 
 function matchesPrefix(category: string, prefixes: readonly string[]): boolean {

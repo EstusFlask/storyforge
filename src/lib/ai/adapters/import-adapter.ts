@@ -1,4 +1,5 @@
 import type { AIConfig, ChatMessage } from '../../types'
+import JSON5 from 'json5'
 import { usePromptStore } from '../../../stores/prompt'
 import { renderPrompt } from '../prompt-engine'
 
@@ -86,6 +87,14 @@ function tryParseWithRepair(jsonStr: string, mightBeTruncated = false): unknown 
   try {
     return JSON.parse(jsonStr)
   } catch (err) {
+    // 模型偶发输出合法 JavaScript 对象字面量而非严格 JSON（最常见是单引号或尾逗号）。
+    // JSON5 只负责语法兼容；上层仍会按闭集字段和枚举重新整形，不能借此写入任意字段。
+    try {
+      const parsed = JSON5.parse(jsonStr)
+      console.warn('[import] AI 输出不是严格 JSON，已按 JSON5 兼容解析')
+      return parsed
+    } catch { /* 继续走既有截断修复 */ }
+
     // 尝试"修复"被截断的 JSON：从末尾删到最后一个完整字段
     if (mightBeTruncated) {
       const repaired = repairTruncatedJSON(jsonStr)

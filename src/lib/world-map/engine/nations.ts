@@ -4,7 +4,17 @@
  * 国家：从首都 Dijkstra 扩张
  */
 
-import type { GridCells, Burg, State, Culture, Province, Road } from './types'
+import type {
+  GridCells,
+  Burg,
+  State,
+  Culture,
+  Province,
+  Road,
+  MapSpatialEntity,
+  SpatialPlacement,
+  SpatialScaleTier,
+} from './types'
 import { BIOMES } from './climate'
 import { getStateName, getCapitalName, getTownName, getCultureName, getProvinceName } from './name-pool'
 
@@ -27,6 +37,8 @@ export function generateBurgs(
   height: number,
   rng: () => number,
   burgNames?: string[],
+  spatialEntities: MapSpatialEntity[] = [],
+  spatialPlacements: SpatialPlacement[] = [],
 ): Burg[] {
   const burgs: Burg[] = [{ i: 0, name: '', cell: 0, x: 0, y: 0, state: 0, capital: false, port: false, population: 0 }]
 
@@ -40,27 +52,37 @@ export function generateBurgs(
   // 最小间距（避免城市太密集）
   const spacing = Math.sqrt((width * height) / (stateCount * 4))
 
+  const entityByName = new Map(spatialEntities.map(entity => [entity.name, entity]))
+  const placementByName = new Map(spatialPlacements.map(placement => [placement.name, placement]))
+
   // 放置首都
   const placed: number[] = []
-  for (const cell of candidates) {
-    if (placed.length >= stateCount) break
-    if (isTooClose(cells, cell, placed, spacing)) continue
+  for (let index = 0; index < stateCount; index++) {
+    const name = burgNames?.[index] || getCapitalName(index)
+    const target = placementByName.get(name)
+    const cell = target
+      ? nearestAvailableCell(cells, candidates, new Set(placed), target.x, target.y)
+      : candidates.find(candidate => !placed.includes(candidate) && !isTooClose(cells, candidate, placed, spacing))
+    if (cell == null) break
     placed.push(cell)
   }
 
   // 首都
   for (let i = 0; i < placed.length; i++) {
     const cell = placed[i]
+    const name = burgNames?.[i] || getCapitalName(i)
+    const scaleTier = entityByName.get(name)?.scaleTier ?? placementByName.get(name)?.scaleTier
     const burg: Burg = {
       i: burgs.length,
-      name: burgNames?.[i] || getCapitalName(i),
+      name,
       cell,
       x: cells.p[cell * 2],
       y: cells.p[cell * 2 + 1],
       state: i + 1,
       capital: true,
       port: cells.harbor[cell] > 0,
-      population: Math.round(cells.s[cell] * (1 + rng()) * 2),
+      population: Math.round(cells.s[cell] * (1 + rng()) * 2 * burgPopulationFactor(scaleTier)),
+      scaleTier,
     }
 
     // 港口城市移向海岸
@@ -76,36 +98,38 @@ export function generateBurgs(
 
   // 放置城镇
   const townSpacing = spacing * 0.4
-  const townCount = Math.floor(candidates.length * burgDensity * 0.02)
+  const namedTownCount = Math.max(0, (burgNames?.length ?? 0) - placed.length)
+  const townCount = Math.max(namedTownCount, Math.floor(candidates.length * burgDensity * 0.02))
   let townPlaced = 0
   const allBurgCells = placed.slice()
+  const occupied = new Set(allBurgCells)
+  const preplacedNames = new Set<string>()
+
+  // 先落实带约束的命名城镇/要塞，距离优先于随机撒点。
+  for (const name of burgNames?.slice(placed.length) ?? []) {
+    const target = placementByName.get(name)
+    if (!target) continue
+    const cell = nearestAvailableCell(cells, candidates, occupied, target.x, target.y)
+    if (cell == null) continue
+    addTown(cells, burgs, cell, name, rng, entityByName.get(name)?.scaleTier ?? target.scaleTier)
+    occupied.add(cell)
+    allBurgCells.push(cell)
+    preplacedNames.add(name)
+    townPlaced++
+  }
+
+  const pendingNames = (burgNames?.slice(placed.length) ?? [])
+    .filter(name => !preplacedNames.has(name))
 
   for (const cell of candidates) {
     if (townPlaced >= townCount) break
     if (cells.burg[cell]) continue
     if (isTooClose(cells, cell, allBurgCells, townSpacing)) continue
 
-    const burg: Burg = {
-      i: burgs.length,
-      name: burgNames?.[placed.length + townPlaced] || getTownName(townPlaced),
-      cell,
-      x: cells.p[cell * 2],
-      y: cells.p[cell * 2 + 1],
-      state: 0, // 稍后分配
-      capital: false,
-      port: cells.harbor[cell] > 0,
-      population: Math.round(cells.s[cell] * (0.5 + rng())),
-    }
-
-    if (burg.port && cells.haven[cell]) {
-      const haven = cells.haven[cell]
-      burg.x = burg.x * 0.8 + cells.p[haven * 2] * 0.2
-      burg.y = burg.y * 0.8 + cells.p[haven * 2 + 1] * 0.2
-    }
-
-    burgs.push(burg)
-    cells.burg[cell] = burg.i
+    const name = pendingNames.shift() || getTownName(townPlaced)
+    addTown(cells, burgs, cell, name, rng, entityByName.get(name)?.scaleTier)
     allBurgCells.push(cell)
+    occupied.add(cell)
     townPlaced++
   }
 
@@ -119,22 +143,29 @@ export function generateStates(
   _stateCount: number,
   rng: () => number,
   stateNames?: string[],
+  spatialEntities: MapSpatialEntity[] = [],
 ): State[] {
   const states: State[] = [{ i: 0, name: '无主之地', color: '#ccc', capital: 0, expansionism: 0, cells: 0, area: 0, totalPopulation: 0 }]
 
   // 创建国家（每个首都一个）
   const capitals = burgs.filter(b => b.capital)
+  const stateEntityByName = new Map(
+    spatialEntities.filter(entity => entity.kind === 'state').map(entity => [entity.name, entity]),
+  )
   for (let i = 0; i < capitals.length; i++) {
     const burg = capitals[i]
+    const name = stateNames?.[i] || getStateName(i)
+    const scaleTier = stateEntityByName.get(name)?.scaleTier
     const state: State = {
       i: states.length,
-      name: stateNames?.[i] || getStateName(i),
+      name,
       color: STATE_COLORS[i % STATE_COLORS.length],
       capital: burg.i,
-      expansionism: 0.8 + rng() * 1.5,
+      expansionism: (0.8 + rng() * 1.5) * stateExpansionFactor(scaleTier),
       cells: 0,
       area: 0,
       totalPopulation: 0,
+      scaleTier,
     }
     states.push(state)
     burg.state = state.i
@@ -332,6 +363,78 @@ function isTooClose(cells: GridCells, cell: number, placed: number[], minDist: n
   }
 
   return false
+}
+
+function nearestAvailableCell(
+  cells: GridCells,
+  candidates: number[],
+  occupied: Set<number>,
+  targetX: number,
+  targetY: number,
+): number | undefined {
+  let bestCell: number | undefined
+  let bestScore = Infinity
+  for (const cell of candidates) {
+    if (occupied.has(cell) || cells.burg[cell]) continue
+    const dx = cells.p[cell * 2] - targetX
+    const dy = cells.p[cell * 2 + 1] - targetY
+    // 以距离为主，在距离接近时偏好更宜居的陆地。
+    const score = dx * dx + dy * dy - Math.min(cells.s[cell], 100) * 4
+    if (score < bestScore) {
+      bestScore = score
+      bestCell = cell
+    }
+  }
+  return bestCell
+}
+
+function addTown(
+  cells: GridCells,
+  burgs: Burg[],
+  cell: number,
+  name: string,
+  rng: () => number,
+  scaleTier?: SpatialScaleTier,
+): void {
+  const burg: Burg = {
+    i: burgs.length,
+    name,
+    cell,
+    x: cells.p[cell * 2],
+    y: cells.p[cell * 2 + 1],
+    state: 0,
+    capital: false,
+    port: cells.harbor[cell] > 0,
+    population: Math.round(cells.s[cell] * (0.5 + rng()) * burgPopulationFactor(scaleTier)),
+    scaleTier,
+  }
+  if (burg.port && cells.haven[cell]) {
+    const haven = cells.haven[cell]
+    burg.x = burg.x * 0.8 + cells.p[haven * 2] * 0.2
+    burg.y = burg.y * 0.8 + cells.p[haven * 2 + 1] * 0.2
+  }
+  burgs.push(burg)
+  cells.burg[cell] = burg.i
+}
+
+function burgPopulationFactor(tier?: SpatialScaleTier): number {
+  switch (tier) {
+    case 'metropolis': return 3
+    case 'city': return 2
+    case 'town': return 1.25
+    case 'village': return 0.55
+    case 'fortress': return 0.85
+    default: return 1
+  }
+}
+
+function stateExpansionFactor(tier?: SpatialScaleTier): number {
+  switch (tier) {
+    case 'empire': return 1.6
+    case 'kingdom': return 1.3
+    case 'province': return 0.85
+    default: return 1
+  }
 }
 
 // ── 省份生成 ────────────────────────────────────────

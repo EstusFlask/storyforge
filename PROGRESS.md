@@ -16,7 +16,7 @@
 - **Zustand** — 状态管理
 - **Dexie.js** — IndexedDB 本地数据库（9 张表）
 - **lucide-react** — 图标
-- **react-router-dom 7** — 路由
+- **react-router 8** — 路由
 - **Google Fonts** — Inter + Source Serif 4 + JetBrains Mono
 
 ### 启动开发

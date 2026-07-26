@@ -7,8 +7,8 @@
  *   · 深层（deep） —— 逐块精读，每维含原文引用 + 全书总结，写 per-chunk rows + 断点续跑。
  *
  * 数据走向：
- *   · 写入 referenceChunkAnalysis 表，关联到 Reference。
- *   · 状态写回 Reference 的 analysisStatus / analysisProgress。
+ *   · 每轮写入独立 ReferenceAnalysisRun + scoped referenceChunkAnalysis。
+ *   · 只有作者激活的 run 同步 Reference 兼容投影并进入创作上下文。
  */
 import { db } from '../db/schema'
 import { chat, resolveRequestConfig, type AICallMeta } from '../ai/client'
@@ -17,7 +17,13 @@ import { useAIConfigStore } from '../../stores/ai-config'
 import { chunkDocument, quickHash, type ChunkPlan } from '../import/chunker'
 import { extractJSON } from '../ai/adapters/import-adapter'
 import type { AIConfig, ChatMessage, Reference, ReferenceChunkAnalysis, ReferenceAnalysisDepth } from '../types'
-import { adopt, clearAdoptedCollection } from '../registry/adopt'
+import { adopt } from '../registry/adopt'
+import {
+  completeReferenceAnalysisRun,
+  createReferenceAnalysisRun,
+  patchReferenceAnalysisRun,
+  readReferenceAnalysisChunks,
+} from './lifecycle'
 
 /** 两档:浅层(大块·轻析) / 深层(小块·深析) */
 const DEPTH_PRESET: Record<ReferenceAnalysisDepth, {
@@ -35,11 +41,12 @@ const RETRY_DELAY_MS = 1500
 let activeController: AbortController | null = null
 let activePaused = { value: false }
 let activeRefId: number | null = null
+let activeRunId: number | null = null
 
 export interface RefAnalysisPipelineListener {
   onProgress?: (progress: number, message?: string) => void
   onActivity?: (level: 'info' | 'success' | 'warn' | 'error', message: string) => void
-  onDone?: (refId: number, success: boolean) => void
+  onDone?: (refId: number, success: boolean, runId?: number) => void
 }
 
 let listener: RefAnalysisPipelineListener = {}
@@ -56,6 +63,10 @@ export function getActiveRefAnalysisId(): number | null {
   return activeRefId
 }
 
+export function getActiveRefAnalysisRunId(): number | null {
+  return activeRunId
+}
+
 export function cancelRefAnalysisPipeline() {
   activePaused.value = true
   activeController?.abort()
@@ -65,16 +76,16 @@ export function cancelRefAnalysisPipeline() {
 // ── 内存分块文本缓存 ─────────────────────────────────────────
 const IN_MEM_CHUNKS: Record<number, ChunkPlan[]> = {}
 
-export function registerRefChunks(refId: number, chunks: ChunkPlan[]) {
-  IN_MEM_CHUNKS[refId] = chunks
+export function registerRefChunks(runId: number, chunks: ChunkPlan[]) {
+  IN_MEM_CHUNKS[runId] = chunks
 }
 
-export function clearRefChunks(refId: number) {
-  delete IN_MEM_CHUNKS[refId]
+export function clearRefChunks(runId: number) {
+  delete IN_MEM_CHUNKS[runId]
 }
 
-export function hasRefChunks(refId: number): boolean {
-  return !!IN_MEM_CHUNKS[refId]?.length
+export function hasRefChunks(runId: number): boolean {
+  return !!IN_MEM_CHUNKS[runId]?.length
 }
 
 // ── 浅层:直接用导入解析已出的 13 维写作技法,零额外 AI ──────────
@@ -86,20 +97,28 @@ export function hasRefChunks(refId: number): boolean {
 export async function writeShallowAnalysisFromTechniques(
   refId: number,
   wt: import('../types').WritingTechniques | undefined,
+  source?: { filename?: string; fileHash?: string; totalChars?: number },
 ): Promise<void> {
   const ref = await db.references.get(refId)
   if (!ref) throw new Error(`参考 #${refId} 不存在`)
-  // 清掉旧分析(可能之前跑过)
-  await clearAdoptedCollection({
-    projectId: ref.projectId,
-    target: 'referenceChunkAnalysis',
-    scope: { referenceId: refId },
+  const run = await createReferenceAnalysisRun({
+    referenceId: refId,
+    depth: 'quick',
+    sourceFilename: source?.filename ?? ref.importedData?.sourceFilename ?? ref.title,
+    fileHash: source?.fileHash ?? ref.fileHash ?? `reference-${refId}-${Date.now()}`,
+    totalChars: Math.max(1, source?.totalChars ?? ref.totalChars ?? 1),
+    expectedChunks: 1,
+    sourceKind: 'unknown',
+    usageScope: 'analysis-only',
+    rightsNote: '由项目导入解析生成；尚未在版本面板补充来源声明',
+    rightsConfirmed: false,
   })
   const w = wt || {}
   const hasAny = Object.values(w).some(v => typeof v === 'string' && v.trim())
   if (hasAny) {
     const row: ReferenceChunkAnalysis = {
       referenceId: refId,
+      analysisRunId: run.id,
       chunkIndex: 0,
       label: '全书',
       narrativeStyle: trim(w.narrativeStyle),
@@ -119,49 +138,71 @@ export async function writeShallowAnalysisFromTechniques(
     }
     await writeAnalysisRow(ref.projectId, row)
   }
-  await patchRef(ref.projectId, refId, {
-    analysisDepth: 'quick',
-    analysisStatus: hasAny ? 'done' : 'failed',
-    analysisProgress: 100,
-    analysisError: hasAny ? undefined : '解析未产出写作技法,无法生成浅层分析',
-  })
+  await completeReferenceAnalysisRun(
+    run.id!,
+    hasAny ? 1 : 0,
+    hasAny ? undefined : '解析未产出写作技法,无法生成浅层分析',
+  )
 }
 
 // ── 深层主入口 ─────────────────────────────────────────────────
 
 /**
  * 跑一次参考作品深层分析(逐块深析)。
- * 前置：必须已经 registerRefChunks()，Reference 记录存在。
+ * 前置：必须已创建 run；原文优先从 registerRefChunks() 读取，刷新后从本地 source 恢复。
  */
-export async function runRefAnalysis(refId: number): Promise<void> {
+export async function runRefAnalysis(refId: number, requestedRunId?: number): Promise<void> {
+  if (activeController) {
+    listener.onActivity?.('warn', '已有参考分析正在运行，请等待或先取消')
+    listener.onDone?.(refId, false, requestedRunId)
+    return
+  }
   const ref = await db.references.get(refId)
   if (!ref) {
     listener.onActivity?.('error', `参考 #${refId} 不存在`)
-    listener.onDone?.(refId, false)
+    listener.onDone?.(refId, false, requestedRunId)
     return
   }
-  const chunks = IN_MEM_CHUNKS[refId]
+  const run = requestedRunId
+    ? await db.referenceAnalysisRuns.get(requestedRunId)
+    : (await db.referenceAnalysisRuns.where('referenceId').equals(refId).toArray())
+      .filter(candidate => candidate.status === 'analyzing')
+      .sort((a, b) => b.version - a.version)[0]
+  if (!run?.id || run.referenceId !== refId) {
+    listener.onActivity?.('error', '找不到待分析版本')
+    listener.onDone?.(refId, false, requestedRunId)
+    return
+  }
+  let chunks: ChunkPlan[] | undefined = IN_MEM_CHUNKS[run.id]
+  if (!chunks?.length) {
+    chunks = await readReferenceAnalysisChunks(run.id)
+  }
   if (!chunks || chunks.length === 0) {
-    await patchRef(ref.projectId, refId, {
-      analysisStatus: 'failed',
-      analysisError: '找不到分块原文（可能页面刷新过，请重新上传文件）',
+    await patchReferenceAnalysisRun(run.id, {
+      status: 'failed',
+      error: '找不到断点原文，请重新上传文件创建新版本',
     })
     listener.onActivity?.('error', '找不到分块原文，需要重新上传')
-    listener.onDone?.(refId, false)
+    listener.onDone?.(refId, false, run.id)
     return
   }
 
-  const depth = ref.analysisDepth || 'quick'
+  const depth = run.depth
   activeController = new AbortController()
   activePaused = { value: false }
   activeRefId = refId
+  activeRunId = run.id
 
-  await patchRef(ref.projectId, refId, { analysisStatus: 'analyzing', analysisProgress: 0, analysisError: undefined })
-  listener.onActivity?.('info', `▶ 开始分析「${ref.title}」共 ${chunks.length} 块（${depth}）`)
+  await patchReferenceAnalysisRun(run.id, {
+    status: 'analyzing',
+    progress: 0,
+    error: null,
+  })
+  listener.onActivity?.('info', `▶ 开始分析「${ref.title}」v${run.version}，共 ${chunks.length} 块（${depth}）`)
 
   // 已有分析 → 断点续跑
   const existing = await db.referenceChunkAnalysis
-    .where('referenceId').equals(refId).toArray()
+    .where('analysisRunId').equals(run.id).toArray()
   const doneSet = new Set(existing.map(r => r.chunkIndex))
 
   let rollingContext = ''
@@ -173,8 +214,8 @@ export async function runRefAnalysis(refId: number): Promise<void> {
     for (const chunk of chunks) {
       if (activePaused.value) {
         listener.onActivity?.('warn', '⏸ 分析已中止')
-        await patchRef(ref.projectId, refId, { analysisStatus: 'failed', analysisError: '用户取消' })
-        listener.onDone?.(refId, false)
+        await patchReferenceAnalysisRun(run.id, { status: 'cancelled', error: '用户取消' })
+        listener.onDone?.(refId, false, run.id)
         return
       }
       if (doneSet.has(chunk.index)) continue
@@ -197,6 +238,7 @@ export async function runRefAnalysis(refId: number): Promise<void> {
           })
           const row: ReferenceChunkAnalysis = {
             referenceId: refId,
+            analysisRunId: run.id,
             chunkIndex: chunk.index,
             label: chunk.label,
             startOffset: chunk.startChar,
@@ -221,20 +263,20 @@ export async function runRefAnalysis(refId: number): Promise<void> {
             dailyLife:          trim(analysis.dailyLife),
             materialCulture:    trim(analysis.materialCulture),
             languageCustoms:    trim(analysis.languageCustoms),
-            rawExcerpt:         trim(analysis.rawExcerpt),
+            rawExcerpt:         verifiedRawExcerpt(analysis.rawExcerpt, chunk.text),
             createdAt: Date.now(),
           }
           await writeAnalysisRow(ref.projectId, row)
           completed++
           const progress = Math.min(100, Math.round((completed / total) * 100))
-          await patchRef(ref.projectId, refId, { analysisProgress: progress })
+          await patchReferenceAnalysisRun(run.id, { completedChunks: completed, progress })
           listener.onProgress?.(progress, `块 ${chunk.index + 1} 完成`)
           listener.onActivity?.('success', `✓ 块 ${chunk.index + 1} 完成`)
           rollingContext = buildRollingContext(rollingContext, row)
           ok = true
           break
         } catch (err) {
-          if ((err as Error).name === 'AbortError') return
+          if ((err as Error).name === 'AbortError') throw err
           lastErr = err instanceof Error ? err.message : String(err)
           listener.onActivity?.('warn',
             `块 ${chunk.index + 1} 第 ${attempt + 1} 次失败：${lastErr.slice(0, 80)}`)
@@ -249,33 +291,29 @@ export async function runRefAnalysis(refId: number): Promise<void> {
 
     // 收尾
     const finalAnalyses = await db.referenceChunkAnalysis
-      .where('referenceId').equals(refId).toArray()
+      .where('analysisRunId').equals(run.id).toArray()
     const successRatio = total > 0 ? finalAnalyses.length / total : 0
-    const finalStatus = successRatio > 0 ? 'done' : 'failed'
     const errMsg = successRatio < 1
       ? `共 ${total} 块，成功 ${finalAnalyses.length}，失败 ${total - finalAnalyses.length}`
       : undefined
-    await patchRef(ref.projectId, refId, {
-      analysisStatus: finalStatus as Reference['analysisStatus'],
-      analysisProgress: Math.round(successRatio * 100),
-      analysisError: errMsg,
-    })
-    listener.onActivity?.(finalStatus === 'done' ? 'success' : 'warn',
+    const finalStatus = await completeReferenceAnalysisRun(run.id, finalAnalyses.length, errMsg)
+    listener.onActivity?.(finalStatus !== 'failed' ? 'success' : 'warn',
       `分析结束：${finalAnalyses.length} / ${total} 块已入库`)
-    listener.onDone?.(refId, finalStatus === 'done')
+    listener.onDone?.(refId, finalStatus !== 'failed', run.id)
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
     if ((err as Error).name === 'AbortError') {
       listener.onActivity?.('warn', '已中止')
-      await patchRef(ref.projectId, refId, { analysisStatus: 'failed', analysisError: '用户取消' })
+      await patchReferenceAnalysisRun(run.id, { status: 'cancelled', error: '用户取消' })
     } else {
-      await patchRef(ref.projectId, refId, { analysisStatus: 'failed', analysisError: msg })
+      await patchReferenceAnalysisRun(run.id, { status: 'failed', error: msg })
       listener.onActivity?.('error', `分析异常：${msg}`)
     }
-    listener.onDone?.(refId, false)
+    listener.onDone?.(refId, false, run.id)
   } finally {
     activeController = null
     activeRefId = null
+    activeRunId = null
   }
 }
 
@@ -461,23 +499,18 @@ async function writeAnalysisRow(projectId: number, row: ReferenceChunkAnalysis):
   }
 }
 
-async function patchRef(projectId: number, refId: number, changes: Partial<Reference>) {
-  const result = await adopt({
-    projectId,
-    target: 'references',
-    recordId: refId,
-    mode: 'replace',
-    data: changes as Record<string, unknown>,
-  })
-  if (result.written.length === 0) {
-    throw new Error(`参考状态写回被拒绝: ${result.skipped[0]?.reason ?? 'unknown'}`)
-  }
-}
-
 function trim(s: string | undefined): string | undefined {
   if (typeof s !== 'string') return undefined
   const t = s.trim()
   return t || undefined
+}
+
+/** 只保留能在本块原文中找到的逐字引用（允许空白差异），拒绝 AI 幻觉引文。 */
+export function verifiedRawExcerpt(excerpt: string | undefined, sourceText: string): string | undefined {
+  const candidate = trim(excerpt)?.replace(/^[“"'‘]+|[”"'’]+$/g, '').trim()
+  if (!candidate) return undefined
+  const normalize = (value: string) => value.replace(/\s+/g, ' ').trim()
+  return normalize(sourceText).includes(normalize(candidate)) ? candidate.slice(0, 500) : undefined
 }
 
 function sleep(ms: number) {

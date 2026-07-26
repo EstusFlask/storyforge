@@ -8,7 +8,7 @@
 
 ## 一、Prompt 模板清单（PromptModuleKey 事实源）
 
-共 59 个唯一 moduleKey，204 条内置模板定义。
+共 61 个唯一 moduleKey，206 条内置模板定义。
 
 | moduleKey | 模板数 | 代表名称 | 说明 | 读取变量 |
 |---|---:|---|---|---|
@@ -55,10 +55,11 @@
 | `import.parse-worldview` | 1 | 内置-世界观文档解析 | 从世界观设定文档中抽取结构化字段（JSON）。 | `rawDocument` |
 | `import.parse-outline` | 1 | 内置-大纲文档解析 | 从大纲文档中抽取结构化卷/章节树（JSON 数组）。 | `rawDocument` |
 | `import.parse-all` | 1 | 内置-智能统一解析 | 一次性从任意文档（设定文档或成品小说）中提取世界观 / 角色 / 大纲章节三类结构化数据。 | `rawDocument` |
-| `import.parse-chunk` | 1 | 内置-分块解析（大文档流水线） | 针对百万字级小说，把原文切成多块后逐块抽取世界观 / 角色 / 大纲，可带已识别上下文。 | `chunkIndex` `totalChunks` `knownContext` `rawDocument` |
+| `import.parse-chunk` | 1 | 内置-分块解析（大文档流水线） | 针对百万字级小说，把原文切成多块后逐块抽取世界观 / 角色 / 大纲，可带已识别上下文。 | `chunkIndex` `totalChunks` `knownContext` `codexCategoryCatalog` `rawDocument` |
 | `import.merge-characters` | 1 | 内置-角色跨块合并 | 检查分块导出的角色清单，判断哪些是同一人（别名 / 尊称 / 昵称）应合并。 | `characterList` |
 | `relation.extract` | 1 | 内置-角色关系提取 | 从大纲摘要和章节正文中自动提取角色间的关系。 | `projectName` `characterList` `outlineSummary` `chapterContent` |
 | `plot.character-driven` | 1 | 内置-角色驱动剧情 | 根据角色初始状态与目标状态，AI 生成中间情节推演（卷/章大纲结构）。 | `projectName` `genres` `worldContext` `storyCore` `existingOutline` `characterArcs` `userHint` `worldRulesContext` |
+| `plot.character-revision` | 1 | 内置-角色变更影响分析 | 分析创作中途的角色变化，把已写区、过渡区和未写区分开，并输出可审查的大纲 patch。 | `revisionContext` |
 | `inspiration.reverse` | 1 | 内置-灵感反推 | 用户写碎片想法，AI 反向生成世界观草稿、故事核心、初始角色卡。 | `projectName` `genres` `inspiration` `userHint` |
 | `inspiration.reverse.multiworld` | 1 | 内置-多世界灵感反推 | 多世界题材：用户给出带有多个世界意图的灵感，AI 顺着思路反推故事主线 + 多个世界 + 角色。 | `projectName` `genres` `inspiration` `userHint` |
 | `world-group.suggest` | 1 | 内置-AI建议世界 | 诸天流/无限流等多世界题材，根据故事概念和已有世界建议新的世界组。 | `projectName` `genres` `concept` `existingWorlds` `userHint` |
@@ -70,14 +71,19 @@
 | `scene.verify` | 1 | 内置-场景考证 | 用户描述当前场景，AI 结合世界观/历史年表/世界规则给出符合背景的细节、时代错乱警示与情节灵感。 | `worldContext` `historyContext` `worldRulesContext` `scene` `sceneEra` `sceneLocation` |
 | `history.consult` | 1 | 内置-历史考据 agent | 历史年表条目的考据 agent。挑剔但合作，绝不顺着作者的错误假设编造细节；尊重作者已声明的艺术改造/架空范围。 | `itemMeta` `finalText` `conceptNote` `consultPrompt` `worldContext` |
 | `history.storm` | 1 | 内置-头脑风暴 agent | 历史年表条目的头脑风暴 agent。围绕作者已设定的方向发散可写素材，尊重作者声明的艺术改造范围。 | `itemMeta` `finalText` `conceptNote` `stormPrompt` `worldContext` |
-| `style.learn` | 1 | 内置-文风学习 | 从用户已定稿/润色的章节中,总结出其个人写作文风画像,供后续章节生成参考。 | `sampleCount` `sampleWords` `samples` `userHint` |
+| `style.learn` | 1 | 内置-文风学习 | 从用户已定稿/润色的章节中,总结出其个人写作文风画像,供后续章节生成参考。 | `sampleCount` `sampleWords` `samples` `revisionPairs` `calibrationFeedback` `userHint` |
+| `style.calibrate` | 1 | 内置-文风互动校准 | 按现有文风画像和作者认可的改稿对照重写一段短文，供作者比较、反馈并沉淀新样本。 | `profile` `revisionPairs` `calibrationFeedback` `sourceText` |
 
 ## 二、上下文源清单（CONTEXT_SOURCES · AI 读什么）
 
-共 34 个上下文源。assembleContext({ sourceKeys }) 按 key 装配。
+共 44 个上下文源。assembleContext({ sourceKeys }) 按 key 装配。
 
 | key | 标签 | 作用域 | 层级 | 预算(token) |
 |---|---|---|---|---|
+| `projectStatus` | 项目概况 | project | L2 | 1200 |
+| `worldGroups` | 世界组目录 | project | L2 | 1500 |
+| `outlineTree` | 大纲树 | world | L2 | 6000 |
+| `searchResults` | 项目内搜索结果 | world | L2 | 2200 |
 | `manualText` | 用户指定内容 | manual | L0 | 100000 |
 | `chapterContent` | 章节正文 | chapter | L0 | 100000 |
 | `contextMemo` | 上下文快照 | project | L3 | 1500 |
@@ -85,6 +91,8 @@
 | `existingVolumeOutlines` | 已有卷大纲 | project | L1 | 2400 |
 | `writtenChapterProgress` | 本卷已写正文进度 | node | L1 | 3000 |
 | `currentFacts` | 当前有效事实(事实账本投影) | chapter | L1 | 2000 |
+| `canonAssertions` | 世界宪法(已确认设定断言) | world | L1 | 1800 |
+| `characterKnowledge` | 角色认知边界(认知账本投影) | chapter | L1 | 1600 |
 | `retrievedPassages` | 相关前文召回(NS-5 混合检索) | chapter | L2 | 2500 |
 | `detailedOutline` | 本章细纲(场景拆解) | node | L1 | 1500 |
 | `previousChapterEnding` | 全局直接前驱原文尾部 | manual | L1 | 1800 |
@@ -93,6 +101,7 @@
 | `recentChapterSummaries` | 当前世界最近已验证摘要 | chapter | L1 | 2200 |
 | `worldview` | 世界观 | world | L2 | 8000 |
 | `storyCore` | 故事核心 | project | L1 | 4000 |
+| `characterDrivenPlan` | 当前生效角色驱动方案 | project | L1 | 5000 |
 | `powerSystem` | 力量体系 | world | L2 | 4000 |
 | `codex` | 设定词条 | world | L2 | 6000 |
 | `characters` | 角色档案 | world | L2 | 8000 |
@@ -102,6 +111,8 @@
 | `locations` | 重要地点 | project | L2 | 1200 |
 | `foreshadows` | 伏笔状态 | chapter | L2 | 1200 |
 | `storyArcs` | 故事线 | project | L2 | 1500 |
+| `storylineProgress` | 作者确认的故事线进度与交汇 | project | L1 | 1400 |
+| `cultivationProgress` | 作者确认的正文修炼进度 | world | L1 | 1000 |
 | `emotionBeats` | 情感节拍 | chapter | L1 | 1000 |
 | `stateCards` | 状态卡 | project | L2 | 1800 |
 | `itemLedger` | 物品流水 | project | L2 | 2400 |
@@ -109,7 +120,8 @@
 | `storyTimeline` | 故事年表 | project | L2 | 2600 |
 | `characterRelations` | 角色关系 | project | L2 | 2200 |
 | `references` | 引用手法 | project | L3 | 2000 |
-| `userStyleProfile` | 我的文风 | project | L2 | 700 |
+| `userStyleProfile` | 我的文风 | project | L2 | 1800 |
+| `inspirationWorkspace` | 增量灵感工作区 | project | L0 | 11000 |
 | `characterFacts` | 该角色的剧情事实 | project | L1 | 1500 |
 | `characterPassages` | 该角色的正文表现 | project | L1 | 2500 |
 
@@ -122,53 +134,76 @@ AI 输出经 `adopt({ target, data })` 写回,只有这里登记的字段可写(
 | 目标表 | 可写字段 |
 |---|---|
 | `chapters` | `content` `continuityHandoff` `notes` `order` `outlineNodeId` `planReconciliation` `status` `summary` `summarySourceTextHash` `summaryTextNormalizationVersion` `title` `wordCount` |
-| `characters` | `abilities` `activeChapterRange` `alignment` `appearance` `arc` `background` `ending` `exitChapterId` `fears` `firstAppearChapterId` `firstAppearance` `goals` `habits` `homeWorldGroupId` `identity` `innerConflict` `isCrossWorld` `keyEvents` `location` `moralAxis` `motivation` `name` `orderAxis` `personality` `powerLevel` `profile` `relationships` `role` `roleWeight` `shortDescription` `signatureItem` `speechStyle` `storyRole` `strengths` `values` `weaknesses` |
+| `characters` | `abilities` `activeChapterRange` `alignment` `appearance` `arc` `background` `cultivationStageId` `cultivationSystemId` `ending` `exitChapterId` `fears` `firstAppearChapterId` `firstAppearance` `goals` `habits` `homeWorldGroupId` `identity` `innerConflict` `isCrossWorld` `keyEvents` `location` `moralAxis` `motivation` `name` `orderAxis` `personality` `powerLevel` `profile` `raceEntryId` `relationships` `role` `roleWeight` `shortDescription` `signatureItem` `speechStyle` `storyRole` `strengths` `values` `weaknesses` |
 | `codexCategories` | `builtInKey` `domain` `fieldSchema` `hidden` `icon` `name` `order` `parentId` `worldGroupId` |
-| `codexEntries` | `categoryId` `description` `fields` `icon` `importance` `name` `order` `refs` `summary` `tags` `worldGroupId` |
+| `codexEntries` | `categoryId` `cultivationStageId` `cultivationSystemId` `description` `fields` `icon` `importance` `importantLocationId` `name` `order` `refs` `summary` `tags` `worldGroupId` |
 | `creativeRules` | `atmosphere` `citedInsightIds` `citedReferenceIds` `consistencyRules` `narrativePOV` `prohibitions` `referenceWorksV2` `specialRequirements` `writingStyle` |
-| `detailedOutlines` | `appearingCharacterIds` `emotionArc` `endingCliffhanger` `foreshadowIds` `lastUsedSummary` `openingHook` `outlineNodeId` `sceneLocation` `scenes` |
+| `cultivationProgress` | `characterId` `characterName` `cultivationSystemId` `cultivationSystemName` `sourceChapterId` `sourceChapterTitle` `sourceOffset` `sourceQuote` `stageId` `stageName` `status` `transition` `trigger` `worldGroupId` |
+| `cultivationSystems` | `description` `name` `stages` `worldGroupId` |
+| `detailedOutlines` | `appearingCharacterIds` `emotionArc` `endingCliffhanger` `foreshadowIds` `lastUsedSummary` `openingHook` `outlineNodeId` `prohibitions` `sceneLocation` `scenes` |
 | `foreshadows` | `description` `echoChapterIds` `expectedResolveChapterId` `importance` `name` `notes` `plantChapterId` `resolveChapterId` `status` `timelinePosition` `type` `urgency` |
 | `historicalKeywords` | `aiBrainstorm` `aiConsult` |
 | `historicalTimelineEvents` | `aiBrainstorm` `aiConsult` |
 | `importantLocations` | `description` `name` `parentId` `significance` `sortOrder` `tags` |
+| `inspirationWorkspaces` | `fragments` `versions` |
 | `itemLedger` | `action` `chapterId` `chapterTitle` `characterId` `heldByName` `itemName` `note` `quantity` |
+| `knowledgeLedger` | `action` `belief` `characterId` `characterName` `factId` `knowledgeKey` `sourceChapterId` `sourceQuote` `sourceType` `statement` `status` `worldGroupId` |
 | `outlineNodes` | `order` `parentId` `summary` `title` `type` `worldGroupId` |
-| `referenceChunkAnalysis` | `characterCraft` `chunkIndex` `climaxDesign` `conflictEscalation` `dailyLife` `dialogueTechnique` `emotionalBeats` `endOffset` `foreshadowing` `historicalContext` `label` `languageCustoms` `materialCulture` `narrativeStyle` `openingTechnique` `otherTechniques` `pacingControl` `plotStructure` `proseStyle` `rawExcerpt` `referenceId` `socialInstitutions` `startOffset` `worldBuilding` |
+| `referenceAnalysisRuns` | `activatedAt` `analysisSummary` `completedAt` `completedChunks` `depth` `error` `expectedChunks` `fileHash` `mergedCharacters` `progress` `referenceId` `rightsConfirmed` `rightsDeclaredAt` `rightsNote` `sourceFilename` `sourceKind` `status` `totalChars` `usageScope` `version` |
+| `referenceChunkAnalysis` | `analysisRunId` `characterCraft` `chunkIndex` `climaxDesign` `conflictEscalation` `dailyLife` `dialogueTechnique` `emotionalBeats` `endOffset` `foreshadowing` `historicalContext` `label` `languageCustoms` `materialCulture` `narrativeStyle` `openingTechnique` `otherTechniques` `pacingControl` `plotStructure` `proseStyle` `rawExcerpt` `referenceId` `socialInstitutions` `startOffset` `worldBuilding` |
 | `references` | `analysisDepth` `analysisError` `analysisProgress` `analysisStatus` `analysisSummary` `fileHash` `genre` `importSessionId` `mergedCharacters` `totalChars` |
 | `stateCards` | `category` `entityName` `fields` `lastChapterId` |
 | `storyArcs` | `description` `name` `stages` `type` |
 | `storyCores` | `centralConflict` `concept` `logline` `mainPlot` `plotPattern` `subPlots` `theme` |
 | `storyTimelineEvents` | `chapterId` `chapterTitle` `description` `importance` `order` `storyTime` `title` |
-| `worldviews` | `climateByRegion` `continentLayout` `culture` `divineDesign` `economy` `factionLayout` `geography` `history` `historyLine` `internalConflicts` `itemDesign` `mountainsRivers` `naturalResourceOverview` `naturalResources` `politicsEconomyCulture` `powerHierarchy` `races` `regionDimensions` `rules` `society` `worldDimensions` `worldEvents` `worldOrigin` `worldStructure` |
+| `storylineCrossings` | `arcIdA` `arcIdB` `chapterId` `chapterTitle` `evidenceQuote` `note` |
+| `storylineProgress` | `arcId` `currentStageId` `evidenceQuote` `involvedEntities` `lastActiveChapterId` `lastActiveChapterTitle` `progressNote` `status` |
+| `worldviews` | `climateByRegion` `continentLayout` `culture` `cultureOverview` `divineDesign` `economy` `economyOverview` `factionLayout` `geography` `history` `historyLine` `internalConflicts` `itemDesign` `mountainsRivers` `naturalResourceOverview` `naturalResources` `politicsEconomyCulture` `politicsOverview` `powerHierarchy` `races` `regionDimensions` `rules` `society` `worldDimensions` `worldEvents` `worldOrigin` `worldStructure` |
 
 ### 领域写回扩展（不是第二套通用 adopt）
 
 | ID | 目标表 | 领域策略注册表 | 唯一入口 | 复审日期 |
 |---|---|---|---|---|
-| `fact-ledger` | `temporalFacts` | `FACT_PREDICATE_REGISTRY` | `src/lib/fact-ledger/fact-ledger.ts`<br/>`src/lib/fact-ledger/human-readable-io.ts`<br/>`src/lib/fact-ledger/lifecycle.ts`<br/>`src/lib/consistency/impact-analysis.ts` | 2027-01-01 |
-| `character-merge-lifecycle` | `characters` | `PROJECT_TABLES refs + remapCharacterReferences` | `src/lib/import/character-merge.ts` | 2027-01-01 |
+| `reference-analysis-run-lifecycle` | `referenceAnalysisRuns` | `REFERENCE_ANALYSIS_RUN_POLICY + ADOPTION_SCHEMAS + PROJECT_TABLES` | `src/lib/reference-analysis/lifecycle.ts`<br/>`src/lib/reference-analysis/legacy-bridge.ts` | 2027-01-01 |
+| `reference-analysis-source-lifecycle` | `referenceAnalysisSources` | `REFERENCE_ANALYSIS_RUN_POLICY + PROJECT_TABLES` | `src/lib/reference-analysis/lifecycle.ts` | 2027-01-01 |
+| `reference-analysis-chunk-lifecycle` | `referenceChunkAnalysis` | `REFERENCE_ANALYSIS_RUN_POLICY + ADOPTION_SCHEMAS + PROJECT_TABLES` | `src/lib/reference-analysis/lifecycle.ts`<br/>`src/lib/reference-analysis/legacy-bridge.ts` | 2027-01-01 |
+| `reference-analysis-reference-lifecycle` | `references` | `REFERENCE_ANALYSIS_RUN_POLICY + PROJECT_TABLES refs` | `src/lib/reference-analysis/lifecycle.ts` | 2027-01-01 |
+| `reference-analysis-citation-lifecycle` | `creativeRules` | `PROJECT_TABLES references refs` | `src/lib/reference-analysis/lifecycle.ts` | 2027-01-01 |
+| `fact-ledger` | `temporalFacts` | `FACT_PREDICATE_REGISTRY` | `src/lib/fact-ledger/fact-ledger.ts`<br/>`src/lib/fact-ledger/human-readable-io.ts`<br/>`src/lib/fact-ledger/lifecycle.ts`<br/>`src/lib/fact-ledger/setting-assertions.ts`<br/>`src/lib/consistency/impact-analysis.ts`<br/>`src/lib/cultivation/lifecycle.ts`<br/>`src/lib/editor/entity-rename.ts` | 2027-01-01 |
+| `character-merge-lifecycle` | `characters` | `PROJECT_TABLES refs + remapCharacterReferences + cultivation DAG validator` | `src/lib/import/character-merge.ts`<br/>`src/lib/codex/references.ts`<br/>`src/lib/cultivation/lifecycle.ts`<br/>`src/lib/cultivation/progress-lifecycle.ts` | 2027-01-01 |
+| `knowledge-ledger` | `knowledgeLedger` | `KNOWLEDGE_ACTIONS + ADOPTION_SCHEMAS + PROJECT_TABLES` | `src/lib/knowledge-ledger/knowledge-ledger.ts`<br/>`src/lib/knowledge-ledger/lifecycle.ts` | 2027-01-01 |
+| `storyline-progress-lifecycle` | `storylineProgress` | `ADOPTION_SCHEMAS + PROJECT_TABLES refs` | `src/lib/storyline/lifecycle.ts` | 2027-01-01 |
+| `storyline-crossing-lifecycle` | `storylineCrossings` | `ADOPTION_SCHEMAS + PROJECT_TABLES refs` | `src/lib/storyline/lifecycle.ts` | 2027-01-01 |
+| `story-arc-dynamic-lifecycle` | `storyArcs` | `PROJECT_TABLES refs` | `src/lib/storyline/lifecycle.ts` | 2027-01-01 |
+| `cultivation-codex-reference-lifecycle` | `codexEntries` | `PROJECT_TABLES refs + cultivation DAG validator` | `src/lib/codex/references.ts`<br/>`src/lib/cultivation/lifecycle.ts`<br/>`src/lib/location/lifecycle.ts` | 2027-01-01 |
+| `cultivation-progress-lifecycle` | `cultivationProgress` | `ADOPTION_SCHEMAS + PROJECT_TABLES + cultivation DAG validator + canonical chapter sequence` | `src/lib/cultivation/progress.ts`<br/>`src/lib/cultivation/progress-lifecycle.ts` | 2027-01-01 |
+| `codex-category-scope-lifecycle` | `codexCategories` | `PROJECT_TABLES lifecycle` | `src/lib/registry/lifecycle.ts` | 2027-01-01 |
 
 ## 四、AI 调用点（消耗统计 category · 在哪触发)
 
-共 46 个 category。
+共 59 个 category。
 未分类调用: 0 个。动态 category 调用: 3 个。
 
 | category | 触发文件 |
 |---|---|
+| `agent.orchestrator` | `src/lib/agent/orchestrator.ts:185` |
+| `agent.readonly` | `src/lib/agent/client-adapter.ts:23` |
 | `ai.restructure` | `src/lib/ai/restructure.ts:54` |
-| `chapter.content` | `src/components/editor/ChapterEditor.tsx:494` |
+| `canon.setting.extract` | `src/components/facts/WorldConstitutionPanel.tsx:79` |
+| `chapter.content` | `src/lib/generation/chapter-generation-node.ts:22` |
 | `chapter.content.batch` | `src/lib/ai/batch-detail-runner.ts:256` |
-| `chapter.continue` | `src/components/editor/ChapterEditor.tsx:512` |
-| `chapter.deai` | `src/components/editor/ChapterEditor.tsx:549` |
-| `chapter.expand` | `src/components/editor/ChapterEditor.tsx:529` |
-| `chapter.memory` | `src/components/editor/ChapterEditor.tsx:326` |
-| `chapter.polish` | `src/components/editor/ChapterEditor.tsx:521` |
+| `chapter.continue` | `src/lib/generation/chapter-generation-node.ts:23` |
+| `chapter.deai` | `src/components/editor/ChapterEditor.tsx:631` |
+| `chapter.expand` | `src/components/editor/ChapterEditor.tsx:611` |
+| `chapter.memory` | `src/components/editor/ChapterEditor.tsx:349` |
+| `chapter.polish` | `src/components/editor/ChapterEditor.tsx:603` |
 | `chapter.toolbar` | `src/components/editor/FloatingToolbar.tsx:105` |
-| `character.generate` | `src/components/character/CharacterPanel.tsx:160` |
+| `character.generate` | `src/components/character/CharacterPanel.tsx:160`<br/>`src/lib/agent/character-copilot.ts:384` |
 | `character.structure` | `src/lib/ai/parse-character-output.ts:80` |
 | `character.supplement` | `src/components/character/CharacterSupplementAction.tsx:80` |
-| `codex.extract` | `src/components/codex/CodexPanel.tsx:206` |
-| `detail.scene` | `src/components/outline/DetailedOutlinePanel.tsx:151`<br/>`src/components/outline/ScenePanel.tsx:115`<br/>`src/lib/ai/batch-detail-runner.ts:109` |
+| `codex.extract` | `src/components/codex/CodexPanel.tsx:226` |
+| `cultivation.progress` | `src/components/cultivation/CultivationProgressPanel.tsx:143` |
+| `detail.scene` | `src/components/outline/DetailedOutlinePanel.tsx:151`<br/>`src/components/outline/ScenePanel.tsx:126`<br/>`src/lib/ai/batch-detail-runner.ts:109` |
 | `emotion.beat` | `src/components/editor/EmotionBeatCard.tsx:66` |
 | `foreshadow.structure` | `src/components/foreshadow/ForeshadowPanel.tsx:67` |
 | `foreshadow.suggest` | `src/components/foreshadow/ForeshadowPanel.tsx:216` |
@@ -176,38 +211,47 @@ AI 输出经 `adopt({ target, data })` 写回,只有这里登记的字段可写(
 | `geography.world-map` | `src/components/geography/WorldMapPanel.tsx:107` |
 | `history.consult` | `src/components/history/useHistoryAI.ts:118` |
 | `history.storm` | `src/components/history/useHistoryAI.ts:120` |
-| `inspiration.reverse` | `src/components/project/InspirationPanel.tsx:107` |
-| `inventory.extract` | `src/components/items/InventoryPanel.tsx:131` |
+| `inspiration.reverse` | `src/hooks/useIncrementalInspiration.ts:212`<br/>`src/lib/agent/inspiration-copilot.ts:242` |
+| `inventory.extract` | `src/components/items/InventoryPanel.tsx:150` |
 | `location.extract` | `src/components/location/LocationPanel.tsx:106` |
-| `outline.chapter` | `src/components/outline/useOutlineGenerationController.ts:106`<br/>`src/lib/ai/batch-outline-runner.ts:123` |
-| `outline.character-driven` | `src/components/outline/CharacterDrivenPlotPanel.tsx:113` |
-| `outline.volume` | `src/components/outline/useOutlineGenerationController.ts:104` |
+| `node.creation` | `src/lib/node-flow/executor.ts:185` |
+| `outline.chapter` | `src/lib/ai/batch-outline-runner.ts:123`<br/>`src/lib/outline/generation-node.ts:55` |
+| `outline.character-driven` | `src/components/outline/CharacterDrivenPlotPanel.tsx:198` |
+| `outline.character-revision` | `src/components/outline/CharacterRevisionPanel.tsx:169` |
+| `outline.volume` | `src/lib/outline/generation-node.ts:51` |
+| `outline.workshop.collision` | `src/lib/outline/workshop.ts:448` |
+| `outline.workshop.motivation` | `src/lib/outline/workshop.ts:445` |
+| `outline.workshop.scan` | `src/lib/outline/workshop.ts:442` |
+| `outline.workshop.scenes` | `src/lib/outline/workshop.ts:453` |
 | `prompt.examples` | `src/components/settings/prompt/PromptExamplesEditor.tsx:108` |
-| `reference.characters` | `src/components/project/AnalysisReportViewer.tsx:143` |
-| `reference.summary` | `src/components/project/AnalysisReportViewer.tsx:112` |
+| `reference.characters` | `src/components/project/AnalysisReportViewer.tsx:151` |
+| `reference.summary` | `src/components/project/AnalysisReportViewer.tsx:119` |
 | `relation.extract` | `src/components/relations/CharacterRelationPanel.tsx:98` |
-| `review.anti-ai` | `src/components/editor/ReviewPanel.tsx:87` |
-| `review.quality` | `src/components/editor/ReviewPanel.tsx:79` |
-| `review.readability` | `src/components/editor/ReviewPanel.tsx:96` |
-| `review.revise` | `src/components/editor/ChapterEditor.tsx:564` |
+| `review.anti-ai` | `src/components/editor/ReviewPanel.tsx:100` |
+| `review.outline-workshop` | `src/lib/outline/workshop.ts:451` |
+| `review.quality` | `src/components/editor/ReviewPanel.tsx:92` |
+| `review.readability` | `src/components/editor/ReviewPanel.tsx:109` |
+| `review.revise` | `src/components/editor/ChapterEditor.tsx:646` |
 | `rules.generate` | `src/components/rules/CreativeRulesPanel.tsx:80` |
 | `scene.verify` | `src/components/scene/SceneVerifyPanel.tsx:81` |
-| `story-arc.generate` | `src/components/outline/StoryArcPanel.tsx:84` |
-| `story.generate` | `src/components/worldview/StoryCorePanel.tsx:193` |
+| `story-arc.generate` | `src/components/outline/StoryArcPanel.tsx:85` |
+| `story.generate` | `src/components/worldview/StoryCorePanel.tsx:200` |
 | `story.timeline` | `src/components/timeline/StoryTimelinePanel.tsx:85` |
-| `style.learn` | `src/components/style/StyleLearningPanel.tsx:79` |
+| `storyline-progress.map` | `src/components/outline/StorylineProgressPanel.tsx:76` |
+| `style.calibrate` | `src/components/style/StyleCalibrationPanel.tsx:63` |
+| `style.learn` | `src/components/style/StyleLearningPanel.tsx:125` |
 | `world-group.expand` | `src/components/world-group/WorldGroupDetail.tsx:98` |
 | `world-group.suggest` | `src/components/world-group/WorldGroupOverview.tsx:57` |
-| `worldview.dimension` | `src/components/worldview/WorldviewHumanityPanel.tsx:252`<br/>`src/components/worldview/WorldviewNaturalPanel.tsx:281`<br/>`src/components/worldview/WorldviewOriginPanel.tsx:257` |
-| `worldview.divine` | `src/components/worldview/WorldviewOriginPanel.tsx:356` |
-| `worldview.divine.split` | `src/components/worldview/WorldviewOriginPanel.tsx:380` |
+| `worldview.dimension` | `src/components/worldview/WorldviewHumanityPanel.tsx:352`<br/>`src/components/worldview/WorldviewNaturalPanel.tsx:284`<br/>`src/components/worldview/WorldviewOriginPanel.tsx:262`<br/>`src/lib/agent/world-origin-copilot.ts:166` |
+| `worldview.divine` | `src/components/worldview/WorldviewOriginPanel.tsx:361` |
+| `worldview.divine.split` | `src/components/worldview/WorldviewOriginPanel.tsx:385` |
 
 ### 动态 category 调用
 
-- `src/components/editor/ReviewPanel.tsx:130 · ai.start`
+- `src/components/editor/ReviewPanel.tsx:152 · ai.start`
 - `src/components/settings/NS0EvalPanel.tsx:50 · chat`
-- `src/components/settings/prompt/WorkflowRunner.tsx:287 · ai.start`
+- `src/lib/generation/workflow-generation-node.ts:23 · ai.start`
 
 ---
 
-生成时间基准:commit `ea9d51a`
+生成时间基准:commit `11fdb1f`

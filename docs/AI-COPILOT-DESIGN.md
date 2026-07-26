@@ -135,8 +135,13 @@ Agent 编排不是从零开始做一个新的一致性系统。它站在“收�
 
 ## 三、工具层（Tool Registry）—— 与现有代码精确对应
 
-每个工具 = `{ name, description, parameters(JSON schema), execute(args) }`。
+每个工具 = `{ name, description, parameters(JSON schema), execute(context, args) }`。
 工具分三类：**只读 / 生成 / 写入**。写入类与生成类全部**复用现有 store 方法和 adapter**，不重写业务逻辑。
+
+> 2026-07-25 实施校正：Phase 27.1-a 已按
+> [`AGENT-TOOL-REGISTRY-DESIGN.md`](./AGENT-TOOL-REGISTRY-DESIGN.md) 落地。旧表中“直接读
+> store state”只表达能力映射，不再是运行时路径；实际读取统一经过
+> `CONTEXT_SOURCES → assembleContext()`，以保留预算、作用域与审计单一入口。
 
 ### 3.1 只读工具（查询项目，零风险，先做）
 
@@ -380,22 +385,37 @@ loop（受步数/Token 上限约束）:
 
 ## 八、分期实施
 
-**Phase 27.1-a 工具层地基（只读工具优先）**
-- 定义 Tool 接口 + 注册表；先实现全部**只读工具**（零风险）
-- 验证：能让 AI 通过工具"看懂"整个项目
+**Phase 27.1-a 工具层地基（2026-07-25 已完成）**
+- 已定义 Tool 接口 + 注册表并实现全部 13 个只读工具
+- 已验证注册表读取、项目/世界隔离、有界搜索、总预算与零写入；当前为 headless 地基，尚未宣称 AI tool calling 已接通
 
-**Phase 27.1-b Agent 执行引擎 + 提供商适配**
-- AgentRunner 多步循环 + `client.ts` tools 注入 + 兼容/降级
-- 验证：拿"一致性检查"（纯只读 Agent）跑通整条 tool calling 链路，验证成本
+**Phase 27.1-b Agent 执行引擎 + 提供商适配（2026-07-25 已完成）**
+- AgentRunner 多步循环 + provider-neutral 严格 JSON 动作协议；协议与 transport 分离，
+  原生 `tool_calls` 保留为后续能力探测优化，不复制执行内核
+- 已用纯只读项目巡检跑通“模型 → 工具 → 证据 → 最终答复”，验证预算、取消、循环、
+  作用域、消息裁剪拒绝、消耗统计和内容表零写入
 
-**Phase 27.1-c 对话副驾 MVP（前台）**
-- 右侧对话栏 UI + 意图识别 + 确认卡片 + 面板同步
-- 先接**生成 + 写入工具的一个闭环**：对话引导填世界观（最高频入口）
-- 验证：用户能"聊着把世界观建好"，面板实时刷新
+**Phase 27.1-c 对话副驾 MVP（前台，2026-07-25 已完成）**
+- 已交付右侧对话栏、当前项目/世界作用域、可编辑确认卡和面板同步；窄屏使用覆盖式右栏，
+  不挤压主面板
+- 首个闭环严格限定为 `read_project_status/read_worldview → worldview.dimension →
+  可见候选 → 作者明确确认 → GenerationNode gate → adopt(worldviews.worldOrigin)`
+- 确认采纳可见候选时不会再次调用模型；来源变化、空/过短/过长/无变化候选均阻断
+- 当前尚未实现泛化意图识别，不能据此宣称“任意对话建完整世界观”；详细边界见
+  [`CHAT-COPILOT-MVP-DESIGN.md`](./CHAT-COPILOT-MVP-DESIGN.md)
 
-**Phase 27.1-d 扩展对话覆盖面**
-- 逐步接入：灵感对话反推、角色/大纲/正文的对话生成
-- 写入工具全面接入确认机制
+**Phase 27.1-d 扩展对话覆盖面（进行中）**
+- 灵感对话反推的首个独立闭环已接入：作者选择已保存碎片，正式 read tool 有界装配，
+  结构化候选可编辑，确认后只复用既有灵感版本写回，不自动采纳项目主档
+- 详细边界与验收见
+  [`CHAT-COPILOT-INSPIRATION-DESIGN.md`](./CHAT-COPILOT-INSPIRATION-DESIGN.md)
+- 角色生成的第二个独立闭环已接入：正式 `read_worldview/read_characters` 装配当前世界
+  关联闭包，复用 `character.generate` 生成闭集 JSON；作者编辑确认后只经
+  `GenerationNode → adopt(characters)` 新增角色，同名与并发过期阻断
+- 详细边界与验收见
+  [`CHAT-COPILOT-CHARACTER-DESIGN.md`](./CHAT-COPILOT-CHARACTER-DESIGN.md)
+- 后续再逐领域接入大纲 / 正文的对话生成；每个领域单独冻结读、候选、gate、
+  确认写回与非范围，不提前泛化成任意意图
 
 **Phase 27.1-e 多 agent 团队编排**
 - 总 agent 负责任务拆解、领域分发、收敛与打回

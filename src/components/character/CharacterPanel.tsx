@@ -146,7 +146,7 @@ export default function CharacterPanel({ project, view = 'generator' }: Props) {
       worldGroupId: targetWorld,
       provider: aiConfig.provider,
       model: aiConfig.model,
-      sourceKeys: ['worldview', 'storyCore', 'powerSystem', 'codex', 'characters', 'creativeRules', 'worldRules', 'historical', 'locations'],
+      sourceKeys: ['canonAssertions', 'worldview', 'storyCore', 'powerSystem', 'codex', 'characters', 'creativeRules', 'worldRules', 'historical', 'locations'],
     })
     const worldCtx = assembled.text
     const opts = {

@@ -2015,6 +2015,7 @@ export const NOVEL_PROMPT_SEED_BINDINGS: Record<string, NovelPromptSeedBinding> 
         "variable": "rules",
         "label": "规则",
         "sourceKeys": [
+          "canonAssertions",
           "worldview",
           "worldRules",
           "powerSystem",
@@ -5299,4 +5300,3 @@ export const NOVEL_PROMPT_SEED_BINDINGS: Record<string, NovelPromptSeedBinding> 
     ]
   }
 }
-

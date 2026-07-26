@@ -205,7 +205,7 @@ const RichEditor = forwardRef<RichEditorHandle, Props>(function RichEditor(
   }
 
   useEffect(() => {
-    if (!editor) return
+    if (!editor || editor.isDestroyed) return
     const pluginKey = new PluginKey('storyforgeEntityReferences')
     const plugin = new Plugin({
       key: pluginKey,
@@ -255,11 +255,13 @@ const RichEditor = forwardRef<RichEditorHandle, Props>(function RichEditor(
       },
     })
     editor.registerPlugin(plugin)
-    return () => { editor.unregisterPlugin(pluginKey) }
+    return () => {
+      if (!editor.isDestroyed) editor.unregisterPlugin(pluginKey)
+    }
   }, [editor, entityReferences])
 
   const insertEntityReference = useCallback((reference: EditorEntityReference) => {
-    if (!editor || !entityMenu) return
+    if (!editor || editor.isDestroyed || !entityMenu) return
     editor.chain().focus().deleteRange({ from: entityMenu.from, to: entityMenu.to }).insertContent({
       type: 'text',
       text: reference.name,
@@ -268,7 +270,7 @@ const RichEditor = forwardRef<RichEditorHandle, Props>(function RichEditor(
   }, [editor, entityMenu])
 
   useEffect(() => {
-    if (!editor || !entityMenu || entityCandidates.length === 0) return
+    if (!editor || editor.isDestroyed || !entityMenu || entityCandidates.length === 0) return
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.isComposing || event.keyCode === 229) return
       if (event.key === 'ArrowDown') {
@@ -288,13 +290,17 @@ const RichEditor = forwardRef<RichEditorHandle, Props>(function RichEditor(
     // Capture before ProseMirror's own keydown handler so Enter selects a candidate
     // instead of first inserting a paragraph into the manuscript.
     editor.view.dom.addEventListener('keydown', handleKeyDown, true)
-    return () => editor.view.dom.removeEventListener('keydown', handleKeyDown, true)
+    return () => {
+      if (!editor.isDestroyed) editor.view.dom.removeEventListener('keydown', handleKeyDown, true)
+    }
   }, [editor, entityMenu, entityCandidates, entityMenuIndex, insertEntityReference])
 
   // 外部 value 变化（切换章节、AI 整段替换）时同步编辑器内容
   // 但避免每次 onChange 触发的 value 回流导致光标丢失
   useEffect(() => {
-    if (!editor) return
+    // React 严格模式会重连 passive effect；此时 useEditor 的旧实例可能已经销毁，
+    // 但引用尚未被下一次 render 清空。访问其 schema 会在 getHTML 内崩溃。
+    if (!editor || editor.isDestroyed) return
     const current = editor.getHTML()
     const incoming = normalizeThemeAdaptiveColorHtml(toHtml(value))
     if (incoming !== current) {
@@ -304,7 +310,7 @@ const RichEditor = forwardRef<RichEditorHandle, Props>(function RichEditor(
 
   // 同步 editable 状态
   useEffect(() => {
-    if (editor) editor.setEditable(!disabled)
+    if (editor && !editor.isDestroyed) editor.setEditable(!disabled)
   }, [disabled, editor])
 
   useEffect(() => {
@@ -317,15 +323,16 @@ const RichEditor = forwardRef<RichEditorHandle, Props>(function RichEditor(
     ref,
     (): RichEditorHandle => ({
       insertContent: (html) => {
-        editor?.chain().focus().insertContent(toHtml(html)).run()
+        if (!editor || editor.isDestroyed) return
+        editor.chain().focus().insertContent(toHtml(html)).run()
       },
       appendContent: (html) => {
-        if (!editor) return
+        if (!editor || editor.isDestroyed) return
         const end = editor.state.doc.content.size
         editor.chain().focus().insertContentAt(end, toHtml(html)).run()
       },
       replaceSelection: (html) => {
-        if (!editor) return
+        if (!editor || editor.isDestroyed) return
         const { from, to } = editor.state.selection
         if (from === to) {
           // 无选区 → 直接插入
@@ -340,24 +347,28 @@ const RichEditor = forwardRef<RichEditorHandle, Props>(function RichEditor(
         }
       },
       getSelectedText: () => {
-        if (!editor) return ''
+        if (!editor || editor.isDestroyed) return ''
         const { from, to, empty } = editor.state.selection
         if (empty) return ''
         return editor.state.doc.textBetween(from, to, '\n')
       },
-      getHTML: () => editor?.getHTML() ?? '',
-      getPlainText: () => editor?.getText() ?? '',
-      getWordCount: () => countWords(editor?.getText() ?? ''),
+      getHTML: () => editor && !editor.isDestroyed ? editor.getHTML() : '',
+      getPlainText: () => editor && !editor.isDestroyed ? editor.getText() : '',
+      getWordCount: () => countWords(editor && !editor.isDestroyed ? editor.getText() : ''),
       setContent: (content) => {
-        editor?.commands.setContent(toHtml(content), { emitUpdate: false })
+        if (!editor || editor.isDestroyed) return
+        editor.commands.setContent(toHtml(content), { emitUpdate: false })
       },
-      focus: () => editor?.commands.focus(),
-      getEditor: () => editor,
+      focus: () => {
+        if (!editor || editor.isDestroyed) return
+        editor.commands.focus()
+      },
+      getEditor: () => editor && !editor.isDestroyed ? editor : null,
     }),
     [editor],
   )
 
-  if (!editor) {
+  if (!editor || editor.isDestroyed) {
     return (
       <div
         className={`w-full bg-bg-surface border border-border rounded-lg ${className}`}

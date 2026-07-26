@@ -58,24 +58,37 @@ describe('INV-1 · checkHeldItemAcquisition 按角色隔离', () => {
   it('角色 A 重复获得 A 已持有物品 → 命中 finding', () => {
     const heldA = [{
       itemName: '青铜铃', quantity: 1,
+      heldByName: '林风',
+      characterId: 1,
       evidence: [{ id: 1, projectId: 1, itemName: '青铜铃', heldByName: '林风', action: 'gain', quantity: 1, chapterId: 1, chapterTitle: '第1章', createdAt: now } as ItemLedgerEntry],
     }]
     const findings = checkHeldItemAcquisition(
       '林风再次获得青铜铃，铃声清脆。',
       heldA,
       ['青铜铃'],
+      ['林风', '张铁'],
     )
     expect(findings).toHaveLength(1)
     expect(findings[0].category).toBe('物品持有连续性')
   })
 
   it('角色 B 首次获得青铜铃（A 持有但 B 未持有）→ 不误报', () => {
-    // B 没有持有物——heldB 是空的
-    const heldB: any[] = []
+    // 全项目投影包含 A 的青铜铃；正文明确是 B 获得，仍不能误报。
+    const heldA = [{
+      itemName: '青铜铃',
+      quantity: 1,
+      heldByName: '林风',
+      characterId: 1,
+      evidence: [{
+        id: 1, projectId: 1, itemName: '青铜铃', heldByName: '林风',
+        action: 'gain', quantity: 1, chapterId: 1, chapterTitle: '第1章', createdAt: now,
+      } as ItemLedgerEntry],
+    }]
     const findings = checkHeldItemAcquisition(
       '张铁第一次获得青铜铃，仔细端详。',
-      heldB,
+      heldA,
       ['青铜铃'],
+      ['林风', '张铁'],
     )
     expect(findings).toHaveLength(0)
   })

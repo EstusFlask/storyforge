@@ -138,6 +138,9 @@ export const FIELD_REGISTRY: FieldSpec[] = [
   longtext('worldviews', 'races', ['species', '种族']),
   longtext('worldviews', 'factionLayout', ['factions', '势力分布']),
   longtext('worldviews', 'politicsEconomyCulture', ['politics', 'economyCulture', '政治经济文化']),
+  longtext('worldviews', 'politicsOverview', ['政治概述', '政治制度概述']),
+  longtext('worldviews', 'economyOverview', ['经济概述', '经济制度概述']),
+  longtext('worldviews', 'cultureOverview', ['文化概述', '文化制度概述']),
   longtext('worldviews', 'internalConflicts', ['conflicts', '内部矛盾']),
   longtext('worldviews', 'itemDesign', ['items', 'artifactDesign', '道具设计']),
 
@@ -220,6 +223,9 @@ export const FIELD_REGISTRY: FieldSpec[] = [
   num('characters', 'exitChapterId'),
   num('characters', 'homeWorldGroupId', ['worldGroupId', 'homeWorld']),
   bool('characters', 'isCrossWorld'),
+  num('characters', 'raceEntryId', ['种族词条ID']),
+  num('characters', 'cultivationSystemId', ['修炼体系ID', '主修体系ID']),
+  text('characters', 'cultivationStageId', ['境界ID', '当前境界ID']),
 
   // creativeRules
   longtext('creativeRules', 'writingStyle', ['style', '文风']),
@@ -268,6 +274,7 @@ export const FIELD_REGISTRY: FieldSpec[] = [
   arr('detailedOutlines', 'appearingCharacterIds'),
   arr('detailedOutlines', 'foreshadowIds'),
   enumeration('detailedOutlines', 'emotionArc', ['rising', 'falling', 'flat', 'wave', 'climax']),
+  arr('detailedOutlines', 'prohibitions'),
   longtext('detailedOutlines', 'lastUsedSummary'),
 
   // foreshadows / story arcs
@@ -289,6 +296,30 @@ export const FIELD_REGISTRY: FieldSpec[] = [
   json('storyArcs', 'stages', ['阶段']),
   longtext('storyArcs', 'description', ['描述']),
 
+  // Phase 39：作者确认的动态故事线投影与交汇
+  num('storylineProgress', 'arcId', ['故事线ID']),
+  text('storylineProgress', 'currentStageId', ['当前阶段ID']),
+  enumeration('storylineProgress', 'status', ['dormant', 'active', 'climax', 'resolved', 'abandoned'], {
+    休眠: 'dormant',
+    活跃: 'active',
+    高潮: 'climax',
+    已解决: 'resolved',
+    已完成: 'resolved',
+    已放弃: 'abandoned',
+  }),
+  longtext('storylineProgress', 'progressNote', ['进度说明']),
+  num('storylineProgress', 'lastActiveChapterId', ['最近活跃章节ID']),
+  text('storylineProgress', 'lastActiveChapterTitle', ['最近活跃章节']),
+  json('storylineProgress', 'involvedEntities', ['涉及实体']),
+  longtext('storylineProgress', 'evidenceQuote', ['正文证据']),
+
+  num('storylineCrossings', 'arcIdA', ['故事线A']),
+  num('storylineCrossings', 'arcIdB', ['故事线B']),
+  num('storylineCrossings', 'chapterId', ['章节ID']),
+  text('storylineCrossings', 'chapterTitle', ['章节标题']),
+  longtext('storylineCrossings', 'note', ['交汇说明']),
+  longtext('storylineCrossings', 'evidenceQuote', ['正文证据']),
+
   // codex
   text('codexCategories', 'name', ['分类名']),
   enumeration('codexCategories', 'domain', ['natural', 'humanity', 'origin'], { 自然: 'natural', 自然环境: 'natural', 人文: 'humanity', 人文环境: 'humanity', 起源: 'origin', 世界起源: 'origin' }),
@@ -309,8 +340,38 @@ export const FIELD_REGISTRY: FieldSpec[] = [
   json('codexEntries', 'refs', ['引用']),
   json('codexEntries', 'tags', ['标签']),
   num('codexEntries', 'importance', ['重要度']),
+  num('codexEntries', 'cultivationSystemId', ['修炼体系ID']),
+  text('codexEntries', 'cultivationStageId', ['境界ID', '当前境界ID']),
+  num('codexEntries', 'importantLocationId', ['重要地点ID', '空间地点ID']),
   num('codexEntries', 'order'),
   num('codexEntries', 'worldGroupId'),
+
+  // WORLD-1 / Phase 37 cultivationSystems
+  text('cultivationSystems', 'name', ['体系名', '修炼体系']),
+  longtext('cultivationSystems', 'description', ['体系描述']),
+  json('cultivationSystems', 'stages', ['境界阶梯', '境界图谱']),
+  num('cultivationSystems', 'worldGroupId'),
+
+  // WORLD-1 / Phase 34 cultivationProgress
+  num('cultivationProgress', 'worldGroupId'),
+  num('cultivationProgress', 'characterId', ['角色ID']),
+  text('cultivationProgress', 'characterName', ['角色名']),
+  num('cultivationProgress', 'cultivationSystemId', ['修炼体系ID']),
+  text('cultivationProgress', 'cultivationSystemName', ['修炼体系名']),
+  text('cultivationProgress', 'stageId', ['境界ID']),
+  text('cultivationProgress', 'stageName', ['境界名']),
+  enumeration('cultivationProgress', 'transition', ['enter', 'advance', 'regress', 'switch'], {
+    初次确认: 'enter',
+    突破: 'advance',
+    倒退: 'regress',
+    改道: 'switch',
+  }),
+  num('cultivationProgress', 'sourceChapterId', ['来源章节ID']),
+  text('cultivationProgress', 'sourceChapterTitle', ['来源章节']),
+  longtext('cultivationProgress', 'sourceQuote', ['正文证据', '逐字引文']),
+  num('cultivationProgress', 'sourceOffset', ['正文位置']),
+  longtext('cultivationProgress', 'trigger', ['突破触发', '变化原因']),
+  enumeration('cultivationProgress', 'status', ['confirmed', 'stale', 'source-missing']),
 
   // importantLocations / downstream extraction products
   text('importantLocations', 'name', ['地点名']),
@@ -328,6 +389,32 @@ export const FIELD_REGISTRY: FieldSpec[] = [
   num('itemLedger', 'chapterId'),
   text('itemLedger', 'chapterTitle', ['章节标题']),
   longtext('itemLedger', 'note', ['备注']),
+
+  // CONSISTENCY-2 角色认知事件账本
+  num('knowledgeLedger', 'worldGroupId'),
+  num('knowledgeLedger', 'characterId', ['角色ID']),
+  text('knowledgeLedger', 'characterName', ['角色名']),
+  text('knowledgeLedger', 'knowledgeKey', ['知识Key', '知识键']),
+  longtext('knowledgeLedger', 'statement', ['知识命题', '事实内容']),
+  num('knowledgeLedger', 'factId', ['关联事实ID']),
+  enumeration('knowledgeLedger', 'action', ['learn', 'mislearn', 'forget', 'correct'], {
+    获知: 'learn',
+    学会: 'learn',
+    误认: 'mislearn',
+    误以为: 'mislearn',
+    遗忘: 'forget',
+    忘记: 'forget',
+    纠正: 'correct',
+  }),
+  longtext('knowledgeLedger', 'belief', ['错误认知', '相信内容']),
+  enumeration('knowledgeLedger', 'sourceType', ['chapter', 'manual', 'import'], {
+    章节: 'chapter',
+    手动: 'manual',
+    导入: 'import',
+  }),
+  num('knowledgeLedger', 'sourceChapterId', ['来源章节ID']),
+  longtext('knowledgeLedger', 'sourceQuote', ['来源引文', '证据']),
+  enumeration('knowledgeLedger', 'status', ['candidate', 'confirmed', 'rejected', 'source-missing', 'invalid-range']),
 
   text('storyTimelineEvents', 'title', ['事件标题']),
   text('storyTimelineEvents', 'storyTime', ['故事时间']),
@@ -349,7 +436,35 @@ export const FIELD_REGISTRY: FieldSpec[] = [
   longtext('references', 'analysisSummary'),
   longtext('references', 'mergedCharacters'),
 
+  // IDEA-1 reference analysis versions. Source declaration is immutable per run;
+  // AI-derived status/summary updates still pass through adopt().
+  num('referenceAnalysisRuns', 'referenceId'),
+  num('referenceAnalysisRuns', 'version'),
+  enumeration('referenceAnalysisRuns', 'status', ['analyzing', 'ready', 'active', 'superseded', 'failed', 'cancelled']),
+  enumeration('referenceAnalysisRuns', 'depth', ['quick', 'deep']),
+  text('referenceAnalysisRuns', 'sourceFilename'),
+  text('referenceAnalysisRuns', 'fileHash'),
+  num('referenceAnalysisRuns', 'totalChars'),
+  enumeration('referenceAnalysisRuns', 'sourceKind', ['own-work', 'authorized', 'public-domain', 'research', 'unknown']),
+  enumeration('referenceAnalysisRuns', 'usageScope', ['analysis-only', 'creative-reference', 'continuation-authorized']),
+  longtext('referenceAnalysisRuns', 'rightsNote'),
+  bool('referenceAnalysisRuns', 'rightsConfirmed'),
+  num('referenceAnalysisRuns', 'rightsDeclaredAt'),
+  num('referenceAnalysisRuns', 'expectedChunks'),
+  num('referenceAnalysisRuns', 'completedChunks'),
+  num('referenceAnalysisRuns', 'progress'),
+  longtext('referenceAnalysisRuns', 'error'),
+  longtext('referenceAnalysisRuns', 'analysisSummary'),
+  longtext('referenceAnalysisRuns', 'mergedCharacters'),
+  num('referenceAnalysisRuns', 'completedAt'),
+  num('referenceAnalysisRuns', 'activatedAt'),
+
+  // CM-1 incremental inspiration workspace (bounded JSON strings)
+  json('inspirationWorkspaces', 'fragments'),
+  json('inspirationWorkspaces', 'versions'),
+
   num('referenceChunkAnalysis', 'referenceId'),
+  num('referenceChunkAnalysis', 'analysisRunId'),
   num('referenceChunkAnalysis', 'chunkIndex'),
   text('referenceChunkAnalysis', 'label'),
   num('referenceChunkAnalysis', 'startOffset'),

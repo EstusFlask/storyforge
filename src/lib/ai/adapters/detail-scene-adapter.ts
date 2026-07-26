@@ -100,6 +100,7 @@ export function parseEnhancedDetailResult(raw: string): {
   emotionArc?: string
   appearingCharacterIds?: number[]
   foreshadowIds?: number[]
+  prohibitions?: string[]
   scenes?: Array<{
     title: string
     summary: string

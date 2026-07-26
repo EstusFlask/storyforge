@@ -28,6 +28,8 @@ export interface ApplyChunkCounts {
   worldviewFields: number
   characters: number
   outlineNodes: number
+  /** Phase 35-c 候选只暂存在会话中，不在本函数写入 Codex。 */
+  codexCandidates?: number
 }
 
 /**
@@ -329,5 +331,6 @@ export async function applyChunkResult(
     worldviewFields,
     characters: charactersAdded,
     outlineNodes: outlineAdded,
+    codexCandidates: result.codexCandidates?.length || 0,
   }
 }

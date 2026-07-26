@@ -79,6 +79,14 @@ export interface Character {
   /** 是否跨世界角色（主角、系统精灵等，在所有世界中可见） */
   isCrossWorld?: boolean
 
+  // ── WORLD-1 修炼/种族结构化关联 ──
+  /** 所属种族词条（Codex race）；替代 profile 中不可校验的纯文本种族。 */
+  raceEntryId?: number | null
+  /** 主修体系；指向 cultivationSystems。 */
+  cultivationSystemId?: number | null
+  /** 当前设定境界（上游角色卡，不是逐章进度）；指向体系 stages 内的稳定字符串 ID。 */
+  cultivationStageId?: string | null
+
   createdAt: number
   updatedAt: number
 }

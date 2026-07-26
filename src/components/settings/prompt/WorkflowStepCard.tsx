@@ -32,6 +32,7 @@ interface Props {
   onOutputChange: (value: string) => void
   saved: boolean
   hasProject: boolean
+  actionsDisabled?: boolean
 }
 
 export function WorkflowStepCard({
@@ -46,6 +47,7 @@ export function WorkflowStepCard({
   onOutputChange,
   saved,
   hasProject,
+  actionsDisabled = false,
 }: Props) {
   const [expanded, setExpanded] = useState(true)
   const [copied, setCopied] = useState(false)
@@ -122,12 +124,13 @@ export function WorkflowStepCard({
             <>
               <textarea
                 value={editedOutput}
+                disabled={actionsDisabled}
                 onChange={event => {
                   setEditedOutput(event.target.value)
                   onOutputChange(event.target.value)
                 }}
                 rows={8}
-                className="w-full text-xs text-text-primary font-sans max-h-72 p-2 bg-bg-surface border border-border rounded resize-y focus:outline-none focus:border-accent"
+                className="w-full max-h-72 resize-y rounded border border-border bg-bg-surface p-2 font-sans text-xs text-text-primary focus:border-accent focus:outline-none disabled:opacity-60"
               />
               <p className="text-[10px] text-text-muted">AI 输出可直接编辑,保存/复制将使用编辑后的内容。</p>
             </>
@@ -135,7 +138,14 @@ export function WorkflowStepCard({
           {result.error && <p className="text-xs text-error">⚠ {result.error}</p>}
           {(result.status === 'done' || result.status === 'failed') && (
             <div className="flex items-center gap-2 pt-1 flex-wrap">
-              <button onClick={onRetry} className="text-xs text-accent hover:underline">重新生成</button>
+              <button
+                type="button"
+                onClick={onRetry}
+                disabled={actionsDisabled}
+                className="text-xs text-accent hover:underline disabled:opacity-40"
+              >
+                重新生成
+              </button>
               {result.status === 'done' && (
                 <>
                   <span className="text-text-muted">·</span>
@@ -148,7 +158,7 @@ export function WorkflowStepCard({
                       <span className="text-text-muted">·</span>
                       <button
                         onClick={() => onSave(editedOutput, step.saveTarget!)}
-                        disabled={saved || !hasProject}
+                        disabled={saved || !hasProject || actionsDisabled}
                         title={!hasProject ? '需先进入项目' : `自动写入 ${targetLabel(step.saveTarget)}`}
                         className={`flex items-center gap-1 text-xs px-2 py-0.5 rounded ${
                           saved
@@ -168,13 +178,27 @@ export function WorkflowStepCard({
               {result.status !== 'done' && (
                 <>
                   <span className="text-text-muted">·</span>
-                  <button onClick={onSkip} className="text-xs text-text-secondary hover:underline">跳过此步</button>
+                  <button
+                    type="button"
+                    onClick={onSkip}
+                    disabled={actionsDisabled}
+                    className="text-xs text-text-secondary hover:underline disabled:opacity-40"
+                  >
+                    跳过此步
+                  </button>
                 </>
               )}
             </div>
           )}
           {result.status === 'pending' && isCurrent && (
-            <button onClick={onSkip} className="text-xs text-text-secondary hover:underline">跳过此步</button>
+            <button
+              type="button"
+              onClick={onSkip}
+              disabled={actionsDisabled}
+              className="text-xs text-text-secondary hover:underline disabled:opacity-40"
+            >
+              跳过此步
+            </button>
           )}
         </div>
       )}

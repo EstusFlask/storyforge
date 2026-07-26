@@ -2,6 +2,7 @@ import { create } from 'zustand'
 import { db } from '../lib/db/schema'
 import type { PromptWorkflow } from '../lib/types/workflow'
 import { SYSTEM_WORKFLOW_SEEDS } from '../lib/ai/workflow-seeds'
+import { validateWorkflowGraph } from '../lib/workflow/graph'
 
 interface WorkflowStore {
   workflows: PromptWorkflow[]
@@ -59,6 +60,10 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
   },
 
   save: async (w) => {
+    const graphIssues = validateWorkflowGraph(w)
+    if (graphIssues.length) {
+      throw new Error(`工作流图无效：${graphIssues.map(issue => issue.message).join('；')}`)
+    }
     const now = Date.now()
     const row: PromptWorkflow = { ...w, updatedAt: now, createdAt: w.createdAt || now }
     const id = await db.promptWorkflows.put(row)

@@ -26,10 +26,12 @@ import type { AIConfig, Character } from '../types'
 import { resolveRequestConfig } from '../ai/client'
 import { chatWithAbort } from './chat-with-abort'
 import { CHARACTER_DIMENSIONS } from '../character/character-dimensions'
+import { transactionTablesFor } from '../registry/lifecycle'
 
 // 合并保留的角色文字字段：所有维度 + relationships(单源，加维度自动跟随)
 const CHARACTER_MERGE_KEYS = [...CHARACTER_DIMENSIONS.map(d => d.key), 'relationships'] as const
 import { applyCharacterReferenceRemap } from '../registry/character-references'
+import { refreshSettingAssertionSourceStatus } from '../fact-ledger/setting-assertions'
 
 export interface RunCharacterMergeArgs {
   sessionId: number
@@ -156,8 +158,14 @@ async function applyMergeGroup(
   }
   merged.relationships = append(merged.relationships || '', aliasNote)
 
-  await db.transaction('rw', [db.characters, db.characterRelations, db.detailedOutlines, db.stateCards, db.temporalFacts], async () => {
+  await db.transaction('rw', transactionTablesFor('importProject'), async () => {
     await db.characters.update(primary.id!, { ...merged, updatedAt: Date.now() })
+    await refreshSettingAssertionSourceStatus({
+      projectId,
+      table: 'characters',
+      recordId: primary.id!,
+      changedFields: Object.keys(merged),
+    })
     for (const o of others) {
       if (!o.id) continue
       await applyCharacterReferenceRemap({

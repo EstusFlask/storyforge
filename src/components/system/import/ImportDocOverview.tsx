@@ -8,9 +8,9 @@ export function ImportDocIntro({ chunkSize }: { chunkSize: number }) {
       <h2 className="text-xl font-bold text-text-primary mb-1">📥 AI 分块文档解析</h2>
       <p className="text-sm text-text-muted">
         上传任意一份文档（设定集、成品小说、大纲草稿……甚至千万字长篇），AI 自动分块串行解析
-        <span className="text-accent">世界观 / 角色 / 大纲章节</span>。
-        开始解析前先选择写入<strong>当前项目</strong>还是<strong>项目参考</strong>；解析过程中即<strong>实时入库</strong>，
-        完成后数据已就位，无需再手动导入。
+        <span className="text-accent">世界观 / 角色 / 大纲章节 / Codex 实体候选</span>。
+        开始解析前先选择写入<strong>当前项目</strong>还是<strong>项目参考</strong>；
+        世界观、角色和大纲<strong>实时入库</strong>，Codex 词条则先形成带证据候选，完成后由作者确认。
       </p>
       <div className="mt-2 bg-bg-surface border border-border rounded-lg p-3 text-xs text-text-secondary">
         <div className="flex items-center gap-1.5 mb-1.5 text-text-primary">
@@ -41,6 +41,7 @@ export function ImportReusableSessionBanner({
   originalTextAvailable,
   onApplyProject,
   onApplyReference,
+  onReviewCodex,
   onIgnore,
 }: {
   session: ImportSession
@@ -48,6 +49,7 @@ export function ImportReusableSessionBanner({
   originalTextAvailable: boolean
   onApplyProject: () => void
   onApplyReference: (depth: 'quick' | 'deep') => void
+  onReviewCodex?: () => void
   onIgnore: () => void
 }) {
   return (
@@ -71,6 +73,12 @@ export function ImportReusableSessionBanner({
           className="px-3 py-1.5 rounded border border-purple-400/60 text-purple-200 hover:bg-purple-400/10 disabled:opacity-50">
           🔬 应用到 项目参考 · 深层
         </button>
+        {onReviewCodex && (session.merged?.codexCandidates?.length || 0) > 0 && !session.codexAdoption && (
+          <button disabled={applying} onClick={onReviewCodex}
+            className="px-3 py-1.5 rounded border border-accent/60 text-accent hover:bg-accent/10 disabled:opacity-50">
+            📚 审查 {session.merged?.codexCandidates?.length} 条词条候选
+          </button>
+        )}
         <button disabled={applying} onClick={onIgnore}
           className="px-3 py-1.5 rounded text-text-muted hover:bg-bg-hover">
           忽略

@@ -184,7 +184,7 @@ describe('Phase 1.3a · 统一上下文装配层', () => {
     expect(assembled.text).not.toContain('雾钟')
   })
 
-  it('historical source 按 worldGroupId 读取当前世界 + 全局旧数据', async () => {
+  it('historical source 按 worldGroupId 精确读取当前世界，不混入默认世界旧数据', async () => {
     const now = Date.now()
     const projectId = await createProject()
     const worldA = await db.worldGroups.add({
@@ -214,8 +214,8 @@ describe('Phase 1.3a · 统一上下文装配层', () => {
     expect(assembled.included).toEqual(['historical'])
     expect(assembled.text).toContain('镜城开埠')
     expect(assembled.text).toContain('镜税')
-    expect(assembled.text).toContain('全局旧史')
-    expect(assembled.text).toContain('通用礼法')
+    expect(assembled.text).not.toContain('全局旧史')
+    expect(assembled.text).not.toContain('通用礼法')
     expect(assembled.text).not.toContain('雾钟敲响')
     expect(assembled.text).not.toContain('雾钟')
   })

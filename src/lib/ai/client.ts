@@ -14,6 +14,11 @@ export interface AICallMeta {
   projectId?: number | null
   /** 调用方显式要求保留的临时生成参数，不参与持久化。 */
   configOverrides?: Partial<AIConfig>
+  /**
+   * 默认沿用既有生成链的自动裁剪；协议型调用可要求拒绝裁剪，
+   * 避免系统指令、用户目标或工具证据被静默移除后继续执行。
+   */
+  contextOverflowPolicy?: 'trim' | 'reject'
 }
 
 export function resolveRequestConfig(config: AIConfig, meta?: AICallMeta) {
@@ -138,6 +143,11 @@ export async function* streamChat(
   warnRouteFallback(resolved, meta)
   config = resolved.config
   const trimmed = trimMessagesToFit(messages, config.provider, config.model, config.maxTokens, config.contextWindow)
+  if (trimmed.trimmed && meta?.contextOverflowPolicy === 'reject') {
+    throw new Error(
+      `当前模型上下文窗口不足以容纳完整请求（${trimmed.totalInputTokens}/${trimmed.inputBudget} tokens）；已拒绝静默裁剪。`,
+    )
+  }
   if (trimmed.trimmed) {
     console.warn(`[AI] request messages trimmed to fit context window: ${trimmed.totalInputTokens}/${trimmed.inputBudget} tokens`)
   }
@@ -258,6 +268,11 @@ export async function chat(
   warnRouteFallback(resolved, meta)
   config = resolved.config
   const trimmed = trimMessagesToFit(messages, config.provider, config.model, config.maxTokens, config.contextWindow)
+  if (trimmed.trimmed && meta?.contextOverflowPolicy === 'reject') {
+    throw new Error(
+      `当前模型上下文窗口不足以容纳完整请求（${trimmed.totalInputTokens}/${trimmed.inputBudget} tokens）；已拒绝静默裁剪。`,
+    )
+  }
   if (trimmed.trimmed) {
     console.warn(`[AI] request messages trimmed to fit context window: ${trimmed.totalInputTokens}/${trimmed.inputBudget} tokens`)
   }

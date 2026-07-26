@@ -114,7 +114,9 @@ describe('CONSISTENCY-1 · heldItems 投影与确定性校验', () => {
     const held = [{
       itemName: '青铜铃',
       quantity: 1,
-      evidence: [{ id: 7, projectId: 1, itemName: '青铜铃', action: 'gain', quantity: 1, chapterId: 1, chapterTitle: '第1章', createdAt: now } as ItemLedgerEntry],
+      heldByName: '主角',
+      characterId: null,
+      evidence: [{ id: 7, projectId: 1, itemName: '青铜铃', heldByName: '主角', action: 'gain', quantity: 1, chapterId: 1, chapterTitle: '第1章', createdAt: now } as ItemLedgerEntry],
     }]
 
     const findings = checkHeldItemAcquisition('他在密室里再次获得青铜铃，铃声惊醒了守卫。随后他捡到赤羽令。', held, ['青铜铃', '赤羽令'])

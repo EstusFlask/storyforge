@@ -4,12 +4,15 @@ import {
   Upload, Download, Plus, Edit3,
 } from 'lucide-react'
 import { useWorkflowStore } from '../../../stores/workflow'
-import type { PromptWorkflowStep } from '../../../lib/types/workflow'
 import type { Project } from '../../../lib/types'
 import WorkflowEditor from './WorkflowEditor'
 import WorkflowRunner from './WorkflowRunner'
 import { useDialog } from '../../shared/Dialog'
 import { useToast } from '../../shared/Toast'
+import {
+  parseImportedWorkflows,
+  serializeWorkflows,
+} from '../../../lib/workflow/import-export'
 
 interface Props {
   project?: Project
@@ -33,7 +36,7 @@ export default function PromptWorkflowsPanel({ project }: Props = {}) {
   useEffect(() => { initWorkflows() }, [initWorkflows])
 
   const handleExportAll = () => {
-    const blob = new Blob([JSON.stringify(workflows, null, 2)], { type: 'application/json' })
+    const blob = new Blob([serializeWorkflows(workflows)], { type: 'application/json' })
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
@@ -50,23 +53,10 @@ export default function PromptWorkflowsPanel({ project }: Props = {}) {
     try {
       const text = await file.text()
       const data = JSON.parse(text)
-      const items: unknown[] = Array.isArray(data) ? data : [data]
       const now = Date.now()
       let count = 0
-      for (const raw of items) {
-        if (typeof raw !== 'object' || raw === null) continue
-        const r = raw as Record<string, unknown>
-        if (typeof r.name !== 'string' || !Array.isArray(r.steps)) continue
-        await saveWorkflow({
-          scope: 'user',
-          name: r.name,
-          description: typeof r.description === 'string' ? r.description : '',
-          genres: Array.isArray(r.genres) ? r.genres as string[] : undefined,
-          steps: r.steps as PromptWorkflowStep[],
-          isDefault: false,
-          createdAt: now,
-          updatedAt: now,
-        })
+      for (const imported of parseImportedWorkflows(data, now)) {
+        await saveWorkflow(imported)
         count++
       }
       await reloadWorkflows()
@@ -99,7 +89,7 @@ export default function PromptWorkflowsPanel({ project }: Props = {}) {
       confirmText: '删除',
       tone: 'danger',
     })
-    if (ok) removeWorkflow(id)
+    if (ok) await removeWorkflow(id)
   }
 
   if (runningId !== null) {
@@ -124,9 +114,9 @@ export default function PromptWorkflowsPanel({ project }: Props = {}) {
     <div className="p-5 space-y-3">
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-base font-semibold text-text-primary mb-1">🔗 提示词工作流</h2>
+          <h2 className="text-base font-semibold text-text-primary mb-1">节点模式</h2>
           <p className="text-sm text-text-muted">
-            一键跑完一段创作流程，每步可暂停审核。
+            ComfyUI 式创作模式：连接节点组成流程；每步仍可暂停、编辑和确认。
           </p>
         </div>
         <div className="flex items-center gap-2 flex-shrink-0">
@@ -179,6 +169,8 @@ export default function PromptWorkflowsPanel({ project }: Props = {}) {
                 </div>
                 <div className="flex items-center gap-1 flex-shrink-0">
                   <button
+                    type="button"
+                    aria-label={`运行工作流 ${w.name}`}
                     onClick={() => setRunningId(w.id!)}
                     className="flex items-center gap-1 px-3 py-1.5 bg-accent text-white text-xs rounded hover:bg-accent-hover"
                   >
@@ -186,6 +178,8 @@ export default function PromptWorkflowsPanel({ project }: Props = {}) {
                   </button>
                   {w.scope === 'user' && (
                     <button
+                      type="button"
+                      aria-label={`编辑工作流 ${w.name}`}
                       onClick={() => setEditingId(w.id!)}
                       className="p-1.5 text-text-muted hover:text-text-primary"
                       title="编辑"
@@ -194,6 +188,8 @@ export default function PromptWorkflowsPanel({ project }: Props = {}) {
                     </button>
                   )}
                   <button
+                    type="button"
+                    aria-label={`克隆工作流 ${w.name}`}
                     onClick={() => cloneWorkflow(w.id!)}
                     className="p-1.5 text-text-muted hover:text-text-primary"
                     title="克隆"
@@ -202,6 +198,8 @@ export default function PromptWorkflowsPanel({ project }: Props = {}) {
                   </button>
                   {w.scope === 'user' && (
                     <button
+                      type="button"
+                      aria-label={`删除工作流 ${w.name}`}
                       onClick={() => { void handleRemove(w.id!, w.name) }}
                       className="p-1.5 text-text-muted hover:text-error"
                     >

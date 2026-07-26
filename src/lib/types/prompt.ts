@@ -63,6 +63,8 @@ export type PromptModuleKey =
   | 'relation.extract'
   // —— Phase 26.3 角色驱动剧情 ——
   | 'plot.character-driven'
+  // —— STORY-1 / CF-12 角色变更影响分析 ——
+  | 'plot.character-revision'
   // —— Phase 26.4 灵感反推 ——
   | 'inspiration.reverse'
   | 'inspiration.reverse.multiworld'
@@ -84,6 +86,7 @@ export type PromptModuleKey =
   | 'history.storm'
   // —— FB-5 自适应文风学习 ——
   | 'style.learn'
+  | 'style.calibrate'
 
 export type PromptProjectField =
   | 'name'

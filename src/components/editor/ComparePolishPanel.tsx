@@ -4,6 +4,7 @@ import type { RichEditorHandle } from './RichEditor'
 import RichEditor from './RichEditor'
 import { useBackupStore } from '../../stores/backup'
 import { useChapterStore } from '../../stores/chapter'
+import { useUserStyleStore } from '../../stores/user-style'
 import { useBeforeUnload } from '../../hooks/useBeforeUnload'
 import { useDialog } from '../shared/Dialog'
 import { useToast } from '../shared/Toast'
@@ -93,9 +94,23 @@ export default function ComparePolishPanel({
         createSnapshot,
         updateChapter,
       })
+      let capturedStyleSample = false
+      try {
+        capturedStyleSample = await useUserStyleStore.getState().captureRevisionPair(projectId, {
+          sourceChapterId: chapterId,
+          chapterTitle,
+          beforeText: sourceHtml,
+          afterText: result.html,
+        }) != null
+      } catch (captureError) {
+        // 文风样本是正文保存后的衍生数据，失败不得回滚已经完成的章节保存。
+        console.warn('[ComparePolish] 文风样本沉淀失败:', captureError)
+      }
       setDraftHtml(result.html)
       onSaved(result)
-      toast.success('对照润色稿已保存，并创建恢复快照')
+      toast.success(capturedStyleSample
+        ? '对照润色稿已保存，已创建快照并沉淀文风样本'
+        : '对照润色稿已保存，并创建恢复快照')
       onClose()
     } catch (error) {
       toast.error(`保存失败：${error instanceof Error ? error.message : String(error)}`)
@@ -168,7 +183,7 @@ export default function ComparePolishPanel({
 
       <p className="flex items-start gap-1.5 text-[11px] leading-5 text-text-muted">
         <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-400" />
-        保存前会检查已持有物品被重复写成首次获得的风险；提示只供判断，不会自动改写正文。
+        保存前会检查已持有物品被重复写成首次获得的风险；保存成功后，仅截取实际改动附近的短片段作为文风样本，不会重复注入整章。
       </p>
     </section>
   )

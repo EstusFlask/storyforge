@@ -12,7 +12,11 @@ export function buildStyleLearnPrompt(
   samples: string,
   sampleCount: number,
   sampleWords: number,
-  userHint?: string,
+  advanced?: {
+    revisionPairs?: string
+    calibrationFeedback?: string
+    userHint?: string
+  },
   options?: RunOptions,
 ): ChatMessage[] {
   const tpl = usePromptStore.getState().getActive('style.learn')
@@ -20,7 +24,29 @@ export function buildStyleLearnPrompt(
     samples,
     sampleCount,
     sampleWords,
-    userHint: userHint || '',
+    revisionPairs: advanced?.revisionPairs || '',
+    calibrationFeedback: advanced?.calibrationFeedback || '',
+    userHint: advanced?.userHint || '',
+  }, options)
+  return messages
+}
+
+/** 用当前画像和有界改稿样本重写短文，结果必须由作者确认后才会沉淀为新样本。 */
+export function buildStyleCalibrationPrompt(
+  input: {
+    profile: string
+    revisionPairs?: string
+    calibrationFeedback?: string
+    sourceText: string
+  },
+  options?: RunOptions,
+): ChatMessage[] {
+  const tpl = usePromptStore.getState().getActive('style.calibrate')
+  const { messages } = renderPrompt(tpl, {
+    profile: input.profile,
+    revisionPairs: input.revisionPairs || '',
+    calibrationFeedback: input.calibrationFeedback || '',
+    sourceText: input.sourceText,
   }, options)
   return messages
 }
