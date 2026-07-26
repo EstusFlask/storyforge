@@ -168,7 +168,7 @@ export default defineConfig({
         // Phase 3.5:把大的静态依赖拆成独立 vendor chunk。
         // 好处:① 主包变小、解析更快 ② 这些库很少变,浏览器可长期缓存(应用更新不必重下)。
         manualChunks: {
-          'vendor-react': ['react', 'react-dom', 'react-router-dom'],
+          'vendor-react': ['react', 'react-dom', 'react-router'],
           'vendor-editor': ['@tiptap/react', '@tiptap/starter-kit', '@tiptap/extension-placeholder'],
           'vendor-db': ['dexie'],
           'vendor-d3': ['d3-hierarchy'],
