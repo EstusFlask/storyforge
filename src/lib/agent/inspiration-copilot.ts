@@ -29,6 +29,12 @@ import type {
   InspirationVersion,
   InspirationWorkspace,
 } from '../types/inspiration-workspace'
+import {
+  evidenceFromContextResult,
+  resolveAgentContextPolicy,
+  type AgentContextEvidence,
+  type AgentContextProfile,
+} from './context-policy'
 import { executeAgentTool } from './tool-registry'
 
 export type InspirationCopilotResult = ReverseResult | ReverseMultiWorldResult
@@ -63,6 +69,7 @@ export interface PreparedInspirationCopilot {
   contextSources: string[]
   selectedFragmentIds: string[]
   snapshot: InspirationWorkspaceSnapshot
+  contextEvidence: AgentContextEvidence
 }
 
 interface InspirationCopilotDependencies {
@@ -163,6 +170,7 @@ export async function prepareInspirationCopilot(input: {
   selectedFragmentIds: string[]
   authorRequest: string
   routingCategory?: string
+  contextProfile?: AgentContextProfile
   signal?: AbortSignal
 }): Promise<PreparedInspirationCopilot> {
   const project = await db.projects.get(input.projectId)
@@ -185,12 +193,15 @@ export async function prepareInspirationCopilot(input: {
     useAIConfigStore.getState().config,
     { category: routingCategory },
   ).config
+  const contextProfile = input.contextProfile ?? 'full'
+  const contextPolicy = resolveAgentContextPolicy('agent-inspiration', contextProfile)
   const context = await executeAgentTool(
     'read_inspiration_workspace',
     {
       projectId: input.projectId,
       provider: config.provider,
       model: config.model,
+      contextPolicy,
     },
     { fragmentIds: selectedFragmentIds, mode },
   )
@@ -226,6 +237,7 @@ export async function prepareInspirationCopilot(input: {
     contextSources: context.meta.included,
     selectedFragmentIds,
     snapshot,
+    contextEvidence: evidenceFromContextResult(contextProfile, context.meta),
   }
 }
 

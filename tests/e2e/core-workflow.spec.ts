@@ -459,6 +459,7 @@ test('上下文窗口、四类通用任务与主 Agent 角色模型路由跨模�
   await page.getByLabel('审查校验模型预设').selectOption({ label: '审查模型 · deepseek/deepseek-review' })
   await page.getByLabel('主 Agent 编排模型预设').selectOption({ label: '审查模型 · deepseek/deepseek-review' })
   await page.getByLabel('正文领域 Agent模型预设').selectOption({ label: '创作模型 · deepseek/deepseek-chat' })
+  await page.getByLabel('正文领域 Agent上下文输入档位').selectOption('lean')
 
   await page.reload()
   await sidebarButton(page, '设置').click()
@@ -467,6 +468,7 @@ test('上下文窗口、四类通用任务与主 Agent 角色模型路由跨模�
   await expect(page.getByLabel('分析总结模型预设')).toHaveValue(await page.getByLabel('审查校验模型预设').inputValue())
   await expect(page.getByLabel('主 Agent 编排模型预设')).toHaveValue(await page.getByLabel('审查校验模型预设').inputValue())
   await expect(page.getByLabel('正文领域 Agent模型预设')).toHaveValue(await page.getByLabel('创作生成模型预设').inputValue())
+  await expect(page.getByLabel('正文领域 Agent上下文输入档位')).toHaveValue('lean')
   await expect(page.getByLabel('创作生成模型预设').locator('option:checked')).toContainText('创作模型')
   await expect(page.getByLabel('分析总结模型预设').locator('option:checked')).toContainText('审查模型')
   await expect(page.getByLabel('正文领域 Agent模型预设').locator('option:checked')).toContainText('创作模型')
@@ -557,6 +559,8 @@ test('主 Agent 调度世界领域任务，拒绝零写入并精确采纳可见�
   await request.fill('生成一段世界来源，包含文明起点')
   await copilot.getByRole('button', { name: '交给主 Agent', exact: true }).click()
   await expect(candidate).toHaveValue('模型候选一：潮汐退去后，最初的陆地显露。')
+  await expect(copilot.getByText(/均衡 · ≈[\d,]+ tokens/)).toBeVisible()
+  await expect(copilot.getByText(/查看本次实际输入证据 · \d+ 个来源/)).toBeVisible()
 
   await openSidebarLeaf(page, '世界观', '世界起源')
   await expect(page.locator('main').getByText('模型候选一：潮汐退去后，最初的陆地显露。', { exact: true }))

@@ -42,7 +42,9 @@ export const PROVIDER_OPTIONS: { value: AIProvider; label: string; cors: boolean
 export default function AIConfigPanel() {
   const { config, setConfig, switchProvider, testConnection,
     rememberApiKey, setRememberApiKey,
-    presets, taskRoutes, setTaskRoute, activePresetId, editingPresetId, saveAsPreset, applyPreset, updatePresetFromCurrent, renamePreset, deletePreset } = useAIConfigStore()
+    presets, taskRoutes, agentContextProfiles, setTaskRoute, setAgentContextProfile,
+    activePresetId, editingPresetId, saveAsPreset, applyPreset, updatePresetFromCurrent,
+    renamePreset, deletePreset } = useAIConfigStore()
   const dialog = useDialog()
   const [showKey, setShowKey] = useState(false)
   const [testing, setTesting] = useState(false)
@@ -186,7 +188,13 @@ export default function AIConfigPanel() {
           onDeletePreset={(id, name) => { void handleDeletePreset(id, name) }}
         />
 
-        <AITaskRoutingSection presets={presets} routes={taskRoutes} onSetRoute={setTaskRoute} />
+        <AITaskRoutingSection
+          presets={presets}
+          routes={taskRoutes}
+          contextProfiles={agentContextProfiles}
+          onSetRoute={setTaskRoute}
+          onSetContextProfile={setAgentContextProfile}
+        />
 
         <div className="space-y-4">
           <div>

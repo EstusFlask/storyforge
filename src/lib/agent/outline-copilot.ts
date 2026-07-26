@@ -25,6 +25,12 @@ import type {
   OutlineNode,
   Project,
 } from '../types'
+import {
+  evidenceFromContextResult,
+  resolveAgentContextPolicy,
+  type AgentContextEvidence,
+  type AgentContextProfile,
+} from './context-policy'
 
 export const OUTLINE_COPILOT_SOURCE_KEYS = [
   'canonAssertions',
@@ -82,6 +88,7 @@ export interface PreparedOutlineCopilot {
   mode: OutlineCopilotMode
   parentVolumeId: number | null
   label: string
+  contextEvidence: AgentContextEvidence
 }
 
 interface OutlineCopilotDependencies {
@@ -341,6 +348,7 @@ export async function prepareOutlineCopilot(input: {
   authorRequest: string
   supplementalContext?: string
   routingCategory?: string
+  contextProfile?: AgentContextProfile
   signal?: AbortSignal
 }): Promise<PreparedOutlineCopilot> {
   const project = await db.projects.get(input.projectId)
@@ -367,6 +375,8 @@ export async function prepareOutlineCopilot(input: {
     useAIConfigStore.getState().config,
     { category: routingCategory },
   ).config
+  const contextProfile = input.contextProfile ?? 'full'
+  const contextPolicy = resolveAgentContextPolicy('agent-outline', contextProfile)
   const assembled = await assembleContext({
     projectId: input.projectId,
     worldGroupId,
@@ -374,6 +384,8 @@ export async function prepareOutlineCopilot(input: {
     provider: config.provider,
     model: config.model,
     sourceKeys: [...OUTLINE_COPILOT_SOURCE_KEYS],
+    inputBudgetMaxTokens: contextPolicy.maxInputTokens,
+    sourceBudgetScale: contextPolicy.sourceBudgetScale,
   })
   const currentNodes = await db.outlineNodes.where('projectId').equals(input.projectId).toArray()
   const snapshot = snapshotOf(currentNodes, worldGroupId, mode, parentVolumeId)
@@ -402,6 +414,7 @@ export async function prepareOutlineCopilot(input: {
     snapshot,
     mode,
     parentVolumeId,
+    contextEvidence: evidenceFromContextResult(contextProfile, assembled),
     label: mode === 'volumes'
       ? '卷级大纲'
       : `《${targetVolume!.title}》章节大纲`,

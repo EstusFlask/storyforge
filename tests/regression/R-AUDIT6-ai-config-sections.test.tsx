@@ -6,6 +6,7 @@ import AITaskRoutingSection from '../../src/components/settings/AITaskRoutingSec
 import AIConnectionLogPanel from '../../src/components/settings/AIConnectionLogPanel'
 import AIConnectionTestSection from '../../src/components/settings/AIConnectionTestSection'
 import ThemeSelector from '../../src/components/settings/ThemeSelector'
+import { DEFAULT_AGENT_CONTEXT_PROFILES } from '../../src/lib/agent/context-policy'
 import type { AIConfig, AIConfigPreset } from '../../src/lib/types'
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true
@@ -69,10 +70,15 @@ describe('AUDIT-6 / HEALTH-4 · AI 设置分区', () => {
 
   it('任务路由分开展示四类通用任务与六个主 Agent 团队角色，并转发专用预设', async () => {
     const onSetRoute = vi.fn()
+    const onSetContextProfile = vi.fn()
     const host = await mount(AITaskRoutingSection as ComponentType<never>, {
-      presets: [preset], routes: { creation: 'writer' }, onSetRoute,
+      presets: [preset],
+      routes: { creation: 'writer' },
+      contextProfiles: DEFAULT_AGENT_CONTEXT_PROFILES,
+      onSetRoute,
+      onSetContextProfile,
     })
-    expect(host.querySelectorAll('select')).toHaveLength(10)
+    expect(host.querySelectorAll('select')).toHaveLength(15)
     expect(host.textContent).toContain('结构提取')
     expect(host.textContent).toContain('主 Agent 团队角色')
     expect(host.textContent).toContain('正文领域 Agent')
@@ -90,6 +96,13 @@ describe('AUDIT-6 / HEALTH-4 · AI 设置分区', () => {
       prose.dispatchEvent(new Event('change', { bubbles: true }))
     })
     expect(onSetRoute).toHaveBeenCalledWith('agent-prose', 'writer')
+    const proseContext = host.querySelector<HTMLSelectElement>('select[aria-label="正文领域 Agent上下文输入档位"]')!
+    await act(async () => {
+      const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value')!.set!
+      setter.call(proseContext, 'lean')
+      proseContext.dispatchEvent(new Event('change', { bubbles: true }))
+    })
+    expect(onSetContextProfile).toHaveBeenCalledWith('agent-prose', 'lean')
   })
 
   it('连接日志保留可读格式并转发清空命令', async () => {

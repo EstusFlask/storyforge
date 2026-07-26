@@ -22,6 +22,12 @@ interface Props {
   onClose: () => void
 }
 
+const CONTEXT_PROFILE_LABELS = {
+  lean: '精简',
+  balanced: '均衡',
+  full: '完整',
+} as const
+
 export default function ChatCopilotPanel({
   project,
   worldGroupId,
@@ -172,7 +178,9 @@ export default function ChatCopilotPanel({
                 className="max-w-[45%] truncate text-[10px] text-text-muted"
                 title={candidate.payload.contextSources.join('、')}
               >
-                {candidate.payload.contextSources.length} 个输入来源
+                {candidate.payload.contextEvidence
+                  ? `${CONTEXT_PROFILE_LABELS[candidate.payload.contextEvidence.profile]} · ≈${candidate.payload.contextEvidence.estimatedInputTokens.toLocaleString()} tokens`
+                  : `${candidate.payload.contextSources.length} 个输入来源`}
               </span>
             </div>
             <textarea
@@ -189,6 +197,26 @@ export default function ChatCopilotPanel({
             <p className="mt-1 text-[10px] text-text-muted">
               这是领域 Agent 的真实输出。刷新后仍会保留；只有采纳才会进入项目正式数据。
             </p>
+            {candidate.payload.contextEvidence && (
+              <details className="mt-2 rounded border border-border/60 bg-bg-surface px-2 py-1.5 text-[10px] text-text-muted">
+                <summary className="cursor-pointer text-text-secondary">
+                  查看本次实际输入证据 · {candidate.payload.contextEvidence.included.length} 个来源
+                </summary>
+                <div className="mt-2 space-y-1 break-words">
+                  <p>
+                    上下文估算 {candidate.payload.contextEvidence.estimatedInputTokens.toLocaleString()} /
+                    {' '}{candidate.payload.contextEvidence.inputBudgetTokens.toLocaleString()} tokens
+                  </p>
+                  <p>已纳入：{candidate.payload.contextEvidence.included.join('、') || '无'}</p>
+                  {candidate.payload.contextEvidence.trimmed.length > 0 && (
+                    <p className="text-warning">整段裁剪：{candidate.payload.contextEvidence.trimmed.join('、')}</p>
+                  )}
+                  {candidate.payload.contextEvidence.omitted.length > 0 && (
+                    <p>无数据/未启用：{candidate.payload.contextEvidence.omitted.join('、')}</p>
+                  )}
+                </div>
+              </details>
+            )}
             {(candidate.payload.dependsOnTaskIds?.length ?? 0) > 0 && (
               <p className="mt-1 text-[10px] text-warning">
                 采纳前需先采纳上游任务：{candidate.payload.dependsOnTaskIds!.join('、')}

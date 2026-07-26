@@ -15,6 +15,12 @@ import { assembleContext } from '../registry/assemble-context'
 import { rebuildChapterChunks } from '../retrieval/retrieval'
 import type { AIConfig, Chapter, OutlineNode, Project } from '../types'
 import { countWords, htmlToPlainText, plainTextToHtml } from '../utils/html'
+import {
+  evidenceFromContextResult,
+  resolveAgentContextPolicy,
+  type AgentContextEvidence,
+  type AgentContextProfile,
+} from './context-policy'
 
 export const PROSE_COPILOT_SOURCE_KEYS = [
   'contextMemo',
@@ -85,6 +91,7 @@ export interface PreparedProseCopilot {
   operation: ProseCopilotOperation
   outlineNodeId: number
   label: string
+  contextEvidence: AgentContextEvidence
 }
 
 interface ProseCopilotDependencies {
@@ -383,6 +390,7 @@ export async function prepareProseCopilot(input: {
   authorRequest: string
   supplementalContext?: string
   routingCategory?: string
+  contextProfile?: AgentContextProfile
   signal?: AbortSignal
 }): Promise<PreparedProseCopilot> {
   const project = await db.projects.get(input.projectId)
@@ -409,6 +417,8 @@ export async function prepareProseCopilot(input: {
     useAIConfigStore.getState().config,
     { category: routingCategory },
   ).config
+  const contextProfile = input.contextProfile ?? 'full'
+  const contextPolicy = resolveAgentContextPolicy('agent-prose', contextProfile)
   const previous = scopedOutlineChapters(nodes, worldGroupId)
     .filter(item => item.ordinal < target.ordinal)
     .reverse()
@@ -426,6 +436,8 @@ export async function prepareProseCopilot(input: {
     provider: config.provider,
     model: config.model,
     sourceKeys: [...PROSE_COPILOT_SOURCE_KEYS],
+    inputBudgetMaxTokens: contextPolicy.maxInputTokens,
+    sourceBudgetScale: contextPolicy.sourceBudgetScale,
   })
   const current = await readSnapshot(input.projectId, snapshot)
   if (!sameSnapshot(current, snapshot)) throw new ProseCopilotStaleError()
@@ -452,6 +464,7 @@ export async function prepareProseCopilot(input: {
     snapshot,
     operation,
     outlineNodeId: target.outline.id!,
+    contextEvidence: evidenceFromContextResult(contextProfile, assembled),
     label: operation === 'continue'
       ? `续写《${target.outline.title}》`
       : `《${target.outline.title}》正文`,

@@ -2143,3 +2143,32 @@ Agent 规划为恰好 1 个 character 任务，再由角色模型生成可见 JS
 👉 27.1-e 的 per-role 模型/API 路由已完成，但不代表团队自治完成。下一增量继续冻结输入
 权重、Canon 打回、预算、取消、并发与恢复；在这些边界落地前，不默认并行调用、不自动
 重试，也不允许长期后台 Agent 静默写入。
+
+### [2026-07-27] Codex · REPORT · AGENT-1 Phase 27.1-e 第二个增量 / 团队上下文预算与输入证据 / `feat/agent-context-budgets`
+
+五个幕后领域现在可独立选择精简、均衡或完整上下文档位，默认均衡。档位只在
+`CONTEXT_SOURCES → assembleContext()` 内收窄登记源的总预算和单源软上限，不能放大
+注册表预算、绕过 L0/protected/scope，也不改变手工分步骤面板。世界、角色、灵感、大纲和
+正文的完整档分别保持此前 19.4K、28.5K、11K、48K 和 64K 上限；同一角色发生多次工具
+读取时共享拆分后的角色总预算，不会每次读取都重复获得完整额度。
+
+候选事件现在冻结档位、实际纳入/省略/整段裁剪的 source key、上下文 token 估算和装配
+上限。主 Agent 候选卡直接显示档位与估算量，并可展开本次实际输入证据；该数据是正式
+上下文装配结果，不冒充 API 精确 prompt usage，后者仍由标准用量日志记录。配置属于当前
+设备 AI 偏好，不进入项目 Canon、IndexedDB、导出或 API Key 生命周期；旧配置自动补为
+均衡，未知角色和档位会被清理。
+
+完整 `npm run ci` 通过：234 个 Vitest 文件 / 851 项测试，coverage statements/lines
+73.55%、branches 73.30%、functions 72.47%；55 required tables、AI Manual、
+architecture、source reachability、roadmap、agent context、canon、project metrics、
+production dependency audit 0 vulnerabilities、ESLint、TypeScript、生产 build 和 bundle
+budget 全绿。完整 Chromium E2E 24/24 通过。
+
+真实 Agnes 隔离项目把主 Agent 和世界领域绑定 Agnes，世界档位设为精简。一次明确世界
+来源请求恰好产生 2 条 Agent 团队用量记录；候选显示 `精简 · ≈93 tokens`，展开显示
+`93 / 9,000 tokens` 和 1 个实际输入来源。拒绝候选后世界来源仍为空；测试路由和档位均已
+恢复默认，隔离项目通过完整危险操作流程删除。
+
+👉 输入成本现在有角色级上限和可见证据，但仍不等于整个 Agent 团队已有总账。下一增量
+继续实现 Canon 确定性打回与跨调用团队预算；在总预算、取消、恢复边界完成前仍不默认
+并行领域调用。
