@@ -30,6 +30,47 @@ export type RuntimeLifecycleStatus = typeof RUNTIME_LIFECYCLE_STATUSES[number]
 export type RuntimeScalar = string | number | boolean | null
 export type RuntimeAttributes = Record<string, RuntimeScalar>
 
+export const SIMULATION_CANON_SOURCE_KINDS = [
+  'world',
+  'character',
+  'location',
+  'item',
+  'rule',
+] as const
+export type SimulationCanonSourceKind = typeof SIMULATION_CANON_SOURCE_KINDS[number]
+
+export interface SimulationCanonSource {
+  sourceKey: string
+  kind: SimulationCanonSourceKind
+  /** 审计用原始记录 ID；冻结后不再作为可变 Canon 外键读取。 */
+  recordId: number | null
+  name: string
+  summary: string
+  fields: Record<string, string>
+  updatedAt: number
+  contentHash: string
+}
+
+export interface SimulationCanonSnapshotV1 {
+  schema: 'storyforge.simulation-canon'
+  version: 1
+  createdAt: number
+  worldGroupId: number | null
+  worldLabel: string
+  sources: SimulationCanonSource[]
+  snapshotHash: string
+}
+
+export interface SimulationCanonCandidate {
+  sourceKey: string
+  kind: SimulationCanonSourceKind
+  recordId: number | null
+  name: string
+  summary: string
+  fields: Record<string, string>
+  updatedAt: number
+}
+
 export interface RuntimeEntityState {
   entityKey: string
   kind: RuntimeEntityKind

@@ -33,7 +33,7 @@ async function clickWhenEnabled(host: HTMLElement, text: string) {
   })
 }
 
-describe('SIM-1A · 互动运行时 UI', () => {
+describe('SIM-1B · 互动运行时 UI', () => {
   let host: HTMLDivElement
   let root: ReturnType<typeof createRoot>
   let project: Project
@@ -43,6 +43,7 @@ describe('SIM-1A · 互动运行时 UI', () => {
     await db.open()
     useSimulationRuntimeStore.setState({
       projectId: null,
+      worldGroupId: null,
       sessions: [],
       selectedSessionId: null,
       events: [],
@@ -64,6 +65,26 @@ describe('SIM-1A · 互动运行时 UI', () => {
       updatedAt: now,
     } as Project) as number
     project = (await db.projects.get(projectId))!
+    await db.characters.add({
+      projectId,
+      homeWorldGroupId: null,
+      name: '林舟',
+      role: 'protagonist',
+      roleWeight: 'main',
+      moralAxis: 'neutral',
+      orderAxis: 'neutral',
+      alignment: 'good',
+      shortDescription: '潮汐旅人',
+      appearance: '',
+      personality: '',
+      background: '',
+      motivation: '',
+      abilities: '',
+      relationships: '',
+      arc: '',
+      createdAt: now,
+      updatedAt: now,
+    })
     host = document.createElement('div')
     document.body.append(host)
     root = createRoot(host)
@@ -87,9 +108,19 @@ describe('SIM-1A · 互动运行时 UI', () => {
 
     const title = host.querySelector<HTMLInputElement>('input[placeholder="新会话名称"]')!
     await act(async () => changeValue(title, '雾港跑团'))
-    await clickWhenEnabled(host, '新建独立会话')
+    await viWaitFor(() => expect(
+      host.querySelector<HTMLInputElement>('input[aria-label="冻结 角色 林舟"]'),
+    ).not.toBeNull())
+    await act(async () => {
+      host.querySelector<HTMLInputElement>('input[aria-label="冻结 世界 互动运行时 UI"]')!.click()
+      host.querySelector<HTMLInputElement>('input[aria-label="冻结 角色 林舟"]')!.click()
+    })
+    await clickWhenEnabled(host, '创建并冻结')
     await viWaitFor(() => expect(host.textContent).toContain('雾港跑团'))
     expect(await db.simulationSessions.count()).toBe(1)
+    expect(host.textContent).toContain('Canon 冻结审计')
+    expect(host.textContent).toContain('运行时实体')
+    expect(host.textContent).toContain('林舟')
 
     const time = host.querySelector<HTMLInputElement>('input[aria-label="推进时间"]')!
     await act(async () => changeValue(time, '3'))

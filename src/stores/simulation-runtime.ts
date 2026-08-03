@@ -8,7 +8,9 @@ import {
   deleteSimulationSession,
   readSimulationState,
   resolveSimulationDice,
+  verifySimulationCheckpoint,
 } from '../lib/simulation/runtime'
+import { buildSimulationCanonSnapshot } from '../lib/simulation/canon-snapshot'
 import {
   EMPTY_SIMULATION_STATE,
   type SimulationCheckpoint,
@@ -20,6 +22,7 @@ import {
 
 interface SimulationRuntimeStore {
   projectId: number | null
+  worldGroupId: number | null
   sessions: SimulationSession[]
   selectedSessionId: number | null
   events: SimulationEvent[]
@@ -27,7 +30,7 @@ interface SimulationRuntimeStore {
   runtimeState: SimulationRuntimeState
   loading: boolean
   error: string
-  load(projectId: number): Promise<void>
+  load(projectId: number, worldGroupId: number | null): Promise<void>
   select(sessionId: number | null): Promise<void>
   createSession(input: {
     projectId: number
@@ -35,12 +38,14 @@ interface SimulationRuntimeStore {
     kind: SimulationSessionKind
     title: string
     seed?: string
+    sourceKeys: string[]
   }): Promise<number>
   advanceTime(amount: number): Promise<void>
   recordNarrative(text: string): Promise<void>
   rollDice(expression: string): Promise<void>
   checkpoint(name: string): Promise<void>
   branch(title: string): Promise<number>
+  restoreCheckpoint(checkpointId: number): Promise<number>
   remove(sessionId: number): Promise<void>
 }
 
@@ -65,6 +70,7 @@ export const useSimulationRuntimeStore = create<SimulationRuntimeStore>((set, ge
 
   return {
     projectId: null,
+    worldGroupId: null,
     sessions: [],
     selectedSessionId: null,
     events: [],
@@ -73,16 +79,19 @@ export const useSimulationRuntimeStore = create<SimulationRuntimeStore>((set, ge
     loading: false,
     error: '',
 
-    load: async projectId => {
+    load: async (projectId, worldGroupId) => {
       set({ loading: true, error: '' })
       try {
-        const sessions = await db.simulationSessions.where('projectId').equals(projectId).toArray()
+        const sessions = (await db.simulationSessions.where('projectId').equals(projectId).toArray())
+          .filter(session => (session.worldGroupId ?? null) === worldGroupId)
         sessions.sort((left, right) => right.updatedAt - left.updatedAt)
-        const current = get().projectId === projectId ? get().selectedSessionId : null
+        const current = get().projectId === projectId && get().worldGroupId === worldGroupId
+          ? get().selectedSessionId
+          : null
         const selectedSessionId = current != null && sessions.some(row => row.id === current)
           ? current
           : sessions[0]?.id ?? null
-        set({ projectId, sessions, selectedSessionId, loading: false })
+        set({ projectId, worldGroupId, sessions, selectedSessionId, loading: false })
         if (selectedSessionId != null) await refreshSelected()
         else set({
           events: [],
@@ -112,15 +121,21 @@ export const useSimulationRuntimeStore = create<SimulationRuntimeStore>((set, ge
     },
 
     createSession: async input => {
-      const session = await createSimulationSession({
-        ...input,
-        canonSnapshot: {
-          version: 1,
-          sources: [],
-          note: 'SIM-1A 核心会话；结构化 Canon 选择将在 SIM-1B 接入。',
-        },
+      const frozen = await buildSimulationCanonSnapshot({
+        projectId: input.projectId,
+        worldGroupId: input.worldGroupId,
+        sourceKeys: input.sourceKeys,
       })
-      await get().load(input.projectId)
+      const session = await createSimulationSession({
+        projectId: input.projectId,
+        worldGroupId: input.worldGroupId,
+        kind: input.kind,
+        title: input.title,
+        seed: input.seed,
+        canonSnapshot: frozen.snapshot,
+        initialState: frozen.initialState,
+      })
+      await get().load(input.projectId, input.worldGroupId)
       await get().select(session.id!)
       return session.id!
     },
@@ -171,15 +186,33 @@ export const useSimulationRuntimeStore = create<SimulationRuntimeStore>((set, ge
         throughSequence: get().runtimeState.lastSequence,
         title,
       })
-      await get().load(parent.projectId)
+      await get().load(parent.projectId, parent.worldGroupId ?? null)
+      await get().select(child.id!)
+      return child.id!
+    },
+
+    restoreCheckpoint: async checkpointId => {
+      const checkpoint = get().checkpoints.find(row => row.id === checkpointId)
+      const parent = get().sessions.find(row => row.id === checkpoint?.sessionId)
+      if (!checkpoint || !parent) throw new Error('要恢复的检查点不存在。')
+      if (!await verifySimulationCheckpoint(checkpointId)) {
+        throw new Error('检查点内容校验失败，不能用于恢复。')
+      }
+      const child = await branchSimulationSession({
+        parentSessionId: parent.id!,
+        throughSequence: checkpoint.throughSequence,
+        title: `${parent.title} · ${checkpoint.name}`,
+      })
+      await get().load(parent.projectId, parent.worldGroupId ?? null)
       await get().select(child.id!)
       return child.id!
     },
 
     remove: async sessionId => {
       const projectId = get().projectId
+      const worldGroupId = get().worldGroupId
       await deleteSimulationSession(sessionId)
-      if (projectId != null) await get().load(projectId)
+      if (projectId != null) await get().load(projectId, worldGroupId)
     },
   }
 })

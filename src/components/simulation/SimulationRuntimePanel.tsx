@@ -6,11 +6,23 @@ import {
   Dices,
   GitBranch,
   Plus,
+  RotateCcw,
   Save,
   ScrollText,
+  Snowflake,
   Trash2,
 } from 'lucide-react'
-import type { Project, SimulationSessionKind } from '../../lib/types'
+import {
+  loadSimulationCanonCandidates,
+  parseSimulationCanonSnapshot,
+  verifySimulationCanonSnapshot,
+} from '../../lib/simulation/canon-snapshot'
+import type {
+  Project,
+  SimulationCanonCandidate,
+  SimulationCanonSourceKind,
+  SimulationSessionKind,
+} from '../../lib/types'
 import { useSimulationRuntimeStore } from '../../stores/simulation-runtime'
 import { useDialog } from '../shared/Dialog'
 
@@ -20,6 +32,22 @@ const KIND_LABELS: Record<SimulationSessionKind, string> = {
   ttrpg: '跑团',
   chatgame: '角色聊天',
 }
+
+const SOURCE_KIND_LABELS: Record<SimulationCanonSourceKind, string> = {
+  world: '世界',
+  character: '角色',
+  location: '地点',
+  item: '物品',
+  rule: '规则',
+}
+
+const SOURCE_KIND_ORDER: SimulationCanonSourceKind[] = [
+  'world',
+  'character',
+  'location',
+  'item',
+  'rule',
+]
 
 function eventSummary(type: string, payloadJson: string): string {
   try {
@@ -50,19 +78,68 @@ export default function SimulationRuntimePanel(props: {
   const [narrative, setNarrative] = useState('')
   const [checkpointName, setCheckpointName] = useState('')
   const [branchTitle, setBranchTitle] = useState('')
+  const [canonCandidates, setCanonCandidates] = useState<SimulationCanonCandidate[]>([])
+  const [selectedSourceKeys, setSelectedSourceKeys] = useState<Set<string>>(new Set())
+  const [canonLoading, setCanonLoading] = useState(false)
+  const [snapshotVerified, setSnapshotVerified] = useState<boolean | null>(null)
   const [busy, setBusy] = useState(false)
   const [actionError, setActionError] = useState('')
 
   useEffect(() => {
-    void store.load(props.project.id!)
+    void store.load(props.project.id!, props.worldGroupId)
   // Zustand action identity is stable; project change is the actual reload boundary.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [props.project.id])
+  }, [props.project.id, props.worldGroupId])
+
+  useEffect(() => {
+    let cancelled = false
+    setCanonLoading(true)
+    setSelectedSourceKeys(new Set())
+    void loadSimulationCanonCandidates({
+      projectId: props.project.id!,
+      worldGroupId: props.worldGroupId,
+    }).then(result => {
+      if (!cancelled) setCanonCandidates(result.candidates)
+    }).catch(error => {
+      if (!cancelled) setActionError(error instanceof Error ? error.message : String(error))
+    }).finally(() => {
+      if (!cancelled) setCanonLoading(false)
+    })
+    return () => { cancelled = true }
+  }, [props.project.id, props.worldGroupId])
 
   const selected = useMemo(
     () => store.sessions.find(session => session.id === store.selectedSessionId) ?? null,
     [store.selectedSessionId, store.sessions],
   )
+  const selectedSnapshot = useMemo(
+    () => selected ? parseSimulationCanonSnapshot(selected.canonSnapshotJson) : null,
+    [selected],
+  )
+  const candidatesByKind = useMemo(() => Object.fromEntries(SOURCE_KIND_ORDER.map(kind => [
+    kind,
+    canonCandidates.filter(candidate => candidate.kind === kind),
+  ])) as Record<SimulationCanonSourceKind, SimulationCanonCandidate[]>, [canonCandidates])
+
+  useEffect(() => {
+    let cancelled = false
+    setSnapshotVerified(null)
+    if (selectedSnapshot) {
+      void verifySimulationCanonSnapshot(selectedSnapshot).then(result => {
+        if (!cancelled) setSnapshotVerified(result)
+      })
+    }
+    return () => { cancelled = true }
+  }, [selectedSnapshot])
+
+  const toggleSource = (sourceKey: string) => {
+    setSelectedSourceKeys(current => {
+      const next = new Set(current)
+      if (next.has(sourceKey)) next.delete(sourceKey)
+      else next.add(sourceKey)
+      return next
+    })
+  }
 
   const run = async (action: () => Promise<unknown>) => {
     setBusy(true)
@@ -77,8 +154,8 @@ export default function SimulationRuntimePanel(props: {
   }
 
   return (
-    <div className="flex h-full min-h-[36rem] bg-bg-base">
-      <aside className="w-72 shrink-0 overflow-y-auto border-r border-border bg-bg-surface p-4">
+    <div className="flex h-full min-h-[36rem] flex-col bg-bg-base lg:flex-row">
+      <aside className="max-h-[28rem] w-full shrink-0 overflow-y-auto border-b border-border bg-bg-surface p-4 lg:max-h-none lg:w-72 lg:border-b-0 lg:border-r">
         <div className="mb-4">
           <div className="mb-1 flex items-center gap-2">
             <Box className="h-4 w-4 text-accent" />
@@ -106,21 +183,63 @@ export default function SimulationRuntimePanel(props: {
               <option key={value} value={value}>{label}</option>
             ))}
           </select>
+          <fieldset className="space-y-2 border-t border-border pt-2">
+            <legend className="flex items-center gap-1.5 px-1 text-xs font-medium text-text-secondary">
+              <Snowflake className="h-3.5 w-3.5" />
+              冻结来源
+            </legend>
+            <div className="max-h-52 space-y-2 overflow-y-auto pr-1">
+              {SOURCE_KIND_ORDER.map(kind => candidatesByKind[kind].length > 0 && (
+                <div key={kind}>
+                  <div className="mb-1 text-[11px] font-medium text-text-muted">
+                    {SOURCE_KIND_LABELS[kind]}
+                  </div>
+                  <div className="space-y-1">
+                    {candidatesByKind[kind].map(candidate => (
+                      <label
+                        key={candidate.sourceKey}
+                        className="flex cursor-pointer items-start gap-2 rounded px-1 py-1 text-xs hover:bg-bg-hover"
+                      >
+                        <input
+                          type="checkbox"
+                          checked={selectedSourceKeys.has(candidate.sourceKey)}
+                          onChange={() => toggleSource(candidate.sourceKey)}
+                          aria-label={`冻结 ${SOURCE_KIND_LABELS[kind]} ${candidate.name}`}
+                          className="mt-0.5 h-3.5 w-3.5"
+                        />
+                        <span className="min-w-0 flex-1">
+                          <span className="block truncate text-text-secondary">{candidate.name}</span>
+                          {candidate.summary && (
+                            <span className="block truncate text-[10px] text-text-muted">
+                              {candidate.summary}
+                            </span>
+                          )}
+                        </span>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              ))}
+              {canonLoading && <p className="py-2 text-center text-xs text-text-muted">读取中...</p>}
+            </div>
+          </fieldset>
           <button
-            disabled={busy || !newTitle.trim()}
+            disabled={busy || canonLoading || !newTitle.trim() || selectedSourceKeys.size === 0}
             onClick={() => void run(async () => {
               await store.createSession({
                 projectId: props.project.id!,
                 worldGroupId: props.worldGroupId,
                 kind: newKind,
                 title: newTitle,
+                sourceKeys: [...selectedSourceKeys],
               })
               setNewTitle('')
+              setSelectedSourceKeys(new Set())
             })}
             className="flex w-full items-center justify-center gap-1.5 rounded bg-accent px-3 py-1.5 text-sm text-white disabled:opacity-40"
           >
             <Plus className="h-3.5 w-3.5" />
-            新建独立会话
+            创建并冻结
           </button>
         </div>
 
@@ -159,7 +278,7 @@ export default function SimulationRuntimePanel(props: {
                 <div className="mb-1 text-xs text-text-muted">体验中心 · {KIND_LABELS[selected.kind]}</div>
                 <h1 className="text-xl font-semibold text-text-primary">{selected.title}</h1>
                 <p className="mt-1 text-xs text-text-muted">
-                  规则 v{selected.rulesetVersion} · 事件 {store.runtimeState.lastSequence} · 检查点 {store.checkpoints.length}
+                  规则 v{selected.rulesetVersion} · 来源 {selectedSnapshot?.sources.length ?? 0} · 事件 {store.runtimeState.lastSequence} · 检查点 {store.checkpoints.length}
                 </p>
               </div>
               <button
@@ -206,6 +325,47 @@ export default function SimulationRuntimePanel(props: {
                 </div>
                 <div className="text-xs text-text-muted">叙事记录</div>
               </div>
+            </section>
+
+            <section className="rounded-lg border border-border bg-bg-surface">
+              <div className="flex items-center justify-between gap-3 border-b border-border px-4 py-3">
+                <div className="flex items-center gap-2 text-sm font-semibold text-text-primary">
+                  <Snowflake className="h-4 w-4 text-accent" />
+                  Canon 冻结审计
+                </div>
+                {selectedSnapshot && (
+                  <div className="flex items-center gap-2 text-[10px]">
+                    <span className={snapshotVerified === false ? 'text-danger' : 'text-text-muted'}>
+                      {snapshotVerified == null ? '校验中' : snapshotVerified ? '完整' : '校验失败'}
+                    </span>
+                    <span className="font-mono text-text-muted" title={selectedSnapshot.snapshotHash}>
+                      {selectedSnapshot.snapshotHash.slice(0, 12)}
+                    </span>
+                  </div>
+                )}
+              </div>
+              {selectedSnapshot ? (
+                <div className="divide-y divide-border">
+                  {selectedSnapshot.sources.map(source => (
+                    <div key={source.sourceKey} className="grid gap-1 px-4 py-3 sm:grid-cols-[8rem_1fr_auto] sm:gap-3">
+                      <div className="text-xs font-medium text-text-primary">
+                        {SOURCE_KIND_LABELS[source.kind]} · {source.name}
+                      </div>
+                      <div className="min-w-0 text-xs text-text-secondary">
+                        <div className="truncate">{source.summary || '未填写摘要'}</div>
+                        <div className="mt-0.5 truncate font-mono text-[10px] text-text-muted">
+                          {source.sourceKey}
+                        </div>
+                      </div>
+                      <span className="font-mono text-[10px] text-text-muted" title={source.contentHash}>
+                        {source.contentHash.slice(0, 10)}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="px-4 py-5 text-sm text-text-muted">旧会话没有结构化冻结审计。</p>
+              )}
             </section>
 
             <section className="grid gap-3 lg:grid-cols-2">
@@ -306,12 +466,48 @@ export default function SimulationRuntimePanel(props: {
                       <CopyPlus className="h-3.5 w-3.5 text-text-muted" />
                       <span className="flex-1 truncate">{checkpoint.name}</span>
                       <span className="text-text-muted">#{checkpoint.throughSequence}</span>
+                      <button
+                        disabled={busy}
+                        onClick={() => void run(() => store.restoreCheckpoint(checkpoint.id!))}
+                        className="rounded p-1 text-text-muted hover:bg-bg-hover hover:text-accent disabled:opacity-40"
+                        title="从检查点建立恢复分支"
+                        aria-label={`恢复检查点 ${checkpoint.name}`}
+                      >
+                        <RotateCcw className="h-3.5 w-3.5" />
+                      </button>
                     </div>
                   ))}
                   {store.checkpoints.length === 0 && (
                     <p className="text-xs text-text-muted">暂无检查点</p>
                   )}
                 </div>
+              </div>
+            </section>
+
+            <section className="rounded-lg border border-border bg-bg-surface">
+              <div className="border-b border-border px-4 py-3 text-sm font-semibold text-text-primary">
+                运行时实体
+              </div>
+              <div className="divide-y divide-border">
+                {Object.values(store.runtimeState.entities).map(entity => (
+                  <div key={entity.entityKey} className="grid gap-2 px-4 py-3 sm:grid-cols-[10rem_8rem_1fr]">
+                    <div>
+                      <div className="text-sm font-medium text-text-primary">{entity.name}</div>
+                      <div className="mt-0.5 font-mono text-[10px] text-text-muted">{entity.entityKey}</div>
+                    </div>
+                    <div className="text-xs text-text-secondary">
+                      {entity.kind} · {entity.lifecycleStatus}
+                    </div>
+                    <div className="flex min-w-0 flex-wrap gap-x-3 gap-y-1 text-xs text-text-muted">
+                      {Object.entries(entity.attributes).map(([key, value]) => (
+                        <span key={key} className="max-w-full break-words">{key}: {String(value)}</span>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+                {Object.keys(store.runtimeState.entities).length === 0 && (
+                  <p className="px-4 py-6 text-center text-sm text-text-muted">暂无运行时实体</p>
+                )}
               </div>
             </section>
 
