@@ -108,6 +108,7 @@
 |---|---:|---|---|---|---|---|---|---|---|
 | SIM-1B | P0 | 当前路线图 | Canon 冻结快照、运行时实体投影 | SIM-1 | COMPLETE | 2026-08-03 已收口 | 作者显式选择、SHA-256 审计、独立实体、世界隔离、恢复分支 | SIM-1A | 来源修改/删除不污染存档；回放、导入导出、浏览器验证 |
 | SIM-1C | P1 | 当前路线图 | NPC 演进与运行时状态更新 | SIM-1 | COMPLETE | 2026-08-03 已按完整功能单位收口 | 冻结运行时上下文、结构化候选、提案事件、作者确认/拒绝、过期保护；不写 Canon、不新增表 | SIM-1B | 事件/刷新/分支可回放；非 NPC、伪造地点、未知字段、跨作用域和 Canon 不变性回归 |
+| TTRPG-1A | P1 | 当前路线图 | 单机战役主持 | TTRPG-1 | COMPLETE | 2026-08-03 已按完整功能单位收口 | 场景、回合顺序、动作、技能检定、AI GM 成功/失败候选和原子回合；复用 SIM-1 三表，不新增 Canon 写字段 | SIM-1C | 场景/回合/检定回放；候选过期、伪造骰点、错误行动者、错误顺序和 UI 回归 |
 | EXT-20260803-01 | P1 | WPS Bug | 章节号/导入/上下文/物品混合一致性 | CANON-1 / PIPE-1 / INV-1 | REPRO/DESIGN | 未解决 | 先取证再拆根因，禁止局部修补 | 导出项目、乱序/重复章节样本 | 数据关系矩阵、规范章序、上下文证据、itemLedger 投影回归 |
 | EXT-20260803-02 | P1 | WPS Bug | 首次大纲候选采纳无效 | PIPE-1 | READY (bug插队) | 未解决 | 修复候选状态/解析完成时机与 Gate | 可靠复现或录屏 | 首次采纳、刷新、重复点击、并发快照反例 |
 | EXT-20260803-03 | P1 | WPS Bug / #19 | CORS 诊断与受控本地 companion 方向 | PRODUCT-1 / PLATFORM-1 | BLOCKED/DESIGN | Issue 保持开放 | 不做任意 URL 代理；先安全边界 | 官方 API、目标白名单、loopback | 内网/重定向阻断、超时/大小、Origin/会话令牌 |
@@ -139,4 +140,4 @@
 2. 任何新增表、AI 可写字段或上下文源，先更新 `PROJECT_TABLES`、`FIELD_REGISTRY`/`AdoptionSchema`、`CONTEXT_SOURCES` 并补反例测试。
 3. 涉及删除、批量写入、导入或引用重映射，必须有失败回滚、无孤儿和真实隔离项目往返证据。
 4. 涉及 AI 行为，必须证明候选/Canon 边界、最终 Prompt 与登记来源同源，并通过 `check:ai-manual`、架构检查、类型检查、相关测试和构建。
-5. 继续遵守施工顺序：`SIM-1B → SIM-1C → TTRPG-1 → CHATGAME-1 → PRODUCT-1 / PLATFORM-1`；只有 P1 生产 Bug 可插队，修完回到主线。
+5. 继续遵守施工顺序：`SIM-1B → SIM-1C → TTRPG-1A → TTRPG-1B/1C → CHATGAME-1 → PRODUCT-1 / PLATFORM-1`；只有 P1 生产 Bug 可插队，修完回到主线。

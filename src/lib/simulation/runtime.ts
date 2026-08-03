@@ -17,6 +17,12 @@ import {
   type SimulationRuntimeState,
   type SimulationSession,
   type SimulationSessionKind,
+  type SimulationTtrpgAction,
+  type SimulationTtrpgCheck,
+  type SimulationTtrpgCheckRequest,
+  type SimulationTtrpgScene,
+  type SimulationTtrpgState,
+  type SimulationTtrpgTurnCandidate,
 } from '../types'
 
 type JsonObject = Record<string, unknown>
@@ -252,6 +258,135 @@ function applyNpcEvolution(
   }
 }
 
+function assertTtrpgScene(value: unknown): SimulationTtrpgScene {
+  if (!isObject(value)) throw new Error('跑团场景必须是对象。')
+  const sceneId = String(value.sceneId ?? '').trim()
+  const title = String(value.title ?? '').trim()
+  const description = String(value.description ?? '').trim()
+  const locationKey = value.locationKey == null ? null : String(value.locationKey).trim() || null
+  const status = String(value.status ?? 'active')
+  if (!sceneId || sceneId.length > 160) throw new Error('跑团场景缺少有效 ID。')
+  if (!title || title.length > 200) throw new Error('跑团场景标题无效。')
+  if (description.length > 8_000) throw new Error('跑团场景描述过长。')
+  if (status !== 'active' && status !== 'resolved') throw new Error('跑团场景状态无效。')
+  return { sceneId, title, description, locationKey, status: status as SimulationTtrpgScene['status'] }
+}
+
+function assertTtrpgAction(value: unknown): SimulationTtrpgAction {
+  if (!isObject(value)) throw new Error('跑团动作必须是对象。')
+  const eventSequence = assertFiniteInteger(value.eventSequence, '跑团动作事件序号', 1, Number.MAX_SAFE_INTEGER)
+  const actorKey = String(value.actorKey ?? '').trim()
+  const text = String(value.text ?? '').trim()
+  if (!actorKey || actorKey.length > 160) throw new Error('跑团动作缺少行动者。')
+  if (!text || text.length > 4_000) throw new Error('跑团动作文本无效。')
+  return { eventSequence, actorKey, text }
+}
+
+function assertTtrpgCheck(value: unknown): SimulationTtrpgCheck {
+  if (!isObject(value)) throw new Error('跑团检定必须是对象。')
+  const eventSequence = assertFiniteInteger(value.eventSequence, '跑团检定事件序号', 1, Number.MAX_SAFE_INTEGER)
+  const actorKey = String(value.actorKey ?? '').trim()
+  const skill = String(value.skill ?? '').trim()
+  const expression = String(value.expression ?? '').trim()
+  const dc = assertFiniteInteger(value.dc, '检定难度', 0, 1_000)
+  const dice = value.dice
+  if (!actorKey || actorKey.length > 160) throw new Error('跑团检定缺少行动者。')
+  if (!skill || skill.length > 120) throw new Error('跑团检定技能无效。')
+  if (!Array.isArray(dice)) throw new Error('跑团检定缺少骰子结果。')
+  const parsed = parseDiceExpression(expression)
+  if (dice.length !== parsed.count) throw new Error('跑团检定骰子数量与骰式不一致。')
+  const normalizedDice = dice.map(die => assertFiniteInteger(die, '检定骰子点数', 1, parsed.sides))
+  const modifier = Number(value.modifier)
+  const total = Number(value.total)
+  const success = value.success
+  if (modifier !== parsed.modifier || total !== normalizedDice.reduce((sum, die) => sum + die, modifier)) {
+    throw new Error('跑团检定合计与骰式不一致。')
+  }
+  if (success !== (total >= dc)) throw new Error('跑团检定成功状态与合计不一致。')
+  return {
+    eventSequence,
+    actorKey,
+    skill,
+    expression: parsed.normalized,
+    dice: normalizedDice,
+    modifier,
+    total,
+    dc,
+    success: Boolean(success),
+  }
+}
+
+function emptyTtrpgState(): SimulationTtrpgState {
+  return { scene: null, round: 0, activeActorKey: null, turnOrder: [], actions: [], checks: [] }
+}
+
+function parseTtrpgState(value: unknown): SimulationTtrpgState | null {
+  if (value == null) return null
+  if (!isObject(value)) throw new Error('跑团状态必须是对象或 null。')
+  const scene = value.scene == null ? null : assertTtrpgScene(value.scene)
+  const round = assertFiniteInteger(value.round, '跑团回合', 0, Number.MAX_SAFE_INTEGER)
+  const activeActorKey = value.activeActorKey == null ? null : String(value.activeActorKey).trim() || null
+  if (!Array.isArray(value.turnOrder)) throw new Error('跑团回合顺序必须是数组。')
+  const turnOrder = value.turnOrder.map(raw => String(raw).trim())
+  if (turnOrder.some(key => !key || key.length > 160) || new Set(turnOrder).size !== turnOrder.length) {
+    throw new Error('跑团回合顺序包含无效或重复行动者。')
+  }
+  if (activeActorKey != null && !turnOrder.includes(activeActorKey)) throw new Error('跑团当前行动者不在回合顺序中。')
+  if (!Array.isArray(value.actions) || !Array.isArray(value.checks)) throw new Error('跑团动作与检定记录必须是数组。')
+  return {
+    scene,
+    round,
+    activeActorKey,
+    turnOrder,
+    actions: value.actions.map(assertTtrpgAction),
+    checks: value.checks.map(assertTtrpgCheck),
+  }
+}
+
+function requireTtrpgState(state: SimulationRuntimeState): SimulationTtrpgState {
+  if (!state.ttrpg) state.ttrpg = emptyTtrpgState()
+  return state.ttrpg
+}
+
+export function parseSimulationTtrpgTurnCandidate(value: unknown): SimulationTtrpgTurnCandidate {
+  if (!isObject(value)) throw new Error('跑团回合候选必须是对象。')
+  const allowed = new Set(['baseSequence', 'actorKey', 'action', 'narrative', 'check', 'outcomes', 'nextActorKey'])
+  const unknown = Object.keys(value).filter(key => !allowed.has(key))
+  if (unknown.length) throw new Error(`跑团回合候选包含未知字段: ${unknown.join(', ')}`)
+  const baseSequence = assertFiniteInteger(value.baseSequence, '跑团候选基线序号', 0, Number.MAX_SAFE_INTEGER)
+  const actorKey = String(value.actorKey ?? '').trim()
+  const action = String(value.action ?? '').trim()
+  const narrative = String(value.narrative ?? '').trim()
+  const nextActorKey = value.nextActorKey == null ? null : String(value.nextActorKey).trim() || null
+  if (!actorKey || actorKey.length > 160) throw new Error('跑团候选缺少行动者。')
+  if (!action || action.length > 4_000) throw new Error('跑团候选动作无效。')
+  if (!narrative || narrative.length > 20_000) throw new Error('跑团候选叙事无效。')
+  let check: SimulationTtrpgCheckRequest | null = null
+  if (value.check != null) {
+    if (!isObject(value.check)) throw new Error('跑团检定候选必须是对象或 null。')
+    const skill = String(value.check.skill ?? '').trim()
+    const expression = String(value.check.expression ?? '').trim()
+    const reason = String(value.check.reason ?? '').trim()
+    const dc = assertFiniteInteger(value.check.dc, '检定难度', 0, 1_000)
+    parseDiceExpression(expression)
+    if (!skill || skill.length > 120) throw new Error('跑团候选技能无效。')
+    if (!reason || reason.length > 1_000) throw new Error('跑团候选检定理由无效。')
+    check = { skill, expression, dc, reason }
+  }
+  let outcomes: SimulationTtrpgTurnCandidate['outcomes'] = null
+  if (value.outcomes != null) {
+    if (!isObject(value.outcomes)) throw new Error('跑团检定分支叙事必须是对象或 null。')
+    const success = String(value.outcomes.success ?? '').trim()
+    const failure = String(value.outcomes.failure ?? '').trim()
+    if (!success || !failure || success.length > 20_000 || failure.length > 20_000) {
+      throw new Error('跑团检定成功/失败叙事无效。')
+    }
+    outcomes = { success, failure }
+  }
+  if ((check == null) !== (outcomes == null)) throw new Error('跑团检定与成功/失败叙事必须同时提供。')
+  return { baseSequence, actorKey, action, narrative, check, outcomes, nextActorKey }
+}
+
 export function parseSimulationState(value: string | SimulationRuntimeState): SimulationRuntimeState {
   const parsed = typeof value === 'string' ? parseJsonObject(value, '运行时状态') : value
   if (parsed.version !== 1) throw new Error('不支持的运行时状态版本。')
@@ -286,7 +421,15 @@ export function parseSimulationState(value: string | SimulationRuntimeState): Si
       text,
     }
   })
-  return { version: 1, clock, entities, memories, narratives, lastSequence }
+  return {
+    version: 1,
+    clock,
+    entities,
+    memories,
+    narratives,
+    ttrpg: parseTtrpgState(parsed.ttrpg),
+    lastSequence,
+  }
 }
 
 function cloneState(state: SimulationRuntimeState): SimulationRuntimeState {
@@ -366,6 +509,89 @@ export function applySimulationEvent(
       const text = String(payload.text ?? '').trim()
       if (!text || text.length > 20_000) throw new Error('运行时叙事文本无效。')
       state.narratives.push({ eventSequence: event.sequence, text })
+      break
+    }
+    case 'ttrpg.scene.opened': {
+      const ttrpg = requireTtrpgState(state)
+      const scene = assertTtrpgScene(payload.scene)
+      const rawTurnOrder = payload.turnOrder
+      if (!Array.isArray(rawTurnOrder) || rawTurnOrder.length === 0) {
+        throw new Error('跑团场景至少需要一个行动者。')
+      }
+      const turnOrder = rawTurnOrder.map(raw => String(raw).trim())
+      if (new Set(turnOrder).size !== turnOrder.length) throw new Error('跑团回合顺序不能重复。')
+      for (const actorKey of turnOrder) {
+        const actor = state.entities[actorKey]
+        if (!actor || !['player', 'character', 'npc'].includes(actor.kind)) {
+          throw new Error(`跑团行动者不存在或类型不支持: ${actorKey}`)
+        }
+      }
+      if (scene.locationKey != null) {
+        const location = state.entities[scene.locationKey]
+        if (!location || location.kind !== 'location') throw new Error(`跑团场景地点不存在: ${scene.locationKey}`)
+      }
+      ttrpg.scene = scene
+      ttrpg.round = 1
+      ttrpg.activeActorKey = turnOrder[0]
+      ttrpg.turnOrder = turnOrder
+      ttrpg.actions = []
+      ttrpg.checks = []
+      break
+    }
+    case 'ttrpg.action.recorded': {
+      const ttrpg = requireTtrpgState(state)
+      if (!ttrpg.scene || ttrpg.scene.status !== 'active') throw new Error('跑团尚未开始活动场景。')
+      const action = assertTtrpgAction({
+        eventSequence: event.sequence,
+        actorKey: payload.actorKey,
+        text: payload.text,
+      })
+      if (!ttrpg.turnOrder.includes(action.actorKey)) throw new Error('跑团动作行动者不在当前回合顺序中。')
+      if (ttrpg.activeActorKey !== action.actorKey) throw new Error('当前还没轮到该行动者。')
+      ttrpg.actions.push(action)
+      break
+    }
+    case 'ttrpg.check.resolved': {
+      const ttrpg = requireTtrpgState(state)
+      if (!isObject(payload.check)) throw new Error('跑团检定缺少 check 对象。')
+      const check = assertTtrpgCheck({ ...payload.check, eventSequence: event.sequence })
+      if (!ttrpg.turnOrder.includes(check.actorKey)) throw new Error('跑团检定行动者不在当前回合顺序中。')
+      ttrpg.checks.push(check)
+      break
+    }
+    case 'ttrpg.gm.response.recorded': {
+      const ttrpg = requireTtrpgState(state)
+      if (!ttrpg.scene || ttrpg.scene.status !== 'active') throw new Error('跑团尚未开始活动场景。')
+      const actionSequence = assertFiniteInteger(payload.actionSequence, '跑团动作序号', 1, event.sequence - 1)
+      if (!ttrpg.actions.some(action => action.eventSequence === actionSequence)) {
+        throw new Error('AI GM 叙事没有对应的玩家动作。')
+      }
+      if (payload.checkSequence != null) {
+        const checkSequence = assertFiniteInteger(payload.checkSequence, '跑团检定序号', 1, event.sequence - 1)
+        if (!ttrpg.checks.some(check => check.eventSequence === checkSequence)) {
+          throw new Error('AI GM 叙事引用了不存在的检定。')
+        }
+      }
+      const text = String(payload.text ?? '').trim()
+      if (!text || text.length > 20_000) throw new Error('AI GM 叙事文本无效。')
+      state.narratives.push({ eventSequence: event.sequence, text })
+      break
+    }
+    case 'ttrpg.turn.advanced': {
+      const ttrpg = requireTtrpgState(state)
+      if (!ttrpg.scene || ttrpg.scene.status !== 'active') throw new Error('跑团尚未开始活动场景。')
+      const nextActorKey = String(payload.nextActorKey ?? '').trim()
+      const round = assertFiniteInteger(payload.round, '跑团回合', 1, Number.MAX_SAFE_INTEGER)
+      if (!ttrpg.turnOrder.includes(nextActorKey)) throw new Error('下一个行动者不在当前回合顺序中。')
+      const currentIndex = ttrpg.turnOrder.indexOf(ttrpg.activeActorKey ?? '')
+      const nextIndex = (currentIndex + 1) % ttrpg.turnOrder.length
+      const expectedActorKey = ttrpg.turnOrder[nextIndex]
+      const expectedRound = ttrpg.round + (nextIndex === 0 ? 1 : 0)
+      if (nextActorKey !== expectedActorKey || round !== expectedRound) {
+        throw new Error('跑团回合推进与确定性顺序不一致。')
+      }
+      ttrpg.activeActorKey = nextActorKey
+      ttrpg.round = round
       break
     }
     case 'npc.evolution.proposed': {
@@ -547,8 +773,13 @@ export async function appendSimulationEvent(input: {
     input.type === 'npc.evolution.proposed'
     || input.type === 'npc.evolution.accepted'
     || input.type === 'npc.evolution.rejected'
+    || input.type === 'ttrpg.scene.opened'
+    || input.type === 'ttrpg.action.recorded'
+    || input.type === 'ttrpg.check.resolved'
+    || input.type === 'ttrpg.gm.response.recorded'
+    || input.type === 'ttrpg.turn.advanced'
   ) {
-    throw new Error('NPC 演进事件只能通过提案、确认或拒绝 API 生成。')
+    throw new Error('受治理的互动事件只能通过对应的专用 API 生成。')
   }
   return appendBuiltEvent(input.sessionId, ({ sequence }) => {
     let payload = input.payload
@@ -730,6 +961,27 @@ function assertDiceResolution(value: unknown): DiceResolution {
   }
 }
 
+function buildDiceResolution(input: {
+  seed: string
+  sequence: number
+  expression: ReturnType<typeof parseDiceExpression>
+  nonce: string
+}): DiceResolution {
+  const dice = Array.from({ length: input.expression.count }, (_, index) => (
+    deterministicDie(
+      `${input.seed}\u0000${input.sequence}\u0000${input.expression.normalized}\u0000${input.nonce}\u0000${index}`,
+      input.expression.sides,
+    )
+  ))
+  return {
+    expression: input.expression.normalized,
+    dice,
+    modifier: input.expression.modifier,
+    total: dice.reduce((sum, die) => sum + die, input.expression.modifier),
+    nonce: input.nonce,
+  }
+}
+
 export async function resolveSimulationDice(input: {
   sessionId: number
   expression: string
@@ -741,25 +993,211 @@ export async function resolveSimulationDice(input: {
   const nonce = input.nonce?.trim() ?? ''
   if (nonce.length > 200) throw new Error('随机判定 nonce 过长。')
   return appendBuiltEvent(input.sessionId, ({ session, sequence }) => {
-    const dice = Array.from({ length: parsed.count }, (_, index) => (
-      deterministicDie(
-        `${session.seed}\u0000${sequence}\u0000${parsed.normalized}\u0000${nonce}\u0000${index}`,
-        parsed.sides,
-      )
-    ))
-    const resolution: DiceResolution = {
-      expression: parsed.normalized,
-      dice,
-      modifier: parsed.modifier,
-      total: dice.reduce((sum, die) => sum + die, parsed.modifier),
-      nonce,
-    }
+    const resolution = buildDiceResolution({ seed: session.seed, sequence, expression: parsed, nonce })
     return {
       type: 'random.resolved',
       actorKey: input.actorKey ?? null,
       targetKey: input.targetKey ?? null,
       payloadJson: JSON.stringify(resolution),
     }
+  })
+}
+
+function assertTtrpgActor(state: SimulationRuntimeState, actorKey: string): void {
+  const actor = state.entities[actorKey]
+  if (!actor || !['player', 'character', 'npc'].includes(actor.kind)) {
+    throw new Error(`跑团行动者不存在或类型不支持: ${actorKey}`)
+  }
+  const ttrpg = state.ttrpg
+  if (!ttrpg?.scene || ttrpg.scene.status !== 'active') throw new Error('请先开始一个跑团场景。')
+  if (!ttrpg.turnOrder.includes(actorKey)) throw new Error('行动者不在当前回合顺序中。')
+  if (ttrpg.activeActorKey !== actorKey) throw new Error('当前还没轮到该行动者。')
+}
+
+export async function openTtrpgScene(input: {
+  sessionId: number
+  title: string
+  description: string
+  locationKey?: string | null
+  turnOrder: string[]
+}): Promise<SimulationEvent> {
+  const title = input.title.trim()
+  const description = input.description.trim()
+  const turnOrder = [...new Set(input.turnOrder.map(key => key.trim()).filter(Boolean))]
+  if (!title || title.length > 200) throw new Error('跑团场景标题无效。')
+  if (description.length > 8_000) throw new Error('跑团场景描述过长。')
+  if (turnOrder.length === 0) throw new Error('跑团场景至少需要一个行动者。')
+  const scene: SimulationTtrpgScene = {
+    sceneId: globalThis.crypto?.randomUUID?.() ?? `scene-${Date.now()}-${Math.random()}`,
+    title,
+    description,
+    locationKey: input.locationKey?.trim() || null,
+    status: 'active',
+  }
+  return appendBuiltEvent(input.sessionId, ({ session, state }) => {
+    if (session.kind !== 'ttrpg') throw new Error('只有跑团会话可以开始场景。')
+    for (const actorKey of turnOrder) {
+      const actor = state.entities[actorKey]
+      if (!actor || !['player', 'character', 'npc'].includes(actor.kind)) {
+        throw new Error(`跑团行动者不存在或类型不支持: ${actorKey}`)
+      }
+    }
+    if (scene.locationKey != null) {
+      const location = state.entities[scene.locationKey]
+      if (!location || location.kind !== 'location') throw new Error(`跑团场景地点不存在: ${scene.locationKey}`)
+    }
+    return {
+      type: 'ttrpg.scene.opened',
+      actorKey: turnOrder[0],
+      targetKey: scene.locationKey,
+      payloadJson: JSON.stringify({ scene, turnOrder }),
+    }
+  })
+}
+
+export async function resolveTtrpgCheck(input: {
+  sessionId: number
+  actorKey: string
+  skill: string
+  expression: string
+  dc: number
+  nonce?: string
+}): Promise<SimulationEvent> {
+  const actorKey = input.actorKey.trim()
+  const skill = input.skill.trim()
+  const parsed = parseDiceExpression(input.expression)
+  const dc = assertFiniteInteger(input.dc, '检定难度', 0, 1_000)
+  const nonce = input.nonce?.trim() || `check:${skill}`
+  if (!skill || skill.length > 120) throw new Error('检定技能无效。')
+  if (nonce.length > 200) throw new Error('检定 nonce 过长。')
+  return appendBuiltEvent(input.sessionId, ({ session, state, sequence }) => {
+    if (session.kind !== 'ttrpg') throw new Error('只有跑团会话可以进行技能检定。')
+    assertTtrpgActor(state, actorKey)
+    const resolution = buildDiceResolution({ seed: session.seed, sequence, expression: parsed, nonce })
+    return {
+      type: 'ttrpg.check.resolved',
+      actorKey,
+      targetKey: actorKey,
+      payloadJson: JSON.stringify({
+        check: {
+          actorKey,
+          skill,
+          expression: resolution.expression,
+          dice: resolution.dice,
+          modifier: resolution.modifier,
+          total: resolution.total,
+          dc,
+          success: resolution.total >= dc,
+        },
+      }),
+    }
+  })
+}
+
+export async function appendTtrpgTurn(input: {
+  sessionId: number
+  candidate: SimulationTtrpgTurnCandidate
+}): Promise<SimulationEvent[]> {
+  const candidate = parseSimulationTtrpgTurnCandidate(input.candidate)
+  return db.transaction('rw', db.simulationSessions, db.simulationEvents, async () => {
+    const session = await db.simulationSessions.get(input.sessionId)
+    if (!session) throw new Error('模拟会话不存在。')
+    if (session.status !== 'active') throw new Error('只有 active 会话可以追加事件。')
+    if (session.kind !== 'ttrpg') throw new Error('只有跑团会话可以记录回合。')
+    const events = await readSessionEvents(session)
+    let state = replaySimulationEvents(parseSimulationState(session.initialStateJson), events)
+    if (candidate.baseSequence !== state.lastSequence) throw new Error('跑团候选已过期，请重新生成。')
+    assertTtrpgActor(state, candidate.actorKey)
+    const ttrpg = state.ttrpg!
+    const currentIndex = ttrpg.turnOrder.indexOf(ttrpg.activeActorKey!)
+    const nextIndex = (currentIndex + 1) % ttrpg.turnOrder.length
+    const expectedNextActorKey = ttrpg.turnOrder[nextIndex]
+    const expectedRound = ttrpg.round + (nextIndex === 0 ? 1 : 0)
+    if (candidate.nextActorKey != null && candidate.nextActorKey !== expectedNextActorKey) {
+      throw new Error('跑团候选尝试改变确定性回合顺序。')
+    }
+    if (candidate.check) parseDiceExpression(candidate.check.expression)
+    const appended: SimulationEvent[] = []
+    const appendLocal = (inputEvent: {
+      type: SimulationEventType
+      actorKey?: string | null
+      targetKey?: string | null
+      payload: unknown
+    }) => {
+      const event: SimulationEvent = {
+        projectId: session.projectId,
+        worldGroupId: session.worldGroupId ?? null,
+        sessionId: input.sessionId,
+        sequence: state.lastSequence + 1,
+        type: inputEvent.type,
+        actorKey: inputEvent.actorKey ?? null,
+        targetKey: inputEvent.targetKey ?? null,
+        payloadJson: JSON.stringify(inputEvent.payload),
+        createdAt: Date.now(),
+      }
+      state = applySimulationEvent(state, event)
+      appended.push(event)
+    }
+    appendLocal({
+      type: 'ttrpg.action.recorded',
+      actorKey: candidate.actorKey,
+      targetKey: candidate.actorKey,
+      payload: { actorKey: candidate.actorKey, text: candidate.action },
+    })
+    let checkSequence: number | null = null
+    let resolvedNarrative = candidate.narrative
+    if (candidate.check) {
+      const expression = parseDiceExpression(candidate.check.expression)
+      const sequence = state.lastSequence + 1
+      const resolution = buildDiceResolution({
+        seed: session.seed,
+        sequence,
+        expression,
+        nonce: `check:${candidate.check.skill}`,
+      })
+      checkSequence = sequence
+      resolvedNarrative = [
+        candidate.narrative,
+        resolution.total >= candidate.check.dc ? candidate.outcomes!.success : candidate.outcomes!.failure,
+      ].filter(Boolean).join('\n\n')
+      appendLocal({
+        type: 'ttrpg.check.resolved',
+        actorKey: candidate.actorKey,
+        targetKey: candidate.actorKey,
+        payload: {
+          check: {
+            actorKey: candidate.actorKey,
+            skill: candidate.check.skill,
+            expression: resolution.expression,
+            dice: resolution.dice,
+            modifier: resolution.modifier,
+            total: resolution.total,
+            dc: candidate.check.dc,
+            success: resolution.total >= candidate.check.dc,
+          },
+        },
+      })
+    }
+    const actionSequence = appended[0].sequence
+    appendLocal({
+      type: 'ttrpg.gm.response.recorded',
+      actorKey: null,
+      targetKey: candidate.actorKey,
+      payload: {
+        actionSequence,
+        checkSequence,
+        text: resolvedNarrative,
+      },
+    })
+    appendLocal({
+      type: 'ttrpg.turn.advanced',
+      actorKey: candidate.actorKey,
+      targetKey: expectedNextActorKey,
+      payload: { nextActorKey: expectedNextActorKey, round: expectedRound },
+    })
+    for (const event of appended) event.id = await db.simulationEvents.add(event) as number
+    await db.simulationSessions.update(input.sessionId, { updatedAt: appended[appended.length - 1].createdAt })
+    return appended
   })
 }
 

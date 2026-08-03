@@ -88,6 +88,15 @@ async function readSimulationRuntimeContext(input: AssembleContextInput): Promis
     `- ${memory.subjectKey}｜${memory.status}｜${memory.content}`
   ))
   const narrativeLines = state.narratives.slice(-40).map(item => `- #${item.eventSequence} ${item.text}`)
+  const ttrpg = state.ttrpg
+  const ttrpgLines = ttrpg ? [
+    `- 场景=${ttrpg.scene?.title ?? '未开始'}｜状态=${ttrpg.scene?.status ?? '无'}｜地点=${ttrpg.scene?.locationKey ?? '无'}`,
+    `- 回合=${ttrpg.round}｜当前行动者=${ttrpg.activeActorKey ?? '无'}｜顺序=${ttrpg.turnOrder.join(' → ') || '无'}`,
+    ...ttrpg.actions.slice(-20).map(action => `- 动作 #${action.eventSequence}｜${action.actorKey}｜${action.text}`),
+    ...ttrpg.checks.slice(-20).map(check => (
+      `- 检定 #${check.eventSequence}｜${check.actorKey}｜${check.skill}｜${check.expression}=${check.total} vs DC ${check.dc}｜${check.success ? '成功' : '失败'}`
+    )),
+  ] : []
   return [
     `【冻结运行时会话】${session.title}｜类型=${session.kind}｜逻辑时间=${state.clock}｜事件序号=${state.lastSequence}`,
     `【冻结世界】${snapshot.worldLabel}｜worldGroupId=${snapshot.worldGroupId ?? 'null'}｜快照=${snapshot.snapshotHash.slice(0, 16)}`,
@@ -99,6 +108,7 @@ async function readSimulationRuntimeContext(input: AssembleContextInput): Promis
     ...(memoryLines.length ? memoryLines : ['- 暂无记忆']),
     '【最近运行时叙事（只读）】',
     ...(narrativeLines.length ? narrativeLines : ['- 暂无叙事']),
+    ...(ttrpgLines.length ? ['【跑团场景与回合（只读）】', ...ttrpgLines] : []),
   ].join('\n')
 }
 

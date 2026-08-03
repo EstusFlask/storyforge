@@ -3,6 +3,7 @@ import { db } from '../lib/db/schema'
 import {
   appendSimulationEvent,
   acceptNpcEvolutionProposal,
+  appendTtrpgTurn,
   appendNpcEvolutionProposal,
   branchSimulationSession,
   createSimulationCheckpoint,
@@ -11,7 +12,9 @@ import {
   readSimulationState,
   readPendingNpcEvolutionProposals,
   rejectNpcEvolutionProposal,
+  openTtrpgScene,
   resolveSimulationDice,
+  resolveTtrpgCheck,
   verifySimulationCheckpoint,
 } from '../lib/simulation/runtime'
 import { buildSimulationCanonSnapshot } from '../lib/simulation/canon-snapshot'
@@ -24,6 +27,7 @@ import {
   type SimulationRuntimeState,
   type SimulationSession,
   type SimulationSessionKind,
+  type SimulationTtrpgTurnCandidate,
 } from '../lib/types'
 
 interface SimulationRuntimeStore {
@@ -52,6 +56,9 @@ interface SimulationRuntimeStore {
   proposeNpcEvolution(candidate: SimulationNpcEvolutionCandidate): Promise<void>
   acceptNpcEvolution(proposalSequence: number): Promise<void>
   rejectNpcEvolution(proposalSequence: number, reason?: string): Promise<void>
+  openTtrpgScene(input: { title: string; description: string; locationKey: string | null; turnOrder: string[] }): Promise<void>
+  recordTtrpgTurn(candidate: SimulationTtrpgTurnCandidate): Promise<void>
+  resolveTtrpgCheck(input: { actorKey: string; skill: string; expression: string; dc: number }): Promise<void>
   rollDice(expression: string): Promise<void>
   checkpoint(name: string): Promise<void>
   branch(title: string): Promise<number>
@@ -198,6 +205,27 @@ export const useSimulationRuntimeStore = create<SimulationRuntimeStore>((set, ge
       const sessionId = get().selectedSessionId
       if (sessionId == null) throw new Error('请先选择运行时会话。')
       await rejectNpcEvolutionProposal({ sessionId, proposalSequence, reason })
+      await refreshSelected()
+    },
+
+    openTtrpgScene: async input => {
+      const sessionId = get().selectedSessionId
+      if (sessionId == null) throw new Error('请先选择运行时会话。')
+      await openTtrpgScene({ sessionId, ...input })
+      await refreshSelected()
+    },
+
+    recordTtrpgTurn: async candidate => {
+      const sessionId = get().selectedSessionId
+      if (sessionId == null) throw new Error('请先选择运行时会话。')
+      await appendTtrpgTurn({ sessionId, candidate })
+      await refreshSelected()
+    },
+
+    resolveTtrpgCheck: async input => {
+      const sessionId = get().selectedSessionId
+      if (sessionId == null) throw new Error('请先选择运行时会话。')
+      await resolveTtrpgCheck({ sessionId, ...input })
       await refreshSelected()
     },
 

@@ -111,6 +111,61 @@ export interface SimulationNpcEvolutionProposal extends SimulationNpcEvolutionCa
   proposalSequence: number
 }
 
+export interface SimulationTtrpgScene {
+  sceneId: string
+  title: string
+  description: string
+  locationKey: string | null
+  status: 'active' | 'resolved'
+}
+
+export interface SimulationTtrpgAction {
+  eventSequence: number
+  actorKey: string
+  text: string
+}
+
+export interface SimulationTtrpgCheck {
+  eventSequence: number
+  actorKey: string
+  skill: string
+  expression: string
+  dice: number[]
+  modifier: number
+  total: number
+  dc: number
+  success: boolean
+}
+
+export interface SimulationTtrpgState {
+  scene: SimulationTtrpgScene | null
+  round: number
+  activeActorKey: string | null
+  turnOrder: string[]
+  actions: SimulationTtrpgAction[]
+  checks: SimulationTtrpgCheck[]
+}
+
+export interface SimulationTtrpgCheckRequest {
+  skill: string
+  expression: string
+  dc: number
+  reason: string
+}
+
+export interface SimulationTtrpgTurnCandidate {
+  baseSequence: number
+  actorKey: string
+  action: string
+  narrative: string
+  check: SimulationTtrpgCheckRequest | null
+  outcomes: {
+    success: string
+    failure: string
+  } | null
+  nextActorKey: string | null
+}
+
 export interface SimulationRuntimeState {
   version: 1
   clock: number
@@ -120,6 +175,8 @@ export interface SimulationRuntimeState {
     eventSequence: number
     text: string
   }>
+  /** 旧存档缺少该字段时按 null 处理。 */
+  ttrpg?: SimulationTtrpgState | null
   lastSequence: number
 }
 
@@ -151,6 +208,11 @@ export const SIMULATION_EVENT_TYPES = [
   'npc.evolution.proposed',
   'npc.evolution.accepted',
   'npc.evolution.rejected',
+  'ttrpg.scene.opened',
+  'ttrpg.action.recorded',
+  'ttrpg.check.resolved',
+  'ttrpg.gm.response.recorded',
+  'ttrpg.turn.advanced',
 ] as const
 export type SimulationEventType = typeof SIMULATION_EVENT_TYPES[number]
 
@@ -185,5 +247,6 @@ export const EMPTY_SIMULATION_STATE: SimulationRuntimeState = {
   entities: {},
   memories: [],
   narratives: [],
+  ttrpg: null,
   lastSequence: 0,
 }

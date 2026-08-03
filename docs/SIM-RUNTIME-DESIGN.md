@@ -115,3 +115,18 @@ SIM-1 不是新的创作 Canon，也不是某一种游戏的私有存档。它�
 
 SIM-1B 完成共同引擎与作者 Canon 的只读发布边界，不等于跑团或聊天产品已经完成。
 SIM-1C、TTRPG 与聊天只能读取冻结快照和运行时实体，不得重新直连可变作者表。
+
+### TTRPG-1A · 单机战役主持
+
+`TTRPG-1A` 是复用 SIM-1 的第一个产品功能单元，不新增战役表或第二套事件引擎。作者/玩家在跑团
+会话中开始一个场景，声明角色回合顺序，提交当前行动；系统可单独执行技能检定，也可让 AI GM 生成
+带检定参数和 success/failure 分支的结构化回合候选。作者明确“记录回合”后，代码在同一事务中写入
+动作、确定性检定、依据真实结果选择的 GM 叙事和下一行动者。
+
+跑团上下文仍只来自 `CONTEXT_SOURCES.simulationRuntime`，其中额外投影当前场景、回合、动作和检定。
+`ttrpg.scene.opened`、`ttrpg.action.recorded`、`ttrpg.check.resolved`、`ttrpg.gm.response.recorded`
+与 `ttrpg.turn.advanced` 均禁止通用事件入口直接写入；回合顺序、DC 合计、检定成功状态和候选基线由
+reducer/API 校验。AI 不提交骰点、不推进回合、不改变角色/物品/地点和 Canon。
+
+后续 `TTRPG-1B`（规则与遭遇）、`TTRPG-1C`（长期战役）和 `TTRPG-1D`（多人协作）分别登记，不能
+因为当前单机 MVP 已可玩就宣称完整跑团体系交付。

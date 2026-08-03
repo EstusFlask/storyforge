@@ -338,7 +338,7 @@ export const PROJECT_TABLES: TableSpec[] = [
       status: 'active',
       rulesetVersion: 1,
       canonSnapshotJson: '{"version":1,"sources":[]}',
-      initialStateJson: '{"version":1,"clock":0,"entities":{},"memories":[],"narratives":[],"lastSequence":0}',
+      initialStateJson: '{"version":1,"clock":0,"entities":{},"memories":[],"narratives":[],"ttrpg":null,"lastSequence":0}',
     },
     note: 'SIM-1 独立互动世界实例；冻结创作来源，不反写 Canon；分支拥有独立事件流' },
 

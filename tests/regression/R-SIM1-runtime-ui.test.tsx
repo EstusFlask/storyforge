@@ -48,6 +48,7 @@ describe('SIM-1B · 互动运行时 UI', () => {
       sessions: [],
       selectedSessionId: null,
       events: [],
+      pendingProposals: [],
       checkpoints: [],
       runtimeState: structuredClone(EMPTY_SIMULATION_STATE),
       loading: false,
@@ -208,6 +209,56 @@ describe('SIM-1B · 互动运行时 UI', () => {
     await viWaitFor(() => expect((readSimulationState(session.id!)).then(state => state.lastSequence)).resolves.toBe(2))
     expect((await readSimulationState(session.id!)).entities['npc:gatekeeper'].attributes.mood).toBe('警惕')
     expect(host.textContent).toContain('暂无待确认候选')
+  })
+
+  it('跑团会话可从可见入口开始场景并执行确定性技能检定', async () => {
+    const session = await createSimulationSession({
+      projectId: project.id!,
+      kind: 'ttrpg',
+      title: '钟楼战役',
+      seed: 'ui-ttrpg',
+      initialState: {
+        ...structuredClone(EMPTY_SIMULATION_STATE),
+        entities: {
+          'character:linzhou': {
+            entityKey: 'character:linzhou',
+            kind: 'character',
+            sourceId: 1,
+            name: '林舟',
+            locationKey: null,
+            lifecycleStatus: 'active',
+            attributes: { role: 'player' },
+          },
+        },
+      },
+    })
+    await act(async () => {
+      root.render(createElement(
+        DialogProvider,
+        null,
+        createElement(SimulationRuntimePanel, { project, worldGroupId: null }),
+      ))
+      await new Promise(resolve => setTimeout(resolve, 0))
+    })
+    await viWaitFor(() => expect(host.textContent).toContain('单机战役主持'))
+    await act(async () => {
+      changeValue(host.querySelector<HTMLInputElement>('input[aria-label="跑团场景标题"]')!, '钟楼门厅')
+      changeValue(host.querySelector<HTMLTextAreaElement>('textarea[aria-label="跑团场景描述"]')!, '潮声从墙后传来。')
+      changeValue(host.querySelector<HTMLInputElement>('input[aria-label="跑团回合顺序"]')!, 'character:linzhou')
+    })
+    await clickWhenEnabled(host, '开始场景')
+    await viWaitFor(() => expect(host.textContent).toContain('第 1 回合'))
+    expect((await readSimulationState(session.id!)).ttrpg).toMatchObject({
+      activeActorKey: 'character:linzhou',
+      turnOrder: ['character:linzhou'],
+    })
+    await act(async () => {
+      changeValue(host.querySelector<HTMLInputElement>('input[aria-label="跑团检定技能"]')!, '感知')
+      changeValue(host.querySelector<HTMLInputElement>('input[aria-label="跑团检定难度"]')!, '10')
+    })
+    await clickWhenEnabled(host, '技能检定')
+    await viWaitFor(() => expect((readSimulationState(session.id!)).then(state => state.ttrpg?.checks.length)).resolves.toBe(1))
+    expect(host.textContent).toContain('检定：感知')
   })
 })
 

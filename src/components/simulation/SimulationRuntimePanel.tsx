@@ -24,6 +24,7 @@ import type {
   SimulationCanonCandidate,
   SimulationCanonSourceKind,
   SimulationSessionKind,
+  SimulationTtrpgTurnCandidate,
 } from '../../lib/types'
 import { useSimulationRuntimeStore } from '../../stores/simulation-runtime'
 import { useDialog } from '../shared/Dialog'
@@ -34,6 +35,7 @@ import { resolveRequestConfig } from '../../lib/ai/client'
 import { isAIConfigReady } from '../../lib/ai/config-readiness'
 import { assembleContext } from '../../lib/registry/assemble-context'
 import { buildNpcEvolutionPrompt, parseNpcEvolutionCandidate } from '../../lib/simulation/npc-evolution'
+import { buildTtrpgGmPrompt, parseTtrpgTurnCandidate } from '../../lib/simulation/ttrpg'
 import { isNpcRuntimeEntity } from '../../lib/simulation/runtime'
 
 const KIND_LABELS: Record<SimulationSessionKind, string> = {
@@ -68,6 +70,14 @@ function eventSummary(type: string, payloadJson: string): string {
       return `${payload.expression}: [${dice}] = ${payload.total}`
     }
     if (type === 'narrative.recorded') return String(payload.text ?? '')
+    if (type === 'ttrpg.scene.opened') return `场景开始：${(payload.scene as Record<string, unknown>)?.title ?? ''}`
+    if (type === 'ttrpg.action.recorded') return `动作：${payload.text ?? ''}`
+    if (type === 'ttrpg.check.resolved') {
+      const check = payload.check as Record<string, unknown> | undefined
+      return `检定：${check?.skill ?? ''} ${check?.total ?? ''}/${check?.dc ?? ''}`
+    }
+    if (type === 'ttrpg.gm.response.recorded') return `GM：${payload.text ?? ''}`
+    if (type === 'ttrpg.turn.advanced') return `回合推进至 ${payload.nextActorKey ?? ''}`
     if (type.startsWith('entity.')) return String(payload.entityKey ?? type)
     return type
   } catch {
@@ -96,6 +106,16 @@ export default function SimulationRuntimePanel(props: {
   const [actionError, setActionError] = useState('')
   const [npcTargetKey, setNpcTargetKey] = useState('')
   const [npcRequest, setNpcRequest] = useState('')
+  const [ttrpgSceneTitle, setTtrpgSceneTitle] = useState('')
+  const [ttrpgSceneDescription, setTtrpgSceneDescription] = useState('')
+  const [ttrpgSceneLocationKey, setTtrpgSceneLocationKey] = useState('')
+  const [ttrpgTurnOrderText, setTtrpgTurnOrderText] = useState('')
+  const [ttrpgActorKey, setTtrpgActorKey] = useState('')
+  const [ttrpgAction, setTtrpgAction] = useState('')
+  const [ttrpgSkill, setTtrpgSkill] = useState('')
+  const [ttrpgExpression, setTtrpgExpression] = useState('1d20')
+  const [ttrpgDc, setTtrpgDc] = useState('12')
+  const [ttrpgCandidate, setTtrpgCandidate] = useState<SimulationTtrpgTurnCandidate | null>(null)
   const { config } = useAIConfigStore()
 
   useEffect(() => {
@@ -134,11 +154,25 @@ export default function SimulationRuntimePanel(props: {
     'simulation.npc-evolution',
     selected?.id ?? 'none',
   ))
+  const ttrpgAI = useAIStream(createAISessionKey(
+    props.project.id!,
+    'simulation.ttrpg-gm',
+    selected?.id ?? 'none',
+  ))
   const npcEntities = useMemo(
     () => Object.values(store.runtimeState.entities).filter(isNpcRuntimeEntity),
     [store.runtimeState.entities],
   )
   const selectedNpc = npcEntities.find(entity => entity.entityKey === npcTargetKey) ?? npcEntities[0] ?? null
+  const ttrpgActors = useMemo(
+    () => Object.values(store.runtimeState.entities).filter(entity => (
+      entity.kind === 'player' || entity.kind === 'character' || entity.kind === 'npc'
+    )),
+    [store.runtimeState.entities],
+  )
+  const selectedTtrpgActor = ttrpgActors.find(entity => entity.entityKey === ttrpgActorKey)
+    ?? ttrpgActors.find(entity => entity.entityKey === store.runtimeState.ttrpg?.activeActorKey)
+    ?? ttrpgActors[0]
   const candidatesByKind = useMemo(() => Object.fromEntries(SOURCE_KIND_ORDER.map(kind => [
     kind,
     canonCandidates.filter(candidate => candidate.kind === kind),
@@ -161,6 +195,16 @@ export default function SimulationRuntimePanel(props: {
       setNpcTargetKey(npcEntities[0]?.entityKey ?? '')
     }
   }, [selected?.kind, selected?.id, npcEntities, npcTargetKey])
+
+  useEffect(() => {
+    if (selected?.kind !== 'ttrpg') return
+    const active = store.runtimeState.ttrpg?.activeActorKey
+    if (!ttrpgActorKey || !ttrpgActors.some(entity => entity.entityKey === ttrpgActorKey)) {
+      setTtrpgActorKey(active && ttrpgActors.some(entity => entity.entityKey === active)
+        ? active
+        : ttrpgActors[0]?.entityKey ?? '')
+    }
+  }, [selected?.kind, selected?.id, ttrpgActors, ttrpgActorKey, store.runtimeState.ttrpg?.activeActorKey])
 
   const toggleSource = (sourceKey: string) => {
     setSelectedSourceKeys(current => {
@@ -208,6 +252,33 @@ export default function SimulationRuntimePanel(props: {
       baseSequence,
     })
     await store.proposeNpcEvolution(candidate)
+  }
+
+  const generateTtrpgTurn = async () => {
+    if (!selected || selected.kind !== 'ttrpg' || !selectedTtrpgActor) return
+    if (!store.runtimeState.ttrpg?.scene) throw new Error('请先开始一个跑团场景。')
+    const runtimeContext = await assembleContext({
+      projectId: props.project.id!,
+      worldGroupId: selected.worldGroupId ?? null,
+      simulationSessionId: selected.id,
+      sourceKeys: ['simulationRuntime'],
+      provider: config.provider,
+      model: config.model,
+    })
+    const draft = await ttrpgAI.start(buildTtrpgGmPrompt({
+      actorKey: selectedTtrpgActor.entityKey,
+      actorName: selectedTtrpgActor.name,
+      action: ttrpgAction,
+      runtimeContext: runtimeContext.text,
+    }), undefined, { category: 'simulation.ttrpg-gm', projectId: props.project.id! })
+    if (!draft.trim()) return
+    setTtrpgCandidate(parseTtrpgTurnCandidate({
+      draft,
+      state: store.runtimeState,
+      actorKey: selectedTtrpgActor.entityKey,
+      action: ttrpgAction,
+      baseSequence: store.runtimeState.lastSequence,
+    }))
   }
 
   return (
@@ -519,6 +590,202 @@ export default function SimulationRuntimePanel(props: {
                     {store.pendingProposals.length === 0 && (
                       <p className="text-xs text-text-muted">暂无待确认候选</p>
                     )}
+                  </div>
+                </div>
+              </section>
+            )}
+
+            {selected.kind === 'ttrpg' && (
+              <section className="rounded-lg border border-accent/30 bg-bg-surface">
+                <div className="flex items-center justify-between gap-3 border-b border-border px-4 py-3">
+                  <div>
+                    <div className="flex items-center gap-2 text-sm font-semibold text-text-primary">
+                      <Dices className="h-4 w-4 text-accent" />
+                      单机战役主持
+                    </div>
+                    <p className="mt-1 text-xs text-text-muted">
+                      玩家动作、确定性检定和 AI GM 叙事会作为一个可回放回合记录；AI 不直接修改运行时状态。
+                    </p>
+                  </div>
+                  {ttrpgAI.tokenUsage && (
+                    <span className="text-[10px] text-text-muted">
+                      {ttrpgAI.tokenUsage.inputTokens + ttrpgAI.tokenUsage.outputTokens} tokens
+                    </span>
+                  )}
+                </div>
+                <div className="space-y-4 p-4">
+                  <div className="grid gap-3 md:grid-cols-2">
+                    <div className="space-y-2">
+                      <input
+                        value={ttrpgSceneTitle}
+                        onChange={event => setTtrpgSceneTitle(event.target.value)}
+                        placeholder="场景标题"
+                        aria-label="跑团场景标题"
+                        className="w-full rounded border border-border bg-bg-base px-2 py-1.5 text-sm text-text-primary"
+                      />
+                      <textarea
+                        value={ttrpgSceneDescription}
+                        onChange={event => setTtrpgSceneDescription(event.target.value)}
+                        placeholder="场景描述与当前目标"
+                        aria-label="跑团场景描述"
+                        className="min-h-16 w-full rounded border border-border bg-bg-base px-2 py-1.5 text-sm text-text-primary"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <select
+                        value={ttrpgSceneLocationKey}
+                        onChange={event => setTtrpgSceneLocationKey(event.target.value)}
+                        aria-label="跑团场景地点"
+                        className="w-full rounded border border-border bg-bg-base px-2 py-1.5 text-sm text-text-primary"
+                      >
+                        <option value="">不绑定地点</option>
+                        {Object.values(store.runtimeState.entities)
+                          .filter(entity => entity.kind === 'location')
+                          .map(entity => <option key={entity.entityKey} value={entity.entityKey}>{entity.name}</option>)}
+                      </select>
+                      <input
+                        value={ttrpgTurnOrderText}
+                        onChange={event => setTtrpgTurnOrderText(event.target.value)}
+                        placeholder="回合顺序：角色键，用逗号分隔"
+                        aria-label="跑团回合顺序"
+                        className="w-full rounded border border-border bg-bg-base px-2 py-1.5 text-sm text-text-primary"
+                      />
+                      <button
+                        disabled={busy || !ttrpgSceneTitle.trim() || !ttrpgTurnOrderText.trim()}
+                        onClick={() => void run(async () => {
+                          await store.openTtrpgScene({
+                            title: ttrpgSceneTitle,
+                            description: ttrpgSceneDescription,
+                            locationKey: ttrpgSceneLocationKey || null,
+                            turnOrder: ttrpgTurnOrderText.split(/[,，\n]/).map(value => value.trim()).filter(Boolean),
+                          })
+                        })}
+                        className="rounded bg-accent px-3 py-1.5 text-sm text-white disabled:opacity-40"
+                      >
+                        开始场景
+                      </button>
+                    </div>
+                  </div>
+
+                  {store.runtimeState.ttrpg?.scene && (
+                    <div className="rounded border border-border bg-bg-base px-3 py-2 text-xs text-text-secondary">
+                      <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                        <span className="font-medium text-text-primary">{store.runtimeState.ttrpg.scene.title}</span>
+                        <span>第 {store.runtimeState.ttrpg.round} 回合</span>
+                        <span>当前：{store.runtimeState.entities[store.runtimeState.ttrpg.activeActorKey ?? '']?.name ?? store.runtimeState.ttrpg.activeActorKey ?? '无'}</span>
+                      </div>
+                      <p className="mt-1 whitespace-pre-wrap">{store.runtimeState.ttrpg.scene.description || '未填写场景描述'}</p>
+                      <div className="mt-1 text-[10px] text-text-muted">
+                        顺序：{store.runtimeState.ttrpg.turnOrder.map(key => store.runtimeState.entities[key]?.name ?? key).join(' → ')}
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="grid gap-3 md:grid-cols-[12rem_1fr]">
+                    <select
+                      value={selectedTtrpgActor?.entityKey ?? ''}
+                      onChange={event => setTtrpgActorKey(event.target.value)}
+                      aria-label="跑团行动者"
+                      disabled={ttrpgActors.length === 0 || ttrpgAI.isStreaming}
+                      className="rounded border border-border bg-bg-base px-2 py-1.5 text-sm text-text-primary disabled:opacity-50"
+                    >
+                      {ttrpgActors.length === 0 && <option value="">暂无角色实体</option>}
+                      {ttrpgActors.map(entity => <option key={entity.entityKey} value={entity.entityKey}>{entity.name}</option>)}
+                    </select>
+                    <textarea
+                      value={ttrpgAction}
+                      onChange={event => setTtrpgAction(event.target.value)}
+                      placeholder="描述当前行动，例如：我检查石门上的潮汐刻痕。"
+                      aria-label="跑团玩家动作"
+                      className="min-h-16 rounded border border-border bg-bg-base px-2 py-1.5 text-sm text-text-primary"
+                    />
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button
+                      disabled={busy || ttrpgAI.isStreaming || !store.runtimeState.ttrpg?.scene || !selectedTtrpgActor || !ttrpgAction.trim() || !isAIConfigReady(resolveRequestConfig(config, { category: 'simulation.ttrpg-gm' }).config)}
+                      onClick={() => void run(generateTtrpgTurn)}
+                      className="flex items-center gap-1.5 rounded bg-accent px-3 py-1.5 text-sm text-white disabled:opacity-40"
+                    >
+                      {ttrpgAI.isStreaming ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
+                      {ttrpgAI.isStreaming ? 'GM 生成中…' : '请求 AI GM'}
+                    </button>
+                    {ttrpgAI.error && <span className="text-xs text-danger">{ttrpgAI.error}</span>}
+                  </div>
+                  {ttrpgAI.output && (
+                    <details className="rounded border border-border bg-bg-base px-3 py-2 text-xs">
+                      <summary className="cursor-pointer text-text-secondary">本次 GM 原始输出</summary>
+                      <pre className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap break-words text-text-muted">{ttrpgAI.output}</pre>
+                    </details>
+                  )}
+                  {ttrpgCandidate && (
+                    <div className="rounded border border-accent/30 bg-bg-base p-3 text-sm">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="font-medium text-text-primary">待记录回合</span>
+                        <span className="text-[10px] text-text-muted">基线事件 #{ttrpgCandidate.baseSequence}</span>
+                      </div>
+                      <p className="mt-2 whitespace-pre-wrap text-text-secondary">{ttrpgCandidate.narrative}</p>
+                      {ttrpgCandidate.check && ttrpgCandidate.outcomes && (
+                        <div className="mt-2 space-y-1 text-xs text-text-secondary">
+                          <div>检定：{ttrpgCandidate.check.skill} · {ttrpgCandidate.check.expression} · DC {ttrpgCandidate.check.dc}</div>
+                          <div>成功：{ttrpgCandidate.outcomes.success}</div>
+                          <div>失败：{ttrpgCandidate.outcomes.failure}</div>
+                        </div>
+                      )}
+                      <div className="mt-3 flex gap-2">
+                        <button
+                          disabled={busy || store.runtimeState.lastSequence !== ttrpgCandidate.baseSequence}
+                          onClick={() => void run(async () => {
+                            await store.recordTtrpgTurn(ttrpgCandidate)
+                            setTtrpgCandidate(null)
+                            setTtrpgAction('')
+                          })}
+                          className="rounded bg-accent px-3 py-1 text-xs text-white disabled:opacity-40"
+                        >
+                          记录回合
+                        </button>
+                        <button
+                          disabled={busy}
+                          onClick={() => setTtrpgCandidate(null)}
+                          className="rounded border border-border px-3 py-1 text-xs text-text-secondary hover:bg-bg-hover disabled:opacity-40"
+                        >
+                          丢弃候选
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="grid gap-2 sm:grid-cols-[8rem_6rem_6rem_auto]">
+                    <input
+                      value={ttrpgSkill}
+                      onChange={event => setTtrpgSkill(event.target.value)}
+                      placeholder="技能"
+                      aria-label="跑团检定技能"
+                      className="rounded border border-border bg-bg-base px-2 py-1.5 text-sm text-text-primary"
+                    />
+                    <input
+                      value={ttrpgExpression}
+                      onChange={event => setTtrpgExpression(event.target.value)}
+                      aria-label="跑团技能表达式"
+                      className="rounded border border-border bg-bg-base px-2 py-1.5 text-sm text-text-primary"
+                    />
+                    <input
+                      value={ttrpgDc}
+                      onChange={event => setTtrpgDc(event.target.value)}
+                      aria-label="跑团检定难度"
+                      className="rounded border border-border bg-bg-base px-2 py-1.5 text-sm text-text-primary"
+                    />
+                    <button
+                      disabled={busy || !store.runtimeState.ttrpg?.scene || !selectedTtrpgActor || !ttrpgSkill.trim()}
+                      onClick={() => void run(() => store.resolveTtrpgCheck({
+                        actorKey: selectedTtrpgActor?.entityKey ?? '',
+                        skill: ttrpgSkill,
+                        expression: ttrpgExpression,
+                        dc: Number(ttrpgDc),
+                      }))}
+                      className="rounded border border-border px-3 py-1.5 text-sm text-text-secondary hover:bg-bg-hover disabled:opacity-40"
+                    >
+                      技能检定
+                    </button>
                   </div>
                 </div>
               </section>
