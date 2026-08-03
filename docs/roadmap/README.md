@@ -317,3 +317,14 @@
 | 协同编辑、账号、云同步、发布发现、社区治理 | PLATFORM-1 | 必须独立完成后端/身份/同步/治理设计后再开工。 |
 
 迁移分类的全量计数、部分完成裁决与防漏规则见 [COMPLETED.md](./COMPLETED.md#迁移审计账本)。CI 通过 `npm run check:roadmap` 锁定历史快照、当前归属和文档链接。
+
+## 七、外部反馈与待开发登记（2026-08-03）
+
+WPS 知识库与 GitHub Issue/PR 的最新审计、合并判断和待开发开发表见
+[EXTERNAL-FEEDBACK-TRIAGE-20260803.md](./EXTERNAL-FEEDBACK-TRIAGE-20260803.md)。
+
+本次登记遵循三个裁决：
+
+- 当前唯一主线仍是 `SIM-1B`；外部 UI/产品候选不得改变 `SIM-1B → SIM-1C → TTRPG-1 → CHATGAME-1 → PRODUCT-1 / PLATFORM-1` 顺序。
+- 已被主线覆盖的反馈不重复登记；关闭 PR 的代码只作为问题定位和设计参考，不作为当前实现来源。
+- `EXT-*` 只是候选待开发项。开工前必须补开工登记卡、三注册表四问、数据生命周期判断、反例测试和验收证据。
