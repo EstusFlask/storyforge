@@ -12,6 +12,8 @@ import {
   type SimulationCheckpoint,
   type SimulationEvent,
   type SimulationEventType,
+  type SimulationNpcEvolutionCandidate,
+  type SimulationNpcEvolutionProposal,
   type SimulationRuntimeState,
   type SimulationSession,
   type SimulationSessionKind,
@@ -127,6 +129,126 @@ function assertRuntimeMemory(value: unknown): RuntimeMemory {
       1,
       Number.MAX_SAFE_INTEGER,
     ),
+  }
+}
+
+export function isNpcRuntimeEntity(entity: RuntimeEntityState): boolean {
+  return entity.kind === 'npc'
+    || (entity.kind === 'character' && (
+      entity.attributes.role === 'npc'
+      || entity.attributes.roleWeight === 'npc'
+    ))
+}
+
+export function parseSimulationNpcEvolutionCandidate(
+  value: unknown,
+): SimulationNpcEvolutionCandidate {
+  if (!isObject(value)) throw new Error('NPC 演进候选必须是对象。')
+  const allowed = new Set([
+    'baseSequence',
+    'entityKey',
+    'locationKey',
+    'lifecycleStatus',
+    'attributes',
+    'narrative',
+    'memory',
+    'rationale',
+  ])
+  const unknown = Object.keys(value).filter(key => !allowed.has(key))
+  if (unknown.length) throw new Error(`NPC 演进候选包含未知字段: ${unknown.join(', ')}`)
+  const entityKey = String(value.entityKey ?? '').trim()
+  if (!entityKey || entityKey.length > 160) throw new Error('NPC 演进候选缺少有效实体。')
+  const rawLocationKey = value.locationKey
+  if (rawLocationKey != null && typeof rawLocationKey !== 'string') {
+    throw new Error('NPC 演进地点必须是稳定实体键或 null。')
+  }
+  const locationKey = typeof rawLocationKey === 'string'
+    ? rawLocationKey.trim() || null
+    : null
+  const lifecycleStatus = String(value.lifecycleStatus ?? '')
+  if (!RUNTIME_LIFECYCLE_STATUSES.includes(lifecycleStatus as RuntimeEntityState['lifecycleStatus'])) {
+    throw new Error(`未知 NPC 生命周期状态: ${lifecycleStatus}`)
+  }
+  const narrative = String(value.narrative ?? '').trim()
+  if (narrative.length > 20_000) throw new Error('NPC 演进叙事过长。')
+  const rationale = String(value.rationale ?? '').trim()
+  if (rationale.length > 4_000) throw new Error('NPC 演进理由过长。')
+  let memory: SimulationNpcEvolutionCandidate['memory'] = null
+  if (value.memory != null) {
+    if (!isObject(value.memory)) throw new Error('NPC 演进记忆必须是对象或 null。')
+    const status = String(value.memory.status ?? '')
+    const content = String(value.memory.content ?? '').trim()
+    if (!['known', 'mistaken', 'forgotten'].includes(status)) {
+      throw new Error(`未知 NPC 记忆状态: ${status}`)
+    }
+    if (!content || content.length > 4_000) throw new Error('NPC 演进记忆内容无效。')
+    memory = { status: status as RuntimeMemory['status'], content }
+  }
+  return {
+    baseSequence: assertFiniteInteger(
+      value.baseSequence,
+      'NPC 演进基线序号',
+      0,
+      Number.MAX_SAFE_INTEGER,
+    ),
+    entityKey,
+    locationKey,
+    lifecycleStatus: lifecycleStatus as RuntimeEntityState['lifecycleStatus'],
+    attributes: assertRuntimeAttributes(value.attributes ?? {}),
+    narrative,
+    memory,
+    rationale,
+  }
+}
+
+function prepareNpcEvolution(
+  state: SimulationRuntimeState,
+  candidate: SimulationNpcEvolutionCandidate,
+): RuntimeEntityState {
+  const existing = state.entities[candidate.entityKey]
+  if (!existing) throw new Error(`要演进的运行时实体不存在: ${candidate.entityKey}`)
+  if (!isNpcRuntimeEntity(existing)) throw new Error('只有运行时 NPC 可以进入演进候选。')
+  if (candidate.locationKey != null) {
+    const location = state.entities[candidate.locationKey]
+    if (!location || location.kind !== 'location') {
+      throw new Error(`NPC 演进目标地点不存在: ${candidate.locationKey}`)
+    }
+  }
+  const next = assertRuntimeEntity({
+    ...existing,
+    locationKey: candidate.locationKey,
+    lifecycleStatus: candidate.lifecycleStatus,
+    attributes: { ...existing.attributes, ...candidate.attributes },
+  })
+  const attributesChanged = Object.entries(candidate.attributes)
+    .some(([key, child]) => existing.attributes[key] !== child)
+  if (
+    next.locationKey === existing.locationKey
+    && next.lifecycleStatus === existing.lifecycleStatus
+    && !attributesChanged
+    && !candidate.narrative
+    && !candidate.memory
+  ) throw new Error('NPC 演进候选没有任何状态或经历变化。')
+  return next
+}
+
+function applyNpcEvolution(
+  state: SimulationRuntimeState,
+  candidate: SimulationNpcEvolutionCandidate,
+  eventSequence: number,
+): void {
+  state.entities[candidate.entityKey] = prepareNpcEvolution(state, candidate)
+  if (candidate.narrative) {
+    state.narratives.push({ eventSequence, text: candidate.narrative })
+  }
+  if (candidate.memory) {
+    state.memories.push({
+      id: `npc-evolution:${eventSequence}:${candidate.entityKey}`,
+      subjectKey: candidate.entityKey,
+      status: candidate.memory.status,
+      content: candidate.memory.content,
+      sourceEventSequence: eventSequence,
+    })
   }
 }
 
@@ -246,6 +368,42 @@ export function applySimulationEvent(
       state.narratives.push({ eventSequence: event.sequence, text })
       break
     }
+    case 'npc.evolution.proposed': {
+      const candidate = parseSimulationNpcEvolutionCandidate(payload.candidate)
+      if (candidate.baseSequence !== state.lastSequence) {
+        throw new Error('NPC 演进候选基线与当前事件序号不一致。')
+      }
+      prepareNpcEvolution(state, candidate)
+      break
+    }
+    case 'npc.evolution.accepted': {
+      const proposalSequence = assertFiniteInteger(
+        payload.proposalSequence,
+        'NPC 演进提案序号',
+        1,
+        event.sequence - 1,
+      )
+      if (state.lastSequence !== proposalSequence) {
+        throw new Error('NPC 演进候选已过期，请重新生成。')
+      }
+      const candidate = parseSimulationNpcEvolutionCandidate(payload.candidate)
+      if (candidate.baseSequence !== proposalSequence - 1) {
+        throw new Error('NPC 演进候选与提案序号不一致。')
+      }
+      applyNpcEvolution(state, candidate, event.sequence)
+      break
+    }
+    case 'npc.evolution.rejected': {
+      assertFiniteInteger(
+        payload.proposalSequence,
+        'NPC 演进提案序号',
+        1,
+        event.sequence - 1,
+      )
+      const reason = String(payload.reason ?? '').trim()
+      if (reason.length > 1_000) throw new Error('NPC 演进拒绝原因过长。')
+      break
+    }
   }
   state.lastSequence = event.sequence
   return state
@@ -343,6 +501,7 @@ async function appendBuiltEvent(
   build: (input: {
     session: SimulationSession
     state: SimulationRuntimeState
+    events: SimulationEvent[]
     sequence: number
   }) => Omit<SimulationEvent, 'id' | 'projectId' | 'worldGroupId' | 'sessionId' | 'sequence' | 'createdAt'>,
 ): Promise<SimulationEvent> {
@@ -357,7 +516,7 @@ async function appendBuiltEvent(
       const events = await readSessionEvents(session)
       const state = replaySimulationEvents(parseSimulationState(session.initialStateJson), events)
       const sequence = state.lastSequence + 1
-      const built = build({ session, state, sequence })
+      const built = build({ session, state, events, sequence })
       const event: SimulationEvent = {
         projectId: session.projectId,
         worldGroupId: session.worldGroupId ?? null,
@@ -384,6 +543,13 @@ export async function appendSimulationEvent(input: {
   if (input.type === 'random.resolved') {
     throw new Error('随机判定只能通过 resolveSimulationDice() 生成。')
   }
+  if (
+    input.type === 'npc.evolution.proposed'
+    || input.type === 'npc.evolution.accepted'
+    || input.type === 'npc.evolution.rejected'
+  ) {
+    throw new Error('NPC 演进事件只能通过提案、确认或拒绝 API 生成。')
+  }
   return appendBuiltEvent(input.sessionId, ({ sequence }) => {
     let payload = input.payload
     if (
@@ -404,6 +570,106 @@ export async function appendSimulationEvent(input: {
       actorKey: input.actorKey ?? null,
       targetKey: input.targetKey ?? null,
       payloadJson: JSON.stringify(payload),
+    }
+  })
+}
+
+function proposalSequenceFromResolution(event: SimulationEvent): number | null {
+  if (
+    event.type !== 'npc.evolution.accepted'
+    && event.type !== 'npc.evolution.rejected'
+  ) return null
+  const payload = parseEventPayload(event)
+  return Number.isInteger(payload.proposalSequence) ? Number(payload.proposalSequence) : null
+}
+
+export function readPendingNpcEvolutionProposals(
+  events: readonly SimulationEvent[],
+): SimulationNpcEvolutionProposal[] {
+  const resolved = new Set(events.flatMap(event => {
+    const sequence = proposalSequenceFromResolution(event)
+    return sequence == null ? [] : [sequence]
+  }))
+  return events
+    .filter(event => event.type === 'npc.evolution.proposed' && !resolved.has(event.sequence))
+    .map(event => ({
+      ...parseSimulationNpcEvolutionCandidate(parseEventPayload(event).candidate),
+      proposalSequence: event.sequence,
+    }))
+    .sort((left, right) => left.proposalSequence - right.proposalSequence)
+}
+
+export async function appendNpcEvolutionProposal(input: {
+  sessionId: number
+  candidate: SimulationNpcEvolutionCandidate
+}): Promise<SimulationEvent> {
+  const candidate = parseSimulationNpcEvolutionCandidate(input.candidate)
+  return appendBuiltEvent(input.sessionId, ({ session, state }) => {
+    if (session.kind !== 'npc-evolution') {
+      throw new Error('NPC 演进候选只能写入 NPC 演进会话。')
+    }
+    if (candidate.baseSequence !== state.lastSequence) {
+      throw new Error('NPC 演进生成期间会话已变化，请重新生成。')
+    }
+    prepareNpcEvolution(state, candidate)
+    return {
+      type: 'npc.evolution.proposed',
+      actorKey: candidate.entityKey,
+      targetKey: candidate.entityKey,
+      payloadJson: JSON.stringify({ candidate }),
+    }
+  })
+}
+
+export async function acceptNpcEvolutionProposal(input: {
+  sessionId: number
+  proposalSequence: number
+}): Promise<SimulationEvent> {
+  return appendBuiltEvent(input.sessionId, ({ session, state, events }) => {
+    if (session.kind !== 'npc-evolution') throw new Error('当前不是 NPC 演进会话。')
+    const proposal = events.find(event => (
+      event.sequence === input.proposalSequence
+      && event.type === 'npc.evolution.proposed'
+    ))
+    if (!proposal) throw new Error('NPC 演进提案不存在。')
+    if (events.some(event => proposalSequenceFromResolution(event) === input.proposalSequence)) {
+      throw new Error('NPC 演进提案已经处理。')
+    }
+    if (state.lastSequence !== input.proposalSequence) {
+      throw new Error('NPC 演进候选已过期，请重新生成。')
+    }
+    const candidate = parseSimulationNpcEvolutionCandidate(parseEventPayload(proposal).candidate)
+    return {
+      type: 'npc.evolution.accepted',
+      actorKey: candidate.entityKey,
+      targetKey: candidate.entityKey,
+      payloadJson: JSON.stringify({ proposalSequence: input.proposalSequence, candidate }),
+    }
+  })
+}
+
+export async function rejectNpcEvolutionProposal(input: {
+  sessionId: number
+  proposalSequence: number
+  reason?: string
+}): Promise<SimulationEvent> {
+  const reason = input.reason?.trim() ?? ''
+  if (reason.length > 1_000) throw new Error('NPC 演进拒绝原因过长。')
+  return appendBuiltEvent(input.sessionId, ({ session, events }) => {
+    if (session.kind !== 'npc-evolution') throw new Error('当前不是 NPC 演进会话。')
+    const proposal = events.find(event => (
+      event.sequence === input.proposalSequence
+      && event.type === 'npc.evolution.proposed'
+    ))
+    if (!proposal) throw new Error('NPC 演进提案不存在。')
+    if (events.some(event => proposalSequenceFromResolution(event) === input.proposalSequence)) {
+      throw new Error('NPC 演进提案已经处理。')
+    }
+    return {
+      type: 'npc.evolution.rejected',
+      actorKey: proposal.actorKey ?? null,
+      targetKey: proposal.targetKey ?? null,
+      payloadJson: JSON.stringify({ proposalSequence: input.proposalSequence, reason }),
     }
   })
 }

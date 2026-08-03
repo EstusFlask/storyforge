@@ -1,6 +1,6 @@
 # SIM-1 共享互动运行时设计
 
-> 状态：SIM-1B Canon 冻结快照与运行时投影已交付（2026-08-03）；下一阶段 SIM-1C
+> 状态：SIM-1C NPC 演进候选闭环已交付（2026-08-03）；后续进入 TTRPG-1 / CHATGAME-1 产品层
 > 依赖：WORLD-1 / CANON-1 / AGENT-1 / FLOW-2
 > 服务对象：NPC 演进、单机跑团、角色聊天与文字冒险
 
@@ -100,8 +100,18 @@ SIM-1 不是新的创作 Canon，也不是某一种游戏的私有存档。它�
 
 ### SIM-1C · NPC 演进
 
-- 在运行时快照上推演 NPC 位置/状态/经历；作者主档保持只读。
-- AI 候选与确定性状态变化分离，成本预算和打开补算可见。
+- 用户故事：作者在 NPC 演进会话中选择一个冻结 NPC，输入一次演进意图，查看 AI 生成的结构化候选，
+  明确确认或拒绝；确认后运行时位置、生命周期、标量状态、叙事经历和可选记忆通过事件回放生效。
+- 读：只使用 `CONTEXT_SOURCES.simulationRuntime`，读取当前项目/世界的冻结 Canon 快照和事件回放状态；
+  不重新读取可变角色、地点或物品表。上下文源校验快照 hash，并限制来源、实体、记忆和最近叙事的数量。
+- 写：AI 没有 Canon 写字段，因此不新增 `FIELD_REGISTRY` 或 `AdoptionSchema`；AI 输出先由严格 parser
+  验证，再由 `appendNpcEvolutionProposal()` 写入 `npc.evolution.proposed`，作者确认后由确定性 reducer
+  写入 `npc.evolution.accepted`。拒绝写入 `npc.evolution.rejected`，候选因其它事件追加而过期时不可确认。
+- 表：不新增表；继续使用已登记的 `simulationSessions`、`simulationEvents` 和现有检查点生命周期。
+- 安全边界：只允许 `kind=npc` 或明确标注 NPC 角色进入候选；地点必须是当前运行时已有 `location` 实体；
+  不允许新实体、角色类型/来源 ID、Canon 字段或对象/数组型运行时属性；主档、物品流水和正文始终不变。
+- 验收：候选在刷新后仍可见；确认/拒绝均可回放并从待处理列表消失；并发追加会使候选失效；跨项目/世界上下文为空；
+  UI、事件 reducer、parser 和真实 IndexedDB 隔离项目均有回归证据。
 
 SIM-1B 完成共同引擎与作者 Canon 的只读发布边界，不等于跑团或聊天产品已经完成。
 SIM-1C、TTRPG 与聊天只能读取冻结快照和运行时实体，不得重新直连可变作者表。

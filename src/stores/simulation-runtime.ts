@@ -2,11 +2,15 @@ import { create } from 'zustand'
 import { db } from '../lib/db/schema'
 import {
   appendSimulationEvent,
+  acceptNpcEvolutionProposal,
+  appendNpcEvolutionProposal,
   branchSimulationSession,
   createSimulationCheckpoint,
   createSimulationSession,
   deleteSimulationSession,
   readSimulationState,
+  readPendingNpcEvolutionProposals,
+  rejectNpcEvolutionProposal,
   resolveSimulationDice,
   verifySimulationCheckpoint,
 } from '../lib/simulation/runtime'
@@ -15,6 +19,8 @@ import {
   EMPTY_SIMULATION_STATE,
   type SimulationCheckpoint,
   type SimulationEvent,
+  type SimulationNpcEvolutionCandidate,
+  type SimulationNpcEvolutionProposal,
   type SimulationRuntimeState,
   type SimulationSession,
   type SimulationSessionKind,
@@ -26,6 +32,7 @@ interface SimulationRuntimeStore {
   sessions: SimulationSession[]
   selectedSessionId: number | null
   events: SimulationEvent[]
+  pendingProposals: SimulationNpcEvolutionProposal[]
   checkpoints: SimulationCheckpoint[]
   runtimeState: SimulationRuntimeState
   loading: boolean
@@ -42,6 +49,9 @@ interface SimulationRuntimeStore {
   }): Promise<number>
   advanceTime(amount: number): Promise<void>
   recordNarrative(text: string): Promise<void>
+  proposeNpcEvolution(candidate: SimulationNpcEvolutionCandidate): Promise<void>
+  acceptNpcEvolution(proposalSequence: number): Promise<void>
+  rejectNpcEvolution(proposalSequence: number, reason?: string): Promise<void>
   rollDice(expression: string): Promise<void>
   checkpoint(name: string): Promise<void>
   branch(title: string): Promise<number>
@@ -57,7 +67,12 @@ async function readSessionDetails(sessionId: number) {
   ])
   events.sort((left, right) => left.sequence - right.sequence)
   checkpoints.sort((left, right) => right.createdAt - left.createdAt)
-  return { events, checkpoints, runtimeState }
+  return {
+    events,
+    checkpoints,
+    runtimeState,
+    pendingProposals: readPendingNpcEvolutionProposals(events),
+  }
 }
 
 export const useSimulationRuntimeStore = create<SimulationRuntimeStore>((set, get) => {
@@ -74,6 +89,7 @@ export const useSimulationRuntimeStore = create<SimulationRuntimeStore>((set, ge
     sessions: [],
     selectedSessionId: null,
     events: [],
+    pendingProposals: [],
     checkpoints: [],
     runtimeState: structuredClone(EMPTY_SIMULATION_STATE),
     loading: false,
@@ -95,6 +111,7 @@ export const useSimulationRuntimeStore = create<SimulationRuntimeStore>((set, ge
         if (selectedSessionId != null) await refreshSelected()
         else set({
           events: [],
+          pendingProposals: [],
           checkpoints: [],
           runtimeState: structuredClone(EMPTY_SIMULATION_STATE),
         })
@@ -108,6 +125,7 @@ export const useSimulationRuntimeStore = create<SimulationRuntimeStore>((set, ge
       if (sessionId == null) {
         set({
           events: [],
+          pendingProposals: [],
           checkpoints: [],
           runtimeState: structuredClone(EMPTY_SIMULATION_STATE),
         })
@@ -159,6 +177,27 @@ export const useSimulationRuntimeStore = create<SimulationRuntimeStore>((set, ge
         type: 'narrative.recorded',
         payload: { text },
       })
+      await refreshSelected()
+    },
+
+    proposeNpcEvolution: async candidate => {
+      const sessionId = get().selectedSessionId
+      if (sessionId == null) throw new Error('请先选择运行时会话。')
+      await appendNpcEvolutionProposal({ sessionId, candidate })
+      await refreshSelected()
+    },
+
+    acceptNpcEvolution: async proposalSequence => {
+      const sessionId = get().selectedSessionId
+      if (sessionId == null) throw new Error('请先选择运行时会话。')
+      await acceptNpcEvolutionProposal({ sessionId, proposalSequence })
+      await refreshSelected()
+    },
+
+    rejectNpcEvolution: async (proposalSequence, reason) => {
+      const sessionId = get().selectedSessionId
+      if (sessionId == null) throw new Error('请先选择运行时会话。')
+      await rejectNpcEvolutionProposal({ sessionId, proposalSequence, reason })
       await refreshSelected()
     },
 

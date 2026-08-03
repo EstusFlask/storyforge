@@ -6,6 +6,7 @@ import { DialogProvider } from '../../src/components/shared/Dialog'
 import { db } from '../../src/lib/db/schema'
 import { EMPTY_SIMULATION_STATE, type Project } from '../../src/lib/types'
 import { useSimulationRuntimeStore } from '../../src/stores/simulation-runtime'
+import { appendNpcEvolutionProposal, createSimulationSession, readSimulationState } from '../../src/lib/simulation/runtime'
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true
 
@@ -157,6 +158,56 @@ describe('SIM-1B · 互动运行时 UI', () => {
     })
     await viWaitFor(() => expect(db.simulationSessions.count()).resolves.toBe(1))
     expect(await db.simulationEvents.count()).toBe(2)
+  })
+
+  it('NPC 演进候选刷新后仍可从面板确认并应用', async () => {
+    const session = await createSimulationSession({
+      projectId: project.id!,
+      kind: 'npc-evolution',
+      title: 'NPC 演进线',
+      initialState: {
+        ...structuredClone(EMPTY_SIMULATION_STATE),
+        entities: {
+          'npc:gatekeeper': {
+            entityKey: 'npc:gatekeeper',
+            kind: 'npc',
+            sourceId: null,
+            name: '守门人',
+            locationKey: null,
+            lifecycleStatus: 'active',
+            attributes: { role: 'npc', mood: '平静' },
+          },
+        },
+      },
+    })
+    await appendNpcEvolutionProposal({
+      sessionId: session.id!,
+      candidate: {
+        baseSequence: 0,
+        entityKey: 'npc:gatekeeper',
+        locationKey: null,
+        lifecycleStatus: 'active',
+        attributes: { mood: '警惕' },
+        narrative: '守门人开始留意城外动静。',
+        memory: null,
+        rationale: '作者确认后的运行时状态变化。',
+      },
+    })
+
+    await act(async () => {
+      root.render(createElement(
+        DialogProvider,
+        null,
+        createElement(SimulationRuntimePanel, { project, worldGroupId: null }),
+      ))
+      await new Promise(resolve => setTimeout(resolve, 0))
+    })
+    await viWaitFor(() => expect(host.textContent).toContain('NPC 演进候选'))
+    await viWaitFor(() => expect(host.textContent).toContain('守门人开始留意城外动静。'))
+    await clickWhenEnabled(host, '确认并应用')
+    await viWaitFor(() => expect((readSimulationState(session.id!)).then(state => state.lastSequence)).resolves.toBe(2))
+    expect((await readSimulationState(session.id!)).entities['npc:gatekeeper'].attributes.mood).toBe('警惕')
+    expect(host.textContent).toContain('暂无待确认候选')
   })
 })
 

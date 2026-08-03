@@ -266,7 +266,7 @@ export interface AdoptResult {
   skipped: { reason: string; data: unknown }[]
 }
 
-export type ContextSourceScope = 'project' | 'world' | 'node' | 'chapter' | 'manual'
+export type ContextSourceScope = 'project' | 'world' | 'node' | 'chapter' | 'manual' | 'runtime'
 
 export interface AssembleContextInput {
   projectId: number
@@ -294,6 +294,8 @@ export interface AssembleContextInput {
   subjectCharacterName?: string
   /** INV-1: 按角色过滤物品流水/持有投影。 */
   characterId?: number | null
+  /** SIM-1C: 冻结运行时会话，供 NPC 演进候选只读上下文使用。 */
+  simulationSessionId?: number
   /** CM-1: 本次明确参与增量融合的碎片；由 inspirationWorkspace source 读取。 */
   inspirationFragmentIds?: string[]
   /** CM-1: 单世界与多世界各自维护最近确认版本。 */
@@ -322,6 +324,7 @@ export interface ContextSource {
   /** NS-1: assembleContext 总预算裁剪时不得整段删除。 */
   protectedFromTrim?: boolean
   requiresWorldGroupId?: boolean
+  requiresSimulationSessionId?: boolean
   requiresOutlineNodeId?: boolean
   requiresChapterId?: boolean
   /** 规划尚未创建正文 Chapter 时，允许用 outlineNodeId 作为规范章序边界。 */

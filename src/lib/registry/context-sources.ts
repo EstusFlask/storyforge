@@ -60,6 +60,47 @@ import {
   readAgentWorldGroups,
 } from '../agent/read-sources'
 import { readRagSelectionContext } from '../retrieval/rag-library'
+import { parseSimulationCanonSnapshot, verifySimulationCanonSnapshot } from '../simulation/canon-snapshot'
+import { readSimulationState } from '../simulation/runtime'
+import type { AssembleContextInput } from './types'
+
+async function readSimulationRuntimeContext(input: AssembleContextInput): Promise<string> {
+  if (input.simulationSessionId == null) return ''
+  const session = await db.simulationSessions.get(input.simulationSessionId)
+  if (!session || session.projectId !== input.projectId) return ''
+  if (input.worldGroupId !== undefined && (session.worldGroupId ?? null) !== (input.worldGroupId ?? null)) return ''
+  const snapshot = parseSimulationCanonSnapshot(session.canonSnapshotJson)
+  if (!snapshot || !(await verifySimulationCanonSnapshot(snapshot))) {
+    throw new Error('冻结运行时 Canon 快照校验失败。')
+  }
+  const state = await readSimulationState(session.id!)
+  const sourceLines = snapshot.sources.slice(0, 120).map(source => (
+    `- ${source.sourceKey}｜${source.kind}｜${source.name}${source.summary ? `｜${source.summary}` : ''}`
+  ))
+  const entityLines = Object.values(state.entities).slice(0, 120).map(entity => {
+    const attributes = Object.entries(entity.attributes)
+      .slice(0, 16)
+      .map(([key, value]) => `${key}=${String(value)}`)
+      .join(', ')
+    return `- ${entity.entityKey}｜${entity.kind}｜${entity.name}｜地点=${entity.locationKey ?? '无'}｜生命周期=${entity.lifecycleStatus}${attributes ? `｜属性=${attributes}` : ''}`
+  })
+  const memoryLines = state.memories.slice(-80).map(memory => (
+    `- ${memory.subjectKey}｜${memory.status}｜${memory.content}`
+  ))
+  const narrativeLines = state.narratives.slice(-40).map(item => `- #${item.eventSequence} ${item.text}`)
+  return [
+    `【冻结运行时会话】${session.title}｜类型=${session.kind}｜逻辑时间=${state.clock}｜事件序号=${state.lastSequence}`,
+    `【冻结世界】${snapshot.worldLabel}｜worldGroupId=${snapshot.worldGroupId ?? 'null'}｜快照=${snapshot.snapshotHash.slice(0, 16)}`,
+    '【冻结 Canon 来源（只读）】',
+    ...(sourceLines.length ? sourceLines : ['- 暂无冻结来源']),
+    '【运行时实体（只读）】',
+    ...(entityLines.length ? entityLines : ['- 暂无运行时实体']),
+    '【运行时记忆（只读）】',
+    ...(memoryLines.length ? memoryLines : ['- 暂无记忆']),
+    '【最近运行时叙事（只读）】',
+    ...(narrativeLines.length ? narrativeLines : ['- 暂无叙事']),
+  ].join('\n')
+}
 
 async function readWorldview(projectId: number, worldGroupId?: number | null): Promise<Worldview | null> {
   const rows = await db.worldviews.where('projectId').equals(projectId).toArray()
@@ -550,6 +591,17 @@ async function readCharacterPassages(projectId: number, name?: string, worldGrou
 }
 
 export const CONTEXT_SOURCES: ContextSource[] = [
+  {
+    // SIM-1C: NPC 演进只读冻结快照与事件回放，不读取可变 Canon 表。
+    key: 'simulationRuntime',
+    label: '冻结运行时状态',
+    scope: 'runtime',
+    layer: 'L0',
+    budgetTokens: 8000,
+    protectedFromTrim: true,
+    requiresSimulationSessionId: true,
+    read: readSimulationRuntimeContext,
+  },
   {
     // AGENT-1: 对话副驾只读工具使用的紧凑项目摘要，不返回整表原始数据。
     key: 'projectStatus',

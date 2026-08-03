@@ -11,6 +11,8 @@ import {
   ScrollText,
   Snowflake,
   Trash2,
+  Loader2,
+  Sparkles,
 } from 'lucide-react'
 import {
   loadSimulationCanonCandidates,
@@ -25,6 +27,14 @@ import type {
 } from '../../lib/types'
 import { useSimulationRuntimeStore } from '../../stores/simulation-runtime'
 import { useDialog } from '../shared/Dialog'
+import { useAIStream } from '../../hooks/useAIStream'
+import { createAISessionKey } from '../../stores/ai-generation-session'
+import { useAIConfigStore } from '../../stores/ai-config'
+import { resolveRequestConfig } from '../../lib/ai/client'
+import { isAIConfigReady } from '../../lib/ai/config-readiness'
+import { assembleContext } from '../../lib/registry/assemble-context'
+import { buildNpcEvolutionPrompt, parseNpcEvolutionCandidate } from '../../lib/simulation/npc-evolution'
+import { isNpcRuntimeEntity } from '../../lib/simulation/runtime'
 
 const KIND_LABELS: Record<SimulationSessionKind, string> = {
   sandbox: '沙盒',
@@ -84,6 +94,9 @@ export default function SimulationRuntimePanel(props: {
   const [snapshotVerified, setSnapshotVerified] = useState<boolean | null>(null)
   const [busy, setBusy] = useState(false)
   const [actionError, setActionError] = useState('')
+  const [npcTargetKey, setNpcTargetKey] = useState('')
+  const [npcRequest, setNpcRequest] = useState('')
+  const { config } = useAIConfigStore()
 
   useEffect(() => {
     void store.load(props.project.id!, props.worldGroupId)
@@ -116,6 +129,16 @@ export default function SimulationRuntimePanel(props: {
     () => selected ? parseSimulationCanonSnapshot(selected.canonSnapshotJson) : null,
     [selected],
   )
+  const npcAI = useAIStream(createAISessionKey(
+    props.project.id!,
+    'simulation.npc-evolution',
+    selected?.id ?? 'none',
+  ))
+  const npcEntities = useMemo(
+    () => Object.values(store.runtimeState.entities).filter(isNpcRuntimeEntity),
+    [store.runtimeState.entities],
+  )
+  const selectedNpc = npcEntities.find(entity => entity.entityKey === npcTargetKey) ?? npcEntities[0] ?? null
   const candidatesByKind = useMemo(() => Object.fromEntries(SOURCE_KIND_ORDER.map(kind => [
     kind,
     canonCandidates.filter(candidate => candidate.kind === kind),
@@ -131,6 +154,13 @@ export default function SimulationRuntimePanel(props: {
     }
     return () => { cancelled = true }
   }, [selectedSnapshot])
+
+  useEffect(() => {
+    if (selected?.kind !== 'npc-evolution') return
+    if (!npcTargetKey || !npcEntities.some(entity => entity.entityKey === npcTargetKey)) {
+      setNpcTargetKey(npcEntities[0]?.entityKey ?? '')
+    }
+  }, [selected?.kind, selected?.id, npcEntities, npcTargetKey])
 
   const toggleSource = (sourceKey: string) => {
     setSelectedSourceKeys(current => {
@@ -151,6 +181,33 @@ export default function SimulationRuntimePanel(props: {
     } finally {
       setBusy(false)
     }
+  }
+
+  const generateNpcEvolution = async () => {
+    if (!selected || selected.kind !== 'npc-evolution' || !selectedNpc) return
+    const runtimeContext = await assembleContext({
+      projectId: props.project.id!,
+      worldGroupId: selected.worldGroupId ?? null,
+      simulationSessionId: selected.id,
+      sourceKeys: ['simulationRuntime'],
+      provider: config.provider,
+      model: config.model,
+    })
+    const baseSequence = store.runtimeState.lastSequence
+    const draft = await npcAI.start(buildNpcEvolutionPrompt({
+      authorRequest: npcRequest,
+      targetEntityKey: selectedNpc.entityKey,
+      targetName: selectedNpc.name,
+      runtimeContext: runtimeContext.text,
+    }), undefined, { category: 'simulation.npc-evolution', projectId: props.project.id! })
+    if (!draft.trim()) return
+    const candidate = parseNpcEvolutionCandidate({
+      draft,
+      state: store.runtimeState,
+      targetEntityKey: selectedNpc.entityKey,
+      baseSequence,
+    })
+    await store.proposeNpcEvolution(candidate)
   }
 
   return (
@@ -367,6 +424,105 @@ export default function SimulationRuntimePanel(props: {
                 <p className="px-4 py-5 text-sm text-text-muted">旧会话没有结构化冻结审计。</p>
               )}
             </section>
+
+            {selected.kind === 'npc-evolution' && (
+              <section className="rounded-lg border border-accent/30 bg-bg-surface">
+                <div className="flex items-center justify-between gap-3 border-b border-border px-4 py-3">
+                  <div>
+                    <div className="flex items-center gap-2 text-sm font-semibold text-text-primary">
+                      <Sparkles className="h-4 w-4 text-accent" />
+                      NPC 演进候选
+                    </div>
+                    <p className="mt-1 text-xs text-text-muted">AI 只生成候选；确认后才追加运行时事件，不会修改 Canon。</p>
+                  </div>
+                  {npcAI.tokenUsage && (
+                    <span className="text-[10px] text-text-muted">
+                      {npcAI.tokenUsage.inputTokens + npcAI.tokenUsage.outputTokens} tokens
+                    </span>
+                  )}
+                </div>
+                <div className="space-y-3 p-4">
+                  <div className="grid gap-3 md:grid-cols-[14rem_1fr]">
+                    <select
+                      value={selectedNpc?.entityKey ?? ''}
+                      onChange={event => setNpcTargetKey(event.target.value)}
+                      aria-label="选择 NPC"
+                      disabled={npcEntities.length === 0 || npcAI.isStreaming}
+                      className="rounded border border-border bg-bg-base px-2 py-1.5 text-sm text-text-primary disabled:opacity-50"
+                    >
+                      {npcEntities.length === 0 && <option value="">暂无 NPC 实体</option>}
+                      {npcEntities.map(entity => (
+                        <option key={entity.entityKey} value={entity.entityKey}>{entity.name}</option>
+                      ))}
+                    </select>
+                    <textarea
+                      value={npcRequest}
+                      onChange={event => setNpcRequest(event.target.value)}
+                      placeholder="描述这次 NPC 演进，例如：经历冲突后变得警惕，并转移到已冻结的地点。"
+                      className="min-h-20 rounded border border-border bg-bg-base px-2 py-1.5 text-sm text-text-primary"
+                    />
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <button
+                      disabled={busy || npcAI.isStreaming || !selectedNpc || npcRequest.trim().length < 2 || !isAIConfigReady(resolveRequestConfig(config, { category: 'simulation.npc-evolution' }).config)}
+                      onClick={() => void run(generateNpcEvolution)}
+                      className="flex items-center gap-1.5 rounded bg-accent px-3 py-1.5 text-sm text-white disabled:opacity-40"
+                    >
+                      {npcAI.isStreaming ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
+                      {npcAI.isStreaming ? '生成中…' : '生成演进候选'}
+                    </button>
+                    {npcAI.error && <span className="text-xs text-danger">{npcAI.error}</span>}
+                  </div>
+                  {npcAI.output && (
+                    <details className="rounded border border-border bg-bg-base px-3 py-2 text-xs">
+                      <summary className="cursor-pointer text-text-secondary">本次 AI 原始输出</summary>
+                      <pre className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap break-words text-text-muted">{npcAI.output}</pre>
+                    </details>
+                  )}
+                  <div className="space-y-2">
+                    <div className="text-xs font-medium text-text-secondary">待作者确认（已持久化）</div>
+                    {store.pendingProposals.map(proposal => {
+                      const stale = store.runtimeState.lastSequence > proposal.proposalSequence
+                      return (
+                        <div key={proposal.proposalSequence} className="rounded border border-border bg-bg-base p-3 text-sm">
+                          <div className="flex items-center gap-2">
+                            <span className="font-medium text-text-primary">{proposal.entityKey}</span>
+                            <span className={stale ? 'text-danger' : 'text-accent'}>{stale ? '已过期' : `提案 #${proposal.proposalSequence}`}</span>
+                          </div>
+                          <div className="mt-2 grid gap-1 text-xs text-text-secondary sm:grid-cols-2">
+                            <span>地点：{proposal.locationKey ?? '不变/无'}</span>
+                            <span>生命周期：{proposal.lifecycleStatus}</span>
+                            <span className="sm:col-span-2">属性：{Object.entries(proposal.attributes).map(([key, value]) => `${key}=${String(value)}`).join('、') || '无'}</span>
+                            {proposal.narrative && <span className="sm:col-span-2">经历：{proposal.narrative}</span>}
+                            {proposal.memory && <span className="sm:col-span-2">记忆：{proposal.memory.content}（{proposal.memory.status}）</span>}
+                            {proposal.rationale && <span className="sm:col-span-2">理由：{proposal.rationale}</span>}
+                          </div>
+                          <div className="mt-3 flex gap-2">
+                            <button
+                              disabled={busy || stale}
+                              onClick={() => void run(() => store.acceptNpcEvolution(proposal.proposalSequence))}
+                              className="rounded bg-accent px-3 py-1 text-xs text-white disabled:opacity-40"
+                            >
+                              确认并应用
+                            </button>
+                            <button
+                              disabled={busy}
+                              onClick={() => void run(() => store.rejectNpcEvolution(proposal.proposalSequence, '作者拒绝该候选'))}
+                              className="rounded border border-border px-3 py-1 text-xs text-text-secondary hover:bg-bg-hover disabled:opacity-40"
+                            >
+                              拒绝
+                            </button>
+                          </div>
+                        </div>
+                      )
+                    })}
+                    {store.pendingProposals.length === 0 && (
+                      <p className="text-xs text-text-muted">暂无待确认候选</p>
+                    )}
+                  </div>
+                </div>
+              </section>
+            )}
 
             <section className="grid gap-3 lg:grid-cols-2">
               <div className="space-y-3 rounded-lg border border-border bg-bg-surface p-4">

@@ -91,6 +91,26 @@ export interface RuntimeMemory {
   sourceEventSequence: number
 }
 
+export interface SimulationNpcEvolutionCandidate {
+  /** 生成候选时的运行时序号；确认前若会话已继续追加事件则必须重新生成。 */
+  baseSequence: number
+  entityKey: string
+  locationKey: string | null
+  lifecycleStatus: RuntimeLifecycleStatus
+  /** 只允许写入运行时实体的标量属性补丁。 */
+  attributes: RuntimeAttributes
+  narrative: string
+  memory: {
+    status: RuntimeMemoryStatus
+    content: string
+  } | null
+  rationale: string
+}
+
+export interface SimulationNpcEvolutionProposal extends SimulationNpcEvolutionCandidate {
+  proposalSequence: number
+}
+
 export interface SimulationRuntimeState {
   version: 1
   clock: number
@@ -128,6 +148,9 @@ export const SIMULATION_EVENT_TYPES = [
   'memory.recorded',
   'random.resolved',
   'narrative.recorded',
+  'npc.evolution.proposed',
+  'npc.evolution.accepted',
+  'npc.evolution.rejected',
 ] as const
 export type SimulationEventType = typeof SIMULATION_EVENT_TYPES[number]
 
