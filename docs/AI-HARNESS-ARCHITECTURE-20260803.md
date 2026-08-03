@@ -163,13 +163,16 @@ StoryForge 的 `AGENTS.md + CONTEXT-ROUTING.md + 三注册表检查器` 已经�
 
 ### 2.6 Kimi K3：可迁移的是环境与验证原则，不是模型内部层级
 
-Kimi K3 官方 [Quickstart](https://platform.kimi.ai/docs/guide/kimi-k3-quickstart) 和 [技术报告](https://arxiv.org/abs/2607.24653) 把多个不同层级放在一起；以下模型/训练结论对应报告 §2、§4，AET 和多 Harness 对应 §4.2.6–§4.2.7，AgentENV 生命周期对应 §5.3.2：
+Kimi K3 官方 [发布仓库](https://github.com/MoonshotAI/Kimi-K3/tree/7c5be9599120d7993748de66a76128614f15f210)、[Quickstart](https://platform.kimi.ai/docs/guide/kimi-k3-quickstart) 和 [技术报告](https://github.com/MoonshotAI/Kimi-K3/blob/7c5be9599120d7993748de66a76128614f15f210/k3_tech_report.pdf) 把多个不同层级放在一起；模型与训练对应报告 §2、§4.1，可配置多 Harness 对应 §4.2.1，AET 与多 scaffold 评测对应 §4.2.6–§4.2.7，AgentENV 生命周期对应 §5.3.2，消息和工具协议对应 Appendix F：
 
 - 模型内部：Kimi Delta Attention、Attention Residual、Stable LatentMoE、1M context；
 - 训练：长任务 RL、不同 reasoning effort、工具调用和多教师蒸馏；
 - Harness 环境：tool interfaces、system prompts、context strategies、skills、memories、subagents；
 - sandbox：AgentENV 的隔离、pause/resume、fork、snapshot 和增量 checkpoint；
-- 任务与验证：initial state、constrained goal、action space、budget、independent verifier、public/hidden verifier。
+- 任务与验证：initial state、constrained goal、action space、budget、independent verifier、public/hidden verifier；
+- Provider 协议：preserved thinking history、动态 tool declaration、reasoning effort，以及为保持历史 KV cache 稳定而区分 global/one-shot/input options。
+
+固定 commit 的仓库树只有 README、LICENSE、logo 和技术报告 PDF，不包含 Kimi Code、统一白盒 RL 环境或 AgentENV 的实现。README 推荐 Kimi Code CLI 是官方使用建议，不是可审计的 Harness 源码；本文只把报告披露的机制当作设计证据。
 
 因此，“K3 是多层架构”不能直接推导出 StoryForge 也应建立模型层、Agent 层、子 Agent 层和记忆层。真正可迁移的工程原则是：
 
@@ -178,6 +181,9 @@ Kimi K3 官方 [Quickstart](https://platform.kimi.ai/docs/guide/kimi-k3-quicksta
 3. public verifier 给诊断反馈，hidden verifier 检查未见场景，降低 reward hacking 和评测过拟合。
 4. 长任务需要环境状态与模型状态分离保存，支持 pause/resume、fork 和 snapshot。
 5. 同一模型在不同 Harness 下成绩不同，模型升级不能替代 Harness 回归。
+6. Executor 必须显式协商 provider 的 history、reasoning effort、动态工具和 cache 能力；不能假定所有 OpenAI/Anthropic-compatible API 的多轮协议相同。
+7. K3 要求多轮/工具调用原样回传 assistant message，包括 `reasoning_content` 和 `tool_calls`。这类内容若为恢复所必需，只能作为有版本、有保留/删除策略的 opaque provider state；不得进入用户可见对话、通用 run ledger、长期记忆或语义评测证据。
+8. 动态加载工具只能从 `RunContract` 已授权的工具全集中按需声明，不能扩大权限或绕过 Tool Registry；context cache 也必须绑定 source/tool/contract/provider hash，cache hit 不能绕过 freshness 检查。
 
 K3 报告中的具体 benchmark 来自不同 Harness、部分内部任务和特定评测配置，本文不把它们当作 StoryForge 效果承诺。
 
@@ -583,6 +589,27 @@ Executor 只编排现有执行原语：
 
 Harness 不直接查询 IndexedDB 业务表拼 prompt，也不直接更新业务记录。
 
+Provider 差异由 Executor adapter 处理，不写进领域 prompt。每次 attempt 在执行前解析并记录不可变的 execution binding：`provider`、`model`、`adapterVersion`、`capabilityProfileHash`、`reasoningEffort` 和 `toolSchemaSetHash`。建议 capability profile 至少声明：
+
+```ts
+interface ProviderCapabilityProfileV1 {
+  version: 1
+  historyMode:
+    | 'content-only'
+    | 'preserved-assistant-message'
+    | 'provider-managed'
+  reasoningEfforts: Array<'low' | 'medium' | 'high' | 'max'>
+  dynamicToolDeclaration: boolean
+  contextCache: 'none' | 'explicit' | 'provider-managed'
+}
+```
+
+- workflow 依赖的能力不满足时在发起调用前 fail-closed，不靠 prompt 猜测兼容性；
+- 动态 tool declaration 只优化已授权工具的披露时点，实际调用仍逐次经过 contract 和 Tool Registry 校验；
+- preserved assistant message 若是 resume 必需状态，checkpoint 只保存受生命周期治理的 opaque adapter payload 或引用；普通事件只记录 hash、大小、协议版本和调用统计；
+- cache key 至少绑定 provider/model/adapter/chat-template 版本、contract generation、context manifest、工具 schema 集和 reasoning effort；任一绑定项变化即 miss；
+- trace、导出和调试 UI 默认不展示隐藏 reasoning，语义 verifier 也不得把它当作作品事实或完成证据。
+
 ### 6.6 Verifier 与 receipt
 
 Verifier 按以下顺序执行：
@@ -676,7 +703,7 @@ fan-out 必须同时满足：
 - `conversationId` 若存在，映射到 `agentConversations`，缺失时置 null，不能因此丢 run；
 - 具体 Dexie 版本使用实施时的下一个可用版本，不在本文预占版本号，避免与并行 SIM 工作冲突；
 - 迁移只建空表，不追认历史 conversation 为可恢复 run，也不伪造旧 receipt；
-- 大体积、可重建 model transcript 是否导出在 H0 用真实体积测量后决定；contract、状态、receipt 和必要证据必须可移植。
+- 大体积、可重建 model transcript 和 opaque provider state 是否导出，在 H0 用真实体积、恢复需求与敏感性测量后决定；必须显式登记保留、导出和删除策略，不能随 run event 静默进入备份。contract、状态、receipt 和必要证据必须可移植。
 
 ### 6.9 与前台对话的关系
 
@@ -687,7 +714,7 @@ AgentRun          1 ---- n    AgentRunCheckpoint
 AgentEvent(candidate/confirmation) <-- optional refs --> AgentRunEvent
 ```
 
-前台仍展示简洁消息、计划、候选、确认和错误。调试/高级视图按需展示 run 状态、步数、预算、来源和 verifier，不把内部思维链或敏感全文暴露给 UI。
+前台仍展示简洁消息、计划、候选、确认和错误。调试/高级视图按需展示 run 状态、步数、预算、来源和 verifier，不把内部思维链或敏感全文暴露给 UI。provider 为续轮所需的 preserved thinking 仍属于传输状态，不因本地保存而升级为产品记忆或可展示 trace。
 
 ### 6.10 提示词与上下文瘦身
 
@@ -696,7 +723,7 @@ AgentEvent(candidate/confirmation) <-- optional refs --> AgentRunEvent
 1. `AGENTS.md` 继续作为地图；任务专项规则只在 `CONTEXT-ROUTING` 命中后加载。
 2. 系统 prompt 只保留角色、全局不变量、动作协议和终止原则；领域细节由 interface/schema/rubric 表达。
 3. 工具描述只写用途、关键参数、返回/失败语义，不重复系统 prompt 的安全规则。
-4. 复杂任务先给 tool catalog 的紧凑索引，具体 source/skill/tool schema 延迟到选中后加载。
+4. 复杂任务先给 tool catalog 的紧凑索引，具体 source/skill/tool schema 延迟到选中后加载；provider 支持动态 tool declaration 时也只能声明 contract 已授权子集。
 5. examples 只保留边界案例；常规调用靠 schema 和错误信息引导。
 6. “丰富参考”优先给现有代码、测试、fixture、页面结构和 rubric，不用更多自然语言复述同一规则。
 7. 自动记忆只允许两类：显式确认的作者偏好和可删除的 run 恢复摘要。作品事实继续归 Canon/ledger，不能由 auto-memory 改写。
@@ -785,6 +812,7 @@ CHIRON 四类信息可映射到现有结构：
 - 先接只读 Runner 和一个单领域 `GenerationNode`，再接主 Agent；
 - 从 append-only event 投影 run 状态，支持刷新/关闭后的 resume；
 - checkpoint 保存投影和 hash，不重复手稿全文；
+- checkpoint 按 capability profile 保存最小 provider 恢复状态；对 `preserved-assistant-message` provider 验证 reasoning/tool-call round-trip，但不把隐藏 reasoning 投影到 ledger/UI；
 - conversation event 与 run event 建立可选引用。
 
 **数据与迁移**
@@ -824,7 +852,7 @@ CHIRON 四类信息可映射到现有结构：
 
 **非范围**
 
-- 不做自动批量修稿，不让语义 verifier 写业务表，不做隐藏思维链存档。
+- 不做自动批量修稿，不让语义 verifier 写业务表，不做面向产品、调试或长期记忆的隐藏思维链归档；provider 协议强制的 preserved thinking 只按 6.5 作为 opaque transport state 处理。
 
 **反例测试**
 
@@ -909,6 +937,7 @@ CHIRON 四类信息可映射到现有结构：
 
 - 建立 system prompt、tool descriptions、skills/source bundles 的 ownership map；
 - 去除重复规则，按需加载 source/tool schema；
+- 建立 provider capability matrix，对 dynamic tool declaration、context cache 和 history mode 做版本化配对 A/B；
 - 为 prompt/tool/skill 添加 version、eval、lastVerifiedAt 和 freshness lint；
 - 在相同模型、预算和 fixtures 上做旧/新上下文配对 A/B。
 
@@ -918,6 +947,7 @@ CHIRON 四类信息可映射到现有结构：
 - 关键结果指标相对 H4 baseline 非劣，预设容忍度不超过 2 个百分点；
 - future/wrong-world、hard precision、恢复和写入边界不得退化；
 - source omission/trim 有完整 manifest，不能靠静默丢上下文换 token；
+- cache key 任一绑定 hash 变化时失效率 100%，动态声明之外的工具调用拒绝率 100%；
 - freshness lint 能在 CI 阻止无 owner、无版本或过期关键说明。
 
 **回滚**
@@ -1058,7 +1088,7 @@ src/lib/evals/long-consistency/            # H4 taxonomy/offset/artifact 扩展
 7. Anthropic, [Harnessing Claude's intelligence](https://claude.com/blog/harnessing-claudes-intelligence)。
 8. Anthropic, [Harness design for long-running application development](https://www.anthropic.com/engineering/harness-design-long-running-apps)。
 9. OpenAI, [Harness Engineering](https://openai.com/zh-Hans-CN/index/harness-engineering/)。
-10. Kimi, [Kimi K3 Quickstart](https://platform.kimi.ai/docs/guide/kimi-k3-quickstart) 与 [Kimi K3 Technical Report](https://arxiv.org/abs/2607.24653)。
+10. Kimi, [Kimi K3 官方发布仓库](https://github.com/MoonshotAI/Kimi-K3/tree/7c5be9599120d7993748de66a76128614f15f210)（`7c5be959`）、[Quickstart](https://platform.kimi.ai/docs/guide/kimi-k3-quickstart) 与 [Technical Report PDF](https://github.com/MoonshotAI/Kimi-K3/blob/7c5be9599120d7993748de66a76128614f15f210/k3_tech_report.pdf)。
 11. [AgentENV](https://github.com/kvcache-ai/AgentENV/tree/281a8bd0f0aac20aab441573fa6a444073e63d23)（`281a8bd0`）。
 
 ### 14.2 Agent、记忆与接口论文
