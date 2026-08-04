@@ -48,7 +48,7 @@
 | 6 | **AUTHOR-1 长篇编辑与作者风格智能** | 提高长篇改稿、个人风格保持和既有作品续写能力 | `EDITOR-5` 与 `FB-5` 高级校准已完成；`FB-4` 已完成可行性审查并在来源/版本/剧情记忆地基就绪前设计暂缓，TipTap 长期优化独立登记 | 实体引用安全重映射；批量改稿预览/快照/撤销；有界改稿样本与作者确认式风格校准；原稿续写不以低保真摘要冒充剧情事实 | **CURRENT SCOPE COMPLETE；FB-4 DESIGN DEFERRED（2026-07-25）** |
 | 7 | **IDEA-1 灵感与参考资料演化** | 让灵感和参考资料持续融合、更新、追溯 | `CM-1` 与参考分析版本演化已完成；剧情连续性胶囊仍唯一归未来 `FB-4A` | 灵感与参考分析均具备来源、版本、差异和作者确认边界；失败分析不覆盖当前上下文，原文断点不进入便携备份 | **CURRENT SCOPE COMPLETE（2026-07-25）** |
 | 8 | **AGENT-1 对话副驾与 Agent 团队** | 用一个主 Agent 对话组合调用现有能力，不让用户选择分 Agent | 单一主对话、五领域闭环、六角色路由、领域上下文与团队预算已完成；27.2b“整理本章”形成六域可恢复证据候选；27.2c 一致性 Agent 以零 token 后台守卫和显式单次 fast/deep 检测提供只读报告；下一单位先落 SIM-1 共享运行时，再接 NPC 演进 | Tool Registry 薄封装；前台写入必确认；后台默认只读；Canon 负责校验 | **27.2c CONSISTENCY AGENT COMPLETE（2026-07-27）** |
-| 9 | **FLOW-2 自由节点模式** | 让作者自由选择具体设定、前文和中间产物，组成可见可保存的创作数据流 | 独立图/运行、六类节点、动态端口、精确记录/字段选择、资料权重/预算、真实召回、局部运行和确认写回已完成；继续模板、条件与脏下游 | 节点模式独立于分步骤 UI/数据模型；底层复用三注册表、共享 AI、Canon 与 adoption；图、策略和运行可恢复、可导出 | **CORE + RAG-1 COMPLETE（2026-07-26）** |
+| 9 | **FLOW-2 技术底座 / FLOW-3 领域节点创作** | 把分步骤模式的世界、故事、角色、大纲、正文和连续性能力转化为可自由拆分、连接与控制的完整节点创作系统 | FLOW-2 独立图、运行证据、动态端口、预算、精确资料和确认写回保留；FLOW-3 新增领域节点库、智能前后置创建、语义端口、稳定 Canon 绑定、节点级 AI/API 档案、批量结构生成、脏下游和分步骤同源同步 | 节点模式与分步骤模式能力同源、交互并列；读写与生命周期只走三注册表；不复制第二份世界观/角色/大纲/正文；旧图兼容 | **FLOW-2 ENGINE COMPLETE；FLOW-3 DESIGN COMPLETE，NEXT 3A（2026-08-04）** |
 | 10 | **SIM-1 世界模拟与互动运行时** | 为跑团、角色聊天、文字游戏和 NPC 演进提供共同状态与事件地基 | SIM-1A 共同运行时核心；SIM-1B 作者选择式 Canon 冻结、来源 hash 审计、角色/地点/物品投影、实体查看和检查点恢复分支；SIM-1C NPC 演进候选、作者确认/拒绝、过期保护和事件回放已交付 | 创作 Canon 与运行时状态分层；模拟不得污染作者原稿；状态变化可回放、可分支；AI 只能产候选 | **SIM-1C COMPLETE（2026-08-03）；NEXT TTRPG-1** |
 | 11 | **TTRPG-1 跑团与战役主持** | 在 StoryForge 世界中进行单机跑团、规则判定和长期战役 | `TTRPG-1A` 单机战役主持已完成；后续 `1B` 规则与遭遇、`1C` 长期战役、`1D` 多人协作 | AI 叙事与确定性判定分离；第一阶段不做联网多人；战役日志不冒充创作 Canon | **1A COMPLETE；NEXT 1B；依赖 SIM-1** |
 | 12 | **CHATGAME-1 角色聊天与冒险** | 提供类似酒馆的角色聊天、长期记忆、多角色房间和文字冒险 | 单角色聊天、用户身份/场景、分支、长期记忆、多角色调度、地点/物品/能力与冒险选择 | 角色知识边界真实；运行时人格/状态不自动反写角色主档；游戏事件只能候选式回流创作层 | **DEPENDENT；SIM-1，后续 PLATFORM-1** |
@@ -81,10 +81,12 @@
     过期保护、确定性 reducer、刷新/分支回放和 NPC 演进 UI 已收口；不新增表、不写回 Canon。
 15. ✅ TTRPG-1A 单机战役主持（2026-08-03）：场景、回合顺序、动作、技能检定、AI GM 成功/失败候选、
     原子回合记录和会话续接已收口；下一单元是 TTRPG-1B 规则与遭遇。
-16. ⏳ TTRPG-1B → TTRPG-1C → CHATGAME-1 → PRODUCT-1 / PLATFORM-1：互动产品继续复用 SIM 状态层，
+16. ⏳ FLOW-3A → 3B → 3C → 3D → 3E → 3F：先完成合同/迁移和三注册表守卫，再按世界故事、
+    角色大纲正文、连续性网络、大图效率和兼容发布逐个垂直功能交付；半成品默认隐藏。
+17. ⏳ TTRPG-1B → TTRPG-1C → CHATGAME-1 → PRODUCT-1 / PLATFORM-1：互动产品继续复用 SIM 状态层，
     不为跑团和角色聊天各建一套引擎。
 
-### FLOW-1 历史实验 / FLOW-2 当前交付卡
+### FLOW-1 历史实验 / FLOW-2 技术底座 / FLOW-3 当前设计卡
 
 - **历史结论**：FLOW-1 的 `PromptWorkflow.graph` 只证明了 DAG 校验和画布交互可行，
   不是独立节点产品；它继续留在提示词管理中服务分步骤配方。
@@ -102,6 +104,13 @@
 - **自动化证据**：`R-FLOW2-free-node-mode` 与 `R-RAG1-visible-library` 覆盖图校验、局部拓扑、
   精确资料、实际输入输出、稳定键往返、确认写回、派生索引和删除边界；完整证据见
   `VISUAL-WORKFLOW-DESIGN.md` 与 `RAG-VISIBLE-LIBRARY.md`。
+- **FLOW-3 方向纠正**：节点模式与分步骤模式完成同一套小说创作任务，只改变编排方式；
+  世界、人文、地理、故事、角色、大纲、正文、伏笔、地点、状态、物品和事实成为可拆分领域
+  节点，并提供 ComfyUI 式前后置智能创建和节点级 AI 配置。
+- **三注册表边界**：FLOW-3 不新增平行数据权威；节点目录只引用
+  `CONTEXT_SOURCES / FIELD_REGISTRY / AdoptionSchema / PROJECT_TABLES` 和现有 Prompt/use-case，
+  首版继续复用 `nodeFlows/nodeRuns`。详细产品、交互、数据、迁移、施工与验收方案见
+  `NODE-AUTHORING-MODE-DESIGN.md`。
 
 ### AGENT-1 当前阶段交付证据
 
@@ -296,7 +305,7 @@
 | 动态故事规划 | [`CHARACTER-DRIVEN-WORKSPACE-DESIGN.md`](../CHARACTER-DRIVEN-WORKSPACE-DESIGN.md)、[`CHARACTER-REVISION-WORKFLOW-DESIGN.md`](../CHARACTER-REVISION-WORKFLOW-DESIGN.md) |
 | 作者工具 / 灵感 | [`ENTITY-RENAME-DESIGN.md`](../ENTITY-RENAME-DESIGN.md)、[`STYLE-CALIBRATION-DESIGN.md`](../STYLE-CALIBRATION-DESIGN.md)、[`FB4-CONTINUATION-FEASIBILITY.md`](../FB4-CONTINUATION-FEASIBILITY.md)、[`INCREMENTAL-INSPIRATION-DESIGN.md`](../INCREMENTAL-INSPIRATION-DESIGN.md) |
 | Agent | [`AI-COPILOT-DESIGN.md`](../AI-COPILOT-DESIGN.md) |
-| 节点模式 | [`VISUAL-WORKFLOW-DESIGN.md`](../VISUAL-WORKFLOW-DESIGN.md) |
+| 节点模式 | [`NODE-AUTHORING-MODE-DESIGN.md`](../NODE-AUTHORING-MODE-DESIGN.md)（FLOW-3 当前方案）、[`VISUAL-WORKFLOW-DESIGN.md`](../VISUAL-WORKFLOW-DESIGN.md)（FLOW-1/2 历史与技术证据） |
 | 跑团 / 角色聊天 / 互动运行时 | [`INTERACTIVE-RUNTIME-ROADMAP.md`](../INTERACTIVE-RUNTIME-ROADMAP.md) |
 
 设计文档提供方案细节，`README.md` 提供当前归属和施工顺序；两者冲突时，先停止开发并回到 `CLAUDE.md`、`MASTER-BLUEPRINT.md` 和本路线图裁决。
