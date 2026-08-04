@@ -109,6 +109,11 @@ export interface Project {
   /** 是否启用多世界模式（默认 false） */
   enableMultiWorld?: boolean
 
+  /** 世界引擎公开编号。旧项目缺失时由项目 store 生成并持久化。 */
+  worldCode?: string
+  /** 世界引擎当前发布版本，首版为 1。 */
+  worldVersion?: number
+
   /** Phase 34：把作者确认的正文修炼进度注入后续 AI 写作；默认关闭。 */
   includeCultivationProgressInAI?: boolean
 

@@ -5,7 +5,7 @@ async function openCleanHome(page: Page) {
   await page.addInitScript(() => {
     localStorage.setItem('storyforge_guide_completed', 'e2e')
   })
-  await page.goto('./')
+  await page.goto('./projects')
   await expect(page.getByRole('heading', { name: /开始.*第一部.*小说/ })).toBeVisible()
 }
 
@@ -22,6 +22,54 @@ function sidebarButton(page: Page, name: string) {
     .getByText(name, { exact: true })
     .locator('xpath=ancestor::button[1]')
 }
+
+test('产品综合首页提供并列功能入口和真实世界基座', async ({ page }) => {
+  await page.addInitScript(() => {
+    localStorage.setItem('storyforge_guide_completed', 'e2e')
+  })
+  await page.goto('./')
+  await expect(page.getByRole('heading', { name: '你的创作与游玩空间', exact: true })).toBeVisible()
+  await expect(page.getByRole('navigation', { name: '产品页签' })).toBeVisible()
+  await expect(page.getByRole('button', { name: '世界引擎', exact: true })).toBeVisible()
+  await expect(page.getByRole('button', { name: '分步骤写作', exact: true })).toBeVisible()
+  await expect(page.getByRole('button', { name: '节点创作', exact: true })).toBeVisible()
+  await expect(page.getByRole('button', { name: '跑团', exact: true })).toBeVisible()
+  await expect(page.getByRole('button', { name: '角色聊天', exact: true })).toBeVisible()
+  await expect(page.getByRole('button', { name: '文字游戏', exact: true })).toBeVisible()
+})
+
+test('产品综合首页可从零创建世界引擎并分配稳定编号', async ({ page }) => {
+  await page.addInitScript(() => {
+    localStorage.setItem('storyforge_guide_completed', 'e2e')
+  })
+  await page.goto('./')
+  await page.getByRole('banner').getByRole('button', { name: '新建', exact: true }).click()
+  await page.getByRole('button', { name: /世界引擎.*从零创建/ }).click()
+  await page.getByPlaceholder('例如：潮汐之后').fill('潮汐之后')
+  await page.getByPlaceholder('一句话描述这个世界或作品').fill('海平面吞没大陆后的漂浮聚落。')
+  await page.getByRole('button', { name: '创建世界引擎', exact: true }).click()
+
+  await expect(page.getByRole('heading', { name: '世界引擎', exact: true })).toBeVisible()
+  await expect(page.locator('.sf-worlds-featured').getByRole('heading', { name: '潮汐之后', exact: true })).toBeVisible()
+  await expect(page.locator('.sf-world-code-large')).toHaveText(/W-[A-Z0-9]+-[A-Z0-9]+ · v1/)
+  await expect(page.getByText('世界引擎已启用', { exact: true })).toBeVisible()
+
+  await page.getByRole('button', { name: '回到总览', exact: true }).click()
+  await page.getByRole('banner').getByRole('button', { name: '新建', exact: true }).click()
+  await page.getByRole('button', { name: /世界引擎.*从零创建/ }).click()
+  await page.getByPlaceholder('例如：潮汐之后').fill('群星港')
+  await page.getByRole('button', { name: '创建世界引擎', exact: true }).click()
+  await expect(page.locator('.sf-worlds-featured').getByRole('heading', { name: '群星港', exact: true })).toBeVisible()
+
+  await page.getByRole('button', { name: '回到总览', exact: true }).click()
+  const tidalWorld = page.locator('.sf-world-card').filter({ hasText: '潮汐之后' })
+  await expect(tidalWorld).toHaveCount(1)
+  await tidalWorld.click()
+  await expect(page.locator('.sf-worlds-featured').getByRole('heading', { name: '潮汐之后', exact: true })).toBeVisible()
+
+  await page.getByRole('banner').getByRole('button', { name: '搜索世界', exact: true }).click()
+  await expect(page.getByRole('heading', { name: '选择一个世界', exact: true })).toBeVisible()
+})
 
 async function openSidebarLeaf(page: Page, branchName: string, leafName: string) {
   const leaf = sidebarButton(page, leafName)

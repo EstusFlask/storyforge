@@ -88,11 +88,13 @@ function eventSummary(type: string, payloadJson: string): string {
 export default function SimulationRuntimePanel(props: {
   project: Project
   worldGroupId: number | null
+  /** 产品入口锁定为单一会话类型；旧工作区不传时仍管理全部互动存档。 */
+  sessionKind?: SimulationSessionKind
 }) {
   const store = useSimulationRuntimeStore()
   const dialog = useDialog()
   const [newTitle, setNewTitle] = useState('')
-  const [newKind, setNewKind] = useState<SimulationSessionKind>('sandbox')
+  const [newKind, setNewKind] = useState<SimulationSessionKind>(props.sessionKind ?? 'sandbox')
   const [dice, setDice] = useState('1d20')
   const [timeAmount, setTimeAmount] = useState('1')
   const [narrative, setNarrative] = useState('')
@@ -141,9 +143,17 @@ export default function SimulationRuntimePanel(props: {
     return () => { cancelled = true }
   }, [props.project.id, props.worldGroupId])
 
+  const visibleSessions = useMemo(
+    () => store.sessions.filter(session => (
+      session.projectId === props.project.id
+      && (session.worldGroupId ?? null) === props.worldGroupId
+      && (!props.sessionKind || session.kind === props.sessionKind)
+    )),
+    [props.project.id, props.sessionKind, props.worldGroupId, store.sessions],
+  )
   const selected = useMemo(
-    () => store.sessions.find(session => session.id === store.selectedSessionId) ?? null,
-    [store.selectedSessionId, store.sessions],
+    () => visibleSessions.find(session => session.id === store.selectedSessionId) ?? null,
+    [store.selectedSessionId, visibleSessions],
   )
   const selectedSnapshot = useMemo(
     () => selected ? parseSimulationCanonSnapshot(selected.canonSnapshotJson) : null,
@@ -173,10 +183,32 @@ export default function SimulationRuntimePanel(props: {
   const selectedTtrpgActor = ttrpgActors.find(entity => entity.entityKey === ttrpgActorKey)
     ?? ttrpgActors.find(entity => entity.entityKey === store.runtimeState.ttrpg?.activeActorKey)
     ?? ttrpgActors[0]
+  const {
+    loading: sessionsLoading,
+    projectId: loadedProjectId,
+    selectedSessionId,
+    select: selectSession,
+    worldGroupId: loadedWorldGroupId,
+  } = store
   const candidatesByKind = useMemo(() => Object.fromEntries(SOURCE_KIND_ORDER.map(kind => [
     kind,
     canonCandidates.filter(candidate => candidate.kind === kind),
   ])) as Record<SimulationCanonSourceKind, SimulationCanonCandidate[]>, [canonCandidates])
+
+  useEffect(() => {
+    if (sessionsLoading || loadedProjectId !== props.project.id || loadedWorldGroupId !== props.worldGroupId) return
+    if (visibleSessions.some(session => session.id === selectedSessionId)) return
+    void selectSession(visibleSessions[0]?.id ?? null)
+  }, [
+    loadedProjectId,
+    loadedWorldGroupId,
+    props.project.id,
+    props.worldGroupId,
+    selectedSessionId,
+    selectSession,
+    sessionsLoading,
+    visibleSessions,
+  ])
 
   useEffect(() => {
     let cancelled = false
@@ -290,7 +322,9 @@ export default function SimulationRuntimePanel(props: {
             <h2 className="font-semibold text-text-primary">互动运行时</h2>
           </div>
           <p className="text-xs leading-relaxed text-text-muted">
-            NPC、跑团和角色聊天共用的独立存档。这里的事件不会反写小说 Canon。
+            {props.sessionKind
+              ? `${KIND_LABELS[props.sessionKind]}使用独立存档，事件不会反写小说 Canon。`
+              : 'NPC、跑团和角色聊天共用的独立存档。这里的事件不会反写小说 Canon。'}
           </p>
         </div>
 
@@ -301,16 +335,26 @@ export default function SimulationRuntimePanel(props: {
             placeholder="新会话名称"
             className="w-full rounded border border-border bg-bg-surface px-2 py-1.5 text-sm text-text-primary"
           />
-          <select
-            value={newKind}
-            onChange={event => setNewKind(event.target.value as SimulationSessionKind)}
-            aria-label="运行时类型"
-            className="w-full rounded border border-border bg-bg-surface px-2 py-1.5 text-sm text-text-primary"
-          >
-            {Object.entries(KIND_LABELS).map(([value, label]) => (
-              <option key={value} value={value}>{label}</option>
-            ))}
-          </select>
+          {props.sessionKind ? (
+            <div
+              data-testid="runtime-kind-lock"
+              className="flex w-full items-center gap-2 rounded border border-border bg-bg-surface px-2 py-1.5 text-sm text-text-primary"
+            >
+              <Dices className="h-3.5 w-3.5 text-accent" />
+              {KIND_LABELS[props.sessionKind]}存档
+            </div>
+          ) : (
+            <select
+              value={newKind}
+              onChange={event => setNewKind(event.target.value as SimulationSessionKind)}
+              aria-label="运行时类型"
+              className="w-full rounded border border-border bg-bg-surface px-2 py-1.5 text-sm text-text-primary"
+            >
+              {Object.entries(KIND_LABELS).map(([value, label]) => (
+                <option key={value} value={value}>{label}</option>
+              ))}
+            </select>
+          )}
           <fieldset className="space-y-2 border-t border-border pt-2">
             <legend className="flex items-center gap-1.5 px-1 text-xs font-medium text-text-secondary">
               <Snowflake className="h-3.5 w-3.5" />
@@ -357,7 +401,7 @@ export default function SimulationRuntimePanel(props: {
               await store.createSession({
                 projectId: props.project.id!,
                 worldGroupId: props.worldGroupId,
-                kind: newKind,
+                kind: props.sessionKind ?? newKind,
                 title: newTitle,
                 sourceKeys: [...selectedSourceKeys],
               })
@@ -372,7 +416,7 @@ export default function SimulationRuntimePanel(props: {
         </div>
 
         <div className="space-y-1">
-          {store.sessions.map(session => (
+          {visibleSessions.map(session => (
             <button
               key={session.id}
               onClick={() => void store.select(session.id!)}
@@ -388,8 +432,10 @@ export default function SimulationRuntimePanel(props: {
               </div>
             </button>
           ))}
-          {!store.loading && store.sessions.length === 0 && (
-            <p className="py-6 text-center text-xs text-text-muted">还没有互动存档</p>
+          {!store.loading && visibleSessions.length === 0 && (
+            <p className="py-6 text-center text-xs text-text-muted">
+              {props.sessionKind ? `还没有${KIND_LABELS[props.sessionKind]}存档` : '还没有互动存档'}
+            </p>
           )}
         </div>
       </aside>
@@ -397,7 +443,9 @@ export default function SimulationRuntimePanel(props: {
       <main className="min-w-0 flex-1 overflow-y-auto p-6">
         {!selected ? (
           <div className="flex h-full items-center justify-center text-sm text-text-muted">
-            创建一个沙盒会话，开始验证共享运行时。
+            {props.sessionKind
+              ? `创建一个${KIND_LABELS[props.sessionKind]}会话，开始新的互动存档。`
+              : '创建一个沙盒会话，开始验证共享运行时。'}
           </div>
         ) : (
           <div className="mx-auto max-w-5xl space-y-5">

@@ -260,6 +260,44 @@ describe('SIM-1B · 互动运行时 UI', () => {
     await viWaitFor(() => expect((readSimulationState(session.id!)).then(state => state.ttrpg?.checks.length)).resolves.toBe(1))
     expect(host.textContent).toContain('检定：感知')
   })
+
+  it('产品跑团入口只显示跑团存档，不会自动打开已有沙盒会话', async () => {
+    const ttrpg = await createSimulationSession({
+      projectId: project.id!,
+      kind: 'ttrpg',
+      title: '产品跑团战役',
+      seed: 'product-ttrpg',
+      initialState: structuredClone(EMPTY_SIMULATION_STATE),
+    })
+    const sandbox = await createSimulationSession({
+      projectId: project.id!,
+      kind: 'sandbox',
+      title: '不应出现在跑团页的沙盒',
+      seed: 'product-sandbox',
+      initialState: structuredClone(EMPTY_SIMULATION_STATE),
+    })
+    await db.simulationSessions.update(sandbox.id!, { updatedAt: Date.now() + 1_000 })
+
+    await act(async () => {
+      root.render(createElement(
+        DialogProvider,
+        null,
+        createElement(SimulationRuntimePanel, {
+          project,
+          worldGroupId: null,
+          sessionKind: 'ttrpg',
+        }),
+      ))
+      await new Promise(resolve => setTimeout(resolve, 0))
+    })
+
+    await viWaitFor(() => expect(useSimulationRuntimeStore.getState().selectedSessionId).toBe(ttrpg.id))
+    await viWaitFor(() => expect(host.textContent).toContain('单机战役主持'))
+    expect(host.textContent).toContain('产品跑团战役')
+    expect(host.textContent).not.toContain('不应出现在跑团页的沙盒')
+    expect(host.querySelector('[data-testid="runtime-kind-lock"]')?.textContent).toContain('跑团存档')
+    expect(host.querySelector('select[aria-label="运行时类型"]')).toBeNull()
+  })
 })
 
 async function viWaitFor(assertion: () => void | Promise<void>) {
