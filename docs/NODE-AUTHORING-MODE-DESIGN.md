@@ -1,6 +1,6 @@
 # FLOW-3 · 领域节点创作模式产品与实现方案
 
-> 状态：FLOW-3A/3B 已实现，FLOW-3C 同源同步基础实施中（2026-08-04）
+> 状态：FLOW-3A/3B 已实现，FLOW-3C 领域执行核心已接入（2026-08-04）；节点 UI/E2E、连续性和大图工程仍在后续阶段。
 >
 > 产品定义：分步骤模式与节点模式完成同一套小说创作任务；前者提供固定引导，后者提供
 > 可视、自由、可追溯的编排。
@@ -641,8 +641,8 @@ FLOW-2 旧图仍可由 `parseAuthoringGraph()` 迁移为 version=2。
 
 ### FLOW-3C · 角色、大纲与正文垂直闭环
 
-当前施工状态：同步基础已开始；角色复合节点、大纲/正文 parser/workshop/gate 的节点级深度闭环
-尚未完成。
+当前施工状态：角色复合节点、卷纲/章纲、细纲和正文节点已接入既有 parser、scope、gate、CAS 与正式采纳；
+节点级多候选可选择。节点 UI/E2E 主路径、多候选比较体验和批量差异仍待补齐。
 
 目标：从世界和故事节点一路生成到可编辑正文。
 
@@ -653,6 +653,12 @@ FLOW-2 旧图仍可由 `parseAuthoringGraph()` 迁移为 version=2。
 - 卷数、章节数、每卷章节数、生成数量等有界批量控制。
 - 复用角色、大纲、细纲和正文 parser/workshop/gate。
 - 多候选比较、批量差异预览、作者选择和原子写回。
+
+当前实现证据：`src/lib/node-authoring/domain-execution.ts` 只负责领域分派；角色复用
+`character-copilot` 的结构化候选与 roster 快照，大纲复用 `outline-copilot` 的父卷作用域/标题重复
+保护，细纲复用 `adoptChapterOutlineWorkshopResult` 的场景与 FK 过滤，正文复用 `prose-copilot` 的
+目标章节选择、空白章保护、CAS 和检索块重建。`R-FLOW3C-domain-specialized-execution` 覆盖四类节点的
+候选解析与采纳。
 
 完成边界：从已有或空白世界出发，生成角色 → 卷纲 → 章纲 → 章节正文；每一步输入可见，
 任一步拒绝均不污染 Canon，不同节点可使用不同 AI 配置档案。

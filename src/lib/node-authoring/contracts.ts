@@ -243,9 +243,46 @@ export interface AuthoringCandidate {
   variants?: string[]
   semantic: AuthoringSemantic
   signature?: AuthoringRunSignature
+  /** 领域候选的结构化目标与快照；只保存稳定语义，正文仍留在 Canon 表。 */
+  domain?: AuthoringCandidateDomain
   errors?: string[]
   createdAt: number
 }
+
+export type AuthoringCandidateDomain =
+  | {
+      kind: 'character'
+      rosterSnapshot: string
+    }
+  | {
+      kind: 'outline'
+      mode: 'volumes' | 'chapters'
+      parentVolumeId: number | null
+      snapshot: {
+        serialized: string
+        existingTitles: string[]
+        startingOrder: number
+      }
+    }
+  | {
+      kind: 'detail'
+      outlineNodeId: number
+      chapterSummary: string
+    }
+  | {
+      kind: 'prose'
+      operation: 'generate' | 'continue'
+      outlineNodeId: number
+      snapshot: {
+        outlineNodeId: number
+        outlineUpdatedAt: number
+        chapterId: number | null
+        chapterUpdatedAt: number | null
+        chapterContentHash: string
+        chapterHadContent: boolean
+        chapterOrder: number
+      }
+    }
 
 export function isAuthoringSemantic(value: unknown): value is AuthoringSemantic {
   return typeof value === 'string' && (AUTHORING_SEMANTICS as readonly string[]).includes(value)

@@ -14,11 +14,13 @@ import { validateAuthoringGraph, topologicalAuthoringOrder } from './graph'
 import { parseAuthoringGraph } from './migration'
 import type {
   AuthoringCandidate,
+  AuthoringCandidateDomain,
   AuthoringInputEnvelope,
   AuthoringNodeGraph,
   AuthoringNodeInstance,
   AuthoringRunSignature,
 } from './contracts'
+import { adoptDomainCandidate, executeDomainNode } from './domain-execution'
 
 export interface AuthoringRunSnapshot {
   nodeId: string
@@ -139,6 +141,7 @@ async function executeNode(input: {
   sourceHash?: string
   sourceEvidence?: AuthoringRunSnapshot['sourceEvidence']
   semantic: AuthoringCandidate['semantic']
+  domain?: AuthoringCandidateDomain
 }> {
   const template = AUTHORING_NODE_BY_ID.get(input.node.templateId)
   if (!template) throw new Error(`节点模板不存在：${input.node.templateId}`)
@@ -219,6 +222,15 @@ async function executeNode(input: {
     return { output: variants.join('\n\n--- 候选分隔 ---\n\n'), variants, semantic: 'candidate' }
   }
   if (template.capability === 'generate-field' || template.capability === 'generate-collection') {
+    const domain = await executeDomainNode({
+      node,
+      inputs,
+      projectId: input.projectId,
+      worldGroupId: input.worldGroupId,
+      aiConfig: requestedAIConfig(node, inputs),
+      signal: input.signal,
+    })
+    if (domain) return domain
     const sourceKeys = template.reads?.sourceKeys ?? []
     const upstream = composeInputs(inputs.filter(item => item.state !== 'control'))
     const binding = !upstream && sourceKeys.length
@@ -308,11 +320,13 @@ export async function adoptAuthoringCandidate(input: {
   const latestRuns = await db.nodeRuns.where('flowId').equals(input.flow.id!).toArray()
   latestRuns.sort((left, right) => right.startedAt - left.startedAt)
   let expectedSignature: AuthoringRunSignature | undefined
+  let latestDomain: AuthoringCandidate['domain']
   for (const run of latestRuns) {
     try {
       const candidate = (JSON.parse(run.nodeResultsJson || '{}') as AuthoringCandidateMap)[input.nodeId]
       if (candidate?.signature) {
         expectedSignature = candidate.signature
+        latestDomain = candidate.domain
         break
       }
     } catch {
@@ -328,6 +342,16 @@ export async function adoptAuthoringCandidate(input: {
     if (currentTarget && !currentTarget.ambiguous && currentTarget.hash !== expectedSignature.targetHash) {
       throw new Error('目标内容已在分步骤模式或其它入口中更新；请重新运行节点后再采纳，避免覆盖新内容。')
     }
+  }
+  if (latestDomain) {
+    const adopted = await adoptDomainCandidate({
+      node,
+      domain: latestDomain,
+      output: input.output,
+      projectId: input.flow.projectId,
+      worldGroupId: input.flow.worldGroupId ?? null,
+    })
+    if (adopted) return adopted
   }
   const write = template.writes
   if (write.fields?.length === 1 && (write.mode === 'replace' || write.mode === 'merge-diffs')) {
@@ -444,6 +468,7 @@ export async function runAuthoringGraph(input: {
         status: node.binding?.mode === 'live' ? 'adopted' : 'candidate',
         output: executed.output,
         ...(executed.variants ? { variants: executed.variants } : {}),
+        ...('domain' in executed ? { domain: executed.domain } : {}),
         semantic: executed.semantic,
         signature,
         createdAt: Date.now(),

@@ -72,6 +72,8 @@ export interface OutlineCopilotInput {
   assembled: Awaited<ReturnType<typeof assembleContext>>
   snapshot: OutlineCopilotSnapshot
   config: AIConfig
+  parameterValues?: Record<string, unknown>
+  generationOverrides?: { temperature?: number; maxTokens?: number }
   routingCategory?: string
   signal?: AbortSignal
 }
@@ -289,7 +291,7 @@ function buildOutlineMessages(input: OutlineCopilotInput) {
     volumes: input.volumes,
     assembled: input.assembled,
     hint: `${input.authorRequest}${supplemental}`,
-    options: {},
+    options: { parameterValues: input.parameterValues },
   })
   if (plan.status === 'skip') throw new Error(plan.reason)
   return plan.messages
@@ -349,6 +351,10 @@ export async function prepareOutlineCopilot(input: {
   supplementalContext?: string
   routingCategory?: string
   contextProfile?: AgentContextProfile
+  parameterValues?: Record<string, unknown>
+  /** 节点级 AI preset 的解析结果；未提供时沿用全局路由配置。 */
+  configOverride?: AIConfig
+  generationOverrides?: { temperature?: number; maxTokens?: number }
   signal?: AbortSignal
 }): Promise<PreparedOutlineCopilot> {
   const project = await db.projects.get(input.projectId)
@@ -371,7 +377,7 @@ export async function prepareOutlineCopilot(input: {
   const before = snapshotOf(allNodes, worldGroupId, mode, parentVolumeId)
   const defaultCategory = mode === 'volumes' ? 'outline.volume' : 'outline.chapter'
   const routingCategory = input.routingCategory ?? defaultCategory
-  const config = resolveRequestConfig(
+  const config = input.configOverride ?? resolveRequestConfig(
     useAIConfigStore.getState().config,
     { category: routingCategory },
   ).config
@@ -403,6 +409,8 @@ export async function prepareOutlineCopilot(input: {
     assembled,
     snapshot,
     config,
+    parameterValues: input.parameterValues,
+    generationOverrides: input.generationOverrides,
     routingCategory,
     signal: input.signal,
   }
@@ -442,7 +450,12 @@ export function createOutlineCopilotNode(
   const runAI = dependencies.runAI ?? (messages => chat(messages, input.config, {
     category: input.routingCategory ?? (input.mode === 'volumes' ? 'outline.volume' : 'outline.chapter'),
     projectId: input.project.id!,
-    configOverrides: { maxTokens: input.mode === 'volumes' ? 8000 : 12_000 },
+    configOverrides: {
+      maxTokens: input.generationOverrides?.maxTokens ?? (input.mode === 'volumes' ? 8000 : 12_000),
+      ...(input.generationOverrides?.temperature != null
+        ? { temperature: input.generationOverrides.temperature }
+        : {}),
+    },
     contextOverflowPolicy: 'reject',
   }, input.signal))
 

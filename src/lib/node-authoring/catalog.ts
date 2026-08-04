@@ -99,6 +99,7 @@ function collectionTemplate(input: {
   writes: AuthoringWriteContract
   promptModuleKey: PromptModuleKey
   extraInputs?: AuthoringPortDefinition[]
+  parameters?: AuthoringParameterDefinition[]
   recommendedBefore?: string[]
   recommendedAfter?: string[]
 }): AuthoringNodeTemplate {
@@ -115,6 +116,7 @@ function collectionTemplate(input: {
     reads: { sourceKeys: input.sourceKeys, allowExactFields: true },
     writes: input.writes,
     promptModuleKey: input.promptModuleKey,
+    parameters: input.parameters,
     recommendedBefore: input.recommendedBefore,
     recommendedAfter: input.recommendedAfter,
   }
@@ -179,6 +181,7 @@ const CONTENT_TEMPLATES: AuthoringNodeTemplate[] = [
     sourceKeys: ['characters', 'worldview', 'storyCore'],
     writes: { target: 'characters', mode: 'add' },
     promptModuleKey: 'character.generate',
+    parameters: [{ key: 'request', label: '生成要求', type: 'text', defaultValue: '' }],
     recommendedBefore: ['world.factions', 'story.conflict'],
     recommendedAfter: ['character.field.motivation', 'character.relation', 'outline.volume'],
   }),
@@ -223,6 +226,7 @@ const CONTENT_TEMPLATES: AuthoringNodeTemplate[] = [
     sourceKeys: ['worldview', 'storyCore', 'characters', 'storyArcs', 'existingVolumeOutlines'],
     writes: { target: 'outlineNodes', mode: 'add-many' },
     promptModuleKey: 'outline.volume',
+    parameters: [{ key: 'request', label: '生成要求', type: 'text', defaultValue: '' }],
     extraInputs: [optionalControl('volume-count', '卷数', 'control.volume-count')],
     recommendedAfter: ['outline.chapter'],
   }),
@@ -236,6 +240,10 @@ const CONTENT_TEMPLATES: AuthoringNodeTemplate[] = [
     sourceKeys: ['worldview', 'storyCore', 'characters', 'storyArcs', 'existingVolumeOutlines'],
     writes: { target: 'outlineNodes', mode: 'add-many' },
     promptModuleKey: 'outline.chapter',
+    parameters: [
+      { key: 'request', label: '生成要求', type: 'text', defaultValue: '' },
+      { key: 'volumeTitle', label: '所属卷标题', type: 'text', defaultValue: '' },
+    ],
     extraInputs: [
       { id: 'volume', label: '所属卷', semantic: 'outline.volume', cardinality: 'one', state: 'any', required: true },
       optionalControl('chapter-count', '章节数', 'control.chapter-count'),
@@ -251,6 +259,10 @@ const CONTENT_TEMPLATES: AuthoringNodeTemplate[] = [
     sourceKeys: ['chapterOutline', 'detailedOutline', 'characters', 'foreshadows'],
     writes: { target: 'detailedOutlines', mode: 'replace' },
     promptModuleKey: 'detail.chapter-planning',
+    parameters: [
+      { key: 'request', label: '生成要求', type: 'text', defaultValue: '' },
+      { key: 'chapterTitle', label: '目标章节标题', type: 'text', defaultValue: '' },
+    ],
     extraInputs: [{ id: 'chapter', label: '章节', semantic: 'outline.chapter', cardinality: 'one', state: 'any', required: true }],
     recommendedAfter: ['chapter.prose'],
   }),
@@ -263,6 +275,10 @@ const CONTENT_TEMPLATES: AuthoringNodeTemplate[] = [
     sourceKeys: ['chapterOutline', 'detailedOutline', 'worldview', 'storyCore', 'characters', 'creativeRules', 'foreshadows', 'retrievedPassages'],
     writes: { target: 'chapters', fields: ['content'], mode: 'replace' },
     promptModuleKey: 'chapter.content',
+    parameters: [
+      { key: 'request', label: '生成要求', type: 'text', defaultValue: '' },
+      { key: 'chapterTitle', label: '目标章节标题', type: 'text', defaultValue: '' },
+    ],
     extraInputs: [{ id: 'plan', label: '章节计划', semantic: 'outline.plan', cardinality: 'one', state: 'any', required: false }],
   }),
   collectionTemplate({

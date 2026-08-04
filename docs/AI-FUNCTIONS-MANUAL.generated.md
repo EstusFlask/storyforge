@@ -184,7 +184,7 @@ AI 输出经 `adopt({ target, data })` 写回,只有这里登记的字段可写(
 
 ## 四、AI 调用点（消耗统计 category · 在哪触发)
 
-共 60 个 category。
+共 61 个 category。
 未分类调用: 0 个。动态 category 调用: 9 个。
 
 | category | 触发文件 |
@@ -207,6 +207,7 @@ AI 输出经 `adopt({ target, data })` 写回,只有这里登记的字段可写(
 | `character.supplement` | `src/components/character/CharacterSupplementAction.tsx:80` |
 | `codex.extract` | `src/components/codex/CodexPanel.tsx:226` |
 | `cultivation.progress` | `src/components/cultivation/CultivationProgressPanel.tsx:143` |
+| `detail.chapter-planning` | `src/lib/node-authoring/domain-execution.ts:251` |
 | `detail.scene` | `src/components/outline/DetailedOutlinePanel.tsx:151`<br/>`src/components/outline/ScenePanel.tsx:126`<br/>`src/lib/ai/batch-detail-runner.ts:109` |
 | `emotion.beat` | `src/components/editor/EmotionBeatCard.tsx:66` |
 | `foreshadow.structure` | `src/components/foreshadow/ForeshadowPanel.tsx:67` |
@@ -218,7 +219,7 @@ AI 输出经 `adopt({ target, data })` 写回,只有这里登记的字段可写(
 | `inspiration.reverse` | `src/hooks/useIncrementalInspiration.ts:212` |
 | `inventory.extract` | `src/components/items/InventoryPanel.tsx:150` |
 | `location.extract` | `src/components/location/LocationPanel.tsx:106` |
-| `node.creation` | `src/lib/node-authoring/executor.ts:205`<br/>`src/lib/node-flow/executor.ts:203` |
+| `node.creation` | `src/lib/node-authoring/executor.ts:208`<br/>`src/lib/node-flow/executor.ts:203` |
 | `outline.chapter` | `src/lib/ai/batch-outline-runner.ts:123`<br/>`src/lib/outline/generation-node.ts:55` |
 | `outline.character-driven` | `src/components/outline/CharacterDrivenPlotPanel.tsx:198` |
 | `outline.character-revision` | `src/components/outline/CharacterRevisionPanel.tsx:169` |
@@ -254,14 +255,14 @@ AI 输出经 `adopt({ target, data })` 写回,只有这里登记的字段可写(
 
 - `src/components/editor/ReviewPanel.tsx:139 · ai.start`
 - `src/components/settings/NS0EvalPanel.tsx:50 · chat`
-- `src/lib/agent/character-copilot.ts:404 · chat`
+- `src/lib/agent/character-copilot.ts:409 · chat`
 - `src/lib/agent/inspiration-copilot.ts:261 · chat`
-- `src/lib/agent/outline-copilot.ts:442 · chat`
-- `src/lib/agent/prose-copilot.ts:488 · chat`
+- `src/lib/agent/outline-copilot.ts:450 · chat`
+- `src/lib/agent/prose-copilot.ts:500 · chat`
 - `src/lib/agent/world-origin-copilot.ts:186 · chat`
 - `src/lib/generation/workflow-generation-node.ts:23 · ai.start`
-- `src/lib/node-authoring/executor.ts:242 · chat`
+- `src/lib/node-authoring/executor.ts:254 · chat`
 
 ---
 
-生成时间基准:commit `ed9a603`
+生成时间基准:commit `d0009c4`

@@ -121,42 +121,35 @@ test('新用户可创建项目并进入工作区', async ({ page }) => {
   await expect(page.getByRole('button', { name: '章节', exact: true })).toBeVisible()
 })
 
-test('独立节点模式可自由建图、运行、刷新恢复并完整清理', async ({ page }) => {
+test('领域节点模式可自由建图、运行、刷新恢复并完整清理', async ({ page }) => {
   await openCleanHome(page)
   await createProject(page, 'E2E 节点模式')
   await openSidebarLeaf(page, '创作区', '节点模式')
-  await expect(page.getByRole('heading', { name: '独立节点模式', exact: true })).toBeVisible()
-  await page.getByRole('button', { name: '创建第一张节点图', exact: true }).click()
+  await expect(page.getByRole('heading', { name: '领域节点创作', exact: true })).toBeVisible()
+  await page.getByRole('button', { name: '创建空白节点图', exact: true }).click()
 
   const flowName = page.getByRole('textbox', { name: '节点图名称' })
   await expect(flowName).toHaveValue('未命名节点图')
   await flowName.fill('E2E 节点分支')
   await page.getByRole('button', { name: /^自由文本/ }).click()
-  await page.getByRole('button', { name: /^内容输出/ }).click()
-
-  await page.locator('article').filter({ hasText: '自由文本' }).click()
   await page.getByLabel('作者输入').fill('潮汐退去后，第一座城从海床升起。')
-  await page.getByRole('button', { name: '从 自由文本 开始连线', exact: true }).click()
-  await page.getByRole('button', { name: '连接到 内容输出.最终内容', exact: true }).click()
-  await expect(page.getByText('自由文本 → 最终内容', { exact: true })).toBeVisible()
   await page.getByRole('button', { name: '保存', exact: true }).click()
   await expect(page.getByText('节点图已保存。', { exact: true })).toBeVisible()
   await page.getByRole('button', { name: '运行全部', exact: true }).click()
-  await expect(page.getByText('节点运行完成，实际输入与输出已保存。', { exact: true })).toBeVisible()
+  await expect(page.getByText('节点图运行完成，候选已保存。', { exact: true })).toBeVisible()
 
-  await page.reload()
+  await page.goto(page.url(), { waitUntil: 'domcontentloaded' })
   await openSidebarLeaf(page, '创作区', '节点模式')
   await expect(page.getByRole('textbox', { name: '节点图名称' })).toHaveValue('E2E 节点分支')
-  await page.locator('article').filter({ hasText: '内容输出' }).click()
-  await expect(page.getByText('自由文本 → 最终内容', { exact: true })).toBeVisible()
-  await expect(page.getByLabel('节点输出内容')).toContainText('潮汐退去后，第一座城从海床升起。')
+  await page.getByText('自由文本', { exact: true }).last().click()
+  await expect(page.getByLabel('候选输出')).toContainText('潮汐退去后，第一座城从海床升起。')
 
   await page.getByRole('button', { name: '删除当前节点图', exact: true }).click()
   const confirmDelete = page.locator('div.fixed.inset-0').filter({
     hasText: '删除节点图“E2E 节点分支”？',
   })
   await confirmDelete.getByRole('button', { name: '删除', exact: true }).click()
-  await expect(page.getByRole('heading', { name: '独立节点模式', exact: true })).toBeVisible()
+  await expect(page.getByRole('heading', { name: '领域节点创作', exact: true })).toBeVisible()
 })
 
 test('互动运行时可演进、判定、检查点、分支并刷新恢复', async ({ page }) => {
@@ -222,20 +215,20 @@ test('可见资料库精确选择字段，节点冻结权重与实际召回', as
   await expect(page.getByRole('spinbutton', { name: '默认权重' })).toHaveValue('2.5')
 
   await sidebarButton(page, '节点模式').click()
-  await page.getByRole('button', { name: '创建第一张节点图', exact: true }).click()
-  await page.getByRole('button', { name: /^项目元素/ }).click()
+  await page.getByRole('button', { name: '创建空白节点图', exact: true }).click()
+  await page.getByRole('button', { name: /^项目资料/ }).click()
+  await page.getByText('项目资料', { exact: true }).last().click()
+  await page.getByRole('button', { name: '精确资料', exact: true }).click()
   await page.getByText('世界观 · 主世界观', { exact: true }).click()
   await page.getByRole('button', { name: /^世界来源 \d+ tokens · 本地关键词$/ }).click()
   await expect(page.getByText(/已选 1 项/)).toBeVisible()
-  await page.getByRole('button', { name: '运行到 项目元素', exact: true }).click()
-  await expect(page.getByText('节点运行完成，实际输入与输出已保存。', { exact: true })).toBeVisible()
-  await expect(page.getByText(/已纳入：世界观 \/ 主世界观 \/ 世界来源（\d+ tokens，权重 2\.5）/))
-    .toBeVisible()
-  await expect(page.getByLabel('节点输出内容')).toContainText('第一座浮空城')
+  await page.getByRole('button', { name: '运行全部', exact: true }).click()
+  await expect(page.getByText('节点图运行完成，候选已保存。', { exact: true })).toBeVisible()
+  await expect(page.getByLabel('候选输出')).toContainText('第一座浮空城')
 
   await page.reload()
   await sidebarButton(page, '资料与检索库').click()
-  await expect(page.getByText(/项目元素 · .*纳入 1 \/ 省略 0 \/ 裁剪 0/)).toBeVisible()
+  await expect(page.getByText(/项目资料 · .*纳入 1 \/ 省略 0 \/ 裁剪 0/)).toBeVisible()
 })
 
 test('人文知识主入口可保存拆分概述，并安全关联与断开城池地点', async ({ page }) => {

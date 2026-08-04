@@ -44,6 +44,7 @@ import { inspectAuthoringGraphFreshness, type AuthoringFreshnessMap } from '../.
 import { useNodeFlowStore } from '../../stores/node-flow'
 import { useAIConfigStore } from '../../stores/ai-config'
 import { CONTEXT_SOURCES } from '../../lib/registry/context-sources'
+import RagEntrySelector from '../retrieval/RagEntrySelector'
 import { useDialog } from '../shared/Dialog'
 import { useToast } from '../shared/Toast'
 
@@ -216,7 +217,7 @@ function AuthoringCanvas(props: {
   )
 }
 
-function NodeInspector(props: { node: AuthoringNodeInstance | null; graph: AuthoringNodeGraph; onChange: (graph: AuthoringNodeGraph) => void; onRemove: () => void }) {
+function NodeInspector(props: { node: AuthoringNodeInstance | null; graph: AuthoringNodeGraph; projectId: number; worldGroupId: number | null; onChange: (graph: AuthoringNodeGraph) => void; onRemove: () => void }) {
   const presets = useAIConfigStore(state => state.presets)
   if (!props.node) return <aside className="flex w-80 shrink-0 items-center justify-center border-l border-border bg-bg-surface p-6 text-center text-xs text-text-muted">选择节点后编辑参数、上下文来源和端口。</aside>
   const node = props.node
@@ -224,12 +225,23 @@ function NodeInspector(props: { node: AuthoringNodeInstance | null; graph: Autho
   const updateNode = (patch: Partial<AuthoringNodeInstance>) => props.onChange({ ...props.graph, nodes: props.graph.nodes.map(item => item.id === node.id ? { ...item, ...patch } : item) })
   const updateConfig = (key: string, value: unknown) => updateNode({ config: { ...node.config, [key]: value } })
   const sourceKeys = Array.isArray(node.config.sourceKeys) ? node.config.sourceKeys.filter((item): item is string => typeof item === 'string') : []
+  const ragEntryKeys = Array.isArray(node.config.ragEntryKeys) ? node.config.ragEntryKeys.filter((item): item is string => typeof item === 'string') : []
+  const selectionMode = node.config.selectionMode === 'exact' || (node.config.selectionMode == null && sourceKeys.includes('ragSelection')) ? 'exact' : 'registered'
   return (
     <aside className="w-80 shrink-0 overflow-y-auto border-l border-border bg-bg-surface p-4">
       <div className="mb-4 flex items-start justify-between gap-2"><div><p className="text-[10px] font-semibold tracking-wide text-accent">{template.category}</p><h3 className="mt-1 text-sm font-semibold text-text-primary">{template.label}</h3></div><button type="button" title="删除节点" onClick={props.onRemove} className="rounded p-1 text-text-muted hover:bg-error/10 hover:text-error"><Trash2 className="h-3.5 w-3.5" /></button></div>
       <label className="mb-4 block"><span className="mb-1 block text-[10px] text-text-secondary">节点名称</span><input value={node.title} onChange={event => updateNode({ title: event.target.value })} className="w-full rounded border border-border bg-bg-base px-2 py-1.5 text-xs text-text-primary outline-none focus:border-accent" /></label>
       <p className="mb-3 text-[10px] leading-4 text-text-muted">{template.description}</p>
-      {template.id === 'source.project-context' && <section className="mb-4 rounded border border-border bg-bg-base p-2"><p className="mb-2 text-[10px] font-medium text-text-secondary">读取哪些登记来源</p><div className="max-h-48 space-y-1 overflow-y-auto">{CONTEXT_SOURCES.filter(source => source.key !== 'ragSelection').map(source => <label key={source.key} className="flex items-start gap-2 text-[10px] text-text-secondary"><input type="checkbox" checked={sourceKeys.includes(source.key)} onChange={() => updateConfig('sourceKeys', sourceKeys.includes(source.key) ? sourceKeys.filter(item => item !== source.key) : [...sourceKeys, source.key])} className="mt-0.5 accent-[var(--color-accent)]" /><span><span className="block">{source.label}</span><span className="block text-[9px] text-text-muted">{source.key}</span></span></label>)}</div><p className="mt-2 text-[9px] leading-3 text-text-muted">需要精确资料时，请在来源节点配置稳定字段键；不会把 API Key 保存进图。</p></section>}
+      {template.id === 'source.project-context' && <section className="mb-4 rounded border border-border bg-bg-base p-2">
+        <div className="mb-2 grid grid-cols-2 rounded border border-border bg-bg-surface p-0.5 text-[10px]">
+          <button type="button" onClick={() => updateNode({ config: { ...node.config, selectionMode: 'exact', sourceKeys: ['ragSelection'] } })} className={`rounded px-2 py-1 ${selectionMode === 'exact' ? 'bg-accent text-white' : 'text-text-muted hover:bg-bg-hover'}`}>精确资料</button>
+          <button type="button" onClick={() => updateNode({ config: { ...node.config, selectionMode: 'registered', sourceKeys: sourceKeys.includes('ragSelection') ? ['worldview', 'storyCore'] : sourceKeys } })} className={`rounded px-2 py-1 ${selectionMode === 'registered' ? 'bg-accent text-white' : 'text-text-muted hover:bg-bg-hover'}`}>注册来源</button>
+        </div>
+        {selectionMode === 'exact' ? <RagEntrySelector projectId={props.projectId} worldGroupId={props.worldGroupId} selectedKeys={ragEntryKeys} onChange={keys => updateNode({ config: { ...node.config, selectionMode: 'exact', sourceKeys: ['ragSelection'], ragEntryKeys: keys } })} /> : <section>
+          <p className="mb-2 text-[10px] font-medium text-text-secondary">读取哪些登记来源</p>
+          <div className="max-h-48 space-y-1 overflow-y-auto">{CONTEXT_SOURCES.filter(source => source.key !== 'ragSelection').map(source => <label key={source.key} className="flex items-start gap-2 text-[10px] text-text-secondary"><input type="checkbox" checked={sourceKeys.includes(source.key)} onChange={() => updateConfig('sourceKeys', sourceKeys.includes(source.key) ? sourceKeys.filter(item => item !== source.key) : [...sourceKeys, source.key])} className="mt-0.5 accent-[var(--color-accent)]" /><span><span className="block">{source.label}</span><span className="block text-[9px] text-text-muted">{source.key}</span></span></label>)}</div>
+        </section>}
+      </section>}
       <div className="space-y-3">{(template.parameters ?? []).map(parameter => {
         const value = node.config[parameter.key] ?? parameter.defaultValue ?? ''
         if (parameter.key === 'presetId') return <label key={parameter.key} className="block"><span className="mb-1 block text-[10px] text-text-secondary">{parameter.label}</span><select value={String(value)} onChange={event => updateConfig(parameter.key, event.target.value)} className="w-full rounded border border-border bg-bg-base px-2 py-1.5 text-[11px] text-text-primary"><option value="">使用全局配置</option>{presets.map(preset => <option key={preset.id} value={preset.id}>{preset.name}</option>)}</select></label>
@@ -379,7 +391,7 @@ export default function NodeAuthoringWorkspace(props: { project: Project; worldG
   const selectedCandidate = selectedNodeId ? candidates[selectedNodeId] : undefined
   return <div className="flex h-[760px] min-h-[560px] max-h-[calc(100vh-180px)] flex-col overflow-hidden bg-bg-base">
     <header className="flex h-12 shrink-0 items-center gap-2 border-b border-border bg-bg-surface px-3"><Workflow className="h-4 w-4 text-accent" /><input aria-label="节点图名称" value={draft.name} onChange={event => { setDraft({ ...draft, name: event.target.value }); setDirty(true) }} className="w-56 rounded border border-transparent bg-transparent px-2 py-1 text-sm font-medium text-text-primary hover:border-border focus:border-accent focus:outline-none" /><span className="text-[10px] text-text-muted">{saving ? '保存中…' : dirty ? '待保存' : '已保存'}</span><div className="ml-auto flex items-center gap-2"><button type="button" onClick={() => void save(true)} className="inline-flex items-center gap-1 rounded px-2 py-1.5 text-xs text-text-secondary hover:bg-bg-hover"><Save className="h-3.5 w-3.5" />保存</button>{abortRef.current ? <button type="button" onClick={() => abortRef.current?.abort()} className="inline-flex items-center gap-1 rounded bg-error/10 px-3 py-1.5 text-xs text-error"><CircleStop className="h-3.5 w-3.5" />停止</button> : <button type="button" onClick={() => void runGraph()} className="inline-flex items-center gap-1 rounded bg-accent px-3 py-1.5 text-xs font-medium text-white hover:bg-accent-hover"><Play className="h-3.5 w-3.5" />运行全部</button>}</div></header>
-    <div className="flex min-h-0 flex-1"><div className="flex w-60 shrink-0 flex-col border-r border-border bg-bg-surface"><div className="border-b border-border p-3"><div className="mb-2 flex items-center justify-between"><span className="text-[10px] font-semibold tracking-wide text-text-muted">我的节点图</span><div className="flex items-center gap-1"><button type="button" title="删除当前节点图" aria-label="删除当前节点图" onClick={() => void removeFlow()} className="rounded p-1 text-text-muted hover:bg-error/10 hover:text-error"><Trash2 className="h-3.5 w-3.5" /></button><button type="button" title="从项目生成概览" aria-label="从项目生成概览" onClick={() => void createOverview()} className="rounded p-1 text-text-muted hover:bg-bg-hover"><LayoutTemplate className="h-3.5 w-3.5" /></button><button type="button" title="新建节点图" aria-label="新建节点图" onClick={() => void createFlow()} className="rounded p-1 text-accent hover:bg-accent/10"><Plus className="h-3.5 w-3.5" /></button></div></div>{flows.map(flow => <button key={flow.id} type="button" onClick={() => setSelectedFlowId(flow.id!)} className={`mb-1 w-full truncate rounded px-2 py-1.5 text-left text-[11px] ${flow.id === selectedFlowId ? 'bg-accent/15 text-accent' : 'text-text-secondary hover:bg-bg-hover'}`}>{flow.name}</button>)}</div><NodeLibrary onAdd={template => addTemplate(template)} /></div><div className="relative flex min-w-0 flex-1"><AuthoringCanvas graph={graph} selectedNodeId={selectedNodeId} candidates={candidates} freshness={freshness} onSelectNode={setSelectedNodeId} onChange={changeGraph} onBeginConnection={beginConnection} onCanvasConnection={openConnectionMenu} onRemoveNode={removeNode} />{connection && menu && <SmartConnectionMenu anchor={{ ...connection, x: menu.x, y: menu.y }} graph={graph} onPick={pickConnectionTemplate} onClose={() => { setConnection(null); setMenu(null) }} />}</div><NodeInspector node={selectedNode} graph={graph} onChange={changeGraph} onRemove={() => selectedNode && removeNode(selectedNode.id)} /></div>
+    <div className="flex min-h-0 flex-1"><div className="flex w-60 shrink-0 flex-col border-r border-border bg-bg-surface"><div className="border-b border-border p-3"><div className="mb-2 flex items-center justify-between"><span className="text-[10px] font-semibold tracking-wide text-text-muted">我的节点图</span><div className="flex items-center gap-1"><button type="button" title="删除当前节点图" aria-label="删除当前节点图" onClick={() => void removeFlow()} className="rounded p-1 text-text-muted hover:bg-error/10 hover:text-error"><Trash2 className="h-3.5 w-3.5" /></button><button type="button" title="从项目生成概览" aria-label="从项目生成概览" onClick={() => void createOverview()} className="rounded p-1 text-text-muted hover:bg-bg-hover"><LayoutTemplate className="h-3.5 w-3.5" /></button><button type="button" title="新建节点图" aria-label="新建节点图" onClick={() => void createFlow()} className="rounded p-1 text-accent hover:bg-accent/10"><Plus className="h-3.5 w-3.5" /></button></div></div>{flows.map(flow => <button key={flow.id} type="button" onClick={() => setSelectedFlowId(flow.id!)} className={`mb-1 w-full truncate rounded px-2 py-1.5 text-left text-[11px] ${flow.id === selectedFlowId ? 'bg-accent/15 text-accent' : 'text-text-secondary hover:bg-bg-hover'}`}>{flow.name}</button>)}</div><NodeLibrary onAdd={template => addTemplate(template)} /></div><div className="relative flex min-w-0 flex-1"><AuthoringCanvas graph={graph} selectedNodeId={selectedNodeId} candidates={candidates} freshness={freshness} onSelectNode={setSelectedNodeId} onChange={changeGraph} onBeginConnection={beginConnection} onCanvasConnection={openConnectionMenu} onRemoveNode={removeNode} />{connection && menu && <SmartConnectionMenu anchor={{ ...connection, x: menu.x, y: menu.y }} graph={graph} onPick={pickConnectionTemplate} onClose={() => { setConnection(null); setMenu(null) }} />}</div><NodeInspector node={selectedNode} graph={graph} projectId={projectId} worldGroupId={props.worldGroupId} onChange={changeGraph} onRemove={() => selectedNode && removeNode(selectedNode.id)} /></div>
     <section className="shrink-0 border-t border-border bg-bg-surface">
       <button type="button" onClick={() => setShowRuns(value => !value)} className="flex h-9 w-full items-center gap-2 px-4 text-left text-[11px] text-text-secondary hover:bg-bg-hover">
         <History className="h-3.5 w-3.5" />
@@ -396,7 +408,30 @@ export default function NodeAuthoringWorkspace(props: { project: Project; worldG
           <div className="p-3">
             <div className="mb-2 flex items-center justify-between">
               <span className="text-[10px] font-semibold text-text-secondary">候选输出</span>
-              {selectedCandidate && !selectedNode?.binding?.ref && <button type="button" onClick={() => void adoptCandidate(selectedNodeId!)} className="inline-flex items-center gap-1 rounded bg-accent px-2 py-1 text-[10px] font-medium text-white hover:bg-accent-hover"><Check className="h-3 w-3" />{selectedCandidate.status === 'adopted' ? '已采纳' : '确认采纳'}</button>}
+              <div className="flex items-center gap-2">
+                {selectedCandidate?.variants && selectedCandidate.variants.length > 1 && (
+                  <label className="flex items-center gap-1 text-[10px] text-text-muted">
+                    <span>候选</span>
+                    <select
+                      aria-label="选择候选版本"
+                      value={Math.max(0, selectedCandidate.variants.findIndex(item => item === selectedCandidate.output))}
+                      onChange={event => {
+                        const index = Number(event.target.value)
+                        const output = selectedCandidate.variants?.[index]
+                        if (!output) return
+                        setCandidates(current => ({
+                          ...current,
+                          [selectedCandidate.nodeId]: { ...selectedCandidate, output, status: 'candidate' },
+                        }))
+                      }}
+                      className="rounded border border-border bg-bg-base px-1 py-0.5 text-[10px] text-text-secondary"
+                    >
+                      {selectedCandidate.variants.map((_, index) => <option key={index} value={index}>版本 {index + 1}</option>)}
+                    </select>
+                  </label>
+                )}
+                {selectedCandidate && !selectedNode?.binding?.ref && <button type="button" onClick={() => void adoptCandidate(selectedNodeId!)} className="inline-flex items-center gap-1 rounded bg-accent px-2 py-1 text-[10px] font-medium text-white hover:bg-accent-hover"><Check className="h-3 w-3" />{selectedCandidate.status === 'adopted' ? '已采纳' : '确认采纳'}</button>}
+              </div>
             </div>
             {selectedCandidate ? <textarea aria-label="候选输出" value={selectedCandidate.output} onChange={event => setCandidates(current => ({ ...current, [selectedCandidate.nodeId]: { ...selectedCandidate, output: event.target.value, status: 'candidate' } }))} className="h-40 w-full resize-y rounded border border-border bg-bg-base p-2 text-[10px] leading-4 text-text-primary outline-none focus:border-accent" /> : <p className="text-[10px] text-text-muted">选择已运行节点查看候选输出。</p>}
           </div>

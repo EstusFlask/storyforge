@@ -65,6 +65,7 @@ export interface CharacterCopilotInput {
   contextSources: string[]
   snapshot: CharacterRosterSnapshot
   config: AIConfig
+  generationOverrides?: { temperature?: number; maxTokens?: number }
   routingCategory?: string
   signal?: AbortSignal
 }
@@ -118,7 +119,7 @@ function isVisibleInScope(character: Character, worldGroupId: number | null): bo
     || (character.homeWorldGroupId ?? null) === worldGroupId
 }
 
-async function readRosterSnapshot(
+export async function readCharacterRosterSnapshot(
   projectId: number,
   worldGroupId: number | null,
 ): Promise<CharacterRosterSnapshot> {
@@ -306,6 +307,9 @@ export async function prepareCharacterCopilot(input: {
   supplementalContext?: string
   routingCategory?: string
   contextProfile?: AgentContextProfile
+  /** 节点级 AI preset 的解析结果；未提供时沿用全局路由配置。 */
+  configOverride?: AIConfig
+  generationOverrides?: { temperature?: number; maxTokens?: number }
   signal?: AbortSignal
 }): Promise<PreparedCharacterCopilot> {
   const project = await db.projects.get(input.projectId)
@@ -314,9 +318,9 @@ export async function prepareCharacterCopilot(input: {
     throw new Error('多世界项目必须先选择一个世界，才能生成角色。')
   }
   const worldGroupId = project.enableMultiWorld ? input.worldGroupId : null
-  const beforeRead = await readRosterSnapshot(input.projectId, worldGroupId)
+  const beforeRead = await readCharacterRosterSnapshot(input.projectId, worldGroupId)
   const routingCategory = input.routingCategory ?? 'character.generate'
-  const config = resolveRequestConfig(
+  const config = input.configOverride ?? resolveRequestConfig(
     useAIConfigStore.getState().config,
     { category: routingCategory },
   ).config
@@ -335,7 +339,7 @@ export async function prepareCharacterCopilot(input: {
   ])
   if (!worldview.ok) throw new Error(worldview.error || '无法读取当前世界观。')
   if (!characters.ok) throw new Error(characters.error || '无法读取当前角色。')
-  const afterRead = await readRosterSnapshot(input.projectId, worldGroupId)
+  const afterRead = await readCharacterRosterSnapshot(input.projectId, worldGroupId)
   if (beforeRead.serialized !== afterRead.serialized) throw new CharacterCopilotStaleError()
 
   const nodeInput: CharacterCopilotInput = {
@@ -354,6 +358,7 @@ export async function prepareCharacterCopilot(input: {
     contextSources: [...new Set([...worldview.meta.included, ...characters.meta.included])],
     snapshot: afterRead,
     config,
+    generationOverrides: input.generationOverrides,
     routingCategory,
     signal: input.signal,
   }
@@ -375,14 +380,14 @@ export function createCharacterCopilotNode(
   dependencies: CharacterCopilotDependencies = {},
 ): GenerationNode<CharacterCopilotInput, CharacterCopilotCandidate, AdoptResult> {
   const readCurrent = dependencies.readCurrent
-    ?? (() => readRosterSnapshot(input.projectId, input.worldGroupId))
+    ?? (() => readCharacterRosterSnapshot(input.projectId, input.worldGroupId))
   const saveCharacter = dependencies.saveCharacter ?? (candidate => db.transaction(
     'rw',
     db.characters,
     db.temporalFacts,
     async () => {
       // 将最终重复/过期检查与 adopt 写回锁进同一事务，避免多标签页在二者之间插入同名角色。
-      const lockedCurrent = await readRosterSnapshot(input.projectId, input.worldGroupId)
+      const lockedCurrent = await readCharacterRosterSnapshot(input.projectId, input.worldGroupId)
       if (lockedCurrent.serialized !== input.snapshot.serialized) {
         throw new CharacterCopilotStaleError()
       }
@@ -404,7 +409,12 @@ export function createCharacterCopilotNode(
   const runAI = dependencies.runAI ?? (messages => chat(messages, input.config, {
     category: input.routingCategory ?? 'character.generate',
     projectId: input.projectId,
-    configOverrides: { maxTokens: 6000 },
+    configOverrides: {
+      maxTokens: input.generationOverrides?.maxTokens ?? 6000,
+      ...(input.generationOverrides?.temperature != null
+        ? { temperature: input.generationOverrides.temperature }
+        : {}),
+    },
     contextOverflowPolicy: 'reject',
   }, input.signal))
 
@@ -440,4 +450,36 @@ export function createCharacterCopilotNode(
       return result
     },
   }
+}
+
+/** 节点执行器与聊天副驾共用的正式角色采纳入口。 */
+export async function adoptCharacterCopilotCandidate(input: {
+  projectId: number
+  worldGroupId: number | null
+  snapshot: CharacterRosterSnapshot
+  candidate: CharacterCopilotCandidate
+}): Promise<AdoptResult> {
+  const parsed = parseCharacterCandidateDraft(JSON.stringify(input.candidate))
+  return db.transaction(
+    'rw',
+    db.characters,
+    db.temporalFacts,
+    async () => {
+      const current = await readCharacterRosterSnapshot(input.projectId, input.worldGroupId)
+      if (current.serialized !== input.snapshot.serialized) throw new CharacterCopilotStaleError()
+      if (current.visibleNames.includes(normalizeName(parsed.name))) {
+        throw new CharacterCopilotDuplicateError(parsed.name)
+      }
+      return adopt({
+        projectId: input.projectId,
+        worldGroupId: input.worldGroupId,
+        target: 'characters',
+        mode: 'add',
+        data: {
+          ...parsed,
+          isCrossWorld: false,
+        },
+      })
+    },
+  )
 }
