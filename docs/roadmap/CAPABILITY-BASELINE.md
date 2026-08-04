@@ -188,11 +188,22 @@
 - `nodeFlows/nodeRuns` 已登记 `PROJECT_TABLES`，进入项目删除、世界删除、JSON 导出导入和
   ID 重映射生命周期；删除节点图会级联删除运行记录。
 
+### FLOW-3 当前交付边界（2026-08-04）
+
+- FLOW-3A/3B 已接管节点模式主入口，领域节点目录覆盖世界、故事、角色、大纲、正文和控制节点；
+  当前可运行闭环是世界/故事设计与候选写回，目录存在不等于后续领域深度闭环已经完成。
+- 项目资料概览由 `buildRagLibrary()` 生成实时绑定节点，图 JSON 只保留稳定 `ragDocumentId + fieldKey`
+  和绑定元数据；正文仍由 `assembleContext()` 在运行时读取。
+- `nodeRuns` 冻结节点配置、实际来源 evidence、source hash 和单字段目标 hash；来源变更会被标记并向
+  下游传播，目标 Canon 已变化时采纳会被阻止。相关反例为 `R-FLOW3C-domain-node-sync`。
+- 三注册表边界没有扩张：本阶段没有新增 Canon 表、平行上下文入口或旁路写回服务，仍分别复用
+  `CONTEXT_SOURCES`、`FIELD_REGISTRY/AdoptionSchema` 和 `PROJECT_TABLES`。
+
 ### 当前边界 / 尚未完成
 
 - 资料库当前对非章节资料提供精确选择和本地内容搜索；不会冒充已经为它们建立了 embedding
   向量索引。章节继续复用 `retrievalChunks` 的关键词/可选向量与层级摘要。
-- 条件、循环、并行模型调用、脚本/插件节点、脏下游自动失效、图模板库和主 Agent 生成图
+- 条件、循环、并行模型调用、脚本/插件节点、脏下游自动重跑、图模板库和主 Agent 生成图
   尚未交付；后续必须独立登记，不能绕过 Tool Registry、Canon 或作者确认。
 - 第一批确认目标只有世界来源和新增角色；增加任何目标都必须先登记字段、采纳 schema、
   生命周期与反例测试。

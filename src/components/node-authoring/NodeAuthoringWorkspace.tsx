@@ -7,6 +7,7 @@ import {
   Database,
   GripVertical,
   History,
+  LayoutTemplate,
   Loader2,
   Play,
   Plus,
@@ -38,6 +39,8 @@ import {
   type AuthoringCandidateMap,
   type AuthoringRunSnapshotMap,
 } from '../../lib/node-authoring/executor'
+import { buildAuthoringOverviewGraph } from '../../lib/node-authoring/overview'
+import { inspectAuthoringGraphFreshness, type AuthoringFreshnessMap } from '../../lib/node-authoring/freshness'
 import { useNodeFlowStore } from '../../stores/node-flow'
 import { useAIConfigStore } from '../../stores/ai-config'
 import { CONTEXT_SOURCES } from '../../lib/registry/context-sources'
@@ -132,6 +135,7 @@ function AuthoringCanvas(props: {
   graph: AuthoringNodeGraph
   selectedNodeId: string | null
   candidates: AuthoringCandidateMap
+  freshness: AuthoringFreshnessMap
   onSelectNode: (id: string) => void
   onChange: (graph: AuthoringNodeGraph) => void
   onBeginConnection: (nodeId: string, portId: string, direction: 'input' | 'output') => void
@@ -186,6 +190,10 @@ function AuthoringCanvas(props: {
           const template = AUTHORING_NODE_BY_ID.get(node.templateId)
           if (!template) return null
           const result = props.candidates[node.id]
+          const freshness = props.freshness[node.id]
+          const freshnessLabel = freshness?.status === 'stale'
+            ? freshness.reasons.includes('source-missing') ? '来源缺失' : '需要重跑'
+            : freshness?.status === 'fresh' ? '输入未变化' : undefined
           return (
             <div key={node.id} className={`absolute rounded-md border shadow-sm ${templateColor(template)} ${props.selectedNodeId === node.id ? 'ring-2 ring-accent ring-offset-1' : ''}`} style={{ left: node.x, top: node.y, width: NODE_WIDTH }} onClick={event => { event.stopPropagation(); props.onSelectNode(node.id) }}>
               <div
@@ -198,7 +206,7 @@ function AuthoringCanvas(props: {
                 <div className="space-y-1">{node.inputs.map(port => <button key={port.id} type="button" onClick={event => { event.stopPropagation(); props.onBeginConnection(node.id, port.id, 'input') }} className="flex w-full items-center gap-1 text-left text-[9px] text-text-secondary hover:text-accent"><span className="h-2.5 w-2.5 shrink-0 rounded-full border-2 border-accent bg-white" /><span className="truncate">{port.label}{port.required ? ' *' : ''}</span></button>)}</div>
                 <div className="space-y-1">{node.outputs.map(port => <button key={port.id} type="button" onClick={event => { event.stopPropagation(); props.onBeginConnection(node.id, port.id, 'output') }} className="flex w-full items-center justify-end gap-1 text-right text-[9px] text-text-secondary hover:text-accent"><span className="truncate">{port.label}</span><span className="h-2.5 w-2.5 shrink-0 rounded-full border-2 border-accent bg-white" /></button>)}</div>
               </div>
-              <div className="border-t border-black/10 px-2 py-1 text-[9px] text-text-muted">{result ? (result.status === 'blocked' ? '运行阻塞' : `${result.output.length.toLocaleString()} 字候选`) : `${template.category} · ${template.capability}`}</div>
+              <div className={`border-t border-black/10 px-2 py-1 text-[9px] ${freshness?.status === 'stale' ? 'text-error' : 'text-text-muted'}`}>{result ? (result.status === 'blocked' ? '运行阻塞' : `${result.output.length.toLocaleString()} 字候选${freshnessLabel ? ` · ${freshnessLabel}` : ''}`) : `${template.category} · ${template.capability}`}</div>
             </div>
           )
         })}
@@ -259,6 +267,7 @@ export default function NodeAuthoringWorkspace(props: { project: Project; worldG
   const [run, setRun] = useState<NodeRunRecord | null>(null)
   const [snapshots, setSnapshots] = useState<AuthoringRunSnapshotMap>({})
   const [candidates, setCandidates] = useState<AuthoringCandidateMap>({})
+  const [freshness, setFreshness] = useState<AuthoringFreshnessMap>({})
   const [connection, setConnection] = useState<{ nodeId: string; portId: string; direction: 'input' | 'output' } | null>(null)
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null)
   const [showRuns, setShowRuns] = useState(true)
@@ -275,6 +284,12 @@ export default function NodeAuthoringWorkspace(props: { project: Project; worldG
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedFlowId, projectId])
   useEffect(() => { const latest = runs.find(item => item.flowId === selectedFlowId) ?? null; setRun(latest); const data = runData(latest); setSnapshots(data.snapshots); setCandidates(data.candidates) }, [runs, selectedFlowId])
+  useEffect(() => {
+    if (!draft || !run || !Object.keys(candidates).length) { setFreshness({}); return }
+    let active = true
+    void inspectAuthoringGraphFreshness({ flow: draft, snapshots, candidates }).then(next => { if (active) setFreshness(next) }).catch(() => { if (active) setFreshness({}) })
+    return () => { active = false }
+  }, [draft, run, snapshots, candidates])
 
   const selectedNode = selectedNodeId ? graph.nodes.find(node => node.id === selectedNodeId) ?? null : null
   const save = async (notify = false): Promise<NodeFlow | null> => {
@@ -288,6 +303,20 @@ export default function NodeAuthoringWorkspace(props: { project: Project; worldG
   useEffect(() => { if (!dirty || !draft) return; const timer = window.setTimeout(() => { void save() }, 700); return () => window.clearTimeout(timer) }, [dirty, graph, draft?.name, draft?.description])
   const changeGraph = (next: AuthoringNodeGraph) => { setGraph(next); setDirty(true) }
   const createFlow = async () => { const id = await useNodeFlowStore.getState().createFlow(projectId, props.worldGroupId); setSelectedFlowId(id) }
+  const createOverview = async () => {
+    try {
+      const overview = await buildAuthoringOverviewGraph({ projectId, worldGroupId: props.worldGroupId })
+      const id = await useNodeFlowStore.getState().createFlow(projectId, props.worldGroupId, {
+        name: '项目资料概览',
+        description: `从当前项目生成的实时绑定概览：${overview.entryCount} 个资料字段。`,
+        graph: overview.graph,
+      })
+      setSelectedFlowId(id)
+      toast.success(`已生成项目资料概览：${overview.entryCount} 个实时绑定节点。`)
+    } catch (error) {
+      toast.error(`概览生成失败：${error instanceof Error ? error.message : String(error)}`)
+    }
+  }
   const removeFlow = async () => {
     if (!draft?.id) return
     const confirmed = await dialog.confirm({
@@ -344,13 +373,13 @@ export default function NodeAuthoringWorkspace(props: { project: Project; worldG
   const adoptCandidate = async (nodeId: string) => { if (!draft || !candidates[nodeId]) return; try { const result = await adoptAuthoringCandidate({ flow: draft, nodeId, output: candidates[nodeId].output }); setCandidates(current => ({ ...current, [nodeId]: { ...current[nodeId], status: 'adopted' } })); toast.success(`已采纳：写入 ${result.written.length} 条记录。`) } catch (error) { toast.error(`采纳失败：${error instanceof Error ? error.message : String(error)}`) } }
 
   if (loading && !flows.length) return <div className="flex min-h-[720px] items-center justify-center text-sm text-text-muted"><Loader2 className="mr-2 h-4 w-4 animate-spin" />加载节点图…</div>
-  if (!draft) return <div className="flex min-h-[720px] items-center justify-center bg-[#f7f7f5]"><div className="max-w-lg rounded-lg border border-border bg-bg-surface p-8 text-center shadow-sm"><Workflow className="mx-auto h-10 w-10 text-accent" /><h2 className="mt-3 text-lg font-semibold text-text-primary">领域节点创作</h2><p className="mt-2 text-sm leading-6 text-text-secondary">把世界观、故事、角色和执行参数编排成一张可观察、可回放的创作图。每个结果先作为候选保存，确认后才写入项目。</p><button type="button" onClick={() => void createFlow()} className="mt-5 inline-flex items-center gap-2 rounded-md bg-accent px-4 py-2 text-sm font-medium text-white hover:bg-accent-hover"><Plus className="h-4 w-4" />创建第一张节点图</button></div></div>
+  if (!draft) return <div className="flex min-h-[720px] items-center justify-center bg-[#f7f7f5]"><div className="max-w-lg rounded-lg border border-border bg-bg-surface p-8 text-center shadow-sm"><Workflow className="mx-auto h-10 w-10 text-accent" /><h2 className="mt-3 text-lg font-semibold text-text-primary">领域节点创作</h2><p className="mt-2 text-sm leading-6 text-text-secondary">把世界观、故事、角色和执行参数编排成一张可观察、可回放的创作图。每个结果先作为候选保存，确认后才写入项目。</p><div className="mt-5 flex justify-center gap-2"><button type="button" onClick={() => void createOverview()} className="inline-flex items-center gap-2 rounded-md border border-border px-4 py-2 text-sm font-medium text-text-secondary hover:bg-bg-hover"><LayoutTemplate className="h-4 w-4" />从项目生成概览</button><button type="button" onClick={() => void createFlow()} className="inline-flex items-center gap-2 rounded-md bg-accent px-4 py-2 text-sm font-medium text-white hover:bg-accent-hover"><Plus className="h-4 w-4" />创建空白节点图</button></div></div></div>
 
   const selectedSnapshot = selectedNodeId ? snapshots[selectedNodeId] : undefined
   const selectedCandidate = selectedNodeId ? candidates[selectedNodeId] : undefined
   return <div className="flex h-[760px] min-h-[560px] max-h-[calc(100vh-180px)] flex-col overflow-hidden bg-bg-base">
     <header className="flex h-12 shrink-0 items-center gap-2 border-b border-border bg-bg-surface px-3"><Workflow className="h-4 w-4 text-accent" /><input aria-label="节点图名称" value={draft.name} onChange={event => { setDraft({ ...draft, name: event.target.value }); setDirty(true) }} className="w-56 rounded border border-transparent bg-transparent px-2 py-1 text-sm font-medium text-text-primary hover:border-border focus:border-accent focus:outline-none" /><span className="text-[10px] text-text-muted">{saving ? '保存中…' : dirty ? '待保存' : '已保存'}</span><div className="ml-auto flex items-center gap-2"><button type="button" onClick={() => void save(true)} className="inline-flex items-center gap-1 rounded px-2 py-1.5 text-xs text-text-secondary hover:bg-bg-hover"><Save className="h-3.5 w-3.5" />保存</button>{abortRef.current ? <button type="button" onClick={() => abortRef.current?.abort()} className="inline-flex items-center gap-1 rounded bg-error/10 px-3 py-1.5 text-xs text-error"><CircleStop className="h-3.5 w-3.5" />停止</button> : <button type="button" onClick={() => void runGraph()} className="inline-flex items-center gap-1 rounded bg-accent px-3 py-1.5 text-xs font-medium text-white hover:bg-accent-hover"><Play className="h-3.5 w-3.5" />运行全部</button>}</div></header>
-    <div className="flex min-h-0 flex-1"><div className="flex w-60 shrink-0 flex-col border-r border-border bg-bg-surface"><div className="border-b border-border p-3"><div className="mb-2 flex items-center justify-between"><span className="text-[10px] font-semibold tracking-wide text-text-muted">我的节点图</span><div className="flex items-center gap-1"><button type="button" title="删除当前节点图" aria-label="删除当前节点图" onClick={() => void removeFlow()} className="rounded p-1 text-text-muted hover:bg-error/10 hover:text-error"><Trash2 className="h-3.5 w-3.5" /></button><button type="button" title="新建节点图" aria-label="新建节点图" onClick={() => void createFlow()} className="rounded p-1 text-accent hover:bg-accent/10"><Plus className="h-3.5 w-3.5" /></button></div></div>{flows.map(flow => <button key={flow.id} type="button" onClick={() => setSelectedFlowId(flow.id!)} className={`mb-1 w-full truncate rounded px-2 py-1.5 text-left text-[11px] ${flow.id === selectedFlowId ? 'bg-accent/15 text-accent' : 'text-text-secondary hover:bg-bg-hover'}`}>{flow.name}</button>)}</div><NodeLibrary onAdd={template => addTemplate(template)} /></div><div className="relative flex min-w-0 flex-1"><AuthoringCanvas graph={graph} selectedNodeId={selectedNodeId} candidates={candidates} onSelectNode={setSelectedNodeId} onChange={changeGraph} onBeginConnection={beginConnection} onCanvasConnection={openConnectionMenu} onRemoveNode={removeNode} />{connection && menu && <SmartConnectionMenu anchor={{ ...connection, x: menu.x, y: menu.y }} graph={graph} onPick={pickConnectionTemplate} onClose={() => { setConnection(null); setMenu(null) }} />}</div><NodeInspector node={selectedNode} graph={graph} onChange={changeGraph} onRemove={() => selectedNode && removeNode(selectedNode.id)} /></div>
+    <div className="flex min-h-0 flex-1"><div className="flex w-60 shrink-0 flex-col border-r border-border bg-bg-surface"><div className="border-b border-border p-3"><div className="mb-2 flex items-center justify-between"><span className="text-[10px] font-semibold tracking-wide text-text-muted">我的节点图</span><div className="flex items-center gap-1"><button type="button" title="删除当前节点图" aria-label="删除当前节点图" onClick={() => void removeFlow()} className="rounded p-1 text-text-muted hover:bg-error/10 hover:text-error"><Trash2 className="h-3.5 w-3.5" /></button><button type="button" title="从项目生成概览" aria-label="从项目生成概览" onClick={() => void createOverview()} className="rounded p-1 text-text-muted hover:bg-bg-hover"><LayoutTemplate className="h-3.5 w-3.5" /></button><button type="button" title="新建节点图" aria-label="新建节点图" onClick={() => void createFlow()} className="rounded p-1 text-accent hover:bg-accent/10"><Plus className="h-3.5 w-3.5" /></button></div></div>{flows.map(flow => <button key={flow.id} type="button" onClick={() => setSelectedFlowId(flow.id!)} className={`mb-1 w-full truncate rounded px-2 py-1.5 text-left text-[11px] ${flow.id === selectedFlowId ? 'bg-accent/15 text-accent' : 'text-text-secondary hover:bg-bg-hover'}`}>{flow.name}</button>)}</div><NodeLibrary onAdd={template => addTemplate(template)} /></div><div className="relative flex min-w-0 flex-1"><AuthoringCanvas graph={graph} selectedNodeId={selectedNodeId} candidates={candidates} freshness={freshness} onSelectNode={setSelectedNodeId} onChange={changeGraph} onBeginConnection={beginConnection} onCanvasConnection={openConnectionMenu} onRemoveNode={removeNode} />{connection && menu && <SmartConnectionMenu anchor={{ ...connection, x: menu.x, y: menu.y }} graph={graph} onPick={pickConnectionTemplate} onClose={() => { setConnection(null); setMenu(null) }} />}</div><NodeInspector node={selectedNode} graph={graph} onChange={changeGraph} onRemove={() => selectedNode && removeNode(selectedNode.id)} /></div>
     <section className="shrink-0 border-t border-border bg-bg-surface">
       <button type="button" onClick={() => setShowRuns(value => !value)} className="flex h-9 w-full items-center gap-2 px-4 text-left text-[11px] text-text-secondary hover:bg-bg-hover">
         <History className="h-3.5 w-3.5" />
@@ -367,7 +396,7 @@ export default function NodeAuthoringWorkspace(props: { project: Project; worldG
           <div className="p-3">
             <div className="mb-2 flex items-center justify-between">
               <span className="text-[10px] font-semibold text-text-secondary">候选输出</span>
-              {selectedCandidate && <button type="button" onClick={() => void adoptCandidate(selectedNodeId!)} className="inline-flex items-center gap-1 rounded bg-accent px-2 py-1 text-[10px] font-medium text-white hover:bg-accent-hover"><Check className="h-3 w-3" />{selectedCandidate.status === 'adopted' ? '已采纳' : '确认采纳'}</button>}
+              {selectedCandidate && !selectedNode?.binding?.ref && <button type="button" onClick={() => void adoptCandidate(selectedNodeId!)} className="inline-flex items-center gap-1 rounded bg-accent px-2 py-1 text-[10px] font-medium text-white hover:bg-accent-hover"><Check className="h-3 w-3" />{selectedCandidate.status === 'adopted' ? '已采纳' : '确认采纳'}</button>}
             </div>
             {selectedCandidate ? <textarea aria-label="候选输出" value={selectedCandidate.output} onChange={event => setCandidates(current => ({ ...current, [selectedCandidate.nodeId]: { ...selectedCandidate, output: event.target.value, status: 'candidate' } }))} className="h-40 w-full resize-y rounded border border-border bg-bg-base p-2 text-[10px] leading-4 text-text-primary outline-none focus:border-accent" /> : <p className="text-[10px] text-text-muted">选择已运行节点查看候选输出。</p>}
           </div>

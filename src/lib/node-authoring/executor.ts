@@ -2,10 +2,14 @@ import { estimateTokens } from '../ai/context-budget'
 import { chat } from '../ai/client'
 import { useAIConfigStore } from '../../stores/ai-config'
 import { db } from '../db/schema'
-import { assembleContext } from '../registry/assemble-context'
 import { adopt } from '../registry/adopt'
 import type { NodeFlow, NodeRunRecord } from '../types'
 import { AUTHORING_NODE_BY_ID } from './catalog'
+import {
+  hashAuthoringText,
+  readAuthoringCanonBinding,
+  readAuthoringTargetFingerprint,
+} from './bindings'
 import { validateAuthoringGraph, topologicalAuthoringOrder } from './graph'
 import { parseAuthoringGraph } from './migration'
 import type {
@@ -19,9 +23,17 @@ import type {
 export interface AuthoringRunSnapshot {
   nodeId: string
   nodeTitle: string
+  config: Record<string, unknown>
   inputs: AuthoringInputEnvelope[]
   totalTokens: number
   sourceKeys?: string[]
+  sourceHash?: string
+  sourceEvidence?: {
+    included: string[]
+    omitted: string[]
+    trimmed: string[]
+    missing: string[]
+  }
 }
 
 export type AuthoringRunSnapshotMap = Record<string, AuthoringRunSnapshot>
@@ -70,6 +82,7 @@ function incomingFor(
         cardinality: source?.outputs.find(port => port.id === edge.sourcePortId)?.cardinality ?? 'one',
         state: source?.outputs.find(port => port.id === edge.sourcePortId)?.state ?? 'any',
         content,
+        sourceHash: hashAuthoringText(content),
         tokens: estimateTokens(content),
         ...(edge.mapping?.maxTokens ? { trimmed: [] } : {}),
         ...(targetPort?.maxTokens ? { tokens: Math.min(estimateTokens(content), targetPort.maxTokens) } : {}),
@@ -85,17 +98,8 @@ function composeInputs(inputs: AuthoringInputEnvelope[]): string {
     .join('\n\n')
 }
 
-function hashText(value: string): string {
-  let hash = 2166136261
-  for (let index = 0; index < value.length; index += 1) {
-    hash ^= value.charCodeAt(index)
-    hash = Math.imul(hash, 16777619)
-  }
-  return (hash >>> 0).toString(16).padStart(8, '0')
-}
-
 function inputSignature(inputs: AuthoringInputEnvelope[]): string {
-  return hashText(inputs.map(input => `${input.sourceNodeId}:${input.targetPortId}:${input.content}`).join('\n'))
+  return hashAuthoringText(inputs.map(input => `${input.sourceNodeId}:${input.targetPortId}:${input.content}`).join('\n'))
 }
 
 function requestedAIConfig(node: AuthoringNodeInstance, inputs: AuthoringInputEnvelope[] = []) {
@@ -128,10 +132,33 @@ async function executeNode(input: {
   projectId: number
   worldGroupId: number | null
   signal?: AbortSignal
-}): Promise<{ output: string; variants?: string[]; sourceKeys?: string[]; semantic: AuthoringCandidate['semantic'] }> {
+}): Promise<{
+  output: string
+  variants?: string[]
+  sourceKeys?: string[]
+  sourceHash?: string
+  sourceEvidence?: AuthoringRunSnapshot['sourceEvidence']
+  semantic: AuthoringCandidate['semantic']
+}> {
   const template = AUTHORING_NODE_BY_ID.get(input.node.templateId)
   if (!template) throw new Error(`节点模板不存在：${input.node.templateId}`)
   const { node, inputs } = input
+  if (node.binding?.mode === 'live' && node.binding.ref) {
+    const binding = await readAuthoringCanonBinding({
+      node,
+      projectId: input.projectId,
+      worldGroupId: input.worldGroupId,
+      contextBudget: numberConfig(node, 'contextBudget', 12_000),
+    })
+    if (binding.missing.length) throw new Error(`绑定来源已不存在：${binding.missing.join('、')}`)
+    return {
+      output: binding.content,
+      sourceKeys: binding.sourceKeys,
+      sourceHash: binding.sourceHash,
+      sourceEvidence: binding,
+      semantic: node.outputs[0]?.semantic ?? template.outputs[0]?.semantic ?? 'any',
+    }
+  }
   if (node.templateId === 'input.manual-text') {
     return { output: stringConfig(node, 'text'), semantic: 'text' }
   }
@@ -144,14 +171,19 @@ async function executeNode(input: {
     if (sourceKeys.includes('ragSelection') && !arrayConfig(node, 'ragEntryKeys').length) {
       throw new Error('项目资料节点选择了精确资料，但尚未绑定任何资料字段。')
     }
-    const assembled = await assembleContext({
+    const binding = await readAuthoringCanonBinding({
+      node,
       projectId: input.projectId,
       worldGroupId: input.worldGroupId,
-      sourceKeys,
-      ragEntryKeys: arrayConfig(node, 'ragEntryKeys'),
-      inputBudgetTokens: numberConfig(node, 'contextBudget', 12_000),
+      contextBudget: numberConfig(node, 'contextBudget', 12_000),
     })
-    return { output: assembled.text, sourceKeys, semantic: 'world.setting' }
+    return {
+      output: binding.content,
+      sourceKeys,
+      sourceHash: binding.sourceHash,
+      sourceEvidence: binding,
+      semantic: 'world.setting',
+    }
   }
   if (template.capability === 'transform') {
     if (node.templateId === 'processor.compose') {
@@ -188,15 +220,16 @@ async function executeNode(input: {
   }
   if (template.capability === 'generate-field' || template.capability === 'generate-collection') {
     const sourceKeys = template.reads?.sourceKeys ?? []
-    const upstream = composeInputs(inputs)
-    const assembled = upstream || (sourceKeys.length
-      ? (await assembleContext({
-        projectId: input.projectId,
-        worldGroupId: input.worldGroupId,
-        sourceKeys,
-        inputBudgetTokens: numberConfig(node, 'contextBudget', 16_000),
-      })).text
-      : '')
+    const upstream = composeInputs(inputs.filter(item => item.state !== 'control'))
+    const binding = !upstream && sourceKeys.length
+      ? await readAuthoringCanonBinding({
+          node,
+          projectId: input.projectId,
+          worldGroupId: input.worldGroupId,
+          contextBudget: numberConfig(node, 'contextBudget', 16_000),
+        })
+      : null
+    const assembled = upstream || binding?.content || ''
     const controlNotes = inputs
       .filter(item => item.state === 'control')
       .map(item => `${item.semantic}=${item.content}`)
@@ -226,7 +259,14 @@ async function executeNode(input: {
       }, input.signal)
       variants.push(result.trim())
     }
-    return { output: variants.join('\n\n--- 候选分隔 ---\n\n'), variants, sourceKeys, semantic: template.outputs[0]?.semantic ?? 'candidate' }
+    return {
+      output: variants.join('\n\n--- 候选分隔 ---\n\n'),
+      variants,
+      sourceKeys,
+      sourceHash: binding?.sourceHash,
+      sourceEvidence: binding ?? undefined,
+      semantic: template.outputs[0]?.semantic ?? 'candidate',
+    }
   }
   if (template.capability === 'validate') {
     const output = composeInputs(inputs)
@@ -262,8 +302,33 @@ export async function adoptAuthoringCandidate(input: {
   const parsed = parseAuthoringGraph(input.flow.graphJson)
   const node = parsed.graph.nodes.find(item => item.id === input.nodeId)
   if (!node) throw new Error('候选节点不存在。')
+  if (node.binding?.mode === 'live') throw new Error('实时 Canon 绑定节点只读，不能重复采纳；请采纳它的下游候选节点。')
   const template = AUTHORING_NODE_BY_ID.get(node.templateId)
   if (!template?.writes) throw new Error('该节点没有登记可采纳的写回契约。')
+  const latestRuns = await db.nodeRuns.where('flowId').equals(input.flow.id!).toArray()
+  latestRuns.sort((left, right) => right.startedAt - left.startedAt)
+  let expectedSignature: AuthoringRunSignature | undefined
+  for (const run of latestRuns) {
+    try {
+      const candidate = (JSON.parse(run.nodeResultsJson || '{}') as AuthoringCandidateMap)[input.nodeId]
+      if (candidate?.signature) {
+        expectedSignature = candidate.signature
+        break
+      }
+    } catch {
+      // A damaged historical run does not replace the latest valid candidate evidence.
+    }
+  }
+  if (expectedSignature?.targetHash && expectedSignature.executorVersion === 'FLOW-3B.2') {
+    const currentTarget = await readAuthoringTargetFingerprint({
+      node,
+      projectId: input.flow.projectId,
+      worldGroupId: input.flow.worldGroupId ?? null,
+    })
+    if (currentTarget && !currentTarget.ambiguous && currentTarget.hash !== expectedSignature.targetHash) {
+      throw new Error('目标内容已在分步骤模式或其它入口中更新；请重新运行节点后再采纳，避免覆盖新内容。')
+    }
+  }
   const write = template.writes
   if (write.fields?.length === 1 && (write.mode === 'replace' || write.mode === 'merge-diffs')) {
     return adopt({
@@ -344,6 +409,7 @@ export async function runAuthoringGraph(input: {
     snapshots[node.id] = {
       nodeId: node.id,
       nodeTitle: node.title,
+      config: structuredClone(node.config),
       inputs,
       totalTokens: inputs.reduce((total, item) => total + item.tokens, 0),
       sourceKeys: AUTHORING_NODE_BY_ID.get(node.templateId)?.reads?.sourceKeys,
@@ -356,17 +422,26 @@ export async function runAuthoringGraph(input: {
         worldGroupId: input.flow.worldGroupId ?? null,
         signal: input.signal,
       })
+      const targetFingerprint = await readAuthoringTargetFingerprint({
+        node,
+        projectId: input.flow.projectId,
+        worldGroupId: input.flow.worldGroupId ?? null,
+      })
+      snapshots[node.id].sourceHash = executed.sourceHash
+      snapshots[node.id].sourceKeys = executed.sourceKeys ?? snapshots[node.id].sourceKeys
+      snapshots[node.id].sourceEvidence = executed.sourceEvidence
       const signature: AuthoringRunSignature = {
-        nodeConfigHash: hashText(JSON.stringify(node.config)),
+        nodeConfigHash: hashAuthoringText(JSON.stringify(node.config)),
         upstreamHash: inputSignature(inputs),
-        sourceHash: hashText(inputs.map(item => item.sourceHash ?? item.content).join('\n')),
+        sourceHash: executed.sourceHash ?? hashAuthoringText(''),
+        ...(!targetFingerprint?.ambiguous && targetFingerprint?.hash ? { targetHash: targetFingerprint.hash } : {}),
         promptVersion: AUTHORING_NODE_BY_ID.get(node.templateId)?.promptModuleKey,
         aiPresetId: stringConfig(node, 'aiPresetId') || undefined,
-        executorVersion: 'FLOW-3A.1',
+        executorVersion: 'FLOW-3B.2',
       }
       candidates[node.id] = {
         nodeId: node.id,
-        status: 'candidate',
+        status: node.binding?.mode === 'live' ? 'adopted' : 'candidate',
         output: executed.output,
         ...(executed.variants ? { variants: executed.variants } : {}),
         semantic: executed.semantic,

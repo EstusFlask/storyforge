@@ -228,6 +228,8 @@ export interface AuthoringRunSignature {
   nodeConfigHash: string
   upstreamHash: string
   sourceHash: string
+  /** Hash of the exact Canon target when a single-field write can be verified. */
+  targetHash?: string
   promptVersion?: string
   aiPresetId?: string
   executorVersion: string
