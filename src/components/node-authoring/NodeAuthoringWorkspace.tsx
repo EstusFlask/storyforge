@@ -44,6 +44,8 @@ import { inspectAuthoringGraphFreshness, type AuthoringFreshnessMap } from '../.
 import { useNodeFlowStore } from '../../stores/node-flow'
 import { useAIConfigStore } from '../../stores/ai-config'
 import { CONTEXT_SOURCES } from '../../lib/registry/context-sources'
+import { buildRagLibrary } from '../../lib/retrieval/rag-library'
+import type { RagLibraryEntry } from '../../lib/types'
 import RagEntrySelector from '../retrieval/RagEntrySelector'
 import { useDialog } from '../shared/Dialog'
 import { useToast } from '../shared/Toast'
@@ -217,7 +219,66 @@ function AuthoringCanvas(props: {
   )
 }
 
-function NodeInspector(props: { node: AuthoringNodeInstance | null; graph: AuthoringNodeGraph; projectId: number; worldGroupId: number | null; onChange: (graph: AuthoringNodeGraph) => void; onRemove: () => void }) {
+function CharacterBindingSelector(props: {
+  node: AuthoringNodeInstance
+  projectId: number
+  worldGroupId: number | null
+  fieldKey: string
+  onChange: (binding: AuthoringNodeInstance['binding'] | undefined) => void
+}) {
+  const [entries, setEntries] = useState<RagLibraryEntry[]>([])
+  const [loading, setLoading] = useState(true)
+  const selectedDocumentId = props.node.binding?.ref?.documentId ?? ''
+
+  useEffect(() => {
+    let active = true
+    setLoading(true)
+    void buildRagLibrary({ projectId: props.projectId, worldGroupId: props.worldGroupId })
+      .then(next => {
+        if (active) setEntries(next.filter(entry => entry.tableName === 'characters' && entry.fieldKey === props.fieldKey))
+      })
+      .catch(() => {
+        if (active) setEntries([])
+      })
+      .finally(() => {
+        if (active) setLoading(false)
+      })
+    return () => { active = false }
+  }, [props.projectId, props.worldGroupId, props.fieldKey])
+
+  const characters = useMemo(() => {
+    const seen = new Set<string>()
+    return entries.filter(entry => {
+      if (seen.has(entry.documentId)) return false
+      seen.add(entry.documentId)
+      return true
+    })
+  }, [entries])
+
+  return (
+    <section className="mb-4 rounded border border-amber-300/70 bg-amber-50/60 p-2">
+      <p className="text-[10px] font-semibold text-amber-900">目标角色</p>
+      <p className="mt-1 text-[9px] leading-4 text-amber-800/80">角色维度必须绑定明确的角色记录，采纳时只更新这个角色。</p>
+      <select
+        aria-label="绑定目标角色"
+        value={selectedDocumentId}
+        onChange={event => {
+          const documentId = event.target.value
+          props.onChange(documentId
+            ? { mode: 'snapshot', ref: { documentId, fieldKey: props.fieldKey, target: 'characters' }, capturedAt: Date.now() }
+            : undefined)
+        }}
+        className="mt-2 w-full rounded border border-amber-300 bg-bg-base px-2 py-1.5 text-[11px] text-text-primary"
+        disabled={loading}
+      >
+        <option value="">{loading ? '正在读取角色…' : characters.length ? '请选择角色' : '暂无可绑定角色'}</option>
+        {characters.map(entry => <option key={entry.documentId} value={entry.documentId}>{entry.title}</option>)}
+      </select>
+    </section>
+  )
+}
+
+function NodeInspector(props: { node: AuthoringNodeInstance | null; graph: AuthoringNodeGraph; projectId: number; worldGroupId: number | null; onChange: (graph: AuthoringNodeGraph) => void; onRemove: () => void; onRun: (nodeId: string) => void }) {
   const presets = useAIConfigStore(state => state.presets)
   if (!props.node) return <aside className="flex w-80 shrink-0 items-center justify-center border-l border-border bg-bg-surface p-6 text-center text-xs text-text-muted">选择节点后编辑参数、上下文来源和端口。</aside>
   const node = props.node
@@ -229,9 +290,10 @@ function NodeInspector(props: { node: AuthoringNodeInstance | null; graph: Autho
   const selectionMode = node.config.selectionMode === 'exact' || (node.config.selectionMode == null && sourceKeys.includes('ragSelection')) ? 'exact' : 'registered'
   return (
     <aside className="w-80 shrink-0 overflow-y-auto border-l border-border bg-bg-surface p-4">
-      <div className="mb-4 flex items-start justify-between gap-2"><div><p className="text-[10px] font-semibold tracking-wide text-accent">{template.category}</p><h3 className="mt-1 text-sm font-semibold text-text-primary">{template.label}</h3></div><button type="button" title="删除节点" onClick={props.onRemove} className="rounded p-1 text-text-muted hover:bg-error/10 hover:text-error"><Trash2 className="h-3.5 w-3.5" /></button></div>
+      <div className="mb-4 flex items-start justify-between gap-2"><div><p className="text-[10px] font-semibold tracking-wide text-accent">{template.category}</p><h3 className="mt-1 text-sm font-semibold text-text-primary">{template.label}</h3></div><div className="flex items-center gap-1"><button type="button" title="运行到此节点" aria-label="运行到此节点" onClick={() => props.onRun(node.id)} className="rounded p-1 text-accent hover:bg-accent/10"><Play className="h-3.5 w-3.5" /></button><button type="button" title="删除节点" onClick={props.onRemove} className="rounded p-1 text-text-muted hover:bg-error/10 hover:text-error"><Trash2 className="h-3.5 w-3.5" /></button></div></div>
       <label className="mb-4 block"><span className="mb-1 block text-[10px] text-text-secondary">节点名称</span><input value={node.title} onChange={event => updateNode({ title: event.target.value })} className="w-full rounded border border-border bg-bg-base px-2 py-1.5 text-xs text-text-primary outline-none focus:border-accent" /></label>
       <p className="mb-3 text-[10px] leading-4 text-text-muted">{template.description}</p>
+      {template.writes?.target === 'characters' && template.writes.fields?.length === 1 && <CharacterBindingSelector node={node} projectId={props.projectId} worldGroupId={props.worldGroupId} fieldKey={template.writes.fields[0]} onChange={binding => updateNode({ binding })} />}
       {template.id === 'source.project-context' && <section className="mb-4 rounded border border-border bg-bg-base p-2">
         <div className="mb-2 grid grid-cols-2 rounded border border-border bg-bg-surface p-0.5 text-[10px]">
           <button type="button" onClick={() => updateNode({ config: { ...node.config, selectionMode: 'exact', sourceKeys: ['ragSelection'] } })} className={`rounded px-2 py-1 ${selectionMode === 'exact' ? 'bg-accent text-white' : 'text-text-muted hover:bg-bg-hover'}`}>精确资料</button>
@@ -391,7 +453,7 @@ export default function NodeAuthoringWorkspace(props: { project: Project; worldG
   const selectedCandidate = selectedNodeId ? candidates[selectedNodeId] : undefined
   return <div className="flex h-[760px] min-h-[560px] max-h-[calc(100vh-180px)] flex-col overflow-hidden bg-bg-base">
     <header className="flex h-12 shrink-0 items-center gap-2 border-b border-border bg-bg-surface px-3"><Workflow className="h-4 w-4 text-accent" /><input aria-label="节点图名称" value={draft.name} onChange={event => { setDraft({ ...draft, name: event.target.value }); setDirty(true) }} className="w-56 rounded border border-transparent bg-transparent px-2 py-1 text-sm font-medium text-text-primary hover:border-border focus:border-accent focus:outline-none" /><span className="text-[10px] text-text-muted">{saving ? '保存中…' : dirty ? '待保存' : '已保存'}</span><div className="ml-auto flex items-center gap-2"><button type="button" onClick={() => void save(true)} className="inline-flex items-center gap-1 rounded px-2 py-1.5 text-xs text-text-secondary hover:bg-bg-hover"><Save className="h-3.5 w-3.5" />保存</button>{abortRef.current ? <button type="button" onClick={() => abortRef.current?.abort()} className="inline-flex items-center gap-1 rounded bg-error/10 px-3 py-1.5 text-xs text-error"><CircleStop className="h-3.5 w-3.5" />停止</button> : <button type="button" onClick={() => void runGraph()} className="inline-flex items-center gap-1 rounded bg-accent px-3 py-1.5 text-xs font-medium text-white hover:bg-accent-hover"><Play className="h-3.5 w-3.5" />运行全部</button>}</div></header>
-    <div className="flex min-h-0 flex-1"><div className="flex w-60 shrink-0 flex-col border-r border-border bg-bg-surface"><div className="border-b border-border p-3"><div className="mb-2 flex items-center justify-between"><span className="text-[10px] font-semibold tracking-wide text-text-muted">我的节点图</span><div className="flex items-center gap-1"><button type="button" title="删除当前节点图" aria-label="删除当前节点图" onClick={() => void removeFlow()} className="rounded p-1 text-text-muted hover:bg-error/10 hover:text-error"><Trash2 className="h-3.5 w-3.5" /></button><button type="button" title="从项目生成概览" aria-label="从项目生成概览" onClick={() => void createOverview()} className="rounded p-1 text-text-muted hover:bg-bg-hover"><LayoutTemplate className="h-3.5 w-3.5" /></button><button type="button" title="新建节点图" aria-label="新建节点图" onClick={() => void createFlow()} className="rounded p-1 text-accent hover:bg-accent/10"><Plus className="h-3.5 w-3.5" /></button></div></div>{flows.map(flow => <button key={flow.id} type="button" onClick={() => setSelectedFlowId(flow.id!)} className={`mb-1 w-full truncate rounded px-2 py-1.5 text-left text-[11px] ${flow.id === selectedFlowId ? 'bg-accent/15 text-accent' : 'text-text-secondary hover:bg-bg-hover'}`}>{flow.name}</button>)}</div><NodeLibrary onAdd={template => addTemplate(template)} /></div><div className="relative flex min-w-0 flex-1"><AuthoringCanvas graph={graph} selectedNodeId={selectedNodeId} candidates={candidates} freshness={freshness} onSelectNode={setSelectedNodeId} onChange={changeGraph} onBeginConnection={beginConnection} onCanvasConnection={openConnectionMenu} onRemoveNode={removeNode} />{connection && menu && <SmartConnectionMenu anchor={{ ...connection, x: menu.x, y: menu.y }} graph={graph} onPick={pickConnectionTemplate} onClose={() => { setConnection(null); setMenu(null) }} />}</div><NodeInspector node={selectedNode} graph={graph} projectId={projectId} worldGroupId={props.worldGroupId} onChange={changeGraph} onRemove={() => selectedNode && removeNode(selectedNode.id)} /></div>
+    <div className="flex min-h-0 flex-1"><div className="flex w-60 shrink-0 flex-col border-r border-border bg-bg-surface"><div className="border-b border-border p-3"><div className="mb-2 flex items-center justify-between"><span className="text-[10px] font-semibold tracking-wide text-text-muted">我的节点图</span><div className="flex items-center gap-1"><button type="button" title="删除当前节点图" aria-label="删除当前节点图" onClick={() => void removeFlow()} className="rounded p-1 text-text-muted hover:bg-error/10 hover:text-error"><Trash2 className="h-3.5 w-3.5" /></button><button type="button" title="从项目生成概览" aria-label="从项目生成概览" onClick={() => void createOverview()} className="rounded p-1 text-text-muted hover:bg-bg-hover"><LayoutTemplate className="h-3.5 w-3.5" /></button><button type="button" title="新建节点图" aria-label="新建节点图" onClick={() => void createFlow()} className="rounded p-1 text-accent hover:bg-accent/10"><Plus className="h-3.5 w-3.5" /></button></div></div>{flows.map(flow => <button key={flow.id} type="button" onClick={() => setSelectedFlowId(flow.id!)} className={`mb-1 w-full truncate rounded px-2 py-1.5 text-left text-[11px] ${flow.id === selectedFlowId ? 'bg-accent/15 text-accent' : 'text-text-secondary hover:bg-bg-hover'}`}>{flow.name}</button>)}</div><NodeLibrary onAdd={template => addTemplate(template)} /></div><div className="relative flex min-w-0 flex-1"><AuthoringCanvas graph={graph} selectedNodeId={selectedNodeId} candidates={candidates} freshness={freshness} onSelectNode={setSelectedNodeId} onChange={changeGraph} onBeginConnection={beginConnection} onCanvasConnection={openConnectionMenu} onRemoveNode={removeNode} />{connection && menu && <SmartConnectionMenu anchor={{ ...connection, x: menu.x, y: menu.y }} graph={graph} onPick={pickConnectionTemplate} onClose={() => { setConnection(null); setMenu(null) }} />}</div><NodeInspector node={selectedNode} graph={graph} projectId={projectId} worldGroupId={props.worldGroupId} onChange={changeGraph} onRemove={() => selectedNode && removeNode(selectedNode.id)} onRun={nodeId => void runGraph(nodeId)} /></div>
     <section className="shrink-0 border-t border-border bg-bg-surface">
       <button type="button" onClick={() => setShowRuns(value => !value)} className="flex h-9 w-full items-center gap-2 px-4 text-left text-[11px] text-text-secondary hover:bg-bg-hover">
         <History className="h-3.5 w-3.5" />
@@ -433,7 +495,22 @@ export default function NodeAuthoringWorkspace(props: { project: Project; worldG
                 {selectedCandidate && !selectedNode?.binding?.ref && <button type="button" onClick={() => void adoptCandidate(selectedNodeId!)} className="inline-flex items-center gap-1 rounded bg-accent px-2 py-1 text-[10px] font-medium text-white hover:bg-accent-hover"><Check className="h-3 w-3" />{selectedCandidate.status === 'adopted' ? '已采纳' : '确认采纳'}</button>}
               </div>
             </div>
-            {selectedCandidate ? <textarea aria-label="候选输出" value={selectedCandidate.output} onChange={event => setCandidates(current => ({ ...current, [selectedCandidate.nodeId]: { ...selectedCandidate, output: event.target.value, status: 'candidate' } }))} className="h-40 w-full resize-y rounded border border-border bg-bg-base p-2 text-[10px] leading-4 text-text-primary outline-none focus:border-accent" /> : <p className="text-[10px] text-text-muted">选择已运行节点查看候选输出。</p>}
+            {selectedCandidate ? <>
+              <textarea aria-label="候选输出" value={selectedCandidate.output} onChange={event => setCandidates(current => ({ ...current, [selectedCandidate.nodeId]: { ...selectedCandidate, output: event.target.value, status: 'candidate' } }))} className="h-40 w-full resize-y rounded border border-border bg-bg-base p-2 text-[10px] leading-4 text-text-primary outline-none focus:border-accent" />
+              {selectedCandidate.variants && selectedCandidate.variants.length > 1 && (
+                <details className="mt-2 rounded border border-border bg-bg-base">
+                  <summary className="cursor-pointer px-2 py-1.5 text-[10px] font-medium text-text-secondary">展开原始候选对照（{selectedCandidate.variants.length} 个版本）</summary>
+                  <div className="grid max-h-52 grid-cols-2 gap-2 overflow-y-auto border-t border-border p-2">
+                    {selectedCandidate.variants.map((variant, index) => (
+                      <article key={`${selectedCandidate.nodeId}:variant:${index}`} className="min-w-0 rounded border border-border/70 bg-bg-surface p-2">
+                        <p className="mb-1 text-[9px] font-semibold text-accent">版本 {index + 1}</p>
+                        <pre className="max-h-36 overflow-auto whitespace-pre-wrap text-[9px] leading-4 text-text-secondary">{variant}</pre>
+                      </article>
+                    ))}
+                  </div>
+                </details>
+              )}
+            </> : <p className="text-[10px] text-text-muted">选择已运行节点查看候选输出。</p>}
           </div>
         </div>
       )}

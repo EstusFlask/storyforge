@@ -9,6 +9,7 @@ import {
   hashAuthoringText,
   readAuthoringCanonBinding,
   readAuthoringTargetFingerprint,
+  resolveAuthoringBoundRecordId,
 } from './bindings'
 import { validateAuthoringGraph, topologicalAuthoringOrder } from './graph'
 import { parseAuthoringGraph } from './migration'
@@ -355,10 +356,20 @@ export async function adoptAuthoringCandidate(input: {
   }
   const write = template.writes
   if (write.fields?.length === 1 && (write.mode === 'replace' || write.mode === 'merge-diffs')) {
+    const recordId = await resolveAuthoringBoundRecordId({
+      node,
+      projectId: input.flow.projectId,
+      worldGroupId: input.flow.worldGroupId ?? null,
+      target: write.target,
+    })
+    if (write.target === 'characters' && recordId == null) {
+      throw new Error('角色维度节点需要先绑定一个目标角色，避免把内容写入错误角色。')
+    }
     return adopt({
       projectId: input.flow.projectId,
       worldGroupId: input.flow.worldGroupId ?? null,
       target: write.target,
+      ...(recordId == null ? {} : { recordId }),
       mode: 'replace',
       data: { [write.fields[0]]: input.output },
     })

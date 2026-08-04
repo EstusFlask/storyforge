@@ -137,3 +137,27 @@ export async function readAuthoringTargetFingerprint(input: {
   const key = entry?.key ?? `${target}::${field}`
   return { hash: hashAuthoringText(`${key}:${entry?.content ?? ''}`), key }
 }
+
+/**
+ * Resolve a portable binding back to the current Dexie record only at the
+ * write boundary. Node graphs never store this numeric id; imports therefore
+ * continue to use the stable RAG document id while adoption targets exactly
+ * the author's selected record.
+ */
+export async function resolveAuthoringBoundRecordId(input: {
+  node: AuthoringNodeInstance
+  projectId: number
+  worldGroupId: number | null
+  target: string
+}): Promise<number | null> {
+  const ref = input.node.binding?.ref
+  if (!ref?.documentId) return null
+  const entries = await buildRagLibrary({ projectId: input.projectId, worldGroupId: input.worldGroupId })
+  const matches = entries.filter(entry => (
+    entry.tableName === input.target
+    && entry.documentId === ref.documentId
+    && (!ref.fieldKey || entry.fieldKey === ref.fieldKey)
+  ))
+  const recordIds = [...new Set(matches.map(entry => entry.recordId))]
+  return recordIds.length === 1 ? recordIds[0]! : null
+}

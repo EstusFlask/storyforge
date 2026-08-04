@@ -201,6 +201,10 @@
   `CONTEXT_SOURCES`、`FIELD_REGISTRY/AdoptionSchema` 和 `PROJECT_TABLES`。
 - 领域执行适配层只保存候选所需的目标语义和快照，不复制 Canon 正文；节点级候选数量支持版本选择，
   作者确认后分别写入角色、大纲、细纲或章节既有表。
+- 角色档案节点的真实浏览器主路径已通过：生成候选、作者确认采纳并进入角色主档；23 个角色维度节点
+  必须绑定稳定资料键，写回时解析当前记录并定点更新，不能落到项目中的第一个角色。
+- 节点检查器支持“运行到此节点”，候选区支持多个原始版本对照；相关浏览器证据在
+  `tests/e2e/core-workflow.spec.ts`，领域回归为 `R-FLOW3C-domain-specialized-execution`。
 
 ### 当前边界 / 尚未完成
 

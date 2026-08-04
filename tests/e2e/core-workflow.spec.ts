@@ -135,7 +135,7 @@ test('领域节点模式可自由建图、运行、刷新恢复并完整清理',
   await page.getByLabel('作者输入').fill('潮汐退去后，第一座城从海床升起。')
   await page.getByRole('button', { name: '保存', exact: true }).click()
   await expect(page.getByText('节点图已保存。', { exact: true })).toBeVisible()
-  await page.getByRole('button', { name: '运行全部', exact: true }).click()
+  await page.getByRole('button', { name: '运行到此节点', exact: true }).click()
   await expect(page.getByText('节点图运行完成，候选已保存。', { exact: true })).toBeVisible()
 
   await page.goto(page.url(), { waitUntil: 'domcontentloaded' })
@@ -150,6 +150,43 @@ test('领域节点模式可自由建图、运行、刷新恢复并完整清理',
   })
   await confirmDelete.getByRole('button', { name: '删除', exact: true }).click()
   await expect(page.getByRole('heading', { name: '领域节点创作', exact: true })).toBeVisible()
+})
+
+test('领域角色节点可生成候选、人工确认并写入角色主档', async ({ page }) => {
+  const dimensions = [
+    'identity', 'profile', 'appearance', 'location', 'personality', 'values', 'strengths',
+    'weaknesses', 'fears', 'motivation', 'goals', 'innerConflict', 'background', 'keyEvents',
+    'abilities', 'powerLevel', 'speechStyle', 'habits', 'signatureItem', 'arc', 'storyRole', 'ending',
+  ]
+  const candidate = Object.fromEntries([
+    ['name', '潮汐测者'], ['roleWeight', 'main'], ['moralAxis', 'good'], ['orderAxis', 'lawful'],
+    ['relationships', '与旧城守门人互相扶持。'], ['shortDescription', '能够听见海床回声的测潮者。'],
+    ...dimensions.map(key => [key, `候选${key}`]),
+  ])
+  await page.route('**/chat/completions', async route => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        choices: [{ message: { content: JSON.stringify(candidate) } }],
+        usage: { prompt_tokens: 12, completion_tokens: 24, total_tokens: 36 },
+      }),
+    })
+  })
+  await openCleanHome(page)
+  await createProject(page, 'E2E 领域角色节点')
+  await openSidebarLeaf(page, '创作区', '节点模式')
+  await page.getByRole('button', { name: '创建空白节点图', exact: true }).click()
+  await page.getByRole('button', { name: /^角色档案/ }).click()
+  await page.locator('textarea').last().fill('创建一名能够听见海床回声的主角。')
+  await page.getByRole('button', { name: '保存', exact: true }).click()
+  await page.getByRole('button', { name: '运行全部', exact: true }).click()
+  await expect(page.getByText('节点图运行完成，候选已保存。', { exact: true })).toBeVisible()
+  await expect(page.getByLabel('候选输出')).toContainText('潮汐测者')
+  await page.getByRole('button', { name: '确认采纳', exact: true }).click()
+  await expect(page.getByRole('button', { name: '已采纳', exact: true })).toBeVisible()
+  await openSidebarLeaf(page, '创作区', '角色生成')
+  await expect(page.getByText('潮汐测者', { exact: true })).toBeVisible()
 })
 
 test('互动运行时可演进、判定、检查点、分支并刷新恢复', async ({ page }) => {

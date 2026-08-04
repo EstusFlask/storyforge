@@ -12,7 +12,8 @@ import { adoptDomainCandidate, executeDomainNode } from '../../src/lib/node-auth
 import { AUTHORING_NODE_BY_ID, defaultConfigForTemplate } from '../../src/lib/node-authoring/catalog'
 import { emptyAuthoringGraph, type AuthoringNodeInstance } from '../../src/lib/node-authoring/contracts'
 import { inspectAuthoringGraphFreshness } from '../../src/lib/node-authoring/freshness'
-import { runAuthoringGraph } from '../../src/lib/node-authoring/executor'
+import { adoptAuthoringCandidate, runAuthoringGraph } from '../../src/lib/node-authoring/executor'
+import { buildRagLibrary } from '../../src/lib/retrieval/rag-library'
 import type { AIConfig, NodeFlow, Project } from '../../src/lib/types'
 
 const project: Project = {
@@ -212,5 +213,35 @@ describe('FLOW-3C · 领域节点专用执行器', () => {
     })
     expect(proseAdoption?.written).toHaveLength(1)
     expect((await db.chapters.where('outlineNodeId').equals(chapterId).first())?.content).toContain('潮声')
+  })
+
+  it('角色维度节点按稳定资料绑定定点写回，不会误更新第一个角色', async () => {
+    const firstId = await db.characters.add({
+      projectId: project.id!, name: '先行者', shortDescription: '已有角色一。', motivation: '原动机一',
+      worldGroupId: null, homeWorldGroupId: null, createdAt: 1, updatedAt: 1,
+    } as any)
+    const secondId = await db.characters.add({
+      projectId: project.id!, name: '潮汐测者', shortDescription: '已有角色二。', motivation: '原动机二',
+      worldGroupId: null, homeWorldGroupId: null, createdAt: 1, updatedAt: 1,
+    } as any)
+    const target = (await buildRagLibrary({ projectId: project.id!, worldGroupId: null }))
+      .find(entry => entry.tableName === 'characters' && entry.recordId === secondId && entry.fieldKey === 'motivation')
+    expect(target).toBeDefined()
+    const graphNode = node('character.field.motivation', { request: '为角色设计新的核心动机。' })
+    graphNode.binding = {
+      mode: 'snapshot',
+      ref: { documentId: target!.documentId, fieldKey: 'motivation', target: 'characters' },
+    }
+    vi.mocked(chat).mockResolvedValue('为了让沉没城市重见天日。')
+    const flowId = await db.nodeFlows.add({
+      projectId: project.id!, worldGroupId: null, name: '角色维度绑定', description: '',
+      graphJson: JSON.stringify({ ...emptyAuthoringGraph(), nodes: [graphNode] }), createdAt: 1, updatedAt: 1,
+    }) as number
+    const flow = await db.nodeFlows.get(flowId) as NodeFlow
+    const result = await runAuthoringGraph({ flow })
+    const adopted = await adoptAuthoringCandidate({ flow, nodeId: graphNode.id, output: result.candidates[graphNode.id].output })
+    expect(adopted.written).toHaveLength(1)
+    expect((await db.characters.get(firstId))?.motivation).toBe('原动机一')
+    expect((await db.characters.get(secondId))?.motivation).toBe('为了让沉没城市重见天日。')
   })
 })
