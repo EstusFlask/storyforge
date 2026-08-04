@@ -41,6 +41,7 @@ import {
 import { useNodeFlowStore } from '../../stores/node-flow'
 import { useAIConfigStore } from '../../stores/ai-config'
 import { CONTEXT_SOURCES } from '../../lib/registry/context-sources'
+import { useDialog } from '../shared/Dialog'
 import { useToast } from '../shared/Toast'
 
 const NODE_WIDTH = 238
@@ -244,6 +245,7 @@ function SmartConnectionMenu(props: { anchor: { nodeId: string; portId: string; 
 
 export default function NodeAuthoringWorkspace(props: { project: Project; worldGroupId: number | null }) {
   const projectId = props.project.id!
+  const dialog = useDialog()
   const toast = useToast()
   const flows = useNodeFlowStore(state => state.flows)
   const runs = useNodeFlowStore(state => state.runs)
@@ -286,6 +288,29 @@ export default function NodeAuthoringWorkspace(props: { project: Project; worldG
   useEffect(() => { if (!dirty || !draft) return; const timer = window.setTimeout(() => { void save() }, 700); return () => window.clearTimeout(timer) }, [dirty, graph, draft?.name, draft?.description])
   const changeGraph = (next: AuthoringNodeGraph) => { setGraph(next); setDirty(true) }
   const createFlow = async () => { const id = await useNodeFlowStore.getState().createFlow(projectId, props.worldGroupId); setSelectedFlowId(id) }
+  const removeFlow = async () => {
+    if (!draft?.id) return
+    const confirmed = await dialog.confirm({
+      title: `删除节点图“${draft.name}”？`,
+      message: '节点图及其所有运行输入、输出记录将一并删除，且不可恢复。',
+      confirmText: '删除',
+      tone: 'danger',
+    })
+    if (!confirmed) return
+    try {
+      await useNodeFlowStore.getState().removeFlow(draft.id)
+      setSelectedFlowId(null)
+      setDraft(null)
+      setGraph(emptyAuthoringGraph())
+      setSelectedNodeId(null)
+      setCandidates({})
+      setSnapshots({})
+      setRun(null)
+      toast.success('节点图及其运行记录已删除。')
+    } catch (error) {
+      toast.error(`删除失败：${error instanceof Error ? error.message : String(error)}`)
+    }
+  }
   const addTemplate = (template: AuthoringNodeTemplate, position?: { x: number; y: number }) => { const node = nodeFromTemplate(template, graph.nodes.length); if (position) { node.x = position.x; node.y = position.y } changeGraph({ ...graph, nodes: [...graph.nodes, node] }); setSelectedNodeId(node.id); return node }
   const removeNode = (id: string) => { changeGraph({ ...graph, nodes: graph.nodes.filter(node => node.id !== id), edges: graph.edges.filter(edge => edge.sourceNodeId !== id && edge.targetNodeId !== id) }); if (selectedNodeId === id) setSelectedNodeId(null) }
   const beginConnection = (nodeId: string, portId: string, direction: 'input' | 'output') => { if (connection && connection.direction === 'output' && direction === 'input' && connection.nodeId !== nodeId) { const next = addEdge(graph, connection.nodeId, connection.portId, nodeId, portId); const issue = validateAuthoringGraph(next).find(item => item.code === 'cycle' || item.code === 'type-mismatch' || item.code === 'duplicate-edge'); if (issue) toast.error(issue.message); else changeGraph(next); setConnection(null); setMenu(null); return } setConnection({ nodeId, portId, direction }); setMenu(null) }
@@ -325,7 +350,7 @@ export default function NodeAuthoringWorkspace(props: { project: Project; worldG
   const selectedCandidate = selectedNodeId ? candidates[selectedNodeId] : undefined
   return <div className="flex h-[760px] min-h-[560px] max-h-[calc(100vh-180px)] flex-col overflow-hidden bg-bg-base">
     <header className="flex h-12 shrink-0 items-center gap-2 border-b border-border bg-bg-surface px-3"><Workflow className="h-4 w-4 text-accent" /><input aria-label="节点图名称" value={draft.name} onChange={event => { setDraft({ ...draft, name: event.target.value }); setDirty(true) }} className="w-56 rounded border border-transparent bg-transparent px-2 py-1 text-sm font-medium text-text-primary hover:border-border focus:border-accent focus:outline-none" /><span className="text-[10px] text-text-muted">{saving ? '保存中…' : dirty ? '待保存' : '已保存'}</span><div className="ml-auto flex items-center gap-2"><button type="button" onClick={() => void save(true)} className="inline-flex items-center gap-1 rounded px-2 py-1.5 text-xs text-text-secondary hover:bg-bg-hover"><Save className="h-3.5 w-3.5" />保存</button>{abortRef.current ? <button type="button" onClick={() => abortRef.current?.abort()} className="inline-flex items-center gap-1 rounded bg-error/10 px-3 py-1.5 text-xs text-error"><CircleStop className="h-3.5 w-3.5" />停止</button> : <button type="button" onClick={() => void runGraph()} className="inline-flex items-center gap-1 rounded bg-accent px-3 py-1.5 text-xs font-medium text-white hover:bg-accent-hover"><Play className="h-3.5 w-3.5" />运行全部</button>}</div></header>
-    <div className="flex min-h-0 flex-1"><div className="flex w-60 shrink-0 flex-col border-r border-border bg-bg-surface"><div className="border-b border-border p-3"><div className="mb-2 flex items-center justify-between"><span className="text-[10px] font-semibold tracking-wide text-text-muted">我的节点图</span><button type="button" title="新建节点图" onClick={() => void createFlow()} className="rounded p-1 text-accent hover:bg-accent/10"><Plus className="h-3.5 w-3.5" /></button></div>{flows.map(flow => <button key={flow.id} type="button" onClick={() => setSelectedFlowId(flow.id!)} className={`mb-1 w-full truncate rounded px-2 py-1.5 text-left text-[11px] ${flow.id === selectedFlowId ? 'bg-accent/15 text-accent' : 'text-text-secondary hover:bg-bg-hover'}`}>{flow.name}</button>)}</div><NodeLibrary onAdd={template => addTemplate(template)} /></div><div className="relative flex min-w-0 flex-1"><AuthoringCanvas graph={graph} selectedNodeId={selectedNodeId} candidates={candidates} onSelectNode={setSelectedNodeId} onChange={changeGraph} onBeginConnection={beginConnection} onCanvasConnection={openConnectionMenu} onRemoveNode={removeNode} />{connection && menu && <SmartConnectionMenu anchor={{ ...connection, x: menu.x, y: menu.y }} graph={graph} onPick={pickConnectionTemplate} onClose={() => { setConnection(null); setMenu(null) }} />}</div><NodeInspector node={selectedNode} graph={graph} onChange={changeGraph} onRemove={() => selectedNode && removeNode(selectedNode.id)} /></div>
+    <div className="flex min-h-0 flex-1"><div className="flex w-60 shrink-0 flex-col border-r border-border bg-bg-surface"><div className="border-b border-border p-3"><div className="mb-2 flex items-center justify-between"><span className="text-[10px] font-semibold tracking-wide text-text-muted">我的节点图</span><div className="flex items-center gap-1"><button type="button" title="删除当前节点图" aria-label="删除当前节点图" onClick={() => void removeFlow()} className="rounded p-1 text-text-muted hover:bg-error/10 hover:text-error"><Trash2 className="h-3.5 w-3.5" /></button><button type="button" title="新建节点图" aria-label="新建节点图" onClick={() => void createFlow()} className="rounded p-1 text-accent hover:bg-accent/10"><Plus className="h-3.5 w-3.5" /></button></div></div>{flows.map(flow => <button key={flow.id} type="button" onClick={() => setSelectedFlowId(flow.id!)} className={`mb-1 w-full truncate rounded px-2 py-1.5 text-left text-[11px] ${flow.id === selectedFlowId ? 'bg-accent/15 text-accent' : 'text-text-secondary hover:bg-bg-hover'}`}>{flow.name}</button>)}</div><NodeLibrary onAdd={template => addTemplate(template)} /></div><div className="relative flex min-w-0 flex-1"><AuthoringCanvas graph={graph} selectedNodeId={selectedNodeId} candidates={candidates} onSelectNode={setSelectedNodeId} onChange={changeGraph} onBeginConnection={beginConnection} onCanvasConnection={openConnectionMenu} onRemoveNode={removeNode} />{connection && menu && <SmartConnectionMenu anchor={{ ...connection, x: menu.x, y: menu.y }} graph={graph} onPick={pickConnectionTemplate} onClose={() => { setConnection(null); setMenu(null) }} />}</div><NodeInspector node={selectedNode} graph={graph} onChange={changeGraph} onRemove={() => selectedNode && removeNode(selectedNode.id)} /></div>
     <section className="shrink-0 border-t border-border bg-bg-surface">
       <button type="button" onClick={() => setShowRuns(value => !value)} className="flex h-9 w-full items-center gap-2 px-4 text-left text-[11px] text-text-secondary hover:bg-bg-hover">
         <History className="h-3.5 w-3.5" />
