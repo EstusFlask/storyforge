@@ -166,8 +166,8 @@
 
 ### 已有能力
 
-- 工作区“节点模式”已经改用独立 `NodeModeWorkspace`，不再复用分步骤的
-  `PromptWorkflowsPanel`；旧 `PromptWorkflow.graph` 仅作为历史技术实验。
+- FLOW-2 的独立工作区已由 FLOW-3 `NodeAuthoringWorkspace` 接管主入口，不再复用分步骤的
+  `PromptWorkflowsPanel`；旧 `NodeModeWorkspace` 与 `PromptWorkflow.graph` 仅作为迁移/兼容实现。
 - `nodeFlows` 保存项目级自由图、动态端口、连线、节点配置与视口；未完成图也会自动保存，
   运行前才进行悬空引用、重复边、自环、类型不匹配、必需输入和环路校验。
 - 已有自由文本、项目元素、整理合并、自由创作、内容校验、内容输出六类节点；作者可任意

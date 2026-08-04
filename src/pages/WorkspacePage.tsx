@@ -29,7 +29,7 @@ const UsageStatsPage = lazy(() => import('../components/settings/UsageStatsPage'
 const VersionHistoryPanel = lazy(() => import('../components/system/VersionHistoryPanel'))
 const ImportDocPanel = lazy(() => import('../components/system/ImportDocPanel'))
 const PromptManagerPanel = lazy(() => import('../components/settings/prompt/PromptManagerPanel'))
-const NodeModeWorkspace = lazy(() => import('../components/node-flow/NodeModeWorkspace'))
+const NodeAuthoringWorkspace = lazy(() => import('../components/node-authoring/NodeAuthoringWorkspace'))
 const RagLibraryPanel = lazy(() => import('../components/retrieval/RagLibraryPanel'))
 const SimulationRuntimePanel = lazy(() => import('../components/simulation/SimulationRuntimePanel'))
 const DataManagementPanel = lazy(() => import('../components/data/DataManagementPanel'))
@@ -257,7 +257,7 @@ export default function WorkspacePage() {
       case 'character-driven-plot':
         return <CharacterDrivenPlotPanel project={project} />
       case 'visual-workflows':
-        return <NodeModeWorkspace project={project} worldGroupId={copilotWorldGroupId} />
+        return <NodeAuthoringWorkspace project={project} worldGroupId={copilotWorldGroupId} />
       case 'rag-library':
         return <RagLibraryPanel project={project} />
       case 'simulation-runtime':

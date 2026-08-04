@@ -26,7 +26,7 @@ import { useWorldGroupStore } from '../stores/world-group'
 import './product-hub.css'
 
 const WorldGroupOverview = lazy(() => import('../components/world-group/WorldGroupOverview'))
-const NodeModeWorkspace = lazy(() => import('../components/node-flow/NodeModeWorkspace'))
+const NodeAuthoringWorkspace = lazy(() => import('../components/node-authoring/NodeAuthoringWorkspace'))
 const SimulationRuntimePanel = lazy(() => import('../components/simulation/SimulationRuntimePanel'))
 const OutlinePanel = lazy(() => import('../components/outline/OutlinePanel'))
 const ChaptersListPanel = lazy(() => import('../components/editor/ChaptersListPanel'))
@@ -239,7 +239,7 @@ function NovelPage({ project, world, onOpenWorldPicker, onCreate }: { project?: 
 function NodesPage({ project, world, onOpenWorldPicker, onCreate }: { project?: Project; world?: ProductWorld; onOpenWorldPicker: () => void; onCreate: () => void }) {
   const worldGroupId = useSelectedWorldGroupId(project)
   if (!project || !world) return <><PageHeading eyebrow="FLOW / NODE AUTHORING" title="节点创作" description="自由编排资料、处理和生成节点。" /><EmptyProjectState onCreate={onCreate} /></>
-  return <><PageHeading eyebrow="FLOW / NODE AUTHORING" title="节点创作" description="把世界资料、处理和生成组成可观察、可复用、可回放的创作数据流。" /><BindingBanner world={world} onChange={onOpenWorldPicker} /><section className="sf-product-runtime-surface"><Suspense fallback={<FeaturePanelFallback />}><NodeModeWorkspace project={project} worldGroupId={worldGroupId} /></Suspense></section></>
+  return <><PageHeading eyebrow="FLOW / NODE AUTHORING" title="节点创作" description="把世界观、故事、角色、执行控制和输出候选自由编排成可观察、可回放的创作图。" /><BindingBanner world={world} onChange={onOpenWorldPicker} /><section className="sf-product-runtime-surface"><Suspense fallback={<FeaturePanelFallback />}><NodeAuthoringWorkspace project={project} worldGroupId={worldGroupId} /></Suspense></section></>
 }
 
 function TtrpgPage({ project, world, onOpenWorldPicker, onCreate }: { project?: Project; world?: ProductWorld; onOpenWorldPicker: () => void; onCreate: () => void }) {

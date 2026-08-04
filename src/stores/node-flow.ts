@@ -1,7 +1,8 @@
 import { create } from 'zustand'
 import { db } from '../lib/db/schema'
 import type { NodeFlow, NodeRunRecord } from '../lib/types'
-import { EMPTY_NODE_FLOW_GRAPH, parseNodeFlowGraph } from '../lib/types'
+import { parseAuthoringGraph } from '../lib/node-authoring/migration'
+import { emptyAuthoringGraph } from '../lib/node-authoring/contracts'
 
 interface NodeFlowStore {
   projectId: number | null
@@ -35,7 +36,7 @@ export const useNodeFlowStore = create<NodeFlowStore>((set, get) => ({
       worldGroupId,
       name: '未命名节点图',
       description: '',
-      graphJson: JSON.stringify(EMPTY_NODE_FLOW_GRAPH),
+      graphJson: JSON.stringify(emptyAuthoringGraph()),
       createdAt: now,
       updatedAt: now,
     }
@@ -47,7 +48,7 @@ export const useNodeFlowStore = create<NodeFlowStore>((set, get) => ({
   saveFlow: async flow => {
     // 草稿阶段允许缺少连线、必需输入或暂时存在循环；运行前会进行完整图校验。
     // 这里只验证 JSON 外壳，避免作者尚未完成的节点图无法被持久化。
-    parseNodeFlowGraph(flow.graphJson)
+    parseAuthoringGraph(flow.graphJson)
     const now = Date.now()
     const id = await db.nodeFlows.put({ ...flow, updatedAt: now }) as number
     await get().load(flow.projectId)
