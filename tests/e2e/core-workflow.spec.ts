@@ -152,6 +152,25 @@ test('领域节点模式可自由建图、运行、刷新恢复并完整清理',
   await expect(page.getByRole('heading', { name: '领域节点创作', exact: true })).toBeVisible()
 })
 
+test('领域节点模式空态可直接创建官方模板并自动布局', async ({ page }) => {
+  await openCleanHome(page)
+  await createProject(page, 'E2E FLOW-3E 官方模板')
+  await openSidebarLeaf(page, '创作区', '节点模式')
+  await expect(page.getByRole('heading', { name: '领域节点创作', exact: true })).toBeVisible()
+
+  await page.getByRole('button', { name: /基础世界构建/ }).click()
+  await expect(page.getByRole('textbox', { name: '节点图名称' })).toHaveValue('基础世界构建')
+  await expect(page.locator('[data-authoring-node-template]')).toHaveCount(13)
+  await page.getByRole('button', { name: '自动布局', exact: true }).click()
+  await page.getByRole('button', { name: '保存', exact: true }).click()
+  await expect(page.getByText('节点图已保存。', { exact: true })).toBeVisible()
+
+  await page.reload()
+  await openSidebarLeaf(page, '创作区', '节点模式')
+  await expect(page.getByRole('textbox', { name: '节点图名称' })).toHaveValue('基础世界构建')
+  await expect(page.locator('[data-authoring-node-template]')).toHaveCount(13)
+})
+
 test('领域节点模式可创建世界到正文的完整创作链并刷新恢复', async ({ page }) => {
   await openCleanHome(page)
   await createProject(page, 'E2E 完整创作链')

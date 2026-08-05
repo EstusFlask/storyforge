@@ -14,6 +14,7 @@ import { remapWorldPortalTargets } from '../utils/world-portals'
 import { parseCharacterDrivenPlanArcs } from '../types/character-driven-plan'
 import type { TableSpec } from '../registry/types'
 import type { ProjectExportData } from './json-export'
+import { redactAuthoringSecrets } from '../node-authoring/contracts'
 
 /** 当前导出格式版本(与手写版保持一致) */
 const EXPORT_VERSION = 3
@@ -82,7 +83,9 @@ function toExportRow(
     }
   }
 
-  return obj
+  return spec.name === 'nodeFlows' || spec.name === 'nodeRuns'
+    ? redactAuthoringSecrets(obj)
+    : obj
 }
 
 function parseIdArray(value: unknown): number[] {

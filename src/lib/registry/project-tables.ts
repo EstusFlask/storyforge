@@ -316,8 +316,13 @@ export const PROJECT_TABLES: TableSpec[] = [
     exportRemap: [
       { field: 'flowId', remapVia: 'nodeFlows', exportAs: '_flowExportId', onUnmapped: 'require' },
     ],
-    defaults: { inputSnapshotsJson: '{}', nodeResultsJson: '{}' },
-    note: 'FLOW-2 逐节点输入/输出/错误/确认记录，保证刷新后仍可见' },
+    defaults: {
+      inputSnapshotsJson: '{}',
+      nodeResultsJson: '{}',
+      executionPlanJson: '{}',
+      graphSnapshotJson: '',
+    },
+    note: 'FLOW-2/3 逐节点输入、输出、执行计划与断点记录，保证刷新后仍可见可恢复' },
 
   // ───────────────────── SIM-1 共享互动运行时 ─────────────────────
   { table: db.simulationSessions, name: 'simulationSessions', owner: 'project',

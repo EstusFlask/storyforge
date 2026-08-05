@@ -21,6 +21,7 @@ import type {
   AuthoringNodeInstance,
   AuthoringRunSignature,
 } from './contracts'
+import { safeAuthoringGraphJson } from './contracts'
 import { adoptDomainCandidate, executeDomainNode } from './domain-execution'
 
 export interface AuthoringRunSnapshot {
@@ -46,6 +47,18 @@ export interface AuthoringRunUpdate {
   run: NodeRunRecord
   snapshots: AuthoringRunSnapshotMap
   candidates: AuthoringCandidateMap
+}
+
+export interface AuthoringExecutionPlan {
+  version: 1
+  graphHash: string
+  targetNodeId: string | null
+  orderedNodeIds: string[]
+  completedNodeIds: string[]
+  pendingNodeIds: string[]
+  estimatedAiCalls: number
+  estimatedMaxOutputTokens: number
+  createdAt: number
 }
 
 function stringConfig(node: AuthoringNodeInstance, key: string, fallback = ''): string {
@@ -127,6 +140,99 @@ function inputControl(inputs: AuthoringInputEnvelope[], semantic: string): strin
 function controlNumber(inputs: AuthoringInputEnvelope[], semantic: string, fallback: number): number {
   const value = Number(inputControl(inputs, semantic))
   return Number.isFinite(value) ? value : fallback
+}
+
+function graphControlNumber(
+  graph: AuthoringNodeGraph,
+  node: AuthoringNodeInstance,
+  semantic: string,
+  fallback: number,
+): number {
+  const edge = graph.edges.find(item => item.targetNodeId === node.id && (
+    graph.nodes.find(source => source.id === item.sourceNodeId)
+      ?.outputs.find(port => port.id === item.sourcePortId)?.semantic === semantic
+  ))
+  const source = edge ? graph.nodes.find(item => item.id === edge.sourceNodeId) : undefined
+  const value = Number(source?.config.value)
+  return Number.isFinite(value) ? value : fallback
+}
+
+export function buildAuthoringExecutionPlan(input: {
+  graph: AuthoringNodeGraph
+  targetNodeId?: string | null
+  runNodeIds?: ReadonlySet<string>
+}): AuthoringExecutionPlan {
+  const allOrdered = topologicalAuthoringOrder(input.graph, input.targetNodeId)
+  const ordered = input.runNodeIds
+    ? allOrdered.filter(node => input.runNodeIds?.has(node.id))
+    : allOrdered
+  let estimatedAiCalls = 0
+  let estimatedMaxOutputTokens = 0
+  const defaultMaxTokens = useAIConfigStore.getState().config.maxTokens
+  for (const node of ordered) {
+    const template = AUTHORING_NODE_BY_ID.get(node.templateId)
+    const usesAI = template?.capability === 'generate-field'
+      || template?.capability === 'generate-collection'
+      || node.templateId === 'processor.free-generation'
+    if (!usesAI) continue
+    const count = Math.min(8, Math.max(1, Math.round(graphControlNumber(
+      input.graph,
+      node,
+      'control.count',
+      numberConfig(node, 'candidateCount', 1),
+    ))))
+    const maxTokens = Math.max(100, Math.round(graphControlNumber(
+      input.graph,
+      node,
+      'control.max-tokens',
+      numberConfig(node, 'maxTokens', defaultMaxTokens),
+    )))
+    estimatedAiCalls += count
+    estimatedMaxOutputTokens += count * maxTokens
+  }
+  const orderedNodeIds = ordered.map(node => node.id)
+  return {
+    version: 1,
+    graphHash: hashAuthoringText(JSON.stringify(input.graph)),
+    targetNodeId: input.targetNodeId ?? null,
+    orderedNodeIds,
+    completedNodeIds: [],
+    pendingNodeIds: [...orderedNodeIds],
+    estimatedAiCalls,
+    estimatedMaxOutputTokens,
+    createdAt: Date.now(),
+  }
+}
+
+export function parseAuthoringExecutionPlan(value: string | null | undefined): AuthoringExecutionPlan | null {
+  if (!value?.trim()) return null
+  try {
+    const parsed = JSON.parse(value) as Partial<AuthoringExecutionPlan>
+    if (
+      parsed.version !== 1
+      || typeof parsed.graphHash !== 'string'
+      || !Array.isArray(parsed.orderedNodeIds)
+      || !Array.isArray(parsed.completedNodeIds)
+      || !Array.isArray(parsed.pendingNodeIds)
+    ) return null
+    return parsed as AuthoringExecutionPlan
+  } catch {
+    return null
+  }
+}
+
+function parseRunMaps(run: NodeRunRecord): {
+  snapshots: AuthoringRunSnapshotMap
+  candidates: AuthoringCandidateMap
+} {
+  try {
+    return {
+      snapshots: JSON.parse(run.inputSnapshotsJson || '{}') as AuthoringRunSnapshotMap,
+      candidates: JSON.parse(run.nodeResultsJson || '{}') as AuthoringCandidateMap,
+    }
+  } catch {
+    throw new Error('节点运行记录损坏，不能作为恢复或重跑基线。')
+  }
 }
 
 async function executeNode(input: {
@@ -398,12 +504,14 @@ async function persistAuthoringRun(
   status: NodeRunRecord['status'],
   snapshots: AuthoringRunSnapshotMap,
   candidates: AuthoringCandidateMap,
+  plan: AuthoringExecutionPlan,
   completedAt?: number | null,
 ) {
   await db.nodeRuns.update(runId, {
     status,
     inputSnapshotsJson: JSON.stringify(snapshots),
     nodeResultsJson: JSON.stringify(candidates),
+    executionPlanJson: JSON.stringify(plan),
     updatedAt: Date.now(),
     completedAt,
   })
@@ -412,6 +520,11 @@ async function persistAuthoringRun(
 export async function runAuthoringGraph(input: {
   flow: NodeFlow
   targetNodeId?: string | null
+  /** Resume updates the same paused/failed run after graph-signature verification. */
+  resumeRunId?: number
+  /** A stale rerun creates a new run while reusing unchanged upstream evidence. */
+  baseRunId?: number
+  runNodeIds?: ReadonlySet<string>
   signal?: AbortSignal
   onUpdate?: (update: AuthoringRunUpdate) => void
 }): Promise<AuthoringRunUpdate> {
@@ -419,22 +532,74 @@ export async function runAuthoringGraph(input: {
   const parsed = parseAuthoringGraph(input.flow.graphJson)
   const issues = validateAuthoringGraph(parsed.graph)
   if (issues.length) throw new Error(issues.map(issue => issue.message).join('；'))
-  const ordered = topologicalAuthoringOrder(parsed.graph, input.targetNodeId)
+  let ordered = topologicalAuthoringOrder(parsed.graph, input.targetNodeId)
+  if (input.runNodeIds) ordered = ordered.filter(node => input.runNodeIds?.has(node.id))
+  if (!ordered.length) throw new Error('本次执行计划没有需要运行的节点。')
   const now = Date.now()
-  const row: NodeRunRecord = {
-    projectId: input.flow.projectId,
-    flowId: input.flow.id,
-    status: 'running',
-    inputSnapshotsJson: '{}',
-    nodeResultsJson: '{}',
-    startedAt: now,
-    updatedAt: now,
-    completedAt: null,
+  let plan = buildAuthoringExecutionPlan({
+    graph: parsed.graph,
+    targetNodeId: input.targetNodeId,
+    runNodeIds: input.runNodeIds,
+  })
+  let snapshots: AuthoringRunSnapshotMap = {}
+  let candidates: AuthoringCandidateMap = {}
+  let run: NodeRunRecord
+  let runId: number
+
+  if (input.resumeRunId != null) {
+    const existing = await db.nodeRuns.get(input.resumeRunId)
+    if (!existing || existing.flowId !== input.flow.id || existing.projectId !== input.flow.projectId) {
+      throw new Error('要恢复的运行记录不存在或不属于当前节点图。')
+    }
+    if (existing.status !== 'paused' && existing.status !== 'failed') {
+      throw new Error('只有已暂停或失败的运行可以从断点恢复。')
+    }
+    const previousPlan = parseAuthoringExecutionPlan(existing.executionPlanJson)
+    if (!previousPlan || previousPlan.graphHash !== plan.graphHash) {
+      throw new Error('节点图已变化，不能继续旧断点；请开始一次新的运行。')
+    }
+    ;({ snapshots, candidates } = parseRunMaps(existing))
+    const completed = new Set(previousPlan.completedNodeIds)
+    ordered = previousPlan.orderedNodeIds
+      .filter(nodeId => !completed.has(nodeId))
+      .map(nodeId => parsed.graph.nodes.find(node => node.id === nodeId))
+      .filter((node): node is AuthoringNodeInstance => Boolean(node))
+    if (!ordered.length) throw new Error('该运行没有待恢复节点。')
+    plan = { ...previousPlan, pendingNodeIds: ordered.map(node => node.id) }
+    for (const node of ordered) {
+      if (candidates[node.id]?.status === 'blocked') delete candidates[node.id]
+    }
+    runId = existing.id!
+    run = { ...existing, status: 'running', updatedAt: now, completedAt: null }
+    await db.nodeRuns.update(runId, {
+      status: 'running',
+      updatedAt: now,
+      completedAt: null,
+      executionPlanJson: JSON.stringify(plan),
+    })
+  } else {
+    if (input.baseRunId != null) {
+      const base = await db.nodeRuns.get(input.baseRunId)
+      if (!base || base.flowId !== input.flow.id || base.projectId !== input.flow.projectId) {
+        throw new Error('过期重跑基线不存在或不属于当前节点图。')
+      }
+      ;({ snapshots, candidates } = parseRunMaps(base))
+    }
+    const row: NodeRunRecord = {
+      projectId: input.flow.projectId,
+      flowId: input.flow.id,
+      status: 'running',
+      inputSnapshotsJson: JSON.stringify(snapshots),
+      nodeResultsJson: JSON.stringify(candidates),
+      executionPlanJson: JSON.stringify(plan),
+      graphSnapshotJson: safeAuthoringGraphJson(input.flow.graphJson),
+      startedAt: now,
+      updatedAt: now,
+      completedAt: null,
+    }
+    runId = await db.nodeRuns.add(row) as number
+    run = { ...row, id: runId }
   }
-  const runId = await db.nodeRuns.add(row) as number
-  const run = { ...row, id: runId }
-  const snapshots: AuthoringRunSnapshotMap = {}
-  const candidates: AuthoringCandidateMap = {}
   const emit = (nextRun: NodeRunRecord) => input.onUpdate?.({ run: nextRun, snapshots: { ...snapshots }, candidates: { ...candidates } })
   emit(run)
 
@@ -484,9 +649,15 @@ export async function runAuthoringGraph(input: {
         signature,
         createdAt: Date.now(),
       }
-      await persistAuthoringRun(runId, 'running', snapshots, candidates, null)
-      emit({ ...run, updatedAt: Date.now() })
+      plan = {
+        ...plan,
+        completedNodeIds: Array.from(new Set([...plan.completedNodeIds, node.id])),
+        pendingNodeIds: plan.pendingNodeIds.filter(nodeId => nodeId !== node.id),
+      }
+      await persistAuthoringRun(runId, 'running', snapshots, candidates, plan, null)
+      emit({ ...run, updatedAt: Date.now(), executionPlanJson: JSON.stringify(plan) })
     } catch (error) {
+      if (input.signal?.aborted) break
       candidates[node.id] = {
         nodeId: node.id,
         status: 'blocked',
@@ -496,17 +667,19 @@ export async function runAuthoringGraph(input: {
         createdAt: Date.now(),
       }
       const completedAt = Date.now()
-      await persistAuthoringRun(runId, 'failed', snapshots, candidates, completedAt)
-      const failed = { ...run, status: 'failed' as const, updatedAt: completedAt, completedAt }
+      await persistAuthoringRun(runId, 'failed', snapshots, candidates, plan, completedAt)
+      const failed = { ...run, status: 'failed' as const, updatedAt: completedAt, completedAt, executionPlanJson: JSON.stringify(plan) }
       emit(failed)
       return { run: failed, snapshots, candidates }
     }
   }
 
   const completedAt = Date.now()
-  const status = input.signal?.aborted ? 'cancelled' : 'completed'
-  await persistAuthoringRun(runId, status, snapshots, candidates, completedAt)
-  const completed = { ...run, status: status as NodeRunRecord['status'], updatedAt: completedAt, completedAt }
+  const status = input.signal?.aborted
+    ? input.signal.reason === 'paused' ? 'paused' : 'cancelled'
+    : 'completed'
+  await persistAuthoringRun(runId, status, snapshots, candidates, plan, completedAt)
+  const completed = { ...run, status: status as NodeRunRecord['status'], updatedAt: completedAt, completedAt, executionPlanJson: JSON.stringify(plan) }
   emit(completed)
   return { run: completed, snapshots, candidates }
 }

@@ -2,7 +2,7 @@ import { create } from 'zustand'
 import { db } from '../lib/db/schema'
 import type { NodeFlow, NodeRunRecord } from '../lib/types'
 import { parseAuthoringGraph } from '../lib/node-authoring/migration'
-import { emptyAuthoringGraph } from '../lib/node-authoring/contracts'
+import { emptyAuthoringGraph, safeAuthoringGraphJson } from '../lib/node-authoring/contracts'
 import type { AuthoringNodeGraph } from '../lib/node-authoring/contracts'
 
 interface NodeFlowStore {
@@ -51,7 +51,7 @@ export const useNodeFlowStore = create<NodeFlowStore>((set, get) => ({
     // 这里只验证 JSON 外壳，避免作者尚未完成的节点图无法被持久化。
     parseAuthoringGraph(flow.graphJson)
     const now = Date.now()
-    const id = await db.nodeFlows.put({ ...flow, updatedAt: now }) as number
+    const id = await db.nodeFlows.put({ ...flow, graphJson: safeAuthoringGraphJson(flow.graphJson), updatedAt: now }) as number
     await get().load(flow.projectId)
     return id
   },

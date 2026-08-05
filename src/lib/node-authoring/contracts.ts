@@ -172,6 +172,8 @@ export interface AuthoringNodeInstance {
   locked?: boolean
   groupId?: string
   note?: string
+  favorite?: boolean
+  lastOpenedAt?: number
 }
 
 export interface AuthoringEdgeMapping {
@@ -313,5 +315,37 @@ export function emptyAuthoringGraph(): AuthoringNodeGraph {
     edges: [],
     viewport: { x: 0, y: 0, zoom: 1 },
     groups: [],
+  }
+}
+
+/** Portable node documents and run evidence must never carry provider secrets. */
+export function redactAuthoringSecrets(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(redactAuthoringSecrets)
+  if (!value || typeof value !== 'object') return value
+  const record = value as Record<string, unknown>
+  return Object.fromEntries(Object.entries(record).map(([key, item]) => [
+    key,
+    /api.?key|access.?token|refresh.?token|client.?secret|authorization/i.test(key)
+      ? '[redacted]'
+      : typeof item === 'string' && /Json$/i.test(key)
+        ? redactAuthoringJsonString(item)
+        : redactAuthoringSecrets(item),
+  ]))
+}
+
+function redactAuthoringJsonString(value: string): string {
+  try {
+    return JSON.stringify(redactAuthoringSecrets(JSON.parse(value)))
+  } catch {
+    return value
+  }
+}
+
+export function safeAuthoringGraphJson(graphJson: string): string {
+  try {
+    return JSON.stringify(redactAuthoringSecrets(JSON.parse(graphJson)))
+  } catch {
+    // Keep malformed drafts recoverable; graph validation reports the parse error at run time.
+    return graphJson
   }
 }

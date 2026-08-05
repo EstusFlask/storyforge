@@ -221,7 +221,7 @@ AI 输出经 `adopt({ target, data })` 写回,只有这里登记的字段可写(
 | `inspiration.reverse` | `src/hooks/useIncrementalInspiration.ts:212` |
 | `inventory.extract` | `src/components/items/InventoryPanel.tsx:150` |
 | `location.extract` | `src/components/location/LocationPanel.tsx:106` |
-| `node.creation` | `src/lib/node-authoring/executor.ts:209`<br/>`src/lib/node-flow/executor.ts:203` |
+| `node.creation` | `src/lib/node-authoring/executor.ts:315`<br/>`src/lib/node-flow/executor.ts:203` |
 | `outline.chapter` | `src/lib/ai/batch-outline-runner.ts:123`<br/>`src/lib/outline/generation-node.ts:55` |
 | `outline.character-driven` | `src/components/outline/CharacterDrivenPlotPanel.tsx:198` |
 | `outline.character-revision` | `src/components/outline/CharacterRevisionPanel.tsx:169` |
@@ -264,8 +264,8 @@ AI 输出经 `adopt({ target, data })` 写回,只有这里登记的字段可写(
 - `src/lib/agent/prose-copilot.ts:500 · chat`
 - `src/lib/agent/world-origin-copilot.ts:186 · chat`
 - `src/lib/generation/workflow-generation-node.ts:23 · ai.start`
-- `src/lib/node-authoring/executor.ts:255 · chat`
+- `src/lib/node-authoring/executor.ts:361 · chat`
 
 ---
 
-生成时间基准:commit `5777120`
+生成时间基准:commit `35dde9c`

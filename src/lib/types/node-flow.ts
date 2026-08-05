@@ -66,6 +66,10 @@ export interface NodeRunRecord {
   inputSnapshotsJson: string
   /** 每个节点的输出、错误与 gate，保证刷新后“输出可见”。 */
   nodeResultsJson: string
+  /** FLOW-3E：冻结本次拓扑顺序、调用上限与断点进度，不包含 API Key。 */
+  executionPlanJson?: string
+  /** FLOW-3E：恢复前校验图版本；只保存编排，不复制 Canon 正文。 */
+  graphSnapshotJson?: string
   startedAt: number
   updatedAt: number
   completedAt?: number | null

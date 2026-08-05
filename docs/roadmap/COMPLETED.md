@@ -25,6 +25,7 @@
 | **SIM-1 互动运行时** | SIM-1A / SIM-1B / SIM-1C | 事件回放、确定性骰子、检查点与分支；Canon 冻结快照与运行时实体投影；NPC 演进候选、提案持久化、作者确认/拒绝、过期保护、运行时只读上下文和 Canon 不变性 | `R-SIM1-runtime-core`、`R-SIM1-canon-snapshot`、`R-SIM1C-npc-evolution`、`R-SIM1-runtime-ui`、`SIM-RUNTIME-DESIGN.md` |
 | **TTRPG-1 跑团与战役主持** | TTRPG-1A / 1B / 1C | 单机战役场景、回合顺序、动作、确定性技能检定、AI GM 成功/失败候选、原子回合记录、AI 遭遇候选确认、确定性先攻、攻击/伤害、资源上下限、状态效果、战斗回合、战役摘要、任务、NPC 日程和会话分支续接；不包含多人协作 | `R-TTRPG1-campaign-runtime`、`R-TTRPG1-gm-parser`、`R-TTRPG1B-combat-encounter`、`R-TTRPG1C-long-campaign`、`R-SIM1-runtime-ui`、`TTRPG-CAMPAIGN-DESIGN.md` |
 | **CHATGAME-1 角色聊天与冒险** | 单角色聊天 MVP | 冻结角色与世界快照、用户身份/场景、流式回复、事件持久化、回复重生成、检查点和会话分支；不包含长期记忆、多角色房间和冒险规则 | `R-CHATGAME1-single-character-chat`、`INTERACTIVE-RUNTIME-ROADMAP.md` |
+| **FLOW-3E 节点大图生产力** | 大图效率、模板与可恢复执行 | 官方起始模板、百节点自动布局、框选/复制/对齐/分组、执行计划、暂停/断点恢复、过期下游重跑、运行快照往返与密钥脱敏 | `R-FLOW3E-productivity`、`NODE-AUTHORING-MODE-DESIGN.md` |
 | **FLOW-1 历史技术试验（非节点模式产品完成）** | FLOW-1 第一阶段 | 旧工作流兼容图、DAG 校验、拓扑执行、显式入边装配和确认写回的技术验证；产品层级已于 2026-07-26 撤销，迁移归 FLOW-2 | `R-FLOW1-*`、`R-WF-workflow-step-context`、`VISUAL-WORKFLOW-DESIGN.md` |
 | **PRODUCT-1 可靠性与发布** | 数据云备份、导出/导入、快照、PWA/Vite、版本与 Release 相关修复、社区反馈批次 | 本地优先、JSON/文件夹/Gist/快照恢复、生产构建和 CI | `R-export-import-roundtrip`、`R-folder-backup`、`R-gist-backup`、CI |
 
