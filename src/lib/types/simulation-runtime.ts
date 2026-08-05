@@ -146,6 +146,8 @@ export interface SimulationTtrpgState {
   checks: SimulationTtrpgCheck[]
   attacks: SimulationTtrpgAttackResult[]
   encounter: SimulationTtrpgEncounter | null
+  /** 长期战役资料；旧跑团存档缺失时按空状态处理。 */
+  campaign?: SimulationTtrpgCampaignState | null
 }
 
 export interface SimulationTtrpgResource {
@@ -225,6 +227,37 @@ export interface SimulationTtrpgTurnCandidate {
   nextActorKey: string | null
 }
 
+export const SIMULATION_TTRPG_QUEST_STATUSES = ['active', 'paused', 'completed', 'failed'] as const
+export type SimulationTtrpgQuestStatus = typeof SIMULATION_TTRPG_QUEST_STATUSES[number]
+
+export interface SimulationTtrpgQuest {
+  questId: string
+  title: string
+  description: string
+  status: SimulationTtrpgQuestStatus
+  priority: number
+  /** 运行时时钟截止点；null 表示没有期限。 */
+  dueClock: number | null
+  updatedSequence: number
+}
+
+export interface SimulationTtrpgNpcSchedule {
+  scheduleId: string
+  entityKey: string
+  startClock: number
+  endClock: number | null
+  locationKey: string | null
+  activity: string
+  recurrence: 'once' | 'daily' | 'weekly'
+  updatedSequence: number
+}
+
+export interface SimulationTtrpgCampaignState {
+  summary: string
+  quests: SimulationTtrpgQuest[]
+  npcSchedules: SimulationTtrpgNpcSchedule[]
+}
+
 export interface SimulationRuntimeState {
   version: 1
   clock: number
@@ -279,6 +312,9 @@ export const SIMULATION_EVENT_TYPES = [
   'ttrpg.combat.condition.applied',
   'ttrpg.combat.condition.removed',
   'ttrpg.combat.turn.advanced',
+  'ttrpg.campaign.summary.updated',
+  'ttrpg.campaign.quest.upserted',
+  'ttrpg.campaign.schedule.upserted',
 ] as const
 export type SimulationEventType = typeof SIMULATION_EVENT_TYPES[number]
 

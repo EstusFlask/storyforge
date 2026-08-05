@@ -23,8 +23,13 @@ import {
   type SimulationTtrpgCheckRequest,
   type SimulationTtrpgCombatant,
   type SimulationTtrpgCondition,
+  type SimulationTtrpgCampaignState,
   type SimulationTtrpgEncounter,
   type SimulationTtrpgEncounterCandidate,
+  type SimulationTtrpgNpcSchedule,
+  type SimulationTtrpgQuest,
+  SIMULATION_TTRPG_QUEST_STATUSES,
+  type SimulationTtrpgQuestStatus,
   type SimulationTtrpgResource,
   type SimulationTtrpgScene,
   type SimulationTtrpgState,
@@ -444,7 +449,17 @@ function assertTtrpgAttackResult(value: unknown): SimulationTtrpgAttackResult {
 }
 
 function emptyTtrpgState(): SimulationTtrpgState {
-  return { scene: null, round: 0, activeActorKey: null, turnOrder: [], actions: [], checks: [], attacks: [], encounter: null }
+  return {
+    scene: null,
+    round: 0,
+    activeActorKey: null,
+    turnOrder: [],
+    actions: [],
+    checks: [],
+    attacks: [],
+    encounter: null,
+    campaign: emptyTtrpgCampaignState(),
+  }
 }
 
 function parseTtrpgState(value: unknown): SimulationTtrpgState | null {
@@ -470,7 +485,74 @@ function parseTtrpgState(value: unknown): SimulationTtrpgState | null {
     checks: value.checks.map(assertTtrpgCheck),
     attacks: (value.attacks ?? []).map(assertTtrpgAttackResult),
     encounter: value.encounter == null ? null : assertTtrpgEncounter(value.encounter),
+    campaign: parseTtrpgCampaignState(value.campaign),
   }
+}
+
+function emptyTtrpgCampaignState(): SimulationTtrpgCampaignState {
+  return { summary: '', quests: [], npcSchedules: [] }
+}
+
+function assertTtrpgQuest(value: unknown): SimulationTtrpgQuest {
+  if (!isObject(value)) throw new Error('战役任务必须是对象。')
+  const questId = String(value.questId ?? '').trim()
+  const title = String(value.title ?? '').trim()
+  const description = String(value.description ?? '').trim()
+  const status = String(value.status ?? '') as SimulationTtrpgQuestStatus
+  if (!questId || questId.length > 160) throw new Error('战役任务 ID 无效。')
+  if (!title || title.length > 240) throw new Error('战役任务标题无效。')
+  if (description.length > 8_000) throw new Error('战役任务描述过长。')
+  if (!SIMULATION_TTRPG_QUEST_STATUSES.includes(status)) throw new Error(`未知战役任务状态: ${status}`)
+  const dueClock = value.dueClock == null ? null : assertFiniteInteger(value.dueClock, '任务期限', 0, Number.MAX_SAFE_INTEGER)
+  return {
+    questId,
+    title,
+    description,
+    status,
+    priority: assertFiniteInteger(value.priority ?? 0, '任务优先级', 0, 5),
+    dueClock,
+    updatedSequence: assertFiniteInteger(value.updatedSequence, '任务更新时间序号', 1, Number.MAX_SAFE_INTEGER),
+  }
+}
+
+function assertTtrpgNpcSchedule(value: unknown): SimulationTtrpgNpcSchedule {
+  if (!isObject(value)) throw new Error('NPC 日程必须是对象。')
+  const scheduleId = String(value.scheduleId ?? '').trim()
+  const entityKey = String(value.entityKey ?? '').trim()
+  const activity = String(value.activity ?? '').trim()
+  const recurrence = String(value.recurrence ?? 'once')
+  if (!scheduleId || scheduleId.length > 160) throw new Error('NPC 日程 ID 无效。')
+  if (!entityKey || entityKey.length > 160) throw new Error('NPC 日程缺少 NPC。')
+  if (!activity || activity.length > 2_000) throw new Error('NPC 日程活动无效。')
+  if (!['once', 'daily', 'weekly'].includes(recurrence)) throw new Error(`未知 NPC 日程重复方式: ${recurrence}`)
+  const startClock = assertFiniteInteger(value.startClock, 'NPC 日程开始时间', 0, Number.MAX_SAFE_INTEGER)
+  const endClock = value.endClock == null ? null : assertFiniteInteger(value.endClock, 'NPC 日程结束时间', startClock, Number.MAX_SAFE_INTEGER)
+  const locationKey = value.locationKey == null ? null : String(value.locationKey).trim() || null
+  return {
+    scheduleId,
+    entityKey,
+    startClock,
+    endClock,
+    locationKey,
+    activity,
+    recurrence: recurrence as SimulationTtrpgNpcSchedule['recurrence'],
+    updatedSequence: assertFiniteInteger(value.updatedSequence, '日程更新时间序号', 1, Number.MAX_SAFE_INTEGER),
+  }
+}
+
+function parseTtrpgCampaignState(value: unknown): SimulationTtrpgCampaignState {
+  if (value == null) return emptyTtrpgCampaignState()
+  if (!isObject(value)) throw new Error('长期战役状态必须是对象。')
+  const summary = String(value.summary ?? '').trim()
+  if (summary.length > 20_000) throw new Error('长期战役摘要过长。')
+  if (!Array.isArray(value.quests) || !Array.isArray(value.npcSchedules)) {
+    throw new Error('长期战役任务和 NPC 日程必须是数组。')
+  }
+  const quests = value.quests.map(assertTtrpgQuest)
+  const npcSchedules = value.npcSchedules.map(assertTtrpgNpcSchedule)
+  if (new Set(quests.map(quest => quest.questId)).size !== quests.length) throw new Error('战役任务 ID 不能重复。')
+  if (new Set(npcSchedules.map(schedule => schedule.scheduleId)).size !== npcSchedules.length) throw new Error('NPC 日程 ID 不能重复。')
+  return { summary, quests, npcSchedules }
 }
 
 function requireTtrpgState(state: SimulationRuntimeState): SimulationTtrpgState {
@@ -838,6 +920,42 @@ export function applySimulationEvent(
       encounter.round = round
       break
     }
+    case 'ttrpg.campaign.summary.updated': {
+      const ttrpg = requireTtrpgState(state)
+      const baseSequence = assertFiniteInteger(payload.baseSequence, '战役摘要基线序号', 0, event.sequence - 1)
+      if (baseSequence !== event.sequence - 1) throw new Error('战役摘要基线与事件序号不一致。')
+      const summary = String(payload.summary ?? '').trim()
+      if (summary.length > 20_000) throw new Error('长期战役摘要过长。')
+      ttrpg.campaign = ttrpg.campaign ?? emptyTtrpgCampaignState()
+      ttrpg.campaign.summary = summary
+      break
+    }
+    case 'ttrpg.campaign.quest.upserted': {
+      const ttrpg = requireTtrpgState(state)
+      const quest = assertTtrpgQuest(payload.quest)
+      if (quest.updatedSequence !== event.sequence) throw new Error('战役任务更新时间序号不一致。')
+      ttrpg.campaign = ttrpg.campaign ?? emptyTtrpgCampaignState()
+      const index = ttrpg.campaign.quests.findIndex(item => item.questId === quest.questId)
+      if (index >= 0) ttrpg.campaign.quests[index] = quest
+      else ttrpg.campaign.quests.push(quest)
+      break
+    }
+    case 'ttrpg.campaign.schedule.upserted': {
+      const ttrpg = requireTtrpgState(state)
+      const schedule = assertTtrpgNpcSchedule(payload.schedule)
+      if (schedule.updatedSequence !== event.sequence) throw new Error('NPC 日程更新时间序号不一致。')
+      const npc = state.entities[schedule.entityKey]
+      if (!npc || !isNpcRuntimeEntity(npc)) throw new Error('NPC 日程目标不是当前运行时 NPC。')
+      if (schedule.locationKey != null) {
+        const location = state.entities[schedule.locationKey]
+        if (!location || location.kind !== 'location') throw new Error('NPC 日程地点不是当前运行时地点。')
+      }
+      ttrpg.campaign = ttrpg.campaign ?? emptyTtrpgCampaignState()
+      const index = ttrpg.campaign.npcSchedules.findIndex(item => item.scheduleId === schedule.scheduleId)
+      if (index >= 0) ttrpg.campaign.npcSchedules[index] = schedule
+      else ttrpg.campaign.npcSchedules.push(schedule)
+      break
+    }
     case 'npc.evolution.proposed': {
       const candidate = parseSimulationNpcEvolutionCandidate(payload.candidate)
       if (candidate.baseSequence !== state.lastSequence) {
@@ -1029,6 +1147,9 @@ export async function appendSimulationEvent(input: {
     || input.type === 'ttrpg.combat.condition.applied'
     || input.type === 'ttrpg.combat.condition.removed'
     || input.type === 'ttrpg.combat.turn.advanced'
+    || input.type === 'ttrpg.campaign.summary.updated'
+    || input.type === 'ttrpg.campaign.quest.upserted'
+    || input.type === 'ttrpg.campaign.schedule.upserted'
   ) {
     throw new Error('受治理的互动事件只能通过对应的专用 API 生成。')
   }
@@ -1615,6 +1736,94 @@ export async function resolveTtrpgAttack(input: {
     for (const event of appended) event.id = await db.simulationEvents.add(event) as number
     await db.simulationSessions.update(input.sessionId, { updatedAt: appended[appended.length - 1].createdAt })
     return appended
+  })
+}
+
+export async function updateTtrpgCampaignSummary(input: {
+  sessionId: number
+  summary: string
+  baseSequence?: number
+}): Promise<SimulationEvent> {
+  const summary = input.summary.trim()
+  if (summary.length > 20_000) throw new Error('长期战役摘要不能超过 20,000 个字符。')
+  return appendBuiltEvent(input.sessionId, ({ session, state }) => {
+    if (session.kind !== 'ttrpg') throw new Error('只有跑团会话可以更新长期战役摘要。')
+    const baseSequence = input.baseSequence ?? state.lastSequence
+    if (baseSequence !== state.lastSequence) throw new Error('长期战役摘要基线已变化，请刷新后重试。')
+    return {
+      type: 'ttrpg.campaign.summary.updated',
+      actorKey: null,
+      targetKey: null,
+      payloadJson: JSON.stringify({ baseSequence, summary }),
+    }
+  })
+}
+
+export async function upsertTtrpgQuest(input: {
+  sessionId: number
+  questId: string
+  title: string
+  description: string
+  status: SimulationTtrpgQuest['status']
+  priority?: number
+  dueClock?: number | null
+}): Promise<SimulationEvent> {
+  return appendBuiltEvent(input.sessionId, ({ session, sequence }) => {
+    if (session.kind !== 'ttrpg') throw new Error('只有跑团会话可以管理战役任务。')
+    const quest = assertTtrpgQuest({
+      questId: input.questId,
+      title: input.title,
+      description: input.description,
+      status: input.status,
+      priority: input.priority ?? 0,
+      dueClock: input.dueClock ?? null,
+      updatedSequence: sequence,
+    })
+    return {
+      type: 'ttrpg.campaign.quest.upserted',
+      actorKey: null,
+      targetKey: quest.questId,
+      payloadJson: JSON.stringify({ quest }),
+    }
+  })
+}
+
+export async function upsertTtrpgNpcSchedule(input: {
+  sessionId: number
+  scheduleId: string
+  entityKey: string
+  startClock: number
+  endClock?: number | null
+  locationKey?: string | null
+  activity: string
+  recurrence?: SimulationTtrpgNpcSchedule['recurrence']
+}): Promise<SimulationEvent> {
+  return appendBuiltEvent(input.sessionId, ({ session, state, sequence }) => {
+    if (session.kind !== 'ttrpg') throw new Error('只有跑团会话可以管理 NPC 日程。')
+    const entityKey = input.entityKey.trim()
+    const npc = state.entities[entityKey]
+    if (!npc || !isNpcRuntimeEntity(npc)) throw new Error('NPC 日程目标不是当前运行时 NPC。')
+    const locationKey = input.locationKey?.trim() || null
+    if (locationKey != null) {
+      const location = state.entities[locationKey]
+      if (!location || location.kind !== 'location') throw new Error('NPC 日程地点不是当前运行时地点。')
+    }
+    const schedule = assertTtrpgNpcSchedule({
+      scheduleId: input.scheduleId,
+      entityKey,
+      startClock: input.startClock,
+      endClock: input.endClock ?? null,
+      locationKey,
+      activity: input.activity,
+      recurrence: input.recurrence ?? 'once',
+      updatedSequence: sequence,
+    })
+    return {
+      type: 'ttrpg.campaign.schedule.upserted',
+      actorKey: entityKey,
+      targetKey: locationKey,
+      payloadJson: JSON.stringify({ schedule }),
+    }
   })
 }
 

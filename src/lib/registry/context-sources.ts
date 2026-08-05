@@ -110,6 +110,15 @@ async function readSimulationRuntimeContext(input: AssembleContextInput): Promis
         return `- 战斗参与者=${key}｜先攻=${combatant.initiative}｜AC=${combatant.armorClass}｜资源=${resources}｜状态=${conditions}`
       }),
     ] : []),
+    ...(ttrpg.campaign ? [
+      `- 长期战役摘要=${ttrpg.campaign.summary || '暂无'}`,
+      ...ttrpg.campaign.quests.slice(-40).map(quest => (
+        `- 任务=${quest.questId}｜${quest.title}｜状态=${quest.status}｜优先级=${quest.priority}${quest.dueClock == null ? '' : `｜期限=${quest.dueClock}`}${quest.description ? `｜${quest.description}` : ''}`
+      )),
+      ...ttrpg.campaign.npcSchedules.slice(-40).map(schedule => (
+        `- NPC日程=${schedule.scheduleId}｜${schedule.entityKey}｜${schedule.startClock}-${schedule.endClock ?? '持续'}｜地点=${schedule.locationKey ?? '无'}｜${schedule.activity}｜重复=${schedule.recurrence}`
+      )),
+    ] : []),
   ] : []
   return [
     `【冻结运行时会话】${session.title}｜类型=${session.kind}｜逻辑时间=${state.clock}｜事件序号=${state.lastSequence}`,

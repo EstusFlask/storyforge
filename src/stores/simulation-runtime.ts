@@ -19,6 +19,9 @@ import {
   changeTtrpgResource,
   applyTtrpgCondition,
   removeTtrpgCondition,
+  updateTtrpgCampaignSummary,
+  upsertTtrpgQuest,
+  upsertTtrpgNpcSchedule,
   resolveSimulationDice,
   resolveTtrpgCheck,
   verifySimulationCheckpoint,
@@ -36,6 +39,8 @@ import {
   type SimulationTtrpgTurnCandidate,
   type SimulationTtrpgEncounterCandidate,
   type SimulationTtrpgCondition,
+  type SimulationTtrpgNpcSchedule,
+  type SimulationTtrpgQuest,
 } from '../lib/types'
 
 interface SimulationRuntimeStore {
@@ -73,6 +78,9 @@ interface SimulationRuntimeStore {
   changeTtrpgResource(input: { entityKey: string; resourceKey: string; delta: number; reason?: string }): Promise<void>
   applyTtrpgCondition(input: { entityKey: string; condition: SimulationTtrpgCondition }): Promise<void>
   removeTtrpgCondition(input: { entityKey: string; conditionId: string }): Promise<void>
+  updateTtrpgCampaignSummary(summary: string, baseSequence?: number): Promise<void>
+  upsertTtrpgQuest(input: Omit<SimulationTtrpgQuest, 'updatedSequence'>): Promise<void>
+  upsertTtrpgNpcSchedule(input: Omit<SimulationTtrpgNpcSchedule, 'updatedSequence'>): Promise<void>
   rollDice(expression: string): Promise<void>
   checkpoint(name: string): Promise<void>
   branch(title: string): Promise<number>
@@ -282,6 +290,27 @@ export const useSimulationRuntimeStore = create<SimulationRuntimeStore>((set, ge
       const sessionId = get().selectedSessionId
       if (sessionId == null) throw new Error('请先选择运行时会话。')
       await removeTtrpgCondition({ sessionId, ...input })
+      await refreshSelected()
+    },
+
+    updateTtrpgCampaignSummary: async (summary, baseSequence) => {
+      const sessionId = get().selectedSessionId
+      if (sessionId == null) throw new Error('请先选择运行时会话。')
+      await updateTtrpgCampaignSummary({ sessionId, summary, baseSequence })
+      await refreshSelected()
+    },
+
+    upsertTtrpgQuest: async input => {
+      const sessionId = get().selectedSessionId
+      if (sessionId == null) throw new Error('请先选择运行时会话。')
+      await upsertTtrpgQuest({ sessionId, ...input })
+      await refreshSelected()
+    },
+
+    upsertTtrpgNpcSchedule: async input => {
+      const sessionId = get().selectedSessionId
+      if (sessionId == null) throw new Error('请先选择运行时会话。')
+      await upsertTtrpgNpcSchedule({ sessionId, ...input })
       await refreshSelected()
     },
 

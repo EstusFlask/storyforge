@@ -1,6 +1,6 @@
-# TTRPG-1A/1B 单机战役与战斗遭遇
+# TTRPG-1A/1B/1C 单机战役、战斗遭遇与长期战役
 
-> 状态：TTRPG-1A/1B 已交付（2026-08-05）
+> 状态：TTRPG-1A/1B/1C 已交付（2026-08-05）
 > 主归属：TTRPG-1 跑团与战役主持
 > 前置：SIM-1A / SIM-1B / SIM-1C
 
@@ -77,15 +77,32 @@ AI 只能提出骰式、DC、成功叙事和失败叙事，不能提交骰点或
 
 ## 5. 非范围与后续功能
 
-- `TTRPG-1C`：长期战役摘要、任务、NPC 日程和跨会话节奏管理。
 - `TTRPG-1D`：多人协作；等待 PLATFORM-1 的账号、同步和冲突处理。
 - 战役日志不会自动写成小说正文、Canon、角色主档或正式物品流水。
 
-## 6. 验收证据
+## 6. TTRPG-1C · 长期战役
+
+长期战役资料继续保存在现有 `SimulationRuntimeState.ttrpg.campaign`，不新增表或并行存档。
+摘要、任务和 NPC 日程都是专用事件，随事件流回放、检查点恢复、分支和项目便携往返。
+
+### 事件与边界
+
+| 事件 | 作用 | 写入入口 |
+|---|---|---|
+| `ttrpg.campaign.summary.updated` | 更新跨场景摘要，并校验作者编辑时的事件基线 | `updateTtrpgCampaignSummary()` |
+| `ttrpg.campaign.quest.upserted` | 新增或更新任务、状态、优先级和运行时期限 | `upsertTtrpgQuest()` |
+| `ttrpg.campaign.schedule.upserted` | 新增或更新 NPC 的时间段、地点、活动和重复方式 | `upsertTtrpgNpcSchedule()` |
+
+世界时间复用既有 `time.advanced` 事件；任务期限和日程只读同一个 `state.clock`，不另建时钟。
+分支复用 `branchSimulationSession()`，子会话从父会话指定序号继承摘要、任务、日程和实体状态，
+之后的更新只进入子会话。AI 仍只读取 `simulationRuntime` 冻结运行时上下文，不能直接修改这些状态。
+
+## 7. 验收证据
 
 - `R-TTRPG1-campaign-runtime`：场景、原子回合、确定性检定、成功/失败分支、过期拒绝和回合轮转。
 - `R-TTRPG1-gm-parser`：严格 JSON、行动者锁定、未知字段、检定/分支配对和 Prompt 红线。
 - `R-TTRPG1B-combat-encounter`：确定性先攻、攻击/伤害原子事务、资源上下限、状态持续时间、
   专用事件防旁路、过期候选和便携往返。
+- `R-TTRPG1C-long-campaign`：摘要/任务/日程与统一时钟回放、过期基线/伪造实体拒绝、分支继承与便携往返。
 - `R-SIM1-runtime-ui`：从可见跑团入口开始场景并执行技能检定。
 - SIM-1 原有检查点、分支、导出导入、删除和 Canon 不变性回归继续覆盖共同生命周期。

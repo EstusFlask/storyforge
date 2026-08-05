@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useState } from 'react'
 import {
   Box,
+  CalendarClock,
   Clock3,
   CopyPlus,
+  ClipboardList,
   Dices,
   GitBranch,
   Plus,
@@ -94,6 +96,9 @@ function eventSummary(type: string, payloadJson: string): string {
     if (type === 'ttrpg.combat.condition.applied') return `状态：${payload.entityKey ?? ''} 获得 ${(payload.condition as Record<string, unknown>)?.name ?? ''}`
     if (type === 'ttrpg.combat.condition.removed') return `状态：${payload.entityKey ?? ''} 移除 ${payload.conditionId ?? ''}`
     if (type === 'ttrpg.combat.turn.advanced') return `战斗回合推进至 ${payload.nextActorKey ?? ''}`
+    if (type === 'ttrpg.campaign.summary.updated') return '更新长期战役摘要'
+    if (type === 'ttrpg.campaign.quest.upserted') return `任务：${(payload.quest as Record<string, unknown>)?.title ?? ''}`
+    if (type === 'ttrpg.campaign.schedule.upserted') return `日程：${(payload.schedule as Record<string, unknown>)?.activity ?? ''}`
     if (type.startsWith('entity.')) return String(payload.entityKey ?? type)
     return type
   } catch {
@@ -150,6 +155,20 @@ export default function SimulationRuntimePanel(props: {
   const [ttrpgConditionName, setTtrpgConditionName] = useState('')
   const [ttrpgConditionDuration, setTtrpgConditionDuration] = useState('1')
   const [ttrpgConditionDescription, setTtrpgConditionDescription] = useState('')
+  const [campaignSummary, setCampaignSummary] = useState('')
+  const [campaignQuestId, setCampaignQuestId] = useState('')
+  const [campaignQuestTitle, setCampaignQuestTitle] = useState('')
+  const [campaignQuestDescription, setCampaignQuestDescription] = useState('')
+  const [campaignQuestStatus, setCampaignQuestStatus] = useState<'active' | 'paused' | 'completed' | 'failed'>('active')
+  const [campaignQuestPriority, setCampaignQuestPriority] = useState('0')
+  const [campaignQuestDueClock, setCampaignQuestDueClock] = useState('')
+  const [campaignScheduleId, setCampaignScheduleId] = useState('')
+  const [campaignScheduleEntityKey, setCampaignScheduleEntityKey] = useState('')
+  const [campaignScheduleStartClock, setCampaignScheduleStartClock] = useState('0')
+  const [campaignScheduleEndClock, setCampaignScheduleEndClock] = useState('')
+  const [campaignScheduleLocationKey, setCampaignScheduleLocationKey] = useState('')
+  const [campaignScheduleActivity, setCampaignScheduleActivity] = useState('')
+  const [campaignScheduleRecurrence, setCampaignScheduleRecurrence] = useState<'once' | 'daily' | 'weekly'>('once')
   const { config } = useAIConfigStore()
 
   useEffect(() => {
@@ -187,6 +206,10 @@ export default function SimulationRuntimePanel(props: {
     () => visibleSessions.find(session => session.id === store.selectedSessionId) ?? null,
     [store.selectedSessionId, visibleSessions],
   )
+  useEffect(() => {
+    if (selected?.id == null) return
+    setCampaignSummary(store.runtimeState.ttrpg?.campaign?.summary ?? '')
+  }, [selected?.id, store.runtimeState.ttrpg?.campaign?.summary])
   const selectedSnapshot = useMemo(
     () => selected ? parseSimulationCanonSnapshot(selected.canonSnapshotJson) : null,
     [selected],
@@ -228,6 +251,18 @@ export default function SimulationRuntimePanel(props: {
   const combatTargetEntities = useMemo(
     () => combatants.map(combatant => store.runtimeState.entities[combatant.entityKey]).filter(Boolean),
     [combatants, store.runtimeState.entities],
+  )
+  const campaign = store.runtimeState.ttrpg?.campaign ?? { summary: '', quests: [], npcSchedules: [] }
+  const campaignNpcs = useMemo(
+    () => Object.values(store.runtimeState.entities).filter(isNpcRuntimeEntity),
+    [store.runtimeState.entities],
+  )
+  const activeCampaignSchedules = useMemo(
+    () => campaign.npcSchedules.filter(schedule => (
+      store.runtimeState.clock >= schedule.startClock
+      && (schedule.endClock == null || store.runtimeState.clock <= schedule.endClock)
+    )),
+    [campaign.npcSchedules, store.runtimeState.clock],
   )
   const {
     loading: sessionsLoading,
@@ -1098,6 +1133,144 @@ export default function SimulationRuntimePanel(props: {
                     >
                       技能检定
                     </button>
+                  </div>
+                </div>
+              </section>
+            )}
+
+            {selected.kind === 'ttrpg' && (
+              <section className="rounded-lg border border-accent/30 bg-bg-surface" data-testid="ttrpg-campaign-panel">
+                <div className="flex items-center gap-2 border-b border-border px-4 py-3">
+                  <CalendarClock className="h-4 w-4 text-accent" />
+                  <div>
+                    <h3 className="text-sm font-semibold text-text-primary">长期战役</h3>
+                    <p className="mt-1 text-xs text-text-muted">战役摘要、任务和 NPC 日程跟随运行时事件流，可在分支会话中继续推进。</p>
+                  </div>
+                </div>
+                <div className="space-y-4 p-4">
+                  <div className="grid gap-3 lg:grid-cols-[1.4fr_1fr]">
+                    <div className="space-y-2">
+                      <label className="text-xs font-medium text-text-secondary" htmlFor="ttrpg-campaign-summary">战役摘要</label>
+                      <textarea
+                        id="ttrpg-campaign-summary"
+                        value={campaignSummary}
+                        onChange={event => setCampaignSummary(event.target.value)}
+                        placeholder="记录跨场景、跨会话需要保留的剧情进展、未决冲突和下一步节奏。"
+                        className="min-h-28 w-full rounded border border-border bg-bg-base px-2 py-1.5 text-sm text-text-primary"
+                      />
+                      <button
+                        disabled={busy || campaignSummary === campaign.summary}
+                        onClick={() => void run(() => store.updateTtrpgCampaignSummary(campaignSummary, store.runtimeState.lastSequence))}
+                        className="rounded bg-accent px-3 py-1.5 text-sm text-white disabled:opacity-40"
+                      >
+                        保存摘要
+                      </button>
+                    </div>
+                    <div className="rounded border border-border bg-bg-base p-3">
+                      <div className="flex items-center justify-between gap-2 text-xs font-medium text-text-secondary">
+                        <span>世界时间</span>
+                        <span className="font-mono text-accent">T+{store.runtimeState.clock}</span>
+                      </div>
+                      <p className="mt-2 text-xs leading-relaxed text-text-muted">推进时间后，任务期限和 NPC 日程会按同一个运行时时钟重新计算。</p>
+                      <div className="mt-3 text-xs text-text-secondary">当前活动日程：{activeCampaignSchedules.length} 条</div>
+                      {activeCampaignSchedules.length > 0 && (
+                        <div className="mt-2 space-y-1">
+                          {activeCampaignSchedules.map(schedule => (
+                            <div key={schedule.scheduleId} className="rounded bg-bg-surface px-2 py-1 text-xs text-text-secondary">
+                              {store.runtimeState.entities[schedule.entityKey]?.name ?? schedule.entityKey}：{schedule.activity}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="grid gap-4 lg:grid-cols-2">
+                    <div className="space-y-2 rounded border border-border bg-bg-base p-3">
+                      <div className="flex items-center gap-2 text-sm font-semibold text-text-primary"><ClipboardList className="h-4 w-4 text-accent" />任务管理</div>
+                      <input value={campaignQuestId} onChange={event => setCampaignQuestId(event.target.value)} placeholder="任务 ID（用于更新同一任务）" aria-label="战役任务 ID" className="w-full rounded border border-border bg-bg-surface px-2 py-1.5 text-sm" />
+                      <input value={campaignQuestTitle} onChange={event => setCampaignQuestTitle(event.target.value)} placeholder="任务标题" aria-label="战役任务标题" className="w-full rounded border border-border bg-bg-surface px-2 py-1.5 text-sm" />
+                      <textarea value={campaignQuestDescription} onChange={event => setCampaignQuestDescription(event.target.value)} placeholder="任务目标、阻碍和完成条件" aria-label="战役任务描述" className="min-h-16 w-full rounded border border-border bg-bg-surface px-2 py-1.5 text-sm" />
+                      <div className="grid gap-2 sm:grid-cols-3">
+                        <select value={campaignQuestStatus} onChange={event => setCampaignQuestStatus(event.target.value as typeof campaignQuestStatus)} aria-label="战役任务状态" className="rounded border border-border bg-bg-surface px-2 py-1.5 text-sm">
+                          <option value="active">进行中</option><option value="paused">暂停</option><option value="completed">已完成</option><option value="failed">已失败</option>
+                        </select>
+                        <input type="number" min="0" max="5" value={campaignQuestPriority} onChange={event => setCampaignQuestPriority(event.target.value)} placeholder="优先级" aria-label="战役任务优先级" className="rounded border border-border bg-bg-surface px-2 py-1.5 text-sm" />
+                        <input type="number" min="0" value={campaignQuestDueClock} onChange={event => setCampaignQuestDueClock(event.target.value)} placeholder="期限 T+（可空）" aria-label="战役任务期限" className="rounded border border-border bg-bg-surface px-2 py-1.5 text-sm" />
+                      </div>
+                      <button
+                        disabled={busy || !campaignQuestId.trim() || !campaignQuestTitle.trim()}
+                        onClick={() => void run(async () => {
+                          await store.upsertTtrpgQuest({
+                            questId: campaignQuestId,
+                            title: campaignQuestTitle,
+                            description: campaignQuestDescription,
+                            status: campaignQuestStatus,
+                            priority: Number(campaignQuestPriority),
+                            dueClock: campaignQuestDueClock.trim() ? Number(campaignQuestDueClock) : null,
+                          })
+                          setCampaignQuestId(''); setCampaignQuestTitle(''); setCampaignQuestDescription('');
+                        })}
+                        className="rounded border border-border px-3 py-1.5 text-sm text-text-secondary hover:bg-bg-hover disabled:opacity-40"
+                      >
+                        保存任务
+                      </button>
+                      <div className="max-h-40 space-y-1 overflow-y-auto">
+                        {campaign.quests.map(quest => (
+                          <button key={quest.questId} type="button" onClick={() => { setCampaignQuestId(quest.questId); setCampaignQuestTitle(quest.title); setCampaignQuestDescription(quest.description); setCampaignQuestStatus(quest.status); setCampaignQuestPriority(String(quest.priority)); setCampaignQuestDueClock(quest.dueClock == null ? '' : String(quest.dueClock)) }} className="flex w-full items-center gap-2 rounded bg-bg-surface px-2 py-1.5 text-left text-xs hover:bg-bg-hover">
+                            <span className="flex-1 truncate text-text-secondary">{quest.title}</span><span className="text-text-muted">{quest.status}</span>{quest.dueClock != null && <span className="text-text-muted">T+{quest.dueClock}</span>}
+                          </button>
+                        ))}
+                        {campaign.quests.length === 0 && <p className="text-xs text-text-muted">还没有战役任务。</p>}
+                      </div>
+                    </div>
+
+                    <div className="space-y-2 rounded border border-border bg-bg-base p-3">
+                      <div className="flex items-center gap-2 text-sm font-semibold text-text-primary"><CalendarClock className="h-4 w-4 text-accent" />NPC 日程</div>
+                      <input value={campaignScheduleId} onChange={event => setCampaignScheduleId(event.target.value)} placeholder="日程 ID（用于更新同一日程）" aria-label="NPC 日程 ID" className="w-full rounded border border-border bg-bg-surface px-2 py-1.5 text-sm" />
+                      <div className="grid gap-2 sm:grid-cols-2">
+                        <select value={campaignScheduleEntityKey} onChange={event => setCampaignScheduleEntityKey(event.target.value)} aria-label="NPC 日程角色" className="rounded border border-border bg-bg-surface px-2 py-1.5 text-sm">
+                          <option value="">选择 NPC</option>{campaignNpcs.map(entity => <option key={entity.entityKey} value={entity.entityKey}>{entity.name}</option>)}
+                        </select>
+                        <select value={campaignScheduleLocationKey} onChange={event => setCampaignScheduleLocationKey(event.target.value)} aria-label="NPC 日程地点" className="rounded border border-border bg-bg-surface px-2 py-1.5 text-sm">
+                          <option value="">不绑定地点</option>{Object.values(store.runtimeState.entities).filter(entity => entity.kind === 'location').map(entity => <option key={entity.entityKey} value={entity.entityKey}>{entity.name}</option>)}
+                        </select>
+                      </div>
+                      <div className="grid gap-2 sm:grid-cols-3">
+                        <input type="number" min="0" value={campaignScheduleStartClock} onChange={event => setCampaignScheduleStartClock(event.target.value)} placeholder="开始 T+" aria-label="NPC 日程开始时间" className="rounded border border-border bg-bg-surface px-2 py-1.5 text-sm" />
+                        <input type="number" min="0" value={campaignScheduleEndClock} onChange={event => setCampaignScheduleEndClock(event.target.value)} placeholder="结束 T+（可空）" aria-label="NPC 日程结束时间" className="rounded border border-border bg-bg-surface px-2 py-1.5 text-sm" />
+                        <select value={campaignScheduleRecurrence} onChange={event => setCampaignScheduleRecurrence(event.target.value as typeof campaignScheduleRecurrence)} aria-label="NPC 日程重复方式" className="rounded border border-border bg-bg-surface px-2 py-1.5 text-sm">
+                          <option value="once">一次</option><option value="daily">每日</option><option value="weekly">每周</option>
+                        </select>
+                      </div>
+                      <input value={campaignScheduleActivity} onChange={event => setCampaignScheduleActivity(event.target.value)} placeholder="活动，例如：在码头巡逻" aria-label="NPC 日程活动" className="w-full rounded border border-border bg-bg-surface px-2 py-1.5 text-sm" />
+                      <button
+                        disabled={busy || !campaignScheduleId.trim() || !campaignScheduleEntityKey || !campaignScheduleActivity.trim()}
+                        onClick={() => void run(async () => {
+                          await store.upsertTtrpgNpcSchedule({
+                            scheduleId: campaignScheduleId,
+                            entityKey: campaignScheduleEntityKey,
+                            startClock: Number(campaignScheduleStartClock),
+                            endClock: campaignScheduleEndClock.trim() ? Number(campaignScheduleEndClock) : null,
+                            locationKey: campaignScheduleLocationKey || null,
+                            activity: campaignScheduleActivity,
+                            recurrence: campaignScheduleRecurrence,
+                          })
+                          setCampaignScheduleId(''); setCampaignScheduleActivity('')
+                        })}
+                        className="rounded border border-border px-3 py-1.5 text-sm text-text-secondary hover:bg-bg-hover disabled:opacity-40"
+                      >
+                        保存日程
+                      </button>
+                      <div className="max-h-40 space-y-1 overflow-y-auto">
+                        {campaign.npcSchedules.map(schedule => (
+                          <button key={schedule.scheduleId} type="button" onClick={() => { setCampaignScheduleId(schedule.scheduleId); setCampaignScheduleEntityKey(schedule.entityKey); setCampaignScheduleStartClock(String(schedule.startClock)); setCampaignScheduleEndClock(schedule.endClock == null ? '' : String(schedule.endClock)); setCampaignScheduleLocationKey(schedule.locationKey ?? ''); setCampaignScheduleActivity(schedule.activity); setCampaignScheduleRecurrence(schedule.recurrence) }} className="flex w-full items-center gap-2 rounded bg-bg-surface px-2 py-1.5 text-left text-xs hover:bg-bg-hover">
+                            <span className="flex-1 truncate text-text-secondary">{store.runtimeState.entities[schedule.entityKey]?.name ?? schedule.entityKey}：{schedule.activity}</span><span className="text-text-muted">T+{schedule.startClock}</span>
+                          </button>
+                        ))}
+                        {campaign.npcSchedules.length === 0 && <p className="text-xs text-text-muted">还没有 NPC 日程。</p>}
+                      </div>
+                    </div>
                   </div>
                 </div>
               </section>
