@@ -24,6 +24,7 @@ import type {
   SimulationCanonCandidate,
   SimulationCanonSourceKind,
   SimulationSessionKind,
+  SimulationTtrpgEncounterCandidate,
   SimulationTtrpgTurnCandidate,
 } from '../../lib/types'
 import { useSimulationRuntimeStore } from '../../stores/simulation-runtime'
@@ -35,7 +36,12 @@ import { resolveRequestConfig } from '../../lib/ai/client'
 import { isAIConfigReady } from '../../lib/ai/config-readiness'
 import { assembleContext } from '../../lib/registry/assemble-context'
 import { buildNpcEvolutionPrompt, parseNpcEvolutionCandidate } from '../../lib/simulation/npc-evolution'
-import { buildTtrpgGmPrompt, parseTtrpgTurnCandidate } from '../../lib/simulation/ttrpg'
+import {
+  buildTtrpgEncounterPrompt,
+  buildTtrpgGmPrompt,
+  parseTtrpgEncounterCandidate,
+  parseTtrpgTurnCandidate,
+} from '../../lib/simulation/ttrpg'
 import { isNpcRuntimeEntity } from '../../lib/simulation/runtime'
 
 const KIND_LABELS: Record<SimulationSessionKind, string> = {
@@ -78,6 +84,16 @@ function eventSummary(type: string, payloadJson: string): string {
     }
     if (type === 'ttrpg.gm.response.recorded') return `GM：${payload.text ?? ''}`
     if (type === 'ttrpg.turn.advanced') return `回合推进至 ${payload.nextActorKey ?? ''}`
+    if (type === 'ttrpg.encounter.started') return `遭遇开始：${(payload.encounter as Record<string, unknown>)?.title ?? ''}`
+    if (type === 'ttrpg.encounter.resolved') return `遭遇结束：${payload.reason ?? ''}`
+    if (type === 'ttrpg.combat.attack.resolved') {
+      const attack = payload.attack as Record<string, unknown> | undefined
+      return `攻击：${attack?.actorKey ?? ''} → ${attack?.targetKey ?? ''}｜${attack?.hit ? `命中 ${attack?.damageTotal ?? 0}` : '未命中'}`
+    }
+    if (type === 'ttrpg.combat.resource.changed') return `资源：${payload.entityKey ?? ''} ${payload.resourceKey ?? ''} ${payload.delta ?? ''}`
+    if (type === 'ttrpg.combat.condition.applied') return `状态：${payload.entityKey ?? ''} 获得 ${(payload.condition as Record<string, unknown>)?.name ?? ''}`
+    if (type === 'ttrpg.combat.condition.removed') return `状态：${payload.entityKey ?? ''} 移除 ${payload.conditionId ?? ''}`
+    if (type === 'ttrpg.combat.turn.advanced') return `战斗回合推进至 ${payload.nextActorKey ?? ''}`
     if (type.startsWith('entity.')) return String(payload.entityKey ?? type)
     return type
   } catch {
@@ -118,6 +134,22 @@ export default function SimulationRuntimePanel(props: {
   const [ttrpgExpression, setTtrpgExpression] = useState('1d20')
   const [ttrpgDc, setTtrpgDc] = useState('12')
   const [ttrpgCandidate, setTtrpgCandidate] = useState<SimulationTtrpgTurnCandidate | null>(null)
+  const [ttrpgEncounterTitle, setTtrpgEncounterTitle] = useState('')
+  const [ttrpgEncounterDescription, setTtrpgEncounterDescription] = useState('')
+  const [ttrpgParticipantKeys, setTtrpgParticipantKeys] = useState<string[]>([])
+  const [ttrpgEncounterCandidate, setTtrpgEncounterCandidate] = useState<SimulationTtrpgEncounterCandidate | null>(null)
+  const [ttrpgAttackTargetKey, setTtrpgAttackTargetKey] = useState('')
+  const [ttrpgAttackExpression, setTtrpgAttackExpression] = useState('1d20')
+  const [ttrpgDamageExpression, setTtrpgDamageExpression] = useState('1d6')
+  const [ttrpgResourceKey] = useState('hp')
+  const [ttrpgAttackReason, setTtrpgAttackReason] = useState('')
+  const [ttrpgResourceEntityKey, setTtrpgResourceEntityKey] = useState('')
+  const [ttrpgResourceName, setTtrpgResourceName] = useState('hp')
+  const [ttrpgResourceDelta, setTtrpgResourceDelta] = useState('-1')
+  const [ttrpgConditionEntityKey, setTtrpgConditionEntityKey] = useState('')
+  const [ttrpgConditionName, setTtrpgConditionName] = useState('')
+  const [ttrpgConditionDuration, setTtrpgConditionDuration] = useState('1')
+  const [ttrpgConditionDescription, setTtrpgConditionDescription] = useState('')
   const { config } = useAIConfigStore()
 
   useEffect(() => {
@@ -169,6 +201,11 @@ export default function SimulationRuntimePanel(props: {
     'simulation.ttrpg-gm',
     selected?.id ?? 'none',
   ))
+  const encounterAI = useAIStream(createAISessionKey(
+    props.project.id!,
+    'simulation.ttrpg-encounter',
+    selected?.id ?? 'none',
+  ))
   const npcEntities = useMemo(
     () => Object.values(store.runtimeState.entities).filter(isNpcRuntimeEntity),
     [store.runtimeState.entities],
@@ -183,6 +220,15 @@ export default function SimulationRuntimePanel(props: {
   const selectedTtrpgActor = ttrpgActors.find(entity => entity.entityKey === ttrpgActorKey)
     ?? ttrpgActors.find(entity => entity.entityKey === store.runtimeState.ttrpg?.activeActorKey)
     ?? ttrpgActors[0]
+  const combatEncounter = store.runtimeState.ttrpg?.encounter ?? null
+  const combatants = useMemo(
+    () => combatEncounter ? combatEncounter.turnOrder.map(key => combatEncounter.combatants[key]).filter(Boolean) : [],
+    [combatEncounter],
+  )
+  const combatTargetEntities = useMemo(
+    () => combatants.map(combatant => store.runtimeState.entities[combatant.entityKey]).filter(Boolean),
+    [combatants, store.runtimeState.entities],
+  )
   const {
     loading: sessionsLoading,
     projectId: loadedProjectId,
@@ -230,13 +276,35 @@ export default function SimulationRuntimePanel(props: {
 
   useEffect(() => {
     if (selected?.kind !== 'ttrpg') return
-    const active = store.runtimeState.ttrpg?.activeActorKey
+    const active = combatEncounter?.activeActorKey ?? store.runtimeState.ttrpg?.activeActorKey
     if (!ttrpgActorKey || !ttrpgActors.some(entity => entity.entityKey === ttrpgActorKey)) {
       setTtrpgActorKey(active && ttrpgActors.some(entity => entity.entityKey === active)
         ? active
         : ttrpgActors[0]?.entityKey ?? '')
     }
-  }, [selected?.kind, selected?.id, ttrpgActors, ttrpgActorKey, store.runtimeState.ttrpg?.activeActorKey])
+  }, [selected?.kind, selected?.id, ttrpgActors, ttrpgActorKey, combatEncounter?.activeActorKey, store.runtimeState.ttrpg?.activeActorKey])
+
+  useEffect(() => {
+    if (selected?.kind !== 'ttrpg') return
+    setTtrpgParticipantKeys(current => {
+      const valid = current.filter(key => ttrpgActors.some(entity => entity.entityKey === key))
+      if (valid.length >= 2) return valid
+      return ttrpgActors.slice(0, Math.max(2, Math.min(4, ttrpgActors.length))).map(entity => entity.entityKey)
+    })
+  }, [selected?.kind, selected?.id, ttrpgActors])
+
+  useEffect(() => {
+    if (!combatTargetEntities.length) return
+    if (!ttrpgAttackTargetKey || !combatTargetEntities.some(entity => entity.entityKey === ttrpgAttackTargetKey)) {
+      setTtrpgAttackTargetKey(combatTargetEntities.find(entity => entity.entityKey !== ttrpgActorKey)?.entityKey ?? combatTargetEntities[0].entityKey)
+    }
+    if (!ttrpgResourceEntityKey || !combatTargetEntities.some(entity => entity.entityKey === ttrpgResourceEntityKey)) {
+      setTtrpgResourceEntityKey(combatTargetEntities[0].entityKey)
+    }
+    if (!ttrpgConditionEntityKey || !combatTargetEntities.some(entity => entity.entityKey === ttrpgConditionEntityKey)) {
+      setTtrpgConditionEntityKey(combatTargetEntities[0].entityKey)
+    }
+  }, [combatTargetEntities, ttrpgAttackTargetKey, ttrpgConditionEntityKey, ttrpgActorKey, ttrpgResourceEntityKey])
 
   const toggleSource = (sourceKey: string) => {
     setSelectedSourceKeys(current => {
@@ -309,6 +377,30 @@ export default function SimulationRuntimePanel(props: {
       state: store.runtimeState,
       actorKey: selectedTtrpgActor.entityKey,
       action: ttrpgAction,
+      baseSequence: store.runtimeState.lastSequence,
+    }))
+  }
+
+  const generateTtrpgEncounter = async () => {
+    if (!selected || selected.kind !== 'ttrpg') return
+    if (ttrpgParticipantKeys.length < 2) throw new Error('遭遇至少需要两个参与者。')
+    const runtimeContext = await assembleContext({
+      projectId: props.project.id!,
+      worldGroupId: selected.worldGroupId ?? null,
+      simulationSessionId: selected.id,
+      sourceKeys: ['simulationRuntime'],
+      provider: config.provider,
+      model: config.model,
+    })
+    const draft = await encounterAI.start(buildTtrpgEncounterPrompt({
+      runtimeContext: runtimeContext.text,
+      participantKeys: ttrpgParticipantKeys,
+    }), undefined, { category: 'simulation.ttrpg-encounter', projectId: props.project.id! })
+    if (!draft.trim()) return
+    setTtrpgEncounterCandidate(parseTtrpgEncounterCandidate({
+      draft,
+      state: store.runtimeState,
+      participantKeys: ttrpgParticipantKeys,
       baseSequence: store.runtimeState.lastSequence,
     }))
   }
@@ -728,6 +820,178 @@ export default function SimulationRuntimePanel(props: {
                       </div>
                     </div>
                   )}
+
+                  <section className="rounded border border-accent/30 bg-bg-base p-3" data-testid="ttrpg-combat-panel">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div>
+                        <div className="flex items-center gap-2 text-sm font-semibold text-text-primary">
+                          <Dices className="h-4 w-4 text-accent" />
+                          战斗遭遇与规则
+                        </div>
+                        <p className="mt-1 text-xs text-text-muted">先攻、攻击骰、资源和状态效果都由事件回放；AI 只提供遭遇描述候选。</p>
+                      </div>
+                      {encounterAI.tokenUsage && (
+                        <span className="text-[10px] text-text-muted">
+                          AI {encounterAI.tokenUsage.inputTokens + encounterAI.tokenUsage.outputTokens} tokens
+                        </span>
+                      )}
+                    </div>
+
+                    {!combatEncounter || combatEncounter.status === 'resolved' ? (
+                      <div className="mt-3 space-y-3">
+                        <div className="grid gap-2 md:grid-cols-2">
+                          <input
+                            value={ttrpgEncounterTitle}
+                            onChange={event => setTtrpgEncounterTitle(event.target.value)}
+                            placeholder="遭遇标题，例如：雾港伏击"
+                            aria-label="跑团遭遇标题"
+                            className="rounded border border-border bg-bg-surface px-2 py-1.5 text-sm text-text-primary"
+                          />
+                          <textarea
+                            value={ttrpgEncounterDescription}
+                            onChange={event => setTtrpgEncounterDescription(event.target.value)}
+                            placeholder="战斗环境、目标和胜负条件"
+                            aria-label="跑团遭遇描述"
+                            className="min-h-16 rounded border border-border bg-bg-surface px-2 py-1.5 text-sm text-text-primary"
+                          />
+                        </div>
+                        <div>
+                          <div className="mb-1 text-xs font-medium text-text-secondary">参与者（先攻由固定种子计算）</div>
+                          <div className="flex flex-wrap gap-2">
+                            {ttrpgActors.map(entity => (
+                              <label key={entity.entityKey} className="flex items-center gap-1.5 rounded border border-border px-2 py-1 text-xs text-text-secondary">
+                                <input
+                                  type="checkbox"
+                                  checked={ttrpgParticipantKeys.includes(entity.entityKey)}
+                                  onChange={() => setTtrpgParticipantKeys(current => current.includes(entity.entityKey)
+                                    ? current.filter(key => key !== entity.entityKey)
+                                    : [...current, entity.entityKey])}
+                                  aria-label={`遭遇参与者 ${entity.name}`}
+                                />
+                                {entity.name}
+                              </label>
+                            ))}
+                          </div>
+                        </div>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <button
+                            disabled={busy || !store.runtimeState.ttrpg?.scene || ttrpgParticipantKeys.length < 2 || !ttrpgEncounterTitle.trim() || !ttrpgEncounterDescription.trim()}
+                            onClick={() => void run(() => store.startTtrpgEncounter({
+                              baseSequence: store.runtimeState.lastSequence,
+                              title: ttrpgEncounterTitle,
+                              description: ttrpgEncounterDescription,
+                              participantKeys: ttrpgParticipantKeys,
+                            }))}
+                            className="rounded bg-accent px-3 py-1.5 text-sm text-white disabled:opacity-40"
+                          >
+                            直接开始遭遇
+                          </button>
+                          <button
+                            disabled={busy || encounterAI.isStreaming || !store.runtimeState.ttrpg?.scene || ttrpgParticipantKeys.length < 2 || !isAIConfigReady(resolveRequestConfig(config, { category: 'simulation.ttrpg-encounter' }).config)}
+                            onClick={() => void run(generateTtrpgEncounter)}
+                            className="flex items-center gap-1.5 rounded border border-border px-3 py-1.5 text-sm text-text-secondary hover:bg-bg-hover disabled:opacity-40"
+                          >
+                            {encounterAI.isStreaming ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
+                            {encounterAI.isStreaming ? '生成中…' : '生成 AI 遭遇候选'}
+                          </button>
+                        </div>
+                        {encounterAI.error && <span className="text-xs text-danger">{encounterAI.error}</span>}
+                        {ttrpgEncounterCandidate && (
+                          <div className="rounded border border-accent/30 bg-bg-surface p-3 text-sm">
+                            <div className="font-medium text-text-primary">{ttrpgEncounterCandidate.title}</div>
+                            <p className="mt-1 whitespace-pre-wrap text-xs text-text-secondary">{ttrpgEncounterCandidate.description}</p>
+                            <div className="mt-1 text-[10px] text-text-muted">参与者：{ttrpgEncounterCandidate.participantKeys.join('、')} · 基线 #{ttrpgEncounterCandidate.baseSequence}</div>
+                            <div className="mt-3 flex gap-2">
+                              <button
+                                disabled={busy || store.runtimeState.lastSequence !== ttrpgEncounterCandidate.baseSequence}
+                                onClick={() => void run(async () => {
+                                  await store.startTtrpgEncounter(ttrpgEncounterCandidate)
+                                  setTtrpgEncounterCandidate(null)
+                                })}
+                                className="rounded bg-accent px-3 py-1 text-xs text-white disabled:opacity-40"
+                              >
+                                确认并开始
+                              </button>
+                              <button disabled={busy} onClick={() => setTtrpgEncounterCandidate(null)} className="rounded border border-border px-3 py-1 text-xs text-text-secondary hover:bg-bg-hover disabled:opacity-40">丢弃候选</button>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    ) : (
+                      <div className="mt-3 space-y-3">
+                        <div className="rounded border border-border bg-bg-surface px-3 py-2 text-xs text-text-secondary">
+                          <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                            <span className="font-medium text-text-primary">{combatEncounter.title}</span>
+                            <span>战斗第 {combatEncounter.round} 回合</span>
+                            <span>当前：{store.runtimeState.entities[combatEncounter.activeActorKey ?? '']?.name ?? combatEncounter.activeActorKey ?? '无'}</span>
+                          </div>
+                          <p className="mt-1 whitespace-pre-wrap">{combatEncounter.description}</p>
+                          <button
+                            disabled={busy}
+                            onClick={() => void run(() => store.resolveTtrpgEncounter('作者结束遭遇'))}
+                            className="mt-2 rounded border border-border px-2 py-1 text-[11px] text-text-secondary hover:bg-bg-hover disabled:opacity-40"
+                          >
+                            结束遭遇
+                          </button>
+                        </div>
+                        <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                          {combatEncounter.turnOrder.map(entityKey => {
+                            const combatant = combatEncounter.combatants[entityKey]
+                            const entity = store.runtimeState.entities[entityKey]
+                            if (!combatant || !entity) return null
+                            const hp = combatant.resources.hp
+                            return (
+                              <div key={entityKey} className={`rounded border px-3 py-2 text-xs ${combatEncounter.activeActorKey === entityKey ? 'border-accent bg-accent/5' : 'border-border bg-bg-surface'}`}>
+                                <div className="flex items-center justify-between gap-2"><span className="font-medium text-text-primary">{entity.name}</span><span className="text-text-muted">先攻 {combatant.initiative} · AC {combatant.armorClass}</span></div>
+                                <div className="mt-1">HP {hp.current}/{hp.maximum} · {Object.entries(combatant.resources).filter(([key]) => key !== 'hp').map(([key, resource]) => `${key} ${resource.current}/${resource.maximum}`).join(' · ') || '无额外资源'}</div>
+                                <div className="mt-1 text-text-muted">状态：{combatant.conditions.map(condition => `${condition.name}${condition.stacks > 1 ? `×${condition.stacks}` : ''}${condition.duration != null ? `(${condition.duration}回合)` : ''}`).join('、') || '无'}</div>
+                              </div>
+                            )
+                          })}
+                        </div>
+                        <div className="grid gap-2 md:grid-cols-[8rem_8rem_7rem_1fr_auto]">
+                          <select value={ttrpgActorKey} onChange={event => setTtrpgActorKey(event.target.value)} aria-label="战斗攻击者" className="rounded border border-border bg-bg-surface px-2 py-1.5 text-xs text-text-primary">
+                            {combatTargetEntities.map(entity => <option key={entity.entityKey} value={entity.entityKey}>{entity.name}</option>)}
+                          </select>
+                          <select value={ttrpgAttackTargetKey} onChange={event => setTtrpgAttackTargetKey(event.target.value)} aria-label="战斗攻击目标" className="rounded border border-border bg-bg-surface px-2 py-1.5 text-xs text-text-primary">
+                            {combatTargetEntities.filter(entity => entity.entityKey !== ttrpgActorKey).map(entity => <option key={entity.entityKey} value={entity.entityKey}>{entity.name}</option>)}
+                          </select>
+                          <input value={ttrpgAttackExpression} onChange={event => setTtrpgAttackExpression(event.target.value)} aria-label="攻击骰式" className="rounded border border-border bg-bg-surface px-2 py-1.5 text-xs text-text-primary" />
+                          <input value={ttrpgDamageExpression} onChange={event => setTtrpgDamageExpression(event.target.value)} aria-label="伤害骰式" placeholder="伤害骰式，可空" className="rounded border border-border bg-bg-surface px-2 py-1.5 text-xs text-text-primary" />
+                          <button disabled={busy || combatEncounter.activeActorKey !== ttrpgActorKey || !ttrpgAttackTargetKey} onClick={() => void run(() => store.resolveTtrpgAttack({ actorKey: ttrpgActorKey, targetKey: ttrpgAttackTargetKey, attackExpression: ttrpgAttackExpression, damageExpression: ttrpgDamageExpression || null, resourceKey: ttrpgResourceKey, reason: ttrpgAttackReason }))} className="rounded bg-accent px-3 py-1.5 text-xs text-white disabled:opacity-40">执行攻击</button>
+                        </div>
+                        <input value={ttrpgAttackReason} onChange={event => setTtrpgAttackReason(event.target.value)} aria-label="攻击说明" placeholder="攻击说明（可选）" className="w-full rounded border border-border bg-bg-surface px-2 py-1.5 text-xs text-text-primary" />
+                        <div className="grid gap-2 md:grid-cols-[8rem_7rem_6rem_1fr_auto]">
+                          <select value={ttrpgResourceEntityKey} onChange={event => setTtrpgResourceEntityKey(event.target.value)} aria-label="资源目标" className="rounded border border-border bg-bg-surface px-2 py-1.5 text-xs text-text-primary">
+                            {combatTargetEntities.map(entity => <option key={entity.entityKey} value={entity.entityKey}>{entity.name}</option>)}
+                          </select>
+                          <input value={ttrpgResourceName} onChange={event => setTtrpgResourceName(event.target.value)} aria-label="资源名称" placeholder="资源名" className="rounded border border-border bg-bg-surface px-2 py-1.5 text-xs text-text-primary" />
+                          <input value={ttrpgResourceDelta} onChange={event => setTtrpgResourceDelta(event.target.value)} aria-label="资源变化" placeholder="变化量" className="rounded border border-border bg-bg-surface px-2 py-1.5 text-xs text-text-primary" />
+                          <span className="self-center text-[10px] text-text-muted">手动调整已登记资源（不会超过 0 / 上限）</span>
+                          <button disabled={busy || !ttrpgResourceEntityKey || !ttrpgResourceName.trim()} onClick={() => void run(() => store.changeTtrpgResource({ entityKey: ttrpgResourceEntityKey, resourceKey: ttrpgResourceName, delta: Number(ttrpgResourceDelta), reason: '作者手动调整' }))} className="rounded border border-border px-3 py-1.5 text-xs text-text-secondary hover:bg-bg-hover disabled:opacity-40">调整资源</button>
+                        </div>
+                        <div className="grid gap-2 md:grid-cols-[8rem_7rem_6rem_1fr_auto]">
+                          <select value={ttrpgConditionEntityKey} onChange={event => setTtrpgConditionEntityKey(event.target.value)} aria-label="状态目标" className="rounded border border-border bg-bg-surface px-2 py-1.5 text-xs text-text-primary">
+                            {combatTargetEntities.map(entity => <option key={entity.entityKey} value={entity.entityKey}>{entity.name}</option>)}
+                          </select>
+                          <input value={ttrpgConditionName} onChange={event => setTtrpgConditionName(event.target.value)} aria-label="状态名称" placeholder="状态名称" className="rounded border border-border bg-bg-surface px-2 py-1.5 text-xs text-text-primary" />
+                          <input value={ttrpgConditionDuration} onChange={event => setTtrpgConditionDuration(event.target.value)} aria-label="状态持续回合" placeholder="回合数" className="rounded border border-border bg-bg-surface px-2 py-1.5 text-xs text-text-primary" />
+                          <input value={ttrpgConditionDescription} onChange={event => setTtrpgConditionDescription(event.target.value)} aria-label="状态说明" placeholder="状态效果说明（可选）" className="rounded border border-border bg-bg-surface px-2 py-1.5 text-xs text-text-primary" />
+                          <button disabled={busy || !ttrpgConditionEntityKey || !ttrpgConditionName.trim()} onClick={() => void run(() => store.applyTtrpgCondition({ entityKey: ttrpgConditionEntityKey, condition: { conditionId: `manual:${Date.now()}`, name: ttrpgConditionName, description: ttrpgConditionDescription, duration: Number(ttrpgConditionDuration) > 0 ? Number(ttrpgConditionDuration) : null, stacks: 1 } }))} className="rounded border border-border px-3 py-1.5 text-xs text-text-secondary hover:bg-bg-hover disabled:opacity-40">施加状态</button>
+                        </div>
+                        <div className="grid gap-2 md:grid-cols-[8rem_1fr_auto]">
+                          <select value={ttrpgConditionEntityKey} onChange={event => setTtrpgConditionEntityKey(event.target.value)} aria-label="移除状态目标" className="rounded border border-border bg-bg-surface px-2 py-1.5 text-xs text-text-primary">
+                            {combatTargetEntities.map(entity => <option key={entity.entityKey} value={entity.entityKey}>{entity.name}</option>)}
+                          </select>
+                          <select aria-label="移除状态" defaultValue="" onChange={event => { if (event.target.value) void run(() => store.removeTtrpgCondition({ entityKey: ttrpgConditionEntityKey, conditionId: event.target.value })) }} className="rounded border border-border bg-bg-surface px-2 py-1.5 text-xs text-text-primary">
+                            <option value="">选择要移除的状态</option>
+                            {(combatEncounter.combatants[ttrpgConditionEntityKey]?.conditions ?? []).map(condition => <option key={condition.conditionId} value={condition.conditionId}>{condition.name}</option>)}
+                          </select>
+                          <span className="self-center text-[10px] text-text-muted">状态持续回合在该行动者结束回合时递减</span>
+                        </div>
+                      </div>
+                    )}
+                  </section>
 
                   <div className="grid gap-3 md:grid-cols-[12rem_1fr]">
                     <select

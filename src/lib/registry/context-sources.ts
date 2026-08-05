@@ -96,6 +96,19 @@ async function readSimulationRuntimeContext(input: AssembleContextInput): Promis
     ...ttrpg.checks.slice(-20).map(check => (
       `- 检定 #${check.eventSequence}｜${check.actorKey}｜${check.skill}｜${check.expression}=${check.total} vs DC ${check.dc}｜${check.success ? '成功' : '失败'}`
     )),
+    ...(ttrpg.attacks ?? []).slice(-20).map(attack => (
+      `- 攻击｜${attack.actorKey} → ${attack.targetKey}｜${attack.attackExpression}=${attack.attackTotal} vs AC ${attack.armorClass}｜${attack.hit ? `命中，${attack.resourceKey} ${attack.damageTotal}` : '未命中'}`
+    )),
+    ...(ttrpg.encounter ? [
+      `- 遭遇=${ttrpg.encounter.title}｜状态=${ttrpg.encounter.status}｜战斗回合=${ttrpg.encounter.round}｜当前=${ttrpg.encounter.activeActorKey ?? '无'}`,
+      ...ttrpg.encounter.turnOrder.map(key => {
+        const combatant = ttrpg.encounter?.combatants[key]
+        if (!combatant) return `- 参与者=${key}`
+        const resources = Object.entries(combatant.resources).map(([name, resource]) => `${name}=${resource.current}/${resource.maximum}`).join(', ')
+        const conditions = combatant.conditions.map(condition => `${condition.name}${condition.stacks > 1 ? `×${condition.stacks}` : ''}`).join('、') || '无'
+        return `- 战斗参与者=${key}｜先攻=${combatant.initiative}｜AC=${combatant.armorClass}｜资源=${resources}｜状态=${conditions}`
+      }),
+    ] : []),
   ] : []
   return [
     `【冻结运行时会话】${session.title}｜类型=${session.kind}｜逻辑时间=${state.clock}｜事件序号=${state.lastSequence}`,

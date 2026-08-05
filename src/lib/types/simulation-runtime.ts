@@ -144,6 +144,65 @@ export interface SimulationTtrpgState {
   turnOrder: string[]
   actions: SimulationTtrpgAction[]
   checks: SimulationTtrpgCheck[]
+  attacks: SimulationTtrpgAttackResult[]
+  encounter: SimulationTtrpgEncounter | null
+}
+
+export interface SimulationTtrpgResource {
+  current: number
+  maximum: number
+}
+
+export interface SimulationTtrpgCondition {
+  conditionId: string
+  name: string
+  description: string
+  duration: number | null
+  stacks: number
+}
+
+export interface SimulationTtrpgCombatant {
+  entityKey: string
+  initiative: number
+  armorClass: number
+  resources: Record<string, SimulationTtrpgResource>
+  conditions: SimulationTtrpgCondition[]
+}
+
+export interface SimulationTtrpgEncounter {
+  encounterId: string
+  title: string
+  description: string
+  status: 'active' | 'resolved'
+  round: number
+  activeActorKey: string | null
+  turnOrder: string[]
+  combatants: Record<string, SimulationTtrpgCombatant>
+}
+
+export interface SimulationTtrpgEncounterCandidate {
+  baseSequence: number
+  title: string
+  description: string
+  participantKeys: string[]
+}
+
+export interface SimulationTtrpgAttackResult {
+  actorKey: string
+  targetKey: string
+  attackExpression: string
+  attackDice: number[]
+  attackModifier: number
+  attackTotal: number
+  armorClass: number
+  hit: boolean
+  damageExpression: string | null
+  damageDice: number[]
+  damageModifier: number
+  damageTotal: number
+  resourceKey: string
+  resourceDelta: number
+  reason: string
 }
 
 export interface SimulationTtrpgCheckRequest {
@@ -213,6 +272,13 @@ export const SIMULATION_EVENT_TYPES = [
   'ttrpg.check.resolved',
   'ttrpg.gm.response.recorded',
   'ttrpg.turn.advanced',
+  'ttrpg.encounter.started',
+  'ttrpg.encounter.resolved',
+  'ttrpg.combat.attack.resolved',
+  'ttrpg.combat.resource.changed',
+  'ttrpg.combat.condition.applied',
+  'ttrpg.combat.condition.removed',
+  'ttrpg.combat.turn.advanced',
 ] as const
 export type SimulationEventType = typeof SIMULATION_EVENT_TYPES[number]
 

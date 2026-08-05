@@ -13,6 +13,12 @@ import {
   readPendingNpcEvolutionProposals,
   rejectNpcEvolutionProposal,
   openTtrpgScene,
+  startTtrpgEncounter,
+  resolveTtrpgEncounter,
+  resolveTtrpgAttack,
+  changeTtrpgResource,
+  applyTtrpgCondition,
+  removeTtrpgCondition,
   resolveSimulationDice,
   resolveTtrpgCheck,
   verifySimulationCheckpoint,
@@ -28,6 +34,8 @@ import {
   type SimulationSession,
   type SimulationSessionKind,
   type SimulationTtrpgTurnCandidate,
+  type SimulationTtrpgEncounterCandidate,
+  type SimulationTtrpgCondition,
 } from '../lib/types'
 
 interface SimulationRuntimeStore {
@@ -57,8 +65,14 @@ interface SimulationRuntimeStore {
   acceptNpcEvolution(proposalSequence: number): Promise<void>
   rejectNpcEvolution(proposalSequence: number, reason?: string): Promise<void>
   openTtrpgScene(input: { title: string; description: string; locationKey: string | null; turnOrder: string[] }): Promise<void>
+  startTtrpgEncounter(candidate: SimulationTtrpgEncounterCandidate): Promise<void>
+  resolveTtrpgEncounter(reason?: string): Promise<void>
   recordTtrpgTurn(candidate: SimulationTtrpgTurnCandidate): Promise<void>
   resolveTtrpgCheck(input: { actorKey: string; skill: string; expression: string; dc: number }): Promise<void>
+  resolveTtrpgAttack(input: { actorKey: string; targetKey: string; attackExpression: string; damageExpression?: string | null; resourceKey?: string; reason?: string }): Promise<void>
+  changeTtrpgResource(input: { entityKey: string; resourceKey: string; delta: number; reason?: string }): Promise<void>
+  applyTtrpgCondition(input: { entityKey: string; condition: SimulationTtrpgCondition }): Promise<void>
+  removeTtrpgCondition(input: { entityKey: string; conditionId: string }): Promise<void>
   rollDice(expression: string): Promise<void>
   checkpoint(name: string): Promise<void>
   branch(title: string): Promise<number>
@@ -215,6 +229,20 @@ export const useSimulationRuntimeStore = create<SimulationRuntimeStore>((set, ge
       await refreshSelected()
     },
 
+    startTtrpgEncounter: async candidate => {
+      const sessionId = get().selectedSessionId
+      if (sessionId == null) throw new Error('请先选择运行时会话。')
+      await startTtrpgEncounter({ sessionId, candidate })
+      await refreshSelected()
+    },
+
+    resolveTtrpgEncounter: async reason => {
+      const sessionId = get().selectedSessionId
+      if (sessionId == null) throw new Error('请先选择运行时会话。')
+      await resolveTtrpgEncounter({ sessionId, reason })
+      await refreshSelected()
+    },
+
     recordTtrpgTurn: async candidate => {
       const sessionId = get().selectedSessionId
       if (sessionId == null) throw new Error('请先选择运行时会话。')
@@ -226,6 +254,34 @@ export const useSimulationRuntimeStore = create<SimulationRuntimeStore>((set, ge
       const sessionId = get().selectedSessionId
       if (sessionId == null) throw new Error('请先选择运行时会话。')
       await resolveTtrpgCheck({ sessionId, ...input })
+      await refreshSelected()
+    },
+
+    resolveTtrpgAttack: async input => {
+      const sessionId = get().selectedSessionId
+      if (sessionId == null) throw new Error('请先选择运行时会话。')
+      await resolveTtrpgAttack({ sessionId, ...input })
+      await refreshSelected()
+    },
+
+    changeTtrpgResource: async input => {
+      const sessionId = get().selectedSessionId
+      if (sessionId == null) throw new Error('请先选择运行时会话。')
+      await changeTtrpgResource({ sessionId, ...input })
+      await refreshSelected()
+    },
+
+    applyTtrpgCondition: async input => {
+      const sessionId = get().selectedSessionId
+      if (sessionId == null) throw new Error('请先选择运行时会话。')
+      await applyTtrpgCondition({ sessionId, ...input })
+      await refreshSelected()
+    },
+
+    removeTtrpgCondition: async input => {
+      const sessionId = get().selectedSessionId
+      if (sessionId == null) throw new Error('请先选择运行时会话。')
+      await removeTtrpgCondition({ sessionId, ...input })
       await refreshSelected()
     },
 

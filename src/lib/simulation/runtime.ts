@@ -18,8 +18,14 @@ import {
   type SimulationSession,
   type SimulationSessionKind,
   type SimulationTtrpgAction,
+  type SimulationTtrpgAttackResult,
   type SimulationTtrpgCheck,
   type SimulationTtrpgCheckRequest,
+  type SimulationTtrpgCombatant,
+  type SimulationTtrpgCondition,
+  type SimulationTtrpgEncounter,
+  type SimulationTtrpgEncounterCandidate,
+  type SimulationTtrpgResource,
   type SimulationTtrpgScene,
   type SimulationTtrpgState,
   type SimulationTtrpgTurnCandidate,
@@ -316,8 +322,129 @@ function assertTtrpgCheck(value: unknown): SimulationTtrpgCheck {
   }
 }
 
+function assertTtrpgResource(value: unknown): SimulationTtrpgResource {
+  if (!isObject(value)) throw new Error('跑团资源必须是对象。')
+  const current = assertFiniteInteger(value.current, '资源当前值', 0, 1_000_000_000)
+  const maximum = assertFiniteInteger(value.maximum, '资源上限', 1, 1_000_000_000)
+  if (current > maximum) throw new Error('资源当前值不能超过上限。')
+  return { current, maximum }
+}
+
+function assertTtrpgCondition(value: unknown): SimulationTtrpgCondition {
+  if (!isObject(value)) throw new Error('跑团状态效果必须是对象。')
+  const conditionId = String(value.conditionId ?? '').trim()
+  const name = String(value.name ?? '').trim()
+  const description = String(value.description ?? '').trim()
+  const duration = value.duration == null
+    ? null
+    : assertFiniteInteger(value.duration, '状态效果持续回合', 0, 1_000_000)
+  const stacks = assertFiniteInteger(value.stacks ?? 1, '状态效果层数', 1, 1_000)
+  if (!conditionId || conditionId.length > 160) throw new Error('状态效果缺少有效 ID。')
+  if (!name || name.length > 120) throw new Error('状态效果名称无效。')
+  if (description.length > 2_000) throw new Error('状态效果描述过长。')
+  return { conditionId, name, description, duration, stacks }
+}
+
+function assertTtrpgCombatant(value: unknown): SimulationTtrpgCombatant {
+  if (!isObject(value)) throw new Error('战斗参与者必须是对象。')
+  const entityKey = String(value.entityKey ?? '').trim()
+  const initiative = assertFiniteInteger(value.initiative, '先攻值', 0, 1_000)
+  const armorClass = assertFiniteInteger(value.armorClass, '护甲等级', 0, 1_000)
+  if (!entityKey || entityKey.length > 160) throw new Error('战斗参与者缺少实体键。')
+  if (!isObject(value.resources)) throw new Error('战斗资源必须是对象。')
+  const resources: Record<string, SimulationTtrpgResource> = {}
+  for (const [key, resource] of Object.entries(value.resources)) {
+    if (!key.trim() || key.length > 80) throw new Error('战斗资源键无效。')
+    resources[key] = assertTtrpgResource(resource)
+  }
+  if (!resources.hp) throw new Error('战斗参与者必须拥有 hp 资源。')
+  if (!Array.isArray(value.conditions)) throw new Error('战斗状态效果必须是数组。')
+  const conditions = value.conditions.map(assertTtrpgCondition)
+  if (new Set(conditions.map(condition => condition.conditionId)).size !== conditions.length) {
+    throw new Error('战斗状态效果不能重复。')
+  }
+  return { entityKey, initiative, armorClass, resources, conditions }
+}
+
+function assertTtrpgEncounter(value: unknown): SimulationTtrpgEncounter {
+  if (!isObject(value)) throw new Error('跑团遭遇必须是对象。')
+  const encounterId = String(value.encounterId ?? '').trim()
+  const title = String(value.title ?? '').trim()
+  const description = String(value.description ?? '').trim()
+  const status = String(value.status ?? 'active')
+  const round = assertFiniteInteger(value.round, '战斗回合', 1, Number.MAX_SAFE_INTEGER)
+  const activeActorKey = value.activeActorKey == null ? null : String(value.activeActorKey).trim() || null
+  if (!encounterId || encounterId.length > 160) throw new Error('遭遇缺少有效 ID。')
+  if (!title || title.length > 200) throw new Error('遭遇标题无效。')
+  if (description.length > 8_000) throw new Error('遭遇描述过长。')
+  if (status !== 'active' && status !== 'resolved') throw new Error('遭遇状态无效。')
+  if (!Array.isArray(value.turnOrder) || value.turnOrder.length === 0) throw new Error('遭遇必须有回合顺序。')
+  const turnOrder = value.turnOrder.map(raw => String(raw).trim())
+  if (turnOrder.some(key => !key || key.length > 160) || new Set(turnOrder).size !== turnOrder.length) {
+    throw new Error('遭遇回合顺序包含无效或重复参与者。')
+  }
+  if (activeActorKey != null && !turnOrder.includes(activeActorKey)) throw new Error('遭遇当前行动者不在回合顺序中。')
+  if (!isObject(value.combatants)) throw new Error('遭遇缺少战斗参与者。')
+  const combatants: Record<string, SimulationTtrpgCombatant> = {}
+  for (const [key, raw] of Object.entries(value.combatants)) {
+    const combatant = assertTtrpgCombatant(raw)
+    if (combatant.entityKey !== key) throw new Error(`遭遇参与者索引与实体键不一致: ${key}`)
+    combatants[key] = combatant
+  }
+  if (turnOrder.some(key => !combatants[key]) || Object.keys(combatants).some(key => !turnOrder.includes(key))) {
+    throw new Error('遭遇回合顺序与参与者不一致。')
+  }
+  return { encounterId, title, description, status: status as SimulationTtrpgEncounter['status'], round, activeActorKey, turnOrder, combatants }
+}
+
+function assertTtrpgAttackResult(value: unknown): SimulationTtrpgAttackResult {
+  if (!isObject(value)) throw new Error('攻击结果必须是对象。')
+  const actorKey = String(value.actorKey ?? '').trim()
+  const targetKey = String(value.targetKey ?? '').trim()
+  const attackExpression = String(value.attackExpression ?? '').trim()
+  const damageExpression = value.damageExpression == null ? null : String(value.damageExpression).trim() || null
+  const resourceKey = String(value.resourceKey ?? 'hp').trim()
+  const reason = String(value.reason ?? '').trim()
+  if (!actorKey || !targetKey || actorKey.length > 160 || targetKey.length > 160) throw new Error('攻击缺少有效行动者或目标。')
+  const attack = parseDiceExpression(attackExpression)
+  const attackDice = value.attackDice
+  if (!Array.isArray(attackDice) || attackDice.length !== attack.count) throw new Error('攻击骰子数量与骰式不一致。')
+  const normalizedAttackDice = attackDice.map(die => assertFiniteInteger(die, '攻击骰子点数', 1, attack.sides))
+  const attackModifier = Number(value.attackModifier)
+  const attackTotal = Number(value.attackTotal)
+  const armorClass = assertFiniteInteger(value.armorClass, '护甲等级', 0, 1_000)
+  const hit = value.hit
+  if (attackModifier !== attack.modifier || attackTotal !== normalizedAttackDice.reduce((sum, die) => sum + die, attackModifier)) {
+    throw new Error('攻击合计与骰式不一致。')
+  }
+  if (hit !== (attackTotal >= armorClass)) throw new Error('攻击命中状态与合计不一致。')
+  let normalizedDamageExpression: string | null = null
+  let damageDice: number[] = []
+  let damageModifier = 0
+  const damageTotal = Number(value.damageTotal ?? 0)
+  if (damageExpression) {
+    const damage = parseDiceExpression(damageExpression)
+    if (!Array.isArray(value.damageDice) || value.damageDice.length !== damage.count) throw new Error('伤害骰子数量与骰式不一致。')
+    damageDice = value.damageDice.map(die => assertFiniteInteger(die, '伤害骰子点数', 1, damage.sides))
+    damageModifier = Number(value.damageModifier)
+    if (damageModifier !== damage.modifier || damageTotal !== damageDice.reduce((sum, die) => sum + die, damageModifier)) {
+      throw new Error('伤害合计与骰式不一致。')
+    }
+    if (damageTotal < 0) throw new Error('伤害合计不能为负数。')
+    normalizedDamageExpression = damage.normalized
+  } else if (damageTotal !== 0 || (Array.isArray(value.damageDice) && value.damageDice.length > 0)) {
+    throw new Error('没有伤害骰式时不能提交伤害结果。')
+  }
+  const resourceDelta = assertFiniteInteger(value.resourceDelta, '资源变化量', -1_000_000_000, 1_000_000_000)
+  if (!hit && (damageTotal !== 0 || resourceDelta !== 0)) throw new Error('未命中攻击不能造成伤害。')
+  if (hit && resourceDelta !== -damageTotal) throw new Error('攻击资源变化必须等于伤害负值。')
+  if (!resourceKey || resourceKey.length > 80) throw new Error('攻击资源键无效。')
+  if (reason.length > 2_000) throw new Error('攻击理由过长。')
+  return { actorKey, targetKey, attackExpression: attack.normalized, attackDice: normalizedAttackDice, attackModifier, attackTotal, armorClass, hit: Boolean(hit), damageExpression: normalizedDamageExpression, damageDice, damageModifier, damageTotal, resourceKey, resourceDelta, reason }
+}
+
 function emptyTtrpgState(): SimulationTtrpgState {
-  return { scene: null, round: 0, activeActorKey: null, turnOrder: [], actions: [], checks: [] }
+  return { scene: null, round: 0, activeActorKey: null, turnOrder: [], actions: [], checks: [], attacks: [], encounter: null }
 }
 
 function parseTtrpgState(value: unknown): SimulationTtrpgState | null {
@@ -333,6 +460,7 @@ function parseTtrpgState(value: unknown): SimulationTtrpgState | null {
   }
   if (activeActorKey != null && !turnOrder.includes(activeActorKey)) throw new Error('跑团当前行动者不在回合顺序中。')
   if (!Array.isArray(value.actions) || !Array.isArray(value.checks)) throw new Error('跑团动作与检定记录必须是数组。')
+  if (value.attacks != null && !Array.isArray(value.attacks)) throw new Error('跑团攻击记录必须是数组。')
   return {
     scene,
     round,
@@ -340,6 +468,8 @@ function parseTtrpgState(value: unknown): SimulationTtrpgState | null {
     turnOrder,
     actions: value.actions.map(assertTtrpgAction),
     checks: value.checks.map(assertTtrpgCheck),
+    attacks: (value.attacks ?? []).map(assertTtrpgAttackResult),
+    encounter: value.encounter == null ? null : assertTtrpgEncounter(value.encounter),
   }
 }
 
@@ -536,6 +666,8 @@ export function applySimulationEvent(
       ttrpg.turnOrder = turnOrder
       ttrpg.actions = []
       ttrpg.checks = []
+      ttrpg.attacks = []
+      ttrpg.encounter = null
       break
     }
     case 'ttrpg.action.recorded': {
@@ -592,6 +724,118 @@ export function applySimulationEvent(
       }
       ttrpg.activeActorKey = nextActorKey
       ttrpg.round = round
+      break
+    }
+    case 'ttrpg.encounter.started': {
+      const ttrpg = requireTtrpgState(state)
+      if (!ttrpg.scene || ttrpg.scene.status !== 'active') throw new Error('请先开始一个跑团场景。')
+      if (ttrpg.encounter?.status === 'active') throw new Error('当前已有进行中的战斗遭遇。')
+      const encounter = assertTtrpgEncounter(payload.encounter)
+      for (const actorKey of encounter.turnOrder) {
+        const actor = state.entities[actorKey]
+        if (!actor || !['player', 'character', 'npc'].includes(actor.kind)) {
+          throw new Error(`遭遇参与者不存在或类型不支持: ${actorKey}`)
+        }
+      }
+      if (encounter.activeActorKey !== encounter.turnOrder[0]) throw new Error('遭遇必须从先攻最高者开始。')
+      ttrpg.encounter = encounter
+      break
+    }
+    case 'ttrpg.encounter.resolved': {
+      const ttrpg = requireTtrpgState(state)
+      const encounter = ttrpg.encounter
+      if (!encounter || encounter.status !== 'active') throw new Error('当前没有进行中的战斗遭遇。')
+      const reason = String(payload.reason ?? '').trim()
+      if (reason.length > 2_000) throw new Error('遭遇结束理由过长。')
+      encounter.status = 'resolved'
+      encounter.activeActorKey = null
+      if (reason) state.narratives.push({ eventSequence: event.sequence, text: `遭遇结束：${reason}` })
+      break
+    }
+    case 'ttrpg.combat.attack.resolved': {
+      const ttrpg = requireTtrpgState(state)
+      const encounter = ttrpg.encounter
+      if (!encounter || encounter.status !== 'active') throw new Error('请先开始一个战斗遭遇。')
+      const attack = assertTtrpgAttackResult(payload.attack)
+      if (attack.actorKey !== event.actorKey || attack.targetKey !== event.targetKey) {
+        throw new Error('攻击事件的行动者或目标与事件元数据不一致。')
+      }
+      if (encounter.activeActorKey !== attack.actorKey) throw new Error('当前还没轮到该战斗行动者。')
+      if (!encounter.combatants[attack.actorKey] || !encounter.combatants[attack.targetKey]) {
+        throw new Error('攻击行动者或目标不在当前遭遇中。')
+      }
+      ttrpg.attacks.push(attack)
+      break
+    }
+    case 'ttrpg.combat.resource.changed': {
+      const ttrpg = requireTtrpgState(state)
+      const encounter = ttrpg.encounter
+      if (!encounter || encounter.status !== 'active') throw new Error('请先开始一个战斗遭遇。')
+      const entityKey = String(payload.entityKey ?? '').trim()
+      const resourceKey = String(payload.resourceKey ?? '').trim()
+      const delta = assertFiniteInteger(payload.delta, '资源变化量', -1_000_000_000, 1_000_000_000)
+      const combatant = encounter.combatants[entityKey]
+      if (!combatant || !resourceKey || resourceKey.length > 80) throw new Error('资源变化目标无效。')
+      if (event.targetKey !== entityKey) throw new Error('资源变化事件目标与实体不一致。')
+      const resource = combatant.resources[resourceKey]
+      if (!resource) throw new Error(`战斗参与者没有资源: ${resourceKey}`)
+      const expectedCurrent = Math.max(0, Math.min(resource.maximum, resource.current + delta))
+      const current = assertFiniteInteger(payload.current, '资源当前值', 0, resource.maximum)
+      if (current !== expectedCurrent) throw new Error('资源变化结果与当前资源不一致。')
+      combatant.resources[resourceKey] = { ...resource, current }
+      break
+    }
+    case 'ttrpg.combat.condition.applied': {
+      const ttrpg = requireTtrpgState(state)
+      const encounter = ttrpg.encounter
+      if (!encounter || encounter.status !== 'active') throw new Error('请先开始一个战斗遭遇。')
+      const entityKey = String(payload.entityKey ?? '').trim()
+      const combatant = encounter.combatants[entityKey]
+      if (!combatant) throw new Error('状态效果目标不在当前遭遇中。')
+      if (event.targetKey !== entityKey) throw new Error('状态效果事件目标与实体不一致。')
+      const condition = assertTtrpgCondition(payload.condition)
+      const existing = combatant.conditions.find(item => item.conditionId === condition.conditionId)
+      if (existing) {
+        existing.stacks = Math.min(1_000, existing.stacks + condition.stacks)
+        existing.duration = condition.duration
+        existing.description = condition.description
+      } else {
+        combatant.conditions.push(condition)
+      }
+      break
+    }
+    case 'ttrpg.combat.condition.removed': {
+      const ttrpg = requireTtrpgState(state)
+      const encounter = ttrpg.encounter
+      if (!encounter || encounter.status !== 'active') throw new Error('请先开始一个战斗遭遇。')
+      const entityKey = String(payload.entityKey ?? '').trim()
+      const conditionId = String(payload.conditionId ?? '').trim()
+      const combatant = encounter.combatants[entityKey]
+      if (!combatant || !conditionId) throw new Error('状态效果移除目标无效。')
+      if (event.targetKey !== entityKey) throw new Error('状态效果事件目标与实体不一致。')
+      combatant.conditions = combatant.conditions.filter(condition => condition.conditionId !== conditionId)
+      break
+    }
+    case 'ttrpg.combat.turn.advanced': {
+      const ttrpg = requireTtrpgState(state)
+      const encounter = ttrpg.encounter
+      if (!encounter || encounter.status !== 'active') throw new Error('请先开始一个战斗遭遇。')
+      const nextActorKey = String(payload.nextActorKey ?? '').trim()
+      const round = assertFiniteInteger(payload.round, '战斗回合', 1, Number.MAX_SAFE_INTEGER)
+      if (!encounter.turnOrder.includes(nextActorKey)) throw new Error('下一个战斗行动者不在遭遇中。')
+      const currentIndex = encounter.turnOrder.indexOf(encounter.activeActorKey ?? '')
+      const nextIndex = (currentIndex + 1) % encounter.turnOrder.length
+      const expectedActorKey = encounter.turnOrder[nextIndex]
+      const expectedRound = encounter.round + (nextIndex === 0 ? 1 : 0)
+      if (nextActorKey !== expectedActorKey || round !== expectedRound) throw new Error('战斗回合推进与先攻顺序不一致。')
+      const leaving = encounter.activeActorKey ? encounter.combatants[encounter.activeActorKey] : null
+      if (leaving) {
+        leaving.conditions = leaving.conditions
+          .map(condition => condition.duration == null ? condition : { ...condition, duration: condition.duration - 1 })
+          .filter(condition => condition.duration == null || condition.duration > 0)
+      }
+      encounter.activeActorKey = nextActorKey
+      encounter.round = round
       break
     }
     case 'npc.evolution.proposed': {
@@ -778,6 +1022,13 @@ export async function appendSimulationEvent(input: {
     || input.type === 'ttrpg.check.resolved'
     || input.type === 'ttrpg.gm.response.recorded'
     || input.type === 'ttrpg.turn.advanced'
+    || input.type === 'ttrpg.encounter.started'
+    || input.type === 'ttrpg.encounter.resolved'
+    || input.type === 'ttrpg.combat.attack.resolved'
+    || input.type === 'ttrpg.combat.resource.changed'
+    || input.type === 'ttrpg.combat.condition.applied'
+    || input.type === 'ttrpg.combat.condition.removed'
+    || input.type === 'ttrpg.combat.turn.advanced'
   ) {
     throw new Error('受治理的互动事件只能通过对应的专用 API 生成。')
   }
@@ -1091,6 +1342,279 @@ export async function resolveTtrpgCheck(input: {
         },
       }),
     }
+  })
+}
+
+export function parseSimulationTtrpgEncounterCandidate(value: unknown): SimulationTtrpgEncounterCandidate {
+  if (!isObject(value)) throw new Error('跑团遭遇候选必须是对象。')
+  const allowed = new Set(['baseSequence', 'title', 'description', 'participantKeys'])
+  const unknown = Object.keys(value).filter(key => !allowed.has(key))
+  if (unknown.length) throw new Error(`跑团遭遇候选包含未知字段: ${unknown.join(', ')}`)
+  const baseSequence = assertFiniteInteger(value.baseSequence, '遭遇候选基线序号', 0, Number.MAX_SAFE_INTEGER)
+  const title = String(value.title ?? '').trim()
+  const description = String(value.description ?? '').trim()
+  if (!title || title.length > 200) throw new Error('遭遇候选标题无效。')
+  if (!description || description.length > 8_000) throw new Error('遭遇候选描述无效。')
+  if (!Array.isArray(value.participantKeys)) throw new Error('遭遇候选必须提供参与者列表。')
+  const participantKeys = value.participantKeys.map(raw => String(raw).trim())
+  if (participantKeys.length < 2 || participantKeys.length > 40 || participantKeys.some(key => !key || key.length > 160)) {
+    throw new Error('遭遇候选参与者必须为 2..40 个有效实体。')
+  }
+  if (new Set(participantKeys).size !== participantKeys.length) throw new Error('遭遇候选参与者不能重复。')
+  return { baseSequence, title, description, participantKeys }
+}
+
+function numericAttribute(entity: RuntimeEntityState, keys: string[], fallback: number, min: number, max: number): number {
+  for (const key of keys) {
+    const value = entity.attributes[key]
+    if (typeof value === 'number' && Number.isInteger(value) && value >= min && value <= max) return value
+  }
+  return fallback
+}
+
+function combatantFromEntity(entity: RuntimeEntityState, initiative: number): SimulationTtrpgCombatant {
+  const maximumHp = numericAttribute(entity, ['maxHp', 'hp'], 10, 1, 1_000_000_000)
+  const currentHp = numericAttribute(entity, ['hp'], maximumHp, 0, maximumHp)
+  const resources: Record<string, SimulationTtrpgResource> = {
+    hp: { current: currentHp, maximum: maximumHp },
+  }
+  for (const key of ['mana', 'stamina', 'actionPoints']) {
+    const maximum = numericAttribute(entity, [`max${key[0].toUpperCase()}${key.slice(1)}`, key], 0, 0, 1_000_000_000)
+    if (maximum > 0) resources[key] = { current: numericAttribute(entity, [key], maximum, 0, maximum), maximum }
+  }
+  return {
+    entityKey: entity.entityKey,
+    initiative,
+    armorClass: numericAttribute(entity, ['armorClass', 'ac'], 10, 0, 1_000),
+    resources,
+    conditions: [],
+  }
+}
+
+export async function startTtrpgEncounter(input: {
+  sessionId: number
+  candidate: SimulationTtrpgEncounterCandidate
+}): Promise<SimulationEvent> {
+  const candidate = parseSimulationTtrpgEncounterCandidate(input.candidate)
+  return appendBuiltEvent(input.sessionId, ({ session, state, sequence }) => {
+    if (session.kind !== 'ttrpg') throw new Error('只有跑团会话可以开始遭遇。')
+    const ttrpg = state.ttrpg
+    if (!ttrpg?.scene || ttrpg.scene.status !== 'active') throw new Error('请先开始一个跑团场景。')
+    if (candidate.baseSequence !== state.lastSequence) throw new Error('遭遇候选已过期，请重新生成。')
+    if (ttrpg.encounter?.status === 'active') throw new Error('当前已有进行中的战斗遭遇。')
+    const combatants: Record<string, SimulationTtrpgCombatant> = {}
+    for (const entityKey of candidate.participantKeys) {
+      const entity = state.entities[entityKey]
+      if (!entity || !['player', 'character', 'npc'].includes(entity.kind)) throw new Error(`遭遇参与者不存在或类型不支持: ${entityKey}`)
+      const initiative = numericAttribute(entity, ['initiative'], deterministicDie(`${session.seed}\u0000${sequence}\u0000initiative:${entityKey}`, 20), 0, 1_000)
+      combatants[entityKey] = combatantFromEntity(entity, initiative)
+    }
+    const turnOrder = Object.values(combatants)
+      .sort((left, right) => right.initiative - left.initiative || left.entityKey.localeCompare(right.entityKey))
+      .map(combatant => combatant.entityKey)
+    const encounter: SimulationTtrpgEncounter = {
+      encounterId: globalThis.crypto?.randomUUID?.() ?? `encounter-${Date.now()}-${Math.random()}`,
+      title: candidate.title,
+      description: candidate.description,
+      status: 'active',
+      round: 1,
+      activeActorKey: turnOrder[0],
+      turnOrder,
+      combatants,
+    }
+    return {
+      type: 'ttrpg.encounter.started',
+      actorKey: turnOrder[0],
+      targetKey: null,
+      payloadJson: JSON.stringify({ encounter }),
+    }
+  })
+}
+
+export async function resolveTtrpgEncounter(input: {
+  sessionId: number
+  reason?: string
+}): Promise<SimulationEvent> {
+  const reason = input.reason?.trim() ?? ''
+  if (reason.length > 2_000) throw new Error('遭遇结束理由过长。')
+  return appendBuiltEvent(input.sessionId, ({ session, state }) => {
+    if (session.kind !== 'ttrpg') throw new Error('只有跑团会话可以结束遭遇。')
+    if (!state.ttrpg?.encounter || state.ttrpg.encounter.status !== 'active') throw new Error('当前没有进行中的战斗遭遇。')
+    return {
+      type: 'ttrpg.encounter.resolved',
+      actorKey: null,
+      targetKey: null,
+      payloadJson: JSON.stringify({ reason }),
+    }
+  })
+}
+
+export async function changeTtrpgResource(input: {
+  sessionId: number
+  entityKey: string
+  resourceKey: string
+  delta: number
+  reason?: string
+}): Promise<SimulationEvent> {
+  const entityKey = input.entityKey.trim()
+  const resourceKey = input.resourceKey.trim()
+  const delta = assertFiniteInteger(input.delta, '资源变化量', -1_000_000_000, 1_000_000_000)
+  const reason = input.reason?.trim() ?? ''
+  if (!entityKey || !resourceKey || resourceKey.length > 80) throw new Error('资源变化目标无效。')
+  if (reason.length > 2_000) throw new Error('资源变化理由过长。')
+  return appendBuiltEvent(input.sessionId, ({ session, state }) => {
+    if (session.kind !== 'ttrpg') throw new Error('只有跑团会话可以调整战斗资源。')
+    const encounter = state.ttrpg?.encounter
+    const resource = encounter?.combatants[entityKey]?.resources[resourceKey]
+    if (!encounter || encounter.status !== 'active' || !resource) throw new Error('资源目标不在当前进行中的遭遇中。')
+    const current = Math.max(0, Math.min(resource.maximum, resource.current + delta))
+    return {
+      type: 'ttrpg.combat.resource.changed',
+      actorKey: entityKey,
+      targetKey: entityKey,
+      payloadJson: JSON.stringify({ entityKey, resourceKey, delta, current, reason }),
+    }
+  })
+}
+
+export async function applyTtrpgCondition(input: {
+  sessionId: number
+  entityKey: string
+  condition: SimulationTtrpgCondition
+}): Promise<SimulationEvent> {
+  const entityKey = input.entityKey.trim()
+  const condition = assertTtrpgCondition(input.condition)
+  return appendBuiltEvent(input.sessionId, ({ session, state }) => {
+    if (session.kind !== 'ttrpg') throw new Error('只有跑团会话可以施加状态效果。')
+    if (!state.ttrpg?.encounter?.combatants[entityKey]) throw new Error('状态效果目标不在当前遭遇中。')
+    return {
+      type: 'ttrpg.combat.condition.applied',
+      actorKey: entityKey,
+      targetKey: entityKey,
+      payloadJson: JSON.stringify({ entityKey, condition }),
+    }
+  })
+}
+
+export async function removeTtrpgCondition(input: {
+  sessionId: number
+  entityKey: string
+  conditionId: string
+}): Promise<SimulationEvent> {
+  const entityKey = input.entityKey.trim()
+  const conditionId = input.conditionId.trim()
+  if (!entityKey || !conditionId) throw new Error('状态效果移除目标无效。')
+  return appendBuiltEvent(input.sessionId, ({ session, state }) => {
+    if (session.kind !== 'ttrpg') throw new Error('只有跑团会话可以移除状态效果。')
+    if (!state.ttrpg?.encounter?.combatants[entityKey]) throw new Error('状态效果目标不在当前遭遇中。')
+    return {
+      type: 'ttrpg.combat.condition.removed',
+      actorKey: entityKey,
+      targetKey: entityKey,
+      payloadJson: JSON.stringify({ entityKey, conditionId }),
+    }
+  })
+}
+
+export async function resolveTtrpgAttack(input: {
+  sessionId: number
+  actorKey: string
+  targetKey: string
+  attackExpression: string
+  damageExpression?: string | null
+  resourceKey?: string
+  reason?: string
+}): Promise<SimulationEvent[]> {
+  const actorKey = input.actorKey.trim()
+  const targetKey = input.targetKey.trim()
+  const attackExpression = parseDiceExpression(input.attackExpression)
+  const damageExpression = input.damageExpression?.trim() ? parseDiceExpression(input.damageExpression) : null
+  const resourceKey = input.resourceKey?.trim() || 'hp'
+  const reason = input.reason?.trim() ?? ''
+  if (!actorKey || !targetKey || actorKey === targetKey) throw new Error('攻击者与目标必须是不同实体。')
+  if (resourceKey.length > 80) throw new Error('攻击资源键无效。')
+  if (reason.length > 2_000) throw new Error('攻击理由过长。')
+  return db.transaction('rw', db.simulationSessions, db.simulationEvents, async () => {
+    const session = await db.simulationSessions.get(input.sessionId)
+    if (!session) throw new Error('模拟会话不存在。')
+    if (session.status !== 'active') throw new Error('只有 active 会话可以追加事件。')
+    if (session.kind !== 'ttrpg') throw new Error('只有跑团会话可以执行攻击。')
+    const events = await readSessionEvents(session)
+    let state = replaySimulationEvents(parseSimulationState(session.initialStateJson), events)
+    const encounter = state.ttrpg?.encounter
+    if (!encounter || encounter.status !== 'active') throw new Error('请先开始一个进行中的战斗遭遇。')
+    if (encounter.activeActorKey !== actorKey) throw new Error('当前还没轮到该战斗行动者。')
+    const actor = encounter.combatants[actorKey]
+    const target = encounter.combatants[targetKey]
+    if (!actor || !target) throw new Error('攻击行动者或目标不在当前遭遇中。')
+    const targetResource = target.resources[resourceKey]
+    if (!targetResource) throw new Error(`目标没有资源: ${resourceKey}`)
+    const attackSequence = state.lastSequence + 1
+    const attackDice = Array.from({ length: attackExpression.count }, (_, index) => deterministicDie(`${session.seed}\u0000${attackSequence}\u0000${attackExpression.normalized}\u0000attack:${actorKey}:${targetKey}\u0000${index}`, attackExpression.sides))
+    const attackTotal = attackDice.reduce((sum, die) => sum + die, attackExpression.modifier)
+    const hit = attackTotal >= target.armorClass
+    const damageDice = hit && damageExpression
+      ? Array.from({ length: damageExpression.count }, (_, index) => deterministicDie(`${session.seed}\u0000${attackSequence}\u0000${damageExpression.normalized}\u0000damage:${actorKey}:${targetKey}\u0000${index}`, damageExpression.sides))
+      : []
+    const damageTotal = hit && damageExpression ? damageDice.reduce((sum, die) => sum + die, damageExpression.modifier) : 0
+    if (damageTotal < 0) throw new Error('伤害骰式不能产生负数伤害。')
+    const resourceDelta = -damageTotal
+    const attack: SimulationTtrpgAttackResult = {
+      actorKey,
+      targetKey,
+      attackExpression: attackExpression.normalized,
+      attackDice,
+      attackModifier: attackExpression.modifier,
+      attackTotal,
+      armorClass: target.armorClass,
+      hit,
+      damageExpression: hit && damageExpression ? damageExpression.normalized : null,
+      damageDice,
+      damageModifier: damageExpression?.modifier ?? 0,
+      damageTotal,
+      resourceKey,
+      resourceDelta,
+      reason,
+    }
+    const appended: SimulationEvent[] = []
+    const appendLocal = (eventInput: { type: SimulationEventType; actorKey?: string | null; targetKey?: string | null; payload: unknown }) => {
+      const event: SimulationEvent = {
+        projectId: session.projectId,
+        worldGroupId: session.worldGroupId ?? null,
+        sessionId: input.sessionId,
+        sequence: state.lastSequence + 1,
+        type: eventInput.type,
+        actorKey: eventInput.actorKey ?? null,
+        targetKey: eventInput.targetKey ?? null,
+        payloadJson: JSON.stringify(eventInput.payload),
+        createdAt: Date.now(),
+      }
+      state = applySimulationEvent(state, event)
+      appended.push(event)
+    }
+    appendLocal({ type: 'ttrpg.combat.attack.resolved', actorKey, targetKey, payload: { attack } })
+    if (hit && damageTotal > 0) {
+      const current = Math.max(0, Math.min(targetResource.maximum, targetResource.current + resourceDelta))
+      appendLocal({
+        type: 'ttrpg.combat.resource.changed',
+        actorKey,
+        targetKey,
+        payload: { entityKey: targetKey, resourceKey, delta: resourceDelta, current, reason: reason || '攻击伤害' },
+      })
+    }
+    const currentIndex = encounter.turnOrder.indexOf(actorKey)
+    const nextIndex = (currentIndex + 1) % encounter.turnOrder.length
+    const nextActorKey = encounter.turnOrder[nextIndex]
+    const nextRound = encounter.round + (nextIndex === 0 ? 1 : 0)
+    appendLocal({
+      type: 'ttrpg.combat.turn.advanced',
+      actorKey,
+      targetKey: nextActorKey,
+      payload: { nextActorKey, round: nextRound },
+    })
+    for (const event of appended) event.id = await db.simulationEvents.add(event) as number
+    await db.simulationSessions.update(input.sessionId, { updatedAt: appended[appended.length - 1].createdAt })
+    return appended
   })
 }
 

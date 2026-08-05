@@ -2,12 +2,41 @@ import JSON5 from 'json5'
 import type {
   ChatMessage,
   SimulationRuntimeState,
+  SimulationTtrpgEncounterCandidate,
   SimulationTtrpgTurnCandidate,
 } from '../types'
-import { parseSimulationTtrpgTurnCandidate } from './runtime'
+import { parseSimulationTtrpgEncounterCandidate, parseSimulationTtrpgTurnCandidate } from './runtime'
 
 export const MAX_TTRPG_ACTION_CHARS = 4_000
 export const MAX_TTRPG_CANDIDATE_CHARS = 30_000
+
+export function buildTtrpgEncounterPrompt(input: {
+  runtimeContext: string
+  participantKeys: string[]
+}): ChatMessage[] {
+  if (input.participantKeys.length < 2) throw new Error('遭遇至少需要两个参与者。')
+  return [
+    {
+      role: 'system',
+      content: [
+        '你是 StoryForge 的跑团遭遇设计助手。',
+        '你只能依据冻结运行时上下文，为作者提出一份可审阅的战斗遭遇候选。',
+        '不要决定先攻、生命值、护甲、骰点或状态变化；这些由代码依据运行时实体和固定种子确定。',
+        '只能使用作者指定的参与者稳定实体键，不得创建实体、修改 Canon 或输出额外字段。',
+        '不要输出 Markdown、解释或额外文本。',
+        '输出格式：{"title":"遭遇标题","description":"遭遇目标、环境与冲突","participantKeys":["实体键"]}',
+      ].join('\n'),
+    },
+    {
+      role: 'user',
+      content: [
+        `指定参与者：${input.participantKeys.join('、')}`,
+        '【冻结运行时上下文】',
+        input.runtimeContext,
+      ].join('\n\n'),
+    },
+  ]
+}
 
 export function buildTtrpgGmPrompt(input: {
   actorKey: string
@@ -99,6 +128,29 @@ export function parseTtrpgTurnCandidate(input: {
   })
   if (candidate.nextActorKey != null && !input.state.ttrpg?.turnOrder.includes(candidate.nextActorKey)) {
     throw new Error('AI GM 候选引用了不在当前回合顺序中的行动者。')
+  }
+  return candidate
+}
+
+export function parseTtrpgEncounterCandidate(input: {
+  draft: string
+  state: SimulationRuntimeState
+  participantKeys: string[]
+  baseSequence: number
+}): SimulationTtrpgEncounterCandidate {
+  const raw = parseJsonObject(input.draft)
+  const candidate = parseSimulationTtrpgEncounterCandidate({
+    ...raw,
+    baseSequence: input.baseSequence,
+  })
+  const expected = new Set(input.participantKeys.map(key => key.trim()).filter(Boolean))
+  if (candidate.participantKeys.some(key => !expected.has(key))) {
+    throw new Error('AI 遭遇候选引用了作者未指定的参与者。')
+  }
+  if (candidate.participantKeys.length !== expected.size) throw new Error('AI 遭遇候选必须保留全部指定参与者。')
+  for (const key of candidate.participantKeys) {
+    const entity = input.state.entities[key]
+    if (!entity || !['player', 'character', 'npc'].includes(entity.kind)) throw new Error(`AI 遭遇候选引用了无效参与者: ${key}`)
   }
   return candidate
 }

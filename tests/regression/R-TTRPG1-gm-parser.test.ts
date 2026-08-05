@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest'
-import { buildTtrpgGmPrompt, parseTtrpgTurnCandidate } from '../../src/lib/simulation/ttrpg'
+import {
+  buildTtrpgEncounterPrompt,
+  buildTtrpgGmPrompt,
+  parseTtrpgEncounterCandidate,
+  parseTtrpgTurnCandidate,
+} from '../../src/lib/simulation/ttrpg'
 import { EMPTY_SIMULATION_STATE, type SimulationRuntimeState } from '../../src/lib/types'
 
 function state(): SimulationRuntimeState {
@@ -38,6 +43,35 @@ function state(): SimulationRuntimeState {
 }
 
 describe('TTRPG-1 · AI GM 候选协议', () => {
+  it('遭遇候选只允许指定参与者，并保留结构化确认边界', () => {
+    const candidate = parseTtrpgEncounterCandidate({
+      draft: JSON.stringify({
+        title: '门厅伏击',
+        description: '守望者拦住了通路。',
+        participantKeys: ['character:linzhou', 'npc:watcher'],
+      }),
+      state: state(),
+      participantKeys: ['character:linzhou', 'npc:watcher'],
+      baseSequence: 3,
+    })
+    expect(candidate).toMatchObject({ baseSequence: 3, title: '门厅伏击', participantKeys: ['character:linzhou', 'npc:watcher'] })
+    expect(() => parseTtrpgEncounterCandidate({
+      draft: JSON.stringify({ title: '越权', description: '创建新怪物。', participantKeys: ['character:linzhou', 'monster:new'] }),
+      state: state(),
+      participantKeys: ['character:linzhou', 'npc:watcher'],
+      baseSequence: 3,
+    })).toThrow('未指定')
+  })
+
+  it('遭遇提示词禁止 AI 决定先攻、生命值和状态变化', () => {
+    const prompt = buildTtrpgEncounterPrompt({
+      runtimeContext: '冻结上下文',
+      participantKeys: ['character:linzhou', 'npc:watcher'],
+    })
+    expect(prompt[0].content).toContain('不要决定先攻、生命值、护甲、骰点或状态变化')
+    expect(prompt[1].content).toContain('冻结上下文')
+  })
+
   it('只允许结构化检定请求，并由调用方锁定行动者、动作和基线', () => {
     const candidate = parseTtrpgTurnCandidate({
       draft: JSON.stringify({

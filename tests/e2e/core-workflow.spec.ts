@@ -226,6 +226,7 @@ test('互动运行时可演进、判定、检查点、分支并刷新恢复', as
   await expect(page.getByText('体验中心 · 跑团', { exact: true })).toBeVisible()
   await expect(page.getByText('Canon 冻结审计', { exact: true })).toBeVisible()
   await expect(page.getByText('完整', { exact: true })).toBeVisible()
+  await expect(page.getByTestId('ttrpg-combat-panel')).toBeVisible()
 
   await page.getByLabel('推进时间').fill('6')
   await page.getByRole('button', { name: '推进时间', exact: true }).click()

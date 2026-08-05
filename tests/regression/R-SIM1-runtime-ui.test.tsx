@@ -261,6 +261,58 @@ describe('SIM-1B · 互动运行时 UI', () => {
     expect(host.textContent).toContain('检定：感知')
   })
 
+  it('跑团面板可创建战斗遭遇并执行攻击、资源与状态操作', async () => {
+    const session = await createSimulationSession({
+      projectId: project.id!,
+      kind: 'ttrpg',
+      title: '战斗遭遇 UI',
+      seed: 'ui-ttrpg-1b',
+      initialState: {
+        ...structuredClone(EMPTY_SIMULATION_STATE),
+        entities: {
+          'character:linzhou': {
+            entityKey: 'character:linzhou', kind: 'character', sourceId: 1, name: '林舟', locationKey: null,
+            lifecycleStatus: 'active', attributes: { role: 'player', hp: 20, maxHp: 20, armorClass: 12, initiative: 20 },
+          },
+          'npc:watcher': {
+            entityKey: 'npc:watcher', kind: 'npc', sourceId: null, name: '守望者', locationKey: null,
+            lifecycleStatus: 'active', attributes: { role: 'npc', hp: 10, maxHp: 10, armorClass: 10, initiative: 10 },
+          },
+        },
+      },
+    })
+    await act(async () => {
+      root.render(createElement(
+        DialogProvider,
+        null,
+        createElement(SimulationRuntimePanel, { project, worldGroupId: null }),
+      ))
+      await new Promise(resolve => setTimeout(resolve, 0))
+    })
+    await viWaitFor(() => expect(useSimulationRuntimeStore.getState().selectedSessionId).toBe(session.id))
+    await viWaitFor(() => expect(host.textContent).toContain('战斗遭遇与规则'))
+    await act(async () => {
+      changeValue(host.querySelector<HTMLInputElement>('input[aria-label="跑团场景标题"]')!, '战斗场景')
+      changeValue(host.querySelector<HTMLTextAreaElement>('textarea[aria-label="跑团场景描述"]')!, '战斗即将开始。')
+      changeValue(host.querySelector<HTMLInputElement>('input[aria-label="跑团回合顺序"]')!, 'character:linzhou,npc:watcher')
+    })
+    await clickWhenEnabled(host, '开始场景')
+    await act(async () => {
+      changeValue(host.querySelector<HTMLInputElement>('input[aria-label="跑团遭遇标题"]')!, '门厅伏击')
+      changeValue(host.querySelector<HTMLTextAreaElement>('textarea[aria-label="跑团遭遇描述"]')!, '击退守望者。')
+    })
+    await clickWhenEnabled(host, '直接开始遭遇')
+    await viWaitFor(() => expect((readSimulationState(session.id!)).then(state => state.ttrpg?.encounter?.title)).resolves.toBe('门厅伏击'))
+    await act(async () => {
+      changeValue(host.querySelector<HTMLInputElement>('input[aria-label="攻击骰式"]')!, '1d20+100')
+      changeValue(host.querySelector<HTMLInputElement>('input[aria-label="伤害骰式"]')!, '1d4')
+    })
+    await clickWhenEnabled(host, '执行攻击')
+    await viWaitFor(() => expect((readSimulationState(session.id!)).then(state => state.ttrpg?.attacks.length)).resolves.toBe(1))
+    expect(host.textContent).toContain('战斗第 1 回合')
+    expect((await readSimulationState(session.id!)).ttrpg?.encounter?.activeActorKey).toBe('npc:watcher')
+  })
+
   it('产品跑团入口只显示跑团存档，不会自动打开已有沙盒会话', async () => {
     const ttrpg = await createSimulationSession({
       projectId: project.id!,
