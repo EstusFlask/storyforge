@@ -939,6 +939,10 @@ PromptRunPanel 展开后可以调整卷级大纲生成参数，例如整体节�
 - 粘贴 GitHub Personal Access Token 连接 Gist。
 - 选择是否把 PAT 记住在本机。
 
+导入 JSON 前会先做备份预检：检查备份版本、项目根记录以及由 `PROJECT_TABLES` 登记的表是否仍为合法数组。
+预检失败时不会创建项目或写入任何子表；旧版本缺少后来新增的表会显示兼容警告，并按空表导入。该检查由
+JSON 导入统一入口执行，因此本地文件夹、Gist 和快照恢复也共享同一安全边界。
+
 重要提示：Gist 备份会把完整项目 JSON 明文上传到你的 GitHub 私密 Gist；Private Gist 不是端到端加密保险箱。
 
 ### 7.4 消耗统计
