@@ -96,7 +96,7 @@ function collectionTemplate(input: {
   semantic: AuthoringSemantic
   cardinality?: 'one' | 'many'
   sourceKeys: string[]
-  writes: AuthoringWriteContract
+  writes?: AuthoringWriteContract
   promptModuleKey: PromptModuleKey
   extraInputs?: AuthoringPortDefinition[]
   parameters?: AuthoringParameterDefinition[]
@@ -280,6 +280,7 @@ const CONTENT_TEMPLATES: AuthoringNodeTemplate[] = [
       { key: 'chapterTitle', label: '目标章节标题', type: 'text', defaultValue: '' },
     ],
     extraInputs: [{ id: 'plan', label: '章节计划', semantic: 'outline.plan', cardinality: 'one', state: 'any', required: false }],
+    recommendedAfter: ['chapter.organize'],
   }),
   collectionTemplate({
     id: 'continuity.foreshadow',
@@ -287,10 +288,223 @@ const CONTENT_TEMPLATES: AuthoringNodeTemplate[] = [
     description: '设计、埋设、呼应和回收叙事承诺。',
     category: '连续性',
     semantic: 'continuity.foreshadow',
-    sourceKeys: ['foreshadows', 'outlineTree', 'storyCore'],
+    sourceKeys: ['foreshadows', 'outlineTree', 'storyCore', 'chapterContent'],
     writes: { target: 'foreshadows', mode: 'add' },
     promptModuleKey: 'foreshadow.generate',
+    parameters: [
+      { key: 'request', label: '整理要求', type: 'text', defaultValue: '' },
+      { key: 'chapterTitle', label: '目标章节标题', type: 'text', defaultValue: '' },
+    ],
   }),
+]
+
+/**
+ * FLOW-3D 连续性节点目录。
+ *
+ * 这些节点只描述编排契约；正文、事实账本、认知账本和事件流水仍由各自
+ * 的既有 parser / adoption extension 写回，避免在节点层复制第二套 Canon。
+ */
+const CONTINUITY_TEMPLATES: AuthoringNodeTemplate[] = [
+  collectionTemplate({
+    id: 'continuity.storyline',
+    label: '故事线',
+    description: '登记主线、支线及其阶段，并观察章节对故事线的推进。',
+    category: '连续性/故事线',
+    semantic: 'story.arc',
+    sourceKeys: ['storyArcs', 'storyCore', 'characters', 'outlineTree', 'chapterContent'],
+    writes: { target: 'storyArcs', mode: 'add' },
+    promptModuleKey: 'outline.plot',
+    parameters: [
+      { key: 'request', label: '故事线要求', type: 'text', defaultValue: '' },
+      { key: 'chapterTitle', label: '参考章节标题', type: 'text', defaultValue: '' },
+    ],
+    recommendedAfter: ['outline.volume', 'chapter.organize'],
+  }),
+  collectionTemplate({
+    id: 'continuity.location',
+    label: '地点',
+    description: '创建地点实体，补充地点关系和章节中的地理连续性。',
+    category: '连续性/世界状态',
+    semantic: 'continuity.location',
+    sourceKeys: ['locations', 'worldview', 'chapterContent', 'outlineTree'],
+    writes: { target: 'importantLocations', mode: 'add' },
+    promptModuleKey: 'worldview.worldbuilding',
+    parameters: [
+      { key: 'request', label: '地点要求', type: 'text', defaultValue: '' },
+      { key: 'chapterTitle', label: '参考章节标题', type: 'text', defaultValue: '' },
+    ],
+    recommendedAfter: ['world.terrain', 'chapter.organize'],
+  }),
+  collectionTemplate({
+    id: 'continuity.state',
+    label: '状态',
+    description: '建立或更新角色、地点、物品和势力的状态卡。',
+    category: '连续性/世界状态',
+    semantic: 'continuity.state',
+    sourceKeys: ['stateCards', 'currentFacts', 'characters', 'locations', 'chapterContent'],
+    writes: { target: 'stateCards', mode: 'add' },
+    promptModuleKey: 'chapter.continuity',
+    parameters: [
+      { key: 'request', label: '状态要求', type: 'text', defaultValue: '' },
+      { key: 'chapterTitle', label: '参考章节标题', type: 'text', defaultValue: '' },
+    ],
+    recommendedAfter: ['character.profile', 'continuity.location', 'chapter.organize'],
+  }),
+  collectionTemplate({
+    id: 'continuity.item',
+    label: '物品流水',
+    description: '记录角色获得、消耗和转移物品的事件，保留章节证据。',
+    category: '连续性/世界状态',
+    semantic: 'continuity.item',
+    sourceKeys: ['itemLedger', 'characters', 'chapterContent', 'heldItems'],
+    writes: { target: 'itemLedger', mode: 'add-many' },
+    promptModuleKey: 'inventory.extract',
+    parameters: [
+      { key: 'request', label: '物品整理要求', type: 'text', defaultValue: '' },
+      { key: 'chapterTitle', label: '目标章节标题', type: 'text', defaultValue: '' },
+    ],
+    recommendedAfter: ['chapter.prose', 'chapter.organize'],
+  }),
+  collectionTemplate({
+    id: 'continuity.fact',
+    label: '事实',
+    description: '从正文抽取受控谓词事实，先作为候选等待作者确认。',
+    category: '连续性/世界状态',
+    semantic: 'continuity.fact',
+    sourceKeys: ['currentFacts', 'canonAssertions', 'characters', 'locations', 'chapterContent'],
+    promptModuleKey: 'chapter.continuity',
+    parameters: [
+      { key: 'request', label: '事实整理要求', type: 'text', defaultValue: '' },
+      { key: 'chapterTitle', label: '目标章节标题', type: 'text', defaultValue: '' },
+    ],
+    recommendedAfter: ['chapter.prose', 'chapter.organize'],
+  }),
+  collectionTemplate({
+    id: 'continuity.knowledge',
+    label: '角色认知',
+    description: '记录角色在章节中的获知、误知、遗忘和纠正。',
+    category: '连续性/角色状态',
+    semantic: 'continuity.knowledge',
+    sourceKeys: ['characterKnowledge', 'currentFacts', 'characters', 'chapterContent'],
+    writes: { target: 'knowledgeLedger', mode: 'add-many' },
+    promptModuleKey: 'chapter.continuity',
+    parameters: [
+      { key: 'request', label: '认知整理要求', type: 'text', defaultValue: '' },
+      { key: 'chapterTitle', label: '目标章节标题', type: 'text', defaultValue: '' },
+    ],
+    recommendedAfter: ['chapter.prose', 'chapter.organize'],
+  }),
+  collectionTemplate({
+    id: 'continuity.timeline',
+    label: '故事年表',
+    description: '抽取改变剧情进程的关键事件并按章节保留来源。',
+    category: '连续性/时间线',
+    semantic: 'continuity.timeline',
+    sourceKeys: ['storyTimeline', 'storyArcs', 'chapterContent', 'outlineTree'],
+    writes: { target: 'storyTimelineEvents', mode: 'add-many' },
+    promptModuleKey: 'story-timeline.extract',
+    parameters: [
+      { key: 'request', label: '年表整理要求', type: 'text', defaultValue: '' },
+      { key: 'chapterTitle', label: '目标章节标题', type: 'text', defaultValue: '' },
+    ],
+    recommendedAfter: ['chapter.prose', 'chapter.organize'],
+  }),
+  {
+    id: 'chapter.organize',
+    version: 1,
+    label: '整理本章',
+    description: '从已确认正文一次生成状态、事实、物品、年表、关系和伏笔六域候选。',
+    category: '连续性/写后整理',
+    class: 'content',
+    capability: 'generate-collection',
+    inputs: [
+      ...generationInputs(),
+      { id: 'chapter', label: '目标章节', semantic: 'chapter.prose', cardinality: 'one', state: 'any', required: true },
+    ],
+    outputs: [{ id: 'candidate', label: '六域候选', semantic: 'continuity.report', cardinality: 'one', state: 'candidate' }],
+    reads: {
+      sourceKeys: [
+        'chapterContent', 'stateCards', 'currentFacts', 'characters', 'itemLedger',
+        'characterRelations', 'foreshadows', 'storyTimeline', 'storyArcs',
+        'storylineProgress', 'characterKnowledge', 'previousChapterEnding',
+        'chapterContinuityHandoff', 'recentChapterSummaries', 'retrievedPassages',
+      ],
+      allowExactFields: true,
+    },
+    promptModuleKey: 'chapter.continuity',
+    parameters: [
+      { key: 'chapterTitle', label: '目标章节标题', type: 'text', defaultValue: '' },
+    ],
+    recommendedAfter: ['continuity.state', 'continuity.fact', 'continuity.item', 'continuity.timeline', 'continuity.knowledge', 'continuity.foreshadow'],
+  },
+]
+
+const CONTINUITY_CONTEXT_TEMPLATES: AuthoringNodeTemplate[] = [
+  {
+    id: 'context.previous-ending',
+    version: 1,
+    label: '前章结尾',
+    description: '只读读取目标章节之前一章的正文尾部。',
+    category: '连续性/只读上下文',
+    class: 'content',
+    capability: 'read-canon',
+    inputs: [],
+    outputs: [{ id: 'context', label: '前章结尾', semantic: 'text', cardinality: 'one', state: 'canon' }],
+    reads: { sourceKeys: ['previousChapterEnding'] },
+    parameters: [{ key: 'chapterTitle', label: '目标章节标题', type: 'text', defaultValue: '' }],
+  },
+  {
+    id: 'context.handoff',
+    version: 1,
+    label: '连续性交接',
+    description: '只读读取目标章节的前章 handoff 和计划对账。',
+    category: '连续性/只读上下文',
+    class: 'content',
+    capability: 'read-canon',
+    inputs: [],
+    outputs: [{ id: 'context', label: '连续性交接', semantic: 'text', cardinality: 'one', state: 'canon' }],
+    reads: { sourceKeys: ['chapterContinuityHandoff', 'previousPlanReconciliation'] },
+    parameters: [{ key: 'chapterTitle', label: '目标章节标题', type: 'text', defaultValue: '' }],
+  },
+  {
+    id: 'context.recent-summaries',
+    version: 1,
+    label: '最近摘要',
+    description: '只读读取当前世界最近已验证的章节摘要。',
+    category: '连续性/只读上下文',
+    class: 'content',
+    capability: 'read-canon',
+    inputs: [],
+    outputs: [{ id: 'context', label: '最近摘要', semantic: 'text', cardinality: 'many', state: 'canon' }],
+    reads: { sourceKeys: ['recentChapterSummaries'] },
+    parameters: [{ key: 'chapterTitle', label: '目标章节标题', type: 'text', defaultValue: '' }],
+  },
+  {
+    id: 'context.related-passages',
+    version: 1,
+    label: '相关前文',
+    description: '只读读取与目标章节相关的前文检索片段。',
+    category: '连续性/只读上下文',
+    class: 'content',
+    capability: 'read-canon',
+    inputs: [],
+    outputs: [{ id: 'context', label: '相关前文', semantic: 'text', cardinality: 'many', state: 'canon' }],
+    reads: { sourceKeys: ['retrievedPassages'] },
+    parameters: [{ key: 'chapterTitle', label: '目标章节标题', type: 'text', defaultValue: '' }],
+  },
+  {
+    id: 'context.consistency-report',
+    version: 1,
+    label: '一致性报告',
+    description: '只读读取当前章节已有的一致性检查结果和影响提示。',
+    category: '连续性/只读上下文',
+    class: 'content',
+    capability: 'read-canon',
+    inputs: [],
+    outputs: [{ id: 'context', label: '一致性报告', semantic: 'continuity.report', cardinality: 'many', state: 'canon' }],
+    reads: { sourceKeys: ['consistencyReport'] },
+    parameters: [{ key: 'chapterTitle', label: '目标章节标题', type: 'text', defaultValue: '' }],
+  },
 ]
 
 function controlTemplate(input: {
@@ -349,6 +563,8 @@ const PROCESSOR_TEMPLATES: AuthoringNodeTemplate[] = [
 
 export const AUTHORING_NODE_CATALOG: readonly AuthoringNodeTemplate[] = Object.freeze([
   ...CONTENT_TEMPLATES,
+  ...CONTINUITY_TEMPLATES,
+  ...CONTINUITY_CONTEXT_TEMPLATES,
   ...CONTROL_TEMPLATES,
   ...PROCESSOR_TEMPLATES,
 ])

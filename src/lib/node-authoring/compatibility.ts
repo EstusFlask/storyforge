@@ -26,6 +26,9 @@ const CONTENT_SEMANTICS = new Set<AuthoringSemantic>([
   'continuity.state',
   'continuity.item',
   'continuity.fact',
+  'continuity.knowledge',
+  'continuity.timeline',
+  'continuity.report',
   'candidate',
 ])
 

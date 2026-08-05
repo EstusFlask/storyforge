@@ -14,13 +14,25 @@ import {
   adoptRestoredProseCandidate,
 } from '../agent/prose-copilot'
 import { buildEnhancedDetailPrompt, parseEnhancedDetailResult } from '../ai/adapters/detail-scene-adapter'
+import {
+  buildChapterOrganizationPrompt,
+  isChapterOrganizationCurrent,
+  persistChapterOrganizationCandidate,
+  adoptChapterOrganizationSelection,
+  selectAllChapterOrganizationCandidates,
+  type ChapterOrganizationCandidate,
+} from '../agent/chapter-organization'
+import { AgentTeamBudgetTracker, type AgentTeamBudgetProfile } from '../agent/team-budget'
+import { hashChapterText, normalizeChapterText } from '../ai/chapter-memory/text-normalization'
+import { buildFactExtractPrompt, parseFactExtractResult } from '../ai/adapters/fact-extract-adapter'
+import { adoptFactCandidates } from '../fact-ledger/fact-ledger'
 import { adoptChapterOutlineWorkshopResult } from '../outline/adopt-workshop'
 import { assembleContext } from '../registry/assemble-context'
 import { db } from '../db/schema'
 import type { AIConfig } from '../types'
 import type { AdoptResult } from '../registry/types'
 import { AUTHORING_NODE_BY_ID } from './catalog'
-import { readAuthoringCanonBinding } from './bindings'
+import { hashAuthoringText, readAuthoringCanonBinding } from './bindings'
 import type {
   AuthoringCandidateDomain,
   AuthoringInputEnvelope,
@@ -80,6 +92,12 @@ function profileForBudget(value: number): 'lean' | 'balanced' | 'full' {
   if (value <= 14_000) return 'lean'
   if (value <= 32_000) return 'balanced'
   return 'full'
+}
+
+function organizationBudgetProfile(value: number): AgentTeamBudgetProfile {
+  if (value <= 14_000) return 'economy'
+  if (value <= 32_000) return 'balanced'
+  return 'expanded'
 }
 
 function generationOverrides(node: AuthoringNodeInstance, inputs: AuthoringInputEnvelope[]) {
@@ -337,6 +355,160 @@ async function executeProse(input: DomainExecutionInput): Promise<DomainExecutio
   }
 }
 
+async function resolveOrganizationChapter(input: DomainExecutionInput) {
+  const title = configText(input.node, 'chapterTitle') || targetTitle(input.node, input.inputs, 'chapterTitle', 'outline.chapter')
+  const [chapters, outlines] = await Promise.all([
+    db.chapters.where('projectId').equals(input.projectId).toArray(),
+    db.outlineNodes.where('projectId').equals(input.projectId).toArray(),
+  ])
+  const outlineById = new Map(outlines.flatMap(item => item.id == null ? [] : [[item.id, item] as const]))
+  const candidates = chapters.filter(chapter => {
+    const outline = outlineById.get(chapter.outlineNodeId)
+    return (outline?.worldGroupId ?? null) === input.worldGroupId
+      && (!title || chapter.title === title || outline?.title === title)
+  })
+  if (candidates.length !== 1 || candidates[0]?.id == null) {
+    throw new Error(title ? `找不到唯一的目标章节《${title}》。` : '整理本章节点需要填写唯一的目标章节标题。')
+  }
+  const chapter = candidates[0]!
+  const outline = outlineById.get(chapter.outlineNodeId)
+  if (!outline?.id) throw new Error('目标章节缺少有效的大纲节点。')
+  return { chapter, outline }
+}
+
+function chapterSegment(assembled: Awaited<ReturnType<typeof assembleContext>>, key: string): string {
+  const index = assembled.included.indexOf(key)
+  return index >= 0 ? assembled.segments[index]?.content ?? '' : ''
+}
+
+async function executeChapterOrganization(input: DomainExecutionInput): Promise<DomainExecutionResult> {
+  const { chapter, outline } = await resolveOrganizationChapter(input)
+  const contextBudgetValue = contextBudget(input.node, input.inputs, 28_000)
+  const assembled = await assembleContext({
+    projectId: input.projectId,
+    worldGroupId: input.worldGroupId,
+    outlineNodeId: outline.id,
+    chapterId: chapter.id,
+    sourceKeys: AUTHORING_NODE_BY_ID.get(input.node.templateId)?.reads?.sourceKeys,
+    inputBudgetTokens: contextBudgetValue,
+    provider: input.aiConfig.provider,
+    model: input.aiConfig.model,
+  })
+  const chapterText = normalizeChapterText(chapterSegment(assembled, 'chapterContent') || chapter.content || '')
+  if (!chapterText) throw new Error('目标章节没有可整理的正文。')
+  const [allCharacters, relations, foreshadows, itemRows] = await Promise.all([
+    db.characters.where('projectId').equals(input.projectId).toArray(),
+    db.characterRelations.where('projectId').equals(input.projectId).toArray(),
+    db.foreshadows.where('projectId').equals(input.projectId).toArray(),
+    db.itemLedger.where('projectId').equals(input.projectId).toArray(),
+  ])
+  const characters = allCharacters.filter(character => (
+    Boolean(character.isCrossWorld) || (character.homeWorldGroupId ?? null) === input.worldGroupId
+  ))
+  const visibleCharacterIds = new Set(characters.flatMap(character => character.id == null ? [] : [character.id]))
+  const visibleRelations = relations.filter(relation => (
+    visibleCharacterIds.has(relation.fromCharacterId) && visibleCharacterIds.has(relation.toCharacterId)
+  ))
+  const knownItemNames = [...new Set(itemRows.map(item => item.itemName.trim()).filter(Boolean))]
+  const tracker = new AgentTeamBudgetTracker(organizationBudgetProfile(contextBudgetValue))
+  const messages = buildChapterOrganizationPrompt({
+    chapterTitle: chapter.title,
+    chapterText,
+    stateContext: [
+      chapterSegment(assembled, 'stateCards'),
+      chapterSegment(assembled, 'currentFacts'),
+      chapterSegment(assembled, 'characterKnowledge'),
+      chapterSegment(assembled, 'storylineProgress'),
+    ].filter(Boolean).join('\n\n'),
+    characters,
+    knownItemNames,
+    existingRelations: visibleRelations,
+    foreshadows,
+  })
+  const trackerReservation = tracker.reserveCall({ label: '整理本章', messages, maxOutputTokens: 8_000 })
+  let raw: string
+  try {
+    raw = await chat(messages, input.aiConfig, {
+      category: 'chapter.continuity',
+      projectId: input.projectId,
+      configOverrides: generationOverrides(input.node, input.inputs),
+      contextOverflowPolicy: 'reject',
+    }, input.signal)
+    tracker.settleCall(trackerReservation, raw)
+  } catch (error) {
+    tracker.settleFailedCall(trackerReservation)
+    throw error
+  }
+  const sourceTextHash = await hashChapterText(chapter.content || '')
+  const parsed = (await import('../agent/chapter-organization')).parseChapterOrganizationOutput({
+    raw,
+    projectId: input.projectId,
+    chapterId: chapter.id!,
+    chapterTitle: chapter.title,
+    worldGroupId: input.worldGroupId,
+    chapterText,
+    sourceTextHash,
+    characters,
+    existingRelations: visibleRelations,
+    foreshadows,
+    budget: tracker.snapshot(),
+  })
+  if (!parsed) throw new Error('整理本章返回的 JSON 无法解析；没有写入任何项目数据。')
+  return {
+    output: JSON.stringify(parsed, null, 2),
+    semantic: 'continuity.report',
+    sourceKeys: assembled.included,
+    sourceHash: hashAuthoringText(`${assembled.included.join(',')}:${sourceTextHash}`),
+    sourceEvidence: {
+      included: assembled.included,
+      omitted: assembled.omitted,
+      trimmed: assembled.trimmed,
+      missing: [],
+    },
+    domain: {
+      kind: 'chapter-organization',
+      chapterId: chapter.id!,
+      chapterTitle: chapter.title,
+      sourceTextHash,
+      candidateJson: JSON.stringify(parsed),
+    },
+  }
+}
+
+async function executeFactNode(input: DomainExecutionInput): Promise<DomainExecutionResult> {
+  const { chapter, outline } = await resolveOrganizationChapter(input)
+  const contextBudgetValue = contextBudget(input.node, input.inputs, 20_000)
+  const assembled = await assembleContext({
+    projectId: input.projectId,
+    worldGroupId: input.worldGroupId,
+    outlineNodeId: outline.id,
+    chapterId: chapter.id,
+    sourceKeys: AUTHORING_NODE_BY_ID.get(input.node.templateId)?.reads?.sourceKeys,
+    inputBudgetTokens: contextBudgetValue,
+    provider: input.aiConfig.provider,
+    model: input.aiConfig.model,
+  })
+  const chapterText = normalizeChapterText(chapterSegment(assembled, 'chapterContent') || chapter.content || '')
+  if (!chapterText) throw new Error('目标章节没有可抽取事实的正文。')
+  const messages = buildFactExtractPrompt({ chapterTitle: chapter.title, chapterContent: chapterText })
+  const raw = await chat(messages, input.aiConfig, {
+    category: 'chapter.continuity',
+    projectId: input.projectId,
+    configOverrides: generationOverrides(input.node, input.inputs),
+    contextOverflowPolicy: 'reject',
+  }, input.signal)
+  const candidates = parseFactExtractResult({ raw, chapterContent: chapterText })
+  const sourceTextHash = await hashChapterText(chapter.content || '')
+  return {
+    output: JSON.stringify({ facts: candidates }, null, 2),
+    semantic: 'continuity.fact',
+    sourceKeys: assembled.included,
+    sourceHash: hashAuthoringText(`${assembled.included.join(',')}:${sourceTextHash}`),
+    sourceEvidence: { included: assembled.included, omitted: assembled.omitted, trimmed: assembled.trimmed, missing: [] },
+    domain: { kind: 'facts', chapterId: chapter.id!, sourceTextHash, candidateJson: JSON.stringify(candidates) },
+  }
+}
+
 /** 领域节点专用执行器；返回 null 时由通用 FLOW-3 执行器处理。 */
 export async function executeDomainNode(input: DomainExecutionInput): Promise<DomainExecutionResult | null> {
   switch (input.node.templateId) {
@@ -345,6 +517,8 @@ export async function executeDomainNode(input: DomainExecutionInput): Promise<Do
     case 'outline.chapter': return executeOutline(input)
     case 'outline.plan': return executeDetail(input)
     case 'chapter.prose': return executeProse(input)
+    case 'chapter.organize': return executeChapterOrganization(input)
+    case 'continuity.fact': return executeFactNode(input)
     default: return null
   }
 }
@@ -421,6 +595,56 @@ export async function adoptDomainCandidate(input: {
       draft: input.output,
     })
     return { ...emptyAdoptResult(), written: [{ id: result.chapterId, fields: ['content'] }] }
+  }
+  if (input.domain.kind === 'chapter-organization') {
+    let candidate: ChapterOrganizationCandidate
+    try {
+      candidate = JSON.parse(input.output) as ChapterOrganizationCandidate
+    } catch {
+      throw new Error('整理本章候选必须是合法 JSON；请先修正候选后再采纳。')
+    }
+    if (
+      candidate.type !== 'chapter-organization'
+      || candidate.projectId !== input.projectId
+      || candidate.chapterId !== input.domain.chapterId
+      || candidate.sourceTextHash !== input.domain.sourceTextHash
+    ) {
+      throw new Error('整理本章候选的项目、章节或来源 hash 不匹配，请重新运行节点。')
+    }
+    if (!await isChapterOrganizationCurrent(candidate)) {
+      throw new Error('章节正文已变化，这批整理候选已过期；请重新运行“整理本章”。')
+    }
+    const run = await persistChapterOrganizationCandidate(candidate)
+    const adopted = await adoptChapterOrganizationSelection({
+      run,
+      selection: selectAllChapterOrganizationCandidates(candidate),
+    })
+    const written = Object.entries(adopted.written).flatMap(([domain, count]) => (
+      count > 0 ? [{ id: 0, fields: [domain] }] : []
+    ))
+    return { ...emptyAdoptResult(), written }
+  }
+  if (input.domain.kind === 'facts') {
+    let candidates: Parameters<typeof adoptFactCandidates>[0]['candidates']
+    try {
+      const parsed = JSON.parse(input.output) as { facts?: unknown }
+      const sourceChapter = await db.chapters.get(input.domain.chapterId)
+      candidates = parseFactExtractResult({ raw: JSON.stringify(parsed), chapterContent: normalizeChapterText(sourceChapter?.content ?? '') })
+    } catch {
+      throw new Error('事实候选必须是合法 JSON；请先修正候选后再采纳。')
+    }
+    const chapter = await db.chapters.get(input.domain.chapterId)
+    if (!chapter || chapter.projectId !== input.projectId) throw new Error('事实候选来源章节不存在。')
+    if (await hashChapterText(chapter.content || '') !== input.domain.sourceTextHash) {
+      throw new Error('章节正文已变化，这批事实候选已过期；请重新运行事实节点。')
+    }
+    const result = await adoptFactCandidates({
+      projectId: input.projectId,
+      sourceChapterId: input.domain.chapterId,
+      worldGroupId: input.worldGroupId,
+      candidates,
+    })
+    return { ...emptyAdoptResult(), written: result.written ? [{ id: 0, fields: ['temporalFacts'] }] : [] }
   }
   return null
 }

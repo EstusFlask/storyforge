@@ -33,6 +33,7 @@ import { formatHeldItemsContext, readProjectHeldItems } from '../consistency/hel
 import { formatCharacterKnowledgeContext, readProjectCharacterKnowledge } from '../knowledge-ledger/knowledge-ledger'
 import { formatCanonAssertionsContext, readCanonAssertions } from '../fact-ledger/setting-assertions'
 import { readStorylineProgressContext } from '../storyline/storyline-progress'
+import { analyzeEditImpact } from '../consistency/impact-analysis'
 import { readCultivationProgressContext } from '../cultivation/progress'
 import type { Chapter, Character, OutlineNode, PowerSystem, Worldview } from '../types'
 import {
@@ -260,6 +261,18 @@ async function readEmotionBeats(projectId: number, chapterId?: number | null): P
     card.overallArc ? `整体弧线:${card.overallArc}` : '',
     ...beats.map(b => `- ${b.label}${b.sceneGoal ? `: ${b.sceneGoal}` : ''}`),
   ].filter(Boolean).join('\n')
+}
+
+/** FLOW-3D：只读的一致性影响摘要，供节点图接线查看，不产生任何写回。 */
+async function readConsistencyReport(projectId: number, chapterId?: number | null): Promise<string> {
+  if (chapterId == null) return ''
+  const impact = await analyzeEditImpact(projectId, chapterId)
+  const staleFacts = impact.factsFromChapter.filter(fact => ['stale', 'source-missing', 'invalid-range'].includes(fact.status))
+  const lines = [
+    `【一致性影响报告】当前章节来源事实 ${impact.factsFromChapter.length} 条；后续可能受影响章节 ${impact.downstreamChapterIds.length} 个。`,
+    staleFacts.length ? `【待复核事实】${staleFacts.map(fact => `${fact.subjectName}/${fact.predicate}=${fact.value}`).join('；')}` : '【待复核事实】暂无已标记失效事实。',
+  ]
+  return lines.join('\n')
 }
 
 async function readStateCards(projectId: number, referenceText?: string, extraIds?: number[]): Promise<string> {
@@ -784,6 +797,17 @@ export const CONTEXT_SOURCES: ContextSource[] = [
     budgetTokens: 2500,
     requiresChapterId: true,
     read: input => readRetrievedPassages(input.projectId, input.chapterId, input.outlineNodeId, input.worldGroupId),
+  },
+  {
+    key: 'consistencyReport',
+    label: '一致性报告',
+    scope: 'chapter',
+    layer: 'L1',
+    budgetTokens: 1800,
+    protectedFromTrim: true,
+    requiresChapterId: true,
+    acceptsOutlineNodeAsChapterBoundary: true,
+    read: input => readConsistencyReport(input.projectId, input.chapterId),
   },
   {
     key: 'detailedOutline',

@@ -317,7 +317,6 @@ export async function adoptAuthoringCandidate(input: {
   if (!node) throw new Error('候选节点不存在。')
   if (node.binding?.mode === 'live') throw new Error('实时 Canon 绑定节点只读，不能重复采纳；请采纳它的下游候选节点。')
   const template = AUTHORING_NODE_BY_ID.get(node.templateId)
-  if (!template?.writes) throw new Error('该节点没有登记可采纳的写回契约。')
   const latestRuns = await db.nodeRuns.where('flowId').equals(input.flow.id!).toArray()
   latestRuns.sort((left, right) => right.startedAt - left.startedAt)
   let expectedSignature: AuthoringRunSignature | undefined
@@ -354,6 +353,7 @@ export async function adoptAuthoringCandidate(input: {
     })
     if (adopted) return adopted
   }
+  if (!template?.writes) throw new Error('该节点没有登记可采纳的写回契约。')
   const write = template.writes
   if (write.fields?.length === 1 && (write.mode === 'replace' || write.mode === 'merge-diffs')) {
     const recordId = await resolveAuthoringBoundRecordId({

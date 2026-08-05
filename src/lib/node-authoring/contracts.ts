@@ -61,6 +61,9 @@ export const AUTHORING_SEMANTICS = [
   'continuity.state',
   'continuity.item',
   'continuity.fact',
+  'continuity.knowledge',
+  'continuity.timeline',
+  'continuity.report',
   'control.ai-profile',
   'control.prompt',
   'control.temperature',
@@ -282,6 +285,21 @@ export type AuthoringCandidateDomain =
         chapterHadContent: boolean
         chapterOrder: number
       }
+    }
+  | {
+      /** FLOW-3D：章节正文后的六域整理候选；正文证据和来源 hash 一并冻结。 */
+      kind: 'chapter-organization'
+      chapterId: number
+      chapterTitle: string
+      sourceTextHash: string
+      candidateJson: string
+    }
+  | {
+      /** FLOW-3D：事实节点复用 FACT_PREDICATE_REGISTRY 与事实账本扩展。 */
+      kind: 'facts'
+      chapterId: number
+      sourceTextHash: string
+      candidateJson: string
     }
 
 export function isAuthoringSemantic(value: unknown): value is AuthoringSemantic {

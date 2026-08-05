@@ -76,7 +76,7 @@
 
 ## 二、上下文源清单（CONTEXT_SOURCES · AI 读什么）
 
-共 46 个上下文源。assembleContext({ sourceKeys }) 按 key 装配。
+共 47 个上下文源。assembleContext({ sourceKeys }) 按 key 装配。
 
 | key | 标签 | 作用域 | 层级 | 预算(token) |
 |---|---|---|---|---|
@@ -96,6 +96,7 @@
 | `canonAssertions` | 世界宪法(已确认设定断言) | world | L1 | 1800 |
 | `characterKnowledge` | 角色认知边界(认知账本投影) | chapter | L1 | 1600 |
 | `retrievedPassages` | 相关前文召回(NS-5 混合检索) | chapter | L2 | 2500 |
+| `consistencyReport` | 一致性报告 | chapter | L1 | 1800 |
 | `detailedOutline` | 本章细纲(场景拆解) | node | L1 | 1500 |
 | `previousChapterEnding` | 全局直接前驱原文尾部 | manual | L1 | 1800 |
 | `chapterContinuityHandoff` | 全局直接前驱连续性交接 | chapter | L1 | 1600 |
@@ -184,7 +185,7 @@ AI 输出经 `adopt({ target, data })` 写回,只有这里登记的字段可写(
 
 ## 四、AI 调用点（消耗统计 category · 在哪触发)
 
-共 61 个 category。
+共 62 个 category。
 未分类调用: 0 个。动态 category 调用: 9 个。
 
 | category | 触发文件 |
@@ -196,6 +197,7 @@ AI 输出经 `adopt({ target, data })` 写回,只有这里登记的字段可写(
 | `chapter.content` | `src/lib/generation/chapter-generation-node.ts:22` |
 | `chapter.content.batch` | `src/lib/ai/batch-detail-runner.ts:256` |
 | `chapter.continue` | `src/lib/generation/chapter-generation-node.ts:23` |
+| `chapter.continuity` | `src/lib/node-authoring/domain-execution.ts:431`<br/>`src/lib/node-authoring/domain-execution.ts:494` |
 | `chapter.deai` | `src/components/editor/ChapterEditor.tsx:753` |
 | `chapter.expand` | `src/components/editor/ChapterEditor.tsx:733` |
 | `chapter.memory` | `src/components/editor/ChapterEditor.tsx:471` |
@@ -207,7 +209,7 @@ AI 输出经 `adopt({ target, data })` 写回,只有这里登记的字段可写(
 | `character.supplement` | `src/components/character/CharacterSupplementAction.tsx:80` |
 | `codex.extract` | `src/components/codex/CodexPanel.tsx:226` |
 | `cultivation.progress` | `src/components/cultivation/CultivationProgressPanel.tsx:143` |
-| `detail.chapter-planning` | `src/lib/node-authoring/domain-execution.ts:274` |
+| `detail.chapter-planning` | `src/lib/node-authoring/domain-execution.ts:292` |
 | `detail.scene` | `src/components/outline/DetailedOutlinePanel.tsx:151`<br/>`src/components/outline/ScenePanel.tsx:126`<br/>`src/lib/ai/batch-detail-runner.ts:109` |
 | `emotion.beat` | `src/components/editor/EmotionBeatCard.tsx:66` |
 | `foreshadow.structure` | `src/components/foreshadow/ForeshadowPanel.tsx:67` |
@@ -265,4 +267,4 @@ AI 输出经 `adopt({ target, data })` 写回,只有这里登记的字段可写(
 
 ---
 
-生成时间基准:commit `7cd5725`
+生成时间基准:commit `caec434`

@@ -2,6 +2,7 @@ import { assembleContext } from '../registry/assemble-context'
 import { AUTHORING_NODE_BY_ID } from './catalog'
 import { buildRagLibrary, makeRagEntryKey } from '../retrieval/rag-library'
 import { createRagSelectionTrace, type RagLibraryEntry } from '../types/rag-library'
+import { db } from '../db/schema'
 import type { AuthoringNodeInstance } from './contracts'
 
 /**
@@ -61,6 +62,22 @@ function fingerprintEntries(entries: RagLibraryEntry[], keys: string[]): string 
   }).join('\n'))
 }
 
+async function resolveChapterScope(node: AuthoringNodeInstance, projectId: number, worldGroupId: number | null) {
+  const title = typeof node.config.chapterTitle === 'string' ? node.config.chapterTitle.trim() : ''
+  if (!title) return {}
+  const [chapters, outlines] = await Promise.all([
+    db.chapters.where('projectId').equals(projectId).toArray(),
+    db.outlineNodes.where('projectId').equals(projectId).toArray(),
+  ])
+  const outlineById = new Map(outlines.flatMap(item => item.id == null ? [] : [[item.id, item] as const]))
+  const match = chapters.find(chapter => {
+    const outline = outlineById.get(chapter.outlineNodeId)
+    return chapter.title === title
+      && (outline?.worldGroupId ?? null) === worldGroupId
+  })
+  return match?.id == null ? {} : { chapterId: match.id, outlineNodeId: match.outlineNodeId }
+}
+
 /** Read the current Canon value for a node's registered sources or exact fields. */
 export async function readAuthoringCanonBinding(input: {
   node: AuthoringNodeInstance
@@ -97,6 +114,7 @@ export async function readAuthoringCanonBinding(input: {
   const assembled = await assembleContext({
     projectId: input.projectId,
     worldGroupId: input.worldGroupId,
+    ...(await resolveChapterScope(input.node, input.projectId, input.worldGroupId)),
     sourceKeys: sourceKeys.length ? sourceKeys : undefined,
     inputBudgetTokens: input.contextBudget,
   })
