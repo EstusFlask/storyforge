@@ -71,6 +71,34 @@ test('产品综合首页可从零创建世界引擎并分配稳定编号', async
   await expect(page.getByRole('heading', { name: '选择一个世界', exact: true })).toBeVisible()
 })
 
+test('世界引擎可生成并预检本地世界分享包，再导入为新编号副本', async ({ page }) => {
+  await page.addInitScript(() => {
+    localStorage.setItem('storyforge_guide_completed', 'e2e')
+  })
+  await page.goto('./')
+  await page.getByRole('banner').getByRole('button', { name: '新建', exact: true }).click()
+  await page.getByRole('button', { name: /世界引擎.*从零创建/ }).click()
+  await page.getByPlaceholder('例如：潮汐之后').fill('分享包测试世界')
+  await page.getByPlaceholder('一句话描述这个世界或作品').fill('用于本地发布包往返的测试世界。')
+  await page.getByRole('button', { name: '创建世界引擎', exact: true }).click()
+  await expect(page.getByRole('heading', { name: '世界引擎', exact: true })).toBeVisible()
+
+  await page.getByLabel('作者署名').fill('E2E 作者')
+  const download = page.waitForEvent('download')
+  await page.getByRole('button', { name: '下载世界分享包', exact: true }).click()
+  const packageDownload = await download
+  const packagePath = await packageDownload.path()
+  expect(packagePath).not.toBeNull()
+
+  const fileChooser = page.waitForEvent('filechooser')
+  await page.getByRole('button', { name: '选择世界分享包', exact: true }).click()
+  await (await fileChooser).setFiles(packagePath!)
+  await expect(page.getByTestId('world-package-preview')).toContainText('分享包预检通过')
+  await page.getByRole('button', { name: '确认导入为本地副本', exact: true }).click()
+  await expect(page.getByRole('heading', { name: '分享包测试世界（导入）', exact: true })).toBeVisible()
+  await expect(page.getByText(/社区导入 · W-/)).toBeVisible()
+})
+
 async function openSidebarLeaf(page: Page, branchName: string, leafName: string) {
   const leaf = sidebarButton(page, leafName)
   const branch = sidebarButton(page, branchName)

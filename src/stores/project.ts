@@ -4,25 +4,11 @@ import type { Project, CreateProjectInput } from '../lib/types'
 import { migrateGenre } from '../lib/types'
 import { requireBackupBefore } from '../lib/safety/require-backup-before'
 import { cascadeDeleteProject } from '../lib/registry/lifecycle'
-
-function generateWorldCode(): string {
-  const timePart = Date.now().toString(36).toUpperCase().slice(-5).padStart(5, '0')
-  const randomPart = Math.random().toString(36).slice(2, 6).toUpperCase().padEnd(4, '0')
-  return `W-${timePart}-${randomPart}`
-}
-
-function hasShareableWorldIdentity(project: Project): boolean {
-  return Boolean(project.worldCode && project.worldVersion && !/^W-[A-Z0-9]{5}$/.test(project.worldCode))
-}
-
-function withWorldIdentity(project: Project): Project {
-  if (hasShareableWorldIdentity(project)) return project
-  const worldCode = project.worldCode && !/^W-[A-Z0-9]{5}$/.test(project.worldCode)
-    ? project.worldCode
-    : generateWorldCode()
-  const worldVersion = project.worldVersion ?? 1
-  return { ...project, worldCode, worldVersion }
-}
+import {
+  generateWorldCode,
+  hasShareableWorldIdentity,
+  withWorldIdentity,
+} from '../lib/product/world-identity'
 
 async function ensureWorldIdentity(project: Project): Promise<Project> {
   if (hasShareableWorldIdentity(project)) return project

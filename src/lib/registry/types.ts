@@ -153,6 +153,8 @@ export interface TableSpec<T = any> {
   refs?: RefSpec[]
   /** 是否纳入 JSON 备份导出 */
   exportable: boolean
+  /** PLATFORM-1：允许进入本地世界分享包；未显式登记的表默认禁止发布。 */
+  communityShare?: 'world'
   /** 导出时需要的 ID 重映射 */
   exportRemap?: ExportRemapField[]
   /**

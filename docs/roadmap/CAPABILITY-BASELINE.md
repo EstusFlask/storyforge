@@ -460,6 +460,10 @@
   所有登记表的数组结构；统一 `importProjectJSON()` 在写库前拒绝损坏/未来版本输入，旧格式缺表只给兼容警告。JSON、
   文件夹、Gist 与快照恢复因此共享同一预检边界，回归为 `R-PRODUCT1-backup-trust`。
 - 新手首次成果、加密云备份、帮助系统、国际化和开源信任的其余阶段仍需独立治理/产品组合；本地诊断不会自动上传。
+- PLATFORM-1 已交付本地世界发布包：`PROJECT_TABLES` 的 `communityShare='world'` 是唯一分享范围声明，
+  `createWorldPackage()` 生成带来源编号、许可、署名、用途、内容警告和 SHA-256 的包；`inspectWorldPackage()`
+  在导入前拒绝私有表泄漏或篡改，`importWorldPackage()` 为副本分配新 `worldCode` 并保留 `communityOrigin`。
+  章节、笔记、Agent/运行时存档、API 配置和个人文风不会进入包。线上账号、云同步、评论和协同仍属于后续后端阶段。
 
 ## 新开发前的最小核对清单
 

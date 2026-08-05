@@ -23,6 +23,7 @@ import {
 import type { Project, SimulationSessionKind } from '../lib/types'
 import { useProjectStore } from '../stores/project'
 import { useWorldGroupStore } from '../stores/world-group'
+import WorldSharingPanel from '../components/product/WorldSharingPanel'
 import './product-hub.css'
 
 const WorldGroupOverview = lazy(() => import('../components/world-group/WorldGroupOverview'))
@@ -116,7 +117,7 @@ function projectToWorld(project: Project, index: number): ProductWorld {
     name: project.name,
     description: project.description || '这个世界还没有写下简介。',
     version: project.worldVersion ?? 1,
-    source: project.enableMultiWorld ? '我的世界引擎' : '分步骤项目',
+    source: project.communityOrigin ? `社区导入 · ${project.communityOrigin.sourceWorldCode}` : project.enableMultiWorld ? '我的世界引擎' : '分步骤项目',
     tags,
     accent: (['ochre', 'teal', 'blue', 'violet'] as Accent[])[index % 4],
     completeness: Math.max(18, Math.min(100, progress || (project.description ? 42 : 18))),
@@ -199,12 +200,12 @@ function WorldCard({ world, onOpen }: { world: ProductWorld; onOpen: () => void 
   return <button className="sf-world-card" onClick={onOpen}><WorldGlyph accent={world.accent} /><div className="sf-world-card-body"><div className="sf-card-topline"><span className="sf-overline"><Hash className="h-3 w-3" /> {world.code}</span><span className="sf-version">v{world.version}</span></div><h3>{world.name}</h3><p>{world.description}</p><div className="sf-tag-row">{world.tags.map(tag => <span className="sf-tag" key={tag}>{tag}</span>)}</div><div className="sf-world-card-footer"><span className="sf-source"><StatusDot tone={world.source === '我的世界引擎' ? 'success' : 'neutral'} />{world.source}</span><span className="sf-completeness">{world.completeness}%</span></div></div></button>
 }
 
-function WorldEnginePage({ worlds, activeWorld, onSelectWorld, onOpenCreate, onOpenWorldPicker }: { worlds: ProductWorld[]; activeWorld?: ProductWorld; onSelectWorld: (world: ProductWorld) => void; onOpenCreate: () => void; onOpenWorldPicker: () => void }) {
+function WorldEnginePage({ worlds, activeWorld, onSelectWorld, onOpenCreate, onOpenWorldPicker, onImported }: { worlds: ProductWorld[]; activeWorld?: ProductWorld; onSelectWorld: (world: ProductWorld) => void; onOpenCreate: () => void; onOpenWorldPicker: () => void; onImported: (projectId: number) => void }) {
   const { updateProject } = useProjectStore()
   const { migrateToMultiWorld, ensurePrimaryGroup } = useWorldGroupStore()
   const [syncing, setSyncing] = useState(false)
   const [message, setMessage] = useState('')
-  if (!activeWorld) return <><PageHeading eyebrow="FOUNDATION / WORLD ENGINE" title="世界引擎" description="独立创建、版本化并复用世界设定。" action={<Button variant="primary" icon={Plus} onClick={onOpenCreate}>从零创建世界</Button>} /><EmptyProjectState onCreate={onOpenCreate} /></>
+  if (!activeWorld) return <><PageHeading eyebrow="FOUNDATION / WORLD ENGINE" title="世界引擎" description="独立创建、版本化并复用世界设定。" action={<Button variant="primary" icon={Plus} onClick={onOpenCreate}>从零创建世界</Button>} /><EmptyProjectState onCreate={onOpenCreate} /><WorldSharingPanel onImported={onImported} /></>
   const sync = async () => {
     setSyncing(true); setMessage('')
     try {
@@ -227,6 +228,7 @@ function WorldEnginePage({ worlds, activeWorld, onSelectWorld, onOpenCreate, onO
     <div className="sf-subnav">{worlds.map(world => <button key={world.code} className={world.code === activeWorld.code ? 'active' : ''} onClick={() => onSelectWorld(world)}><WorldGlyph accent={world.accent} small /><span>{world.name}</span><span>{world.code}</span></button>)}<span className="sf-subnav-spacer" /></div>
     <section className="sf-worlds-featured"><div className="sf-worlds-featured-visual"><WorldGlyph accent={activeWorld.accent} /></div><div className="sf-worlds-featured-copy"><span className="sf-overline">WORLD ENGINE · {activeWorld.source}</span><h2>{activeWorld.name}</h2><p>{activeWorld.description}</p><span className="sf-world-code-large"><Hash className="h-4 w-4" /> {activeWorld.code} · v{activeWorld.version}</span><div className="sf-worlds-featured-actions"><Button variant="primary" icon={ArrowRight} onClick={() => document.getElementById('world-engine-editor')?.scrollIntoView({ behavior: 'smooth' })}>管理世界设定</Button>{!activeWorld.project.enableMultiWorld && <Button icon={Check} onClick={() => void sync()} disabled={syncing}>{syncing ? '同步中…' : '同步分步骤设定'}</Button>}</div>{message && <p className="sf-product-message">{message}</p>}</div><div className="sf-worlds-featured-stats"><div><strong>{activeWorld.completeness}%</strong><span>资料完整度</span></div><div><strong>v{activeWorld.version}</strong><span>当前版本</span></div><div><strong>{activeWorld.project.enableMultiWorld ? '可引用' : '待同步'}</strong><span>基座状态</span></div></div></section>
     <section id="world-engine-editor" className="sf-product-panel"><div className="sf-section-header"><div><div className="sf-eyebrow">WORLD CONTENT</div><h2>{activeWorld.project.enableMultiWorld ? '世界设定工作台' : '分步骤项目设定'}</h2></div><span className="sf-project-status"><StatusDot tone={activeWorld.project.enableMultiWorld ? 'success' : 'warning'} />{activeWorld.project.enableMultiWorld ? '世界引擎已启用' : '同步后可被其他功能引用'}</span></div>{activeWorld.project.enableMultiWorld ? <Suspense fallback={<FeaturePanelFallback />}><WorldGroupOverview project={activeWorld.project} /></Suspense> : <div className="sf-product-inline-empty"><p>当前项目仍按旧的分步骤模式保存。同步操作会先将现有设定归属到主世界，再开启世界引擎入口，不会拆分或删除原内容。</p><Button variant="primary" icon={Check} onClick={() => void sync()} disabled={syncing}>{syncing ? '同步中…' : '同步为世界引擎'}</Button></div>}</section>
+    <WorldSharingPanel project={activeWorld.project} onImported={onImported} />
   </>
 }
 
@@ -312,7 +314,7 @@ export default function ProductHubPage() {
 
   const renderPage = () => {
     switch (activeTab) {
-      case 'worlds': return <WorldEnginePage worlds={worlds} activeWorld={activeWorld} onSelectWorld={selectWorld} onOpenCreate={() => setShowCreate(true)} onOpenWorldPicker={() => setShowWorldPicker(true)} />
+      case 'worlds': return <WorldEnginePage worlds={worlds} activeWorld={activeWorld} onSelectWorld={selectWorld} onOpenCreate={() => setShowCreate(true)} onOpenWorldPicker={() => setShowWorldPicker(true)} onImported={async projectId => { await loadProjects(); setActiveProjectId(projectId); setActiveTab('worlds') }} />
       case 'novel': return <NovelPage project={activeProject} world={activeWorld} onOpenWorldPicker={() => setShowWorldPicker(true)} onCreate={() => setShowCreate(true)} />
       case 'nodes': return <NodesPage project={activeProject} world={activeWorld} onOpenWorldPicker={() => setShowWorldPicker(true)} onCreate={() => setShowCreate(true)} />
       case 'ttrpg': return <TtrpgPage project={activeProject} world={activeWorld} onOpenWorldPicker={() => setShowWorldPicker(true)} onCreate={() => setShowCreate(true)} />
