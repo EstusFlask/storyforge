@@ -299,6 +299,7 @@ npm run ci
 | [CHANGELOG.md](./CHANGELOG.md) | 版本变更记录 |
 | [CLAUDE.md](./CLAUDE.md) | AI/开发者接手项目必须遵守的规则 |
 | [docs/MASTER-BLUEPRINT.md](./docs/MASTER-BLUEPRINT.md) | 重构施工蓝图与架构权威 |
+| [docs/WORLD-ENGINE-COMMUNITY-ARCHITECTURE.md](./docs/WORLD-ENGINE-COMMUNITY-ARCHITECTURE.md) | 世界引擎、作品实例、状态机与社区的目标架构 |
 | [docs/roadmap/README.md](./docs/roadmap/README.md) | 当前功能体系、待开发组合与施工顺序 |
 | [docs/roadmap/CAPABILITY-BASELINE.md](./docs/roadmap/CAPABILITY-BASELINE.md) | 当前已有能力与禁止重复建设边界 |
 | [docs/roadmap/COMPLETED.md](./docs/roadmap/COMPLETED.md) | 已完成开发单位与历史证据入口 |
