@@ -28,7 +28,8 @@
 | **FLOW-3E 节点大图生产力** | 大图效率、模板与可恢复执行 | 官方起始模板、百节点自动布局、框选/复制/对齐/分组、执行计划、暂停/断点恢复、过期下游重跑、运行快照往返与密钥脱敏 | `R-FLOW3E-productivity`、`NODE-AUTHORING-MODE-DESIGN.md` |
 | **FLOW-3F 节点兼容发布** | FLOW-2 兼容收口与正式入口统一 | 旧图兼容读取、显式 graph v2 转换、未知节点 fail-closed、项目备份往返和旧入口下线 | `R-FLOW3F-compat-release`、`NODE-AUTHORING-MODE-DESIGN.md` |
 | **FLOW-1 历史技术试验（非节点模式产品完成）** | FLOW-1 第一阶段 | 旧工作流兼容图、DAG 校验、拓扑执行、显式入边装配和确认写回的技术验证；产品层级已于 2026-07-26 撤销，迁移归 FLOW-2 | `R-FLOW1-*`、`R-WF-workflow-step-context`、`VISUAL-WORKFLOW-DESIGN.md` |
-| **PRODUCT-1 可靠性与发布** | 数据云备份、导出/导入、快照、PWA/Vite、版本与 Release 相关修复、社区反馈批次 | 本地优先、JSON/文件夹/Gist/快照恢复、生产构建和 CI | `R-export-import-roundtrip`、`R-folder-backup`、`R-gist-backup`、CI |
+| **PRODUCT-1 可靠性与发布** | 数据云备份、导出/导入、快照、PWA/Vite、版本与 Release 相关修复、社区反馈批次；当前阶段新增备份恢复可信预检 | 本地优先、JSON/文件夹/Gist/快照恢复、生产构建和 CI；损坏/未来版本备份在写库前拒绝，旧格式缺表兼容警告 | `R-export-import-roundtrip`、`R-folder-backup`、`R-gist-backup`、`R-PRODUCT1-backup-trust`、CI |
+| **PLATFORM-1 本地世界发布包** | 世界引擎生成本地发布包，声明署名、许可、内容警告和二创用途；导入前校验并生成新的本地世界副本 | 仅分享 `PROJECT_TABLES.communityShare='world'` 登记的世界资料，保留来源编号和许可；不包含正文、运行存档、账号或云同步 | `R-PLATFORM1-world-package`、Chromium 本地分享包 E2E、`PLATFORM-1-LOCAL-PUBLISHING.md` |
 
 ## 主要已完成批次
 

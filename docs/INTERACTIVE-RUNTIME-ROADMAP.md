@@ -116,5 +116,5 @@
 5. ⏳ SIM-1C NPC 演进与候选式状态更新。
 6. ✅ TTRPG-1A 单机战役主持 MVP。
 7. ✅ TTRPG-1B 规则与遭遇、TTRPG-1C 长期战役。
-8. CHATGAME-1 单角色聊天 MVP；随后共享 SIM-1 扩展多人角色与冒险。
-8. 多人在线能力等待 PLATFORM-1，不在纯前端 IndexedDB 上硬叠。
+8. ✅ CHATGAME-1 单角色聊天 MVP；随后共享 SIM-1 扩展多人角色与冒险。
+9. 多人在线能力等待 PLATFORM-1，不在纯前端 IndexedDB 上硬叠。
