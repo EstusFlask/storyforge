@@ -245,7 +245,7 @@ const CONTENT_TEMPLATES: AuthoringNodeTemplate[] = [
       { key: 'volumeTitle', label: '所属卷标题', type: 'text', defaultValue: '' },
     ],
     extraInputs: [
-      { id: 'volume', label: '所属卷', semantic: 'outline.volume', cardinality: 'one', state: 'any', required: true },
+      { id: 'volume', label: '所属卷候选', semantic: 'outline.volume', cardinality: 'many', state: 'any', required: true },
       optionalControl('chapter-count', '章节数', 'control.chapter-count'),
     ],
     recommendedAfter: ['outline.plan', 'chapter.prose'],
@@ -263,7 +263,7 @@ const CONTENT_TEMPLATES: AuthoringNodeTemplate[] = [
       { key: 'request', label: '生成要求', type: 'text', defaultValue: '' },
       { key: 'chapterTitle', label: '目标章节标题', type: 'text', defaultValue: '' },
     ],
-    extraInputs: [{ id: 'chapter', label: '章节', semantic: 'outline.chapter', cardinality: 'one', state: 'any', required: true }],
+    extraInputs: [{ id: 'chapter', label: '章节候选', semantic: 'outline.chapter', cardinality: 'many', state: 'any', required: true }],
     recommendedAfter: ['chapter.prose'],
   }),
   collectionTemplate({

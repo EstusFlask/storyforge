@@ -152,6 +152,29 @@ test('领域节点模式可自由建图、运行、刷新恢复并完整清理',
   await expect(page.getByRole('heading', { name: '领域节点创作', exact: true })).toBeVisible()
 })
 
+test('领域节点模式可创建世界到正文的完整创作链并刷新恢复', async ({ page }) => {
+  await openCleanHome(page)
+  await createProject(page, 'E2E 完整创作链')
+  await openSidebarLeaf(page, '创作区', '节点模式')
+  await page.getByRole('button', { name: '创建完整创作链', exact: true }).click()
+
+  await expect(page.getByRole('textbox', { name: '节点图名称' })).toHaveValue('完整创作链')
+  await expect(page.getByText('所属卷候选 *', { exact: true })).toBeVisible()
+  await expect(page.getByText('章节候选 *', { exact: true })).toBeVisible()
+  await expect(page.locator('[data-authoring-node-template="control.volume-count"]')).toBeVisible()
+  await expect(page.locator('[data-authoring-node-template="control.chapter-count"]')).toBeVisible()
+  await expect(page.locator('[data-authoring-node-template="control.word-count"]')).toBeVisible()
+  await expect(page.locator('[data-authoring-node-template="chapter.prose"]')).toBeVisible()
+  await expect(page.getByText('完整创作链已创建，请按上游到下游逐步运行并确认采纳。', { exact: true })).toBeVisible()
+
+  await page.getByRole('button', { name: '保存', exact: true }).click()
+  await page.reload()
+  await openSidebarLeaf(page, '创作区', '节点模式')
+  await expect(page.getByRole('textbox', { name: '节点图名称' })).toHaveValue('完整创作链')
+  await expect(page.getByText('所属卷候选 *', { exact: true })).toBeVisible()
+  await expect(page.getByText('章节候选 *', { exact: true })).toBeVisible()
+})
+
 test('领域角色节点可生成候选、人工确认并写入角色主档', async ({ page }) => {
   const dimensions = [
     'identity', 'profile', 'appearance', 'location', 'personality', 'values', 'strengths',

@@ -10,7 +10,8 @@ import { CHARACTER_DIMENSIONS } from '../../src/lib/character/character-dimensio
 import { db } from '../../src/lib/db/schema'
 import { adoptDomainCandidate, executeDomainNode } from '../../src/lib/node-authoring/domain-execution'
 import { AUTHORING_NODE_BY_ID, defaultConfigForTemplate } from '../../src/lib/node-authoring/catalog'
-import { emptyAuthoringGraph, type AuthoringNodeInstance } from '../../src/lib/node-authoring/contracts'
+import { buildAuthoringCreationChainGraph } from '../../src/lib/node-authoring/creation-chain'
+import { emptyAuthoringGraph, type AuthoringInputEnvelope, type AuthoringNodeInstance } from '../../src/lib/node-authoring/contracts'
 import { inspectAuthoringGraphFreshness } from '../../src/lib/node-authoring/freshness'
 import { adoptAuthoringCandidate, runAuthoringGraph } from '../../src/lib/node-authoring/executor'
 import { buildRagLibrary } from '../../src/lib/retrieval/rag-library'
@@ -215,6 +216,49 @@ describe('FLOW-3C · 领域节点专用执行器', () => {
     expect((await db.chapters.where('outlineNodeId').equals(chapterId).first())?.content).toContain('潮声')
   })
 
+  it('细纲节点遵守候选数量控制并保留全部可比较版本', async () => {
+    const volumeId = await db.outlineNodes.add({
+      projectId: project.id!, parentId: null, type: 'volume', title: '第一卷：潮门', summary: '卷摘要', order: 0, worldGroupId: null, createdAt: 1, updatedAt: 1,
+    })
+    await db.outlineNodes.add({
+      projectId: project.id!, parentId: volumeId, type: 'chapter', title: '第一章：退潮', summary: '主角在海岸发现城门。', order: 0, worldGroupId: null, createdAt: 1, updatedAt: 1,
+    })
+    vi.mocked(chat)
+      .mockResolvedValueOnce(detailDraft)
+      .mockResolvedValueOnce(JSON.stringify({ ...JSON.parse(detailDraft), endingCliffhanger: '第三道门在月下开启。' }))
+    const candidateCount: AuthoringInputEnvelope = {
+      sourceNodeId: 'candidate-count', sourcePortId: 'value', targetPortId: 'candidate-count',
+      semantic: 'control.count', cardinality: 'one', state: 'control', content: '2', tokens: 1,
+    }
+    const result = await executeDomainNode({
+      node: node('outline.plan', { chapterTitle: '第一章：退潮' }),
+      inputs: [candidateCount], projectId: project.id!, worldGroupId: null, aiConfig,
+    })
+    expect(chat).toHaveBeenCalledTimes(2)
+    expect(result?.variants).toHaveLength(2)
+    expect(result?.output).toContain('海床亮起第二道门')
+    expect(result?.variants?.[1]).toContain('第三道门在月下开启')
+  })
+
+  it('细纲节点从上游结构化章纲候选解析目标章节，无需重复填写标题', async () => {
+    const volumeId = await db.outlineNodes.add({
+      projectId: project.id!, parentId: null, type: 'volume', title: '第一卷：潮门', summary: '卷摘要', order: 0, worldGroupId: null, createdAt: 1, updatedAt: 1,
+    })
+    const chapterId = await db.outlineNodes.add({
+      projectId: project.id!, parentId: volumeId, type: 'chapter', title: '第一章：退潮', summary: '主角在海岸发现城门。', order: 0, worldGroupId: null, createdAt: 1, updatedAt: 1,
+    })
+    vi.mocked(chat).mockResolvedValueOnce(detailDraft)
+    const upstream: AuthoringInputEnvelope = {
+      sourceNodeId: 'chapter', sourcePortId: 'candidate', targetPortId: 'chapter',
+      semantic: 'outline.chapter', cardinality: 'many', state: 'candidate',
+      content: JSON.stringify([{ title: '第一章：退潮', summary: '主角在海岸发现城门。' }]), tokens: 20,
+    }
+    const result = await executeDomainNode({
+      node: node('outline.plan'), inputs: [upstream], projectId: project.id!, worldGroupId: null, aiConfig,
+    })
+    expect(result?.domain).toMatchObject({ kind: 'detail', outlineNodeId: chapterId })
+  })
+
   it('角色维度节点按稳定资料绑定定点写回，不会误更新第一个角色', async () => {
     const firstId = await db.characters.add({
       projectId: project.id!, name: '先行者', shortDescription: '已有角色一。', motivation: '原动机一',
@@ -243,5 +287,59 @@ describe('FLOW-3C · 领域节点专用执行器', () => {
     expect(adopted.written).toHaveLength(1)
     expect((await db.characters.get(firstId))?.motivation).toBe('原动机一')
     expect((await db.characters.get(secondId))?.motivation).toBe('为了让沉没城市重见天日。')
+  })
+
+  it('官方完整创作链可按作者确认边界从故事生成到正式正文', async () => {
+    vi.mocked(chat).mockImplementation(async (_messages, _config, options) => {
+      switch (options.category) {
+        case 'worldview.dimension': return '潮汐退去后，沉没城市会在每个月圆之夜从海床苏醒。'
+        case 'story.core': return '退潮后苏醒的城市迫使测潮者在真相与故乡之间选择。'
+        case 'character.generate': return characterDraft()
+        case 'outline.volume': return JSON.stringify([{ title: '第一卷：潮门', summary: '主角发现海床城门并踏入旧文明。' }])
+        case 'outline.chapter': return JSON.stringify([{ title: '第一章：退潮', summary: '主角在海岸发现城门。' }])
+        case 'detail.chapter-planning': return detailDraft
+        case 'chapter.content': return '潮声在夜色中持续了很久，直到城门从海床升起。测潮者沿着湿冷石阶向下，听见远处有人敲响铜钟。海水在身后重新合拢，古老刻痕逐渐亮起，照出通往旧文明的黑暗长廊。他握紧潮汐罗盘继续前行，墙壁深处却传来另一个与自己完全相同的脚步声。'
+        default: throw new Error(`unexpected category: ${options.category}`)
+      }
+    })
+    const { graph, nodeIds } = buildAuthoringCreationChainGraph()
+    const flowId = await db.nodeFlows.add({
+      projectId: project.id!, worldGroupId: null, name: '完整创作链', description: '',
+      graphJson: JSON.stringify(graph), createdAt: 1, updatedAt: 1,
+    }) as number
+    const flow = await db.nodeFlows.get(flowId) as NodeFlow
+
+    const runAndAdopt = async (nodeId: string) => {
+      const result = await runAuthoringGraph({ flow, targetNodeId: nodeId })
+      const failure = Object.values(result.candidates).find(candidate => candidate.status === 'blocked')
+      expect(result.run.status, failure?.errors?.join('；')).toBe('completed')
+      expect(result.candidates[nodeId]?.status).toBe('candidate')
+      return adoptAuthoringCandidate({ flow, nodeId, output: result.candidates[nodeId].output })
+    }
+
+    await runAndAdopt(nodeIds.world)
+    await runAndAdopt(nodeIds.concept)
+    await runAndAdopt(nodeIds.conflict)
+    await runAndAdopt(nodeIds.character)
+    await runAndAdopt(nodeIds.volume)
+    await runAndAdopt(nodeIds.chapter)
+    await runAndAdopt(nodeIds.detail)
+    await runAndAdopt(nodeIds.prose)
+
+    const [worldview, storyCore, characters, outlines, details, chapters] = await Promise.all([
+      db.worldviews.where('projectId').equals(project.id!).first(),
+      db.storyCores.where('projectId').equals(project.id!).first(),
+      db.characters.where('projectId').equals(project.id!).toArray(),
+      db.outlineNodes.where('projectId').equals(project.id!).toArray(),
+      db.detailedOutlines.where('projectId').equals(project.id!).toArray(),
+      db.chapters.where('projectId').equals(project.id!).toArray(),
+    ])
+    expect(worldview?.worldOrigin).toContain('每个月圆之夜')
+    expect(storyCore?.concept).toContain('退潮后苏醒的城市')
+    expect(storyCore?.centralConflict).toContain('真相与故乡')
+    expect(characters.some(character => character.name === '潮汐测者')).toBe(true)
+    expect(outlines.map(item => item.type)).toEqual(['volume', 'chapter'])
+    expect(details).toHaveLength(1)
+    expect(chapters[0]?.content).toContain('古老刻痕')
   })
 })

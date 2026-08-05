@@ -5,6 +5,7 @@ import {
   ChevronRight,
   CircleStop,
   Database,
+  GitBranch,
   GripVertical,
   History,
   LayoutTemplate,
@@ -40,6 +41,8 @@ import {
   type AuthoringRunSnapshotMap,
 } from '../../lib/node-authoring/executor'
 import { buildAuthoringOverviewGraph } from '../../lib/node-authoring/overview'
+import { buildAuthoringCreationChainGraph } from '../../lib/node-authoring/creation-chain'
+import { compareCandidateVariants } from '../../lib/node-authoring/candidate-diff'
 import { inspectAuthoringGraphFreshness, type AuthoringFreshnessMap } from '../../lib/node-authoring/freshness'
 import { useNodeFlowStore } from '../../stores/node-flow'
 import { useAIConfigStore } from '../../stores/ai-config'
@@ -198,7 +201,7 @@ function AuthoringCanvas(props: {
             ? freshness.reasons.includes('source-missing') ? '来源缺失' : '需要重跑'
             : freshness?.status === 'fresh' ? '输入未变化' : undefined
           return (
-            <div key={node.id} className={`absolute rounded-md border shadow-sm ${templateColor(template)} ${props.selectedNodeId === node.id ? 'ring-2 ring-accent ring-offset-1' : ''}`} style={{ left: node.x, top: node.y, width: NODE_WIDTH }} onClick={event => { event.stopPropagation(); props.onSelectNode(node.id) }}>
+            <div key={node.id} data-authoring-node-template={node.templateId} className={`absolute rounded-md border shadow-sm ${templateColor(template)} ${props.selectedNodeId === node.id ? 'ring-2 ring-accent ring-offset-1' : ''}`} style={{ left: node.x, top: node.y, width: NODE_WIDTH }} onClick={event => { event.stopPropagation(); props.onSelectNode(node.id) }}>
               <div
                 className="flex h-[38px] cursor-grab items-center gap-2 rounded-t-md border-b border-black/10 px-2 active:cursor-grabbing"
                 onPointerDown={event => { event.stopPropagation(); dragRef.current = { nodeId: node.id, startX: event.clientX, startY: event.clientY, nodeX: node.x, nodeY: node.y }; event.currentTarget.setPointerCapture(event.pointerId) }}
@@ -391,6 +394,20 @@ export default function NodeAuthoringWorkspace(props: { project: Project; worldG
       toast.error(`概览生成失败：${error instanceof Error ? error.message : String(error)}`)
     }
   }
+  const createCreationChain = async () => {
+    try {
+      const { graph } = buildAuthoringCreationChainGraph()
+      const id = await useNodeFlowStore.getState().createFlow(projectId, props.worldGroupId, {
+        name: '完整创作链',
+        description: '世界与故事 → 角色 → 卷纲 → 章纲 → 细纲 → 正文；每一步都需作者确认后写回。',
+        graph,
+      })
+      setSelectedFlowId(id)
+      toast.success('完整创作链已创建，请按上游到下游逐步运行并确认采纳。')
+    } catch (error) {
+      toast.error(`完整创作链创建失败：${error instanceof Error ? error.message : String(error)}`)
+    }
+  }
   const removeFlow = async () => {
     if (!draft?.id) return
     const confirmed = await dialog.confirm({
@@ -447,7 +464,7 @@ export default function NodeAuthoringWorkspace(props: { project: Project; worldG
   const adoptCandidate = async (nodeId: string) => { if (!draft || !candidates[nodeId]) return; try { const result = await adoptAuthoringCandidate({ flow: draft, nodeId, output: candidates[nodeId].output }); setCandidates(current => ({ ...current, [nodeId]: { ...current[nodeId], status: 'adopted' } })); toast.success(`已采纳：写入 ${result.written.length} 条记录。`) } catch (error) { toast.error(`采纳失败：${error instanceof Error ? error.message : String(error)}`) } }
 
   if (loading && !flows.length) return <div className="flex min-h-[720px] items-center justify-center text-sm text-text-muted"><Loader2 className="mr-2 h-4 w-4 animate-spin" />加载节点图…</div>
-  if (!draft) return <div className="flex min-h-[720px] items-center justify-center bg-[#f7f7f5]"><div className="max-w-lg rounded-lg border border-border bg-bg-surface p-8 text-center shadow-sm"><Workflow className="mx-auto h-10 w-10 text-accent" /><h2 className="mt-3 text-lg font-semibold text-text-primary">领域节点创作</h2><p className="mt-2 text-sm leading-6 text-text-secondary">把世界观、故事、角色和执行参数编排成一张可观察、可回放的创作图。每个结果先作为候选保存，确认后才写入项目。</p><div className="mt-5 flex justify-center gap-2"><button type="button" onClick={() => void createOverview()} className="inline-flex items-center gap-2 rounded-md border border-border px-4 py-2 text-sm font-medium text-text-secondary hover:bg-bg-hover"><LayoutTemplate className="h-4 w-4" />从项目生成概览</button><button type="button" onClick={() => void createFlow()} className="inline-flex items-center gap-2 rounded-md bg-accent px-4 py-2 text-sm font-medium text-white hover:bg-accent-hover"><Plus className="h-4 w-4" />创建空白节点图</button></div></div></div>
+  if (!draft) return <div className="flex min-h-[720px] items-center justify-center bg-[#f7f7f5]"><div className="max-w-2xl rounded-lg border border-border bg-bg-surface p-8 text-center shadow-sm"><Workflow className="mx-auto h-10 w-10 text-accent" /><h2 className="mt-3 text-lg font-semibold text-text-primary">领域节点创作</h2><p className="mt-2 text-sm leading-6 text-text-secondary">把世界观、故事、角色和执行参数编排成一张可观察、可回放的创作图。每个结果先作为候选保存，确认后才写入项目。</p><div className="mt-5 grid gap-2 sm:grid-cols-3"><button type="button" onClick={() => void createCreationChain()} className="inline-flex items-center justify-center gap-2 rounded-md bg-accent px-4 py-2 text-sm font-medium text-white hover:bg-accent-hover"><GitBranch className="h-4 w-4" />创建完整创作链</button><button type="button" onClick={() => void createOverview()} className="inline-flex items-center justify-center gap-2 rounded-md border border-border px-4 py-2 text-sm font-medium text-text-secondary hover:bg-bg-hover"><LayoutTemplate className="h-4 w-4" />从项目生成概览</button><button type="button" onClick={() => void createFlow()} className="inline-flex items-center justify-center gap-2 rounded-md border border-border px-4 py-2 text-sm font-medium text-text-secondary hover:bg-bg-hover"><Plus className="h-4 w-4" />创建空白节点图</button></div><p className="mt-4 text-[11px] leading-5 text-text-muted">完整创作链是可编辑的起始图；运行一个节点后先确认采纳，再继续运行下游节点。</p></div></div>
 
   const selectedSnapshot = selectedNodeId ? snapshots[selectedNodeId] : undefined
   const selectedCandidate = selectedNodeId ? candidates[selectedNodeId] : undefined
@@ -500,6 +517,9 @@ export default function NodeAuthoringWorkspace(props: { project: Project; worldG
               {selectedCandidate.variants && selectedCandidate.variants.length > 1 && (
                 <details className="mt-2 rounded border border-border bg-bg-base">
                   <summary className="cursor-pointer px-2 py-1.5 text-[10px] font-medium text-text-secondary">展开原始候选对照（{selectedCandidate.variants.length} 个版本）</summary>
+                  <div className="border-t border-border px-2 py-1.5 text-[9px] text-text-muted">
+                    {compareCandidateVariants(selectedCandidate.output, selectedCandidate.variants).filter(diff => selectedCandidate.variants?.[diff.variantIndex] !== selectedCandidate.output).map(diff => <span key={diff.variantIndex} className="mr-3">版本 {diff.variantIndex + 1}：{diff.changedLines} 行变化（+{diff.addedLines}/-{diff.removedLines}）</span>)}
+                  </div>
                   <div className="grid max-h-52 grid-cols-2 gap-2 overflow-y-auto border-t border-border p-2">
                     {selectedCandidate.variants.map((variant, index) => (
                       <article key={`${selectedCandidate.nodeId}:variant:${index}`} className="min-w-0 rounded border border-border/70 bg-bg-surface p-2">

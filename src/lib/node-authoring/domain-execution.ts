@@ -101,8 +101,29 @@ function contextBudget(node: AuthoringNodeInstance, inputs: AuthoringInputEnvelo
   return Number.isFinite(value) && value > 0 ? Math.round(value) : fallback
 }
 
-function targetTitle(node: AuthoringNodeInstance, inputs: AuthoringInputEnvelope[], key: string): string {
-  return configText(node, key) || nonControlInput(inputs).split('\n').find(line => line.trim())?.trim() || ''
+function structuredTitleInput(inputs: AuthoringInputEnvelope[], semantic: AuthoringSemantic): string {
+  const content = inputs.find(input => input.semantic === semantic && input.content.trim())?.content.trim()
+  if (!content) return ''
+  try {
+    const parsed = JSON.parse(content) as unknown
+    const first = Array.isArray(parsed) ? parsed[0] : parsed
+    if (first && typeof first === 'object' && !Array.isArray(first)) {
+      const title = (first as Record<string, unknown>).title
+      if (typeof title === 'string') return title.trim()
+    }
+  } catch {
+    // Free-form upstream content remains available as supplemental context, but is not a safe target key.
+  }
+  return ''
+}
+
+function targetTitle(
+  node: AuthoringNodeInstance,
+  inputs: AuthoringInputEnvelope[],
+  key: string,
+  semantic: AuthoringSemantic,
+): string {
+  return configText(node, key) || structuredTitleInput(inputs, semantic)
 }
 
 async function executeCharacter(input: DomainExecutionInput): Promise<DomainExecutionResult> {
@@ -209,7 +230,7 @@ async function executeDetail(input: DomainExecutionInput): Promise<DomainExecuti
   const project = await db.projects.get(input.projectId)
   if (!project) throw new Error('项目不存在。')
   const allNodes = await db.outlineNodes.where('projectId').equals(input.projectId).toArray()
-  const title = targetTitle(input.node, input.inputs, 'chapterTitle')
+  const title = targetTitle(input.node, input.inputs, 'chapterTitle', 'outline.chapter')
   const candidates = allNodes.filter(node => (
     node.type === 'chapter'
     && (node.worldGroupId ?? null) === input.worldGroupId
@@ -248,16 +269,21 @@ async function executeDetail(input: DomainExecutionInput): Promise<DomainExecuti
     segmentText(assembled, 'characters'),
     segmentText(assembled, 'foreshadows'),
   )
-  const raw = await chat(messages, input.aiConfig, {
-    category: 'detail.chapter-planning',
-    projectId: input.projectId,
-    configOverrides: generationOverrides(input.node, input.inputs),
-    contextOverflowPolicy: 'reject',
-  }, input.signal)
-  const parsed = parseEnhancedDetailResult(raw)
-  if (!parsed) throw new Error('细纲候选不是有效的 JSON 对象。')
+  const variants: string[] = []
+  for (let index = 0; index < generationCount(input.node, input.inputs); index += 1) {
+    const raw = await chat(messages, input.aiConfig, {
+      category: 'detail.chapter-planning',
+      projectId: input.projectId,
+      configOverrides: generationOverrides(input.node, input.inputs),
+      contextOverflowPolicy: 'reject',
+    }, input.signal)
+    const parsed = parseEnhancedDetailResult(raw)
+    if (!parsed) throw new Error('细纲候选不是有效的 JSON 对象。')
+    variants.push(JSON.stringify(parsed, null, 2))
+  }
   return {
-    output: JSON.stringify(parsed, null, 2),
+    output: variants[0] ?? '',
+    variants,
     semantic: 'outline.plan',
     sourceKeys: binding.sourceKeys,
     sourceHash: binding.sourceHash,
