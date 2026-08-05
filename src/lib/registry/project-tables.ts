@@ -24,18 +24,18 @@ export const PROJECT_TABLES: TableSpec[] = [
     note: '项目本身' },
 
   // ───────────────────── 世界观/设定(world-scoped 多)─────────────────────
-  { table: db.worldviews, name: 'worldviews', owner: 'project', worldScoped: true,
+  { table: db.worldviews, name: 'worldviews', owner: 'project', worldScoped: true, communityShare: 'world',
     exportable: true,
     exportRemap: [{ field: 'worldGroupId', remapVia: 'worldGroups', exportAs: '_worldGroupExportId' }] },
 
   { table: db.storyCores, name: 'storyCores', owner: 'project', exportable: true,
     note: '项目级,跨世界共享主线' },
 
-  { table: db.powerSystems, name: 'powerSystems', owner: 'project', worldScoped: true,
+  { table: db.powerSystems, name: 'powerSystems', owner: 'project', worldScoped: true, communityShare: 'world',
     exportable: true,
     exportRemap: [{ field: 'worldGroupId', remapVia: 'worldGroups', exportAs: '_worldGroupExportId' }] },
 
-  { table: db.cultivationSystems, name: 'cultivationSystems', owner: 'project', worldScoped: true,
+  { table: db.cultivationSystems, name: 'cultivationSystems', owner: 'project', worldScoped: true, communityShare: 'world',
     exportable: true, exportIdField: true,
     refs: [
       { kind: 'simple', field: 'id', target: 'characters[cultivationSystemId]', onDelete: 'setNull' },
@@ -60,15 +60,15 @@ export const PROJECT_TABLES: TableSpec[] = [
     defaults: { status: 'confirmed', sourceOffset: 0, trigger: '' },
     note: 'Phase 34 作者确认的正文修炼事件；当前境界与实际路径按规范章序实时投影，软引用缺失时保留冗余名称与证据' },
 
-  { table: db.geographies, name: 'geographies', owner: 'project', worldScoped: true,
+  { table: db.geographies, name: 'geographies', owner: 'project', worldScoped: true, communityShare: 'world',
     exportable: true,
     exportRemap: [{ field: 'worldGroupId', remapVia: 'worldGroups', exportAs: '_worldGroupExportId' }] },
 
-  { table: db.histories, name: 'histories', owner: 'project', worldScoped: true,
+  { table: db.histories, name: 'histories', owner: 'project', worldScoped: true, communityShare: 'world',
     exportable: true,
     exportRemap: [{ field: 'worldGroupId', remapVia: 'worldGroups', exportAs: '_worldGroupExportId' }] },
 
-  { table: db.worldNodes, name: 'worldNodes', owner: 'project', worldScoped: true,
+  { table: db.worldNodes, name: 'worldNodes', owner: 'project', worldScoped: true, communityShare: 'world',
     exportable: true, tree: { parentField: 'parentId' }, exportIdField: true,
     refs: [
       { kind: 'json', field: 'portalsJSON', jsonPath: '$[].targetWorldId', target: 'worldNodes[id]', onDelete: 'remap' },
@@ -81,15 +81,15 @@ export const PROJECT_TABLES: TableSpec[] = [
     note: 'portalsJSON 内含指向其它节点的引用' },
 
   { table: db.historicalTimelineEvents, name: 'historicalTimelineEvents', owner: 'project',
-    worldScoped: true, exportable: true,
+    worldScoped: true, exportable: true, communityShare: 'world',
     exportRemap: [{ field: 'worldGroupId', remapVia: 'worldGroups', exportAs: '_worldGroupExportId' }] },
 
   { table: db.historicalKeywords, name: 'historicalKeywords', owner: 'project',
-    worldScoped: true, exportable: true,
+    worldScoped: true, exportable: true, communityShare: 'world',
     exportRemap: [{ field: 'worldGroupId', remapVia: 'worldGroups', exportAs: '_worldGroupExportId' }] },
 
   { table: db.importantLocations, name: 'importantLocations', owner: 'project',
-    exportable: true, tree: { parentField: 'parentId' }, exportIdField: true,
+    exportable: true, communityShare: 'world', tree: { parentField: 'parentId' }, exportIdField: true,
     refs: [
       { kind: 'simple', field: 'id', target: 'codexEntries[importantLocationId]', onDelete: 'setNull' },
     ],
@@ -97,13 +97,13 @@ export const PROJECT_TABLES: TableSpec[] = [
     note: '⚠️ 无 worldGroupId,当前全局注入写作上下文；城池词条可通过 importantLocationId 建立软引用' },
 
   { table: db.worldRulesProfiles, name: 'worldRulesProfiles', owner: 'project',
-    worldScoped: true, exportable: true,
+    worldScoped: true, exportable: true, communityShare: 'world',
     exportRemap: [{ field: 'worldGroupId', remapVia: 'worldGroups', exportAs: '_worldGroupExportId' }],
     note: '真实与幻想规则每世界一套;null 为单世界/默认主世界' },
 
   // ───────────────────── 角色 ─────────────────────
   { table: db.characters, name: 'characters', owner: 'project', homeWorldScoped: true,
-    exportable: true,
+    exportable: true, communityShare: 'world',
     refs: [
       // 删角色 → 关系级联删 + 细纲数组引用清理
       { kind: 'simple', field: 'id', target: 'characterRelations[fromCharacterId]', onDelete: 'cascade' },
@@ -117,7 +117,7 @@ export const PROJECT_TABLES: TableSpec[] = [
     ] },
 
   { table: db.characterRelations, name: 'characterRelations', owner: 'project',
-    exportable: true,
+    exportable: true, communityShare: 'world',
     exportRemap: [
       { field: 'fromCharacterId', remapVia: 'characters', exportAs: '_fromCharacterIndex', onUnmapped: 'drop' },
       { field: 'toCharacterId', remapVia: 'characters', exportAs: '_toCharacterIndex', onUnmapped: 'drop' },
@@ -252,7 +252,7 @@ export const PROJECT_TABLES: TableSpec[] = [
 
   // ───────────────────── 词条系统 ─────────────────────
   { table: db.codexCategories, name: 'codexCategories', owner: 'project',
-    exportable: true, tree: { parentField: 'parentId' }, exportIdField: true,
+    exportable: true, communityShare: 'world', tree: { parentField: 'parentId' }, exportIdField: true,
     refs: [{ kind: 'simple', field: 'id', target: 'codexEntries[categoryId]', onDelete: 'cascade' }],
     exportRemap: [
       { field: 'parentId', remapVia: 'codexCategories', selfTree: true, exportAs: '_parentExportId' },
@@ -261,7 +261,7 @@ export const PROJECT_TABLES: TableSpec[] = [
     note: '分类 schema 项目级共享；worldGroupId 仅为旧备份兼容字段，不参与世界生命周期' },
 
   { table: db.codexEntries, name: 'codexEntries', owner: 'project', worldScoped: true,
-    exportable: true,
+    exportable: true, communityShare: 'world',
     refs: [
       { kind: 'json', field: 'refs', jsonPath: '$.*', target: 'codexEntries[id]', onDelete: 'remap' },
       { kind: 'simple', field: 'id', target: 'characters[raceEntryId]', onDelete: 'setNull' },
@@ -316,8 +316,13 @@ export const PROJECT_TABLES: TableSpec[] = [
     exportRemap: [
       { field: 'flowId', remapVia: 'nodeFlows', exportAs: '_flowExportId', onUnmapped: 'require' },
     ],
-    defaults: { inputSnapshotsJson: '{}', nodeResultsJson: '{}' },
-    note: 'FLOW-2 逐节点输入/输出/错误/确认记录，保证刷新后仍可见' },
+    defaults: {
+      inputSnapshotsJson: '{}',
+      nodeResultsJson: '{}',
+      executionPlanJson: '{}',
+      graphSnapshotJson: '',
+    },
+    note: 'FLOW-2/3 逐节点输入、输出、执行计划与断点记录，保证刷新后仍可见可恢复' },
 
   // ───────────────────── SIM-1 共享互动运行时 ─────────────────────
   { table: db.simulationSessions, name: 'simulationSessions', owner: 'project',
@@ -338,7 +343,7 @@ export const PROJECT_TABLES: TableSpec[] = [
       status: 'active',
       rulesetVersion: 1,
       canonSnapshotJson: '{"version":1,"sources":[]}',
-      initialStateJson: '{"version":1,"clock":0,"entities":{},"memories":[],"narratives":[],"lastSequence":0}',
+      initialStateJson: '{"version":1,"clock":0,"entities":{},"memories":[],"narratives":[],"ttrpg":null,"lastSequence":0}',
     },
     note: 'SIM-1 独立互动世界实例；冻结创作来源，不反写 Canon；分支拥有独立事件流' },
 
@@ -423,11 +428,11 @@ export const PROJECT_TABLES: TableSpec[] = [
     note: 'NS-5 章→卷→全书层级摘要树·可重建派生缓存；四态 pending/rebuilding/verified/stale' },
 
   // ───────────────────── 多世界 ─────────────────────
-  { table: db.worldGroups, name: 'worldGroups', owner: 'project', exportable: true,
+  { table: db.worldGroups, name: 'worldGroups', owner: 'project', exportable: true, communityShare: 'world',
     exportIdField: true, exportOrderBy: 'order',
     note: '导出用 _exportId(导出序)重映射;按 order 排序保证序稳定' },
 
-  { table: db.worldGroupLinks, name: 'worldGroupLinks', owner: 'project', exportable: true,
+  { table: db.worldGroupLinks, name: 'worldGroupLinks', owner: 'project', exportable: true, communityShare: 'world',
     exportRemap: [
       { field: 'fromGroupId', remapVia: 'worldGroups', exportAs: '_fromGroupExportId', onUnmapped: 'require' },
       { field: 'toGroupId', remapVia: 'worldGroups', exportAs: '_toGroupExportId', onUnmapped: 'require' },

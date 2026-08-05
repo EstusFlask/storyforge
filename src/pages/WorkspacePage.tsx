@@ -1,5 +1,5 @@
 import { useEffect, useState, useMemo, lazy, Suspense } from 'react'
-import { useNavigate, useParams } from 'react-router'
+import { useLocation, useNavigate, useParams } from 'react-router'
 import { useProjectStore } from '../stores/project'
 import { useWorldviewStore } from '../stores/worldview'
 import { useCharacterStore } from '../stores/character'
@@ -29,7 +29,7 @@ const UsageStatsPage = lazy(() => import('../components/settings/UsageStatsPage'
 const VersionHistoryPanel = lazy(() => import('../components/system/VersionHistoryPanel'))
 const ImportDocPanel = lazy(() => import('../components/system/ImportDocPanel'))
 const PromptManagerPanel = lazy(() => import('../components/settings/prompt/PromptManagerPanel'))
-const NodeModeWorkspace = lazy(() => import('../components/node-flow/NodeModeWorkspace'))
+const NodeAuthoringWorkspace = lazy(() => import('../components/node-authoring/NodeAuthoringWorkspace'))
 const RagLibraryPanel = lazy(() => import('../components/retrieval/RagLibraryPanel'))
 const SimulationRuntimePanel = lazy(() => import('../components/simulation/SimulationRuntimePanel'))
 const DataManagementPanel = lazy(() => import('../components/data/DataManagementPanel'))
@@ -71,9 +71,16 @@ import { useWorldGroupStore } from '../stores/world-group'
 
 export default function WorkspacePage() {
   const { projectId } = useParams()
+  const location = useLocation()
   const navigate = useNavigate()
   const { loadProject, projects, currentProjectId } = useProjectStore()
-  const [activeModule, setActiveModule] = useState<SidebarModule>('info')
+  const initialModule = new URLSearchParams(location.search).get('module')
+  const backPath = initialModule ? '/' : '/projects'
+  const [activeModule, setActiveModule] = useState<SidebarModule>(
+    initialModule === 'outline' || initialModule === 'chapters-list' || initialModule === 'visual-workflows' || initialModule === 'simulation-runtime'
+      ? initialModule
+      : 'info',
+  )
   const [loading, setLoading] = useState(true)
   const [editorNodeId, setEditorNodeId] = useState<number | null>(null)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
@@ -104,6 +111,12 @@ export default function WorkspacePage() {
   useFolderAutoBackup(project?.id ?? null)
 
   // 加载项目 + 所有关联数据
+  useEffect(() => {
+    if (initialModule === 'outline' || initialModule === 'chapters-list' || initialModule === 'visual-workflows' || initialModule === 'simulation-runtime') {
+      setActiveModule(initialModule)
+    }
+  }, [initialModule])
+
   useEffect(() => {
     const load = async () => {
       if (!projectId || isNaN(Number(projectId))) {
@@ -244,7 +257,7 @@ export default function WorkspacePage() {
       case 'character-driven-plot':
         return <CharacterDrivenPlotPanel project={project} />
       case 'visual-workflows':
-        return <NodeModeWorkspace project={project} worldGroupId={copilotWorldGroupId} />
+        return <NodeAuthoringWorkspace project={project} worldGroupId={copilotWorldGroupId} />
       case 'rag-library':
         return <RagLibraryPanel project={project} />
       case 'simulation-runtime':
@@ -314,7 +327,7 @@ export default function WorkspacePage() {
       <Sidebar
         active={activeModule}
         onSelect={(m) => { setActiveModule(m); if (m !== 'editor') setEditorNodeId(null) }}
-        onBack={() => navigate('/')}
+        onBack={() => navigate(backPath)}
         projectName={project.name}
         collapsed={sidebarCollapsed}
         onToggleCollapse={() => setSidebarCollapsed(v => !v)}

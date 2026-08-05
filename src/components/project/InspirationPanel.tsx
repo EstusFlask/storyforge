@@ -69,7 +69,8 @@ export default function InspirationPanel({ project }: Props) {
     setAdopting(true)
     try {
       // 确保多世界已开启 + 主世界组存在
-      await wgStore.migrateToMultiWorld(project.id!)
+      const migrated = await wgStore.migrateToMultiWorld(project.id!)
+      if (!migrated) return
 
       // 1. 故事核心（项目级）
       const sc = mwResult.storyCore

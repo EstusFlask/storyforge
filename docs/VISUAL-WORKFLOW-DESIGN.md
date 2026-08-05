@@ -1,5 +1,10 @@
 # FLOW-1（历史实现）/ FLOW-2（重构）· 自由节点创作模式
 
+> **2026-08-04 产品方向更新**：FLOW-2 已证明独立画布、DAG、运行证据、Token 预算和
+> 三注册表写回边界可行，但其通用文本流水线语义不等于最终节点模式。后续产品定义与施工以
+> [`NODE-AUTHORING-MODE-DESIGN.md`](NODE-AUTHORING-MODE-DESIGN.md) 的 FLOW-3 领域节点创作
+> 方案为准；本文继续保留 FLOW-1/2 现状、历史判断和可复用技术证据。
+>
 > 2026-07-26 产品校正：下文 FLOW-1 把 `PromptWorkflow` 增加画布视图的方案，已被作者明确
 > 判定为层级与功能均不符合节点模式。FLOW-1 代码只作为迁移来源，不再构成完成证据。
 > 正式重构以 [`AUTHORING-PLATFORM-DESIGN.md`](./AUTHORING-PLATFORM-DESIGN.md) 的

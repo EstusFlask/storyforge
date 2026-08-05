@@ -79,6 +79,7 @@ const CREATION_PREFIXES = [
   'history.storm',
   'technology',
   'emotion.beat',
+  'simulation.',
   'inspiration.',
   'node.',
   'style.calibrate',

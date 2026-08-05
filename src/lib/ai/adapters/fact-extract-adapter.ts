@@ -76,8 +76,8 @@ export function parseFactExtractResult(args: {
   return parsed.facts.flatMap((raw): ExtractedFactCandidate[] => {
     if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return []
     const item = raw as Record<string, unknown>
-    const subjectName = String(item.subject ?? '').trim()
-    const quote = String(item.quote ?? '').trim()
+    const subjectName = String(item.subject ?? item.subjectName ?? '').trim()
+    const quote = String(item.quote ?? item.sourceQuote ?? '').trim()
     // 谓词必须过受控注册表，未登记直接丢（不入权威账本）
     const spec = normalizeFactPredicate(String(item.predicate ?? ''))
     const value = spec ? normalizeFactValue(spec, item.value) : null

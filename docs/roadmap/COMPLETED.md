@@ -22,8 +22,14 @@
 | **AUTHOR-1 作者工具** | Phase E/H；`FB-5` 基础画像与高级校准；编辑器基础；`CF-20260702-5/10/11`；`EDITOR-5` | 本地模型配置、任务路由、有界文风 few-shot 与互动校准、富文本、自动保存、对照润色、稳定实体智能全书改名与原子撤销 | `R-EDITOR3-*`、`R-EDITOR5-entity-rename`、`R-FB5-*`、Chromium 文风闭环 |
 | **IDEA-1 灵感与参考** | Phase 26.4；Phase 28/28.5；`CM-1`；参考作品导入/分块/分析；参考分析版本演化；角色 AI 聚合去重 | 灵感反推、带来源碎片、增量融合、字段差异、确认版本、参考资料来源声明、失败隔离、断点续跑、版本差异/激活/回滚、active-only 上下文、角色聚合与 AI 去重 | `R-CM1-*`、`R-IDEA1-*`、`INCREMENTAL-INSPIRATION-DESIGN.md`、`REFERENCE-ANALYSIS-EVOLUTION-DESIGN.md` |
 | **AGENT-1 当前阶段** | Phase 16/17 工作流；模型路由；Phase 27.1-a/b/c；Phase 27.1-d 四个扩展领域；Phase 27.2a 场景考证 | Prompt workflow、任务模型路由、14 个受作用域/预算约束的只读工具、严格协议只读 AgentRunner、世界来源/灵感反推/角色/大纲/正文 ChatCopilot 可编辑确认闭环、用户触发的场景考证 | `R-AGENT1-*`、`AGENT-TOOL-REGISTRY-DESIGN.md`、`AGENT-RUNNER-DESIGN.md`、`CHAT-COPILOT-MVP-DESIGN.md`、`CHAT-COPILOT-INSPIRATION-DESIGN.md`、`CHAT-COPILOT-CHARACTER-DESIGN.md`、`CHAT-COPILOT-OUTLINE-DESIGN.md`、`CHAT-COPILOT-PROSE-DESIGN.md`、`AI-COPILOT-DESIGN.md` |
+| **SIM-1 互动运行时** | SIM-1A / SIM-1B / SIM-1C | 事件回放、确定性骰子、检查点与分支；Canon 冻结快照与运行时实体投影；NPC 演进候选、提案持久化、作者确认/拒绝、过期保护、运行时只读上下文和 Canon 不变性 | `R-SIM1-runtime-core`、`R-SIM1-canon-snapshot`、`R-SIM1C-npc-evolution`、`R-SIM1-runtime-ui`、`SIM-RUNTIME-DESIGN.md` |
+| **TTRPG-1 跑团与战役主持** | TTRPG-1A / 1B / 1C | 单机战役场景、回合顺序、动作、确定性技能检定、AI GM 成功/失败候选、原子回合记录、AI 遭遇候选确认、确定性先攻、攻击/伤害、资源上下限、状态效果、战斗回合、战役摘要、任务、NPC 日程和会话分支续接；不包含多人协作 | `R-TTRPG1-campaign-runtime`、`R-TTRPG1-gm-parser`、`R-TTRPG1B-combat-encounter`、`R-TTRPG1C-long-campaign`、`R-SIM1-runtime-ui`、`TTRPG-CAMPAIGN-DESIGN.md` |
+| **CHATGAME-1 角色聊天与冒险** | 单角色聊天 MVP | 冻结角色与世界快照、用户身份/场景、流式回复、事件持久化、回复重生成、检查点和会话分支；不包含长期记忆、多角色房间和冒险规则 | `R-CHATGAME1-single-character-chat`、`INTERACTIVE-RUNTIME-ROADMAP.md` |
+| **FLOW-3E 节点大图生产力** | 大图效率、模板与可恢复执行 | 官方起始模板、百节点自动布局、框选/复制/对齐/分组、执行计划、暂停/断点恢复、过期下游重跑、运行快照往返与密钥脱敏 | `R-FLOW3E-productivity`、`NODE-AUTHORING-MODE-DESIGN.md` |
+| **FLOW-3F 节点兼容发布** | FLOW-2 兼容收口与正式入口统一 | 旧图兼容读取、显式 graph v2 转换、未知节点 fail-closed、项目备份往返和旧入口下线 | `R-FLOW3F-compat-release`、`NODE-AUTHORING-MODE-DESIGN.md` |
 | **FLOW-1 历史技术试验（非节点模式产品完成）** | FLOW-1 第一阶段 | 旧工作流兼容图、DAG 校验、拓扑执行、显式入边装配和确认写回的技术验证；产品层级已于 2026-07-26 撤销，迁移归 FLOW-2 | `R-FLOW1-*`、`R-WF-workflow-step-context`、`VISUAL-WORKFLOW-DESIGN.md` |
-| **PRODUCT-1 可靠性与发布** | 数据云备份、导出/导入、快照、PWA/Vite、版本与 Release 相关修复、社区反馈批次 | 本地优先、JSON/文件夹/Gist/快照恢复、生产构建和 CI | `R-export-import-roundtrip`、`R-folder-backup`、`R-gist-backup`、CI |
+| **PRODUCT-1 可靠性与发布** | 数据云备份、导出/导入、快照、PWA/Vite、版本与 Release 相关修复、社区反馈批次；当前阶段新增备份恢复可信预检 | 本地优先、JSON/文件夹/Gist/快照恢复、生产构建和 CI；损坏/未来版本备份在写库前拒绝，旧格式缺表兼容警告 | `R-export-import-roundtrip`、`R-folder-backup`、`R-gist-backup`、`R-PRODUCT1-backup-trust`、CI |
+| **PLATFORM-1 本地世界发布包** | 世界引擎生成本地发布包，声明署名、许可、内容警告和二创用途；导入前校验并生成新的本地世界副本 | 仅分享 `PROJECT_TABLES.communityShare='world'` 登记的世界资料，保留来源编号和许可；不包含正文、运行存档、账号或云同步 | `R-PLATFORM1-world-package`、Chromium 本地分享包 E2E、`PLATFORM-1-LOCAL-PUBLISHING.md` |
 
 ## 主要已完成批次
 
@@ -44,7 +50,7 @@
 
 - WORLD-1 的 Phase 37-a、Phase 34、Phase 35-b/c 与 ENH-WORLDMAP-2 距离、规模和相对位置已完成。
 - `FB-4` 与个人写作向量库未完成；`CM-1`、`EDITOR-2/5` 与 `FB-5` 高级校准已完成。
-- Phase 27.1 多 Agent、27.2b 后台建议、27.3 NPC 演进未完成。
+- Phase 27.1 多 Agent、27.2b 后台建议仍有未完成边界；NPC 演进已由 SIM-1C 完成，不再按旧 Phase 27.3 单独立项。
 
 ## 迁移审计账本
 

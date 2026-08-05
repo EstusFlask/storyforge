@@ -13,6 +13,7 @@
  */
 import { deriveExportProjectJSON } from './registry-export'
 import { deriveImportProjectJSON } from './registry-import'
+import { assertTrustedProjectBackup } from './backup-trust'
 import type {
   Project, Worldview, StoryCore, PowerSystem,
   Character, OutlineNode, Chapter,
@@ -199,5 +200,7 @@ export function downloadJSON(data: ProjectExportData, filename: string) {
 
 /** 导入项目 JSON — 返回新项目 ID（注册表派生，兼容 v1/v2/v3 旧格式） */
 export async function importProjectJSON(data: ProjectExportData): Promise<number> {
+  // 预检必须发生在事务外、写库前；失败时保证项目表也不会出现半导入根记录。
+  assertTrustedProjectBackup(data)
   return deriveImportProjectJSON(data)
 }

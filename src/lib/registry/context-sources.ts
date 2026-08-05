@@ -33,6 +33,7 @@ import { formatHeldItemsContext, readProjectHeldItems } from '../consistency/hel
 import { formatCharacterKnowledgeContext, readProjectCharacterKnowledge } from '../knowledge-ledger/knowledge-ledger'
 import { formatCanonAssertionsContext, readCanonAssertions } from '../fact-ledger/setting-assertions'
 import { readStorylineProgressContext } from '../storyline/storyline-progress'
+import { analyzeEditImpact } from '../consistency/impact-analysis'
 import { readCultivationProgressContext } from '../cultivation/progress'
 import type { Chapter, Character, OutlineNode, PowerSystem, Worldview } from '../types'
 import {
@@ -60,6 +61,89 @@ import {
   readAgentWorldGroups,
 } from '../agent/read-sources'
 import { readRagSelectionContext } from '../retrieval/rag-library'
+import { parseSimulationCanonSnapshot, verifySimulationCanonSnapshot } from '../simulation/canon-snapshot'
+import { readSimulationState } from '../simulation/runtime'
+import type { AssembleContextInput } from './types'
+
+async function readSimulationRuntimeContext(input: AssembleContextInput): Promise<string> {
+  if (input.simulationSessionId == null) return ''
+  const session = await db.simulationSessions.get(input.simulationSessionId)
+  if (!session || session.projectId !== input.projectId) return ''
+  if (input.worldGroupId !== undefined && (session.worldGroupId ?? null) !== (input.worldGroupId ?? null)) return ''
+  const snapshot = parseSimulationCanonSnapshot(session.canonSnapshotJson)
+  if (!snapshot || !(await verifySimulationCanonSnapshot(snapshot))) {
+    throw new Error('冻结运行时 Canon 快照校验失败。')
+  }
+  const state = await readSimulationState(session.id!)
+  const sourceLines = snapshot.sources.slice(0, 120).map(source => (
+    `- ${source.sourceKey}｜${source.kind}｜${source.name}${source.summary ? `｜${source.summary}` : ''}`
+  ))
+  const entityLines = Object.values(state.entities).slice(0, 120).map(entity => {
+    const attributes = Object.entries(entity.attributes)
+      .slice(0, 16)
+      .map(([key, value]) => `${key}=${String(value)}`)
+      .join(', ')
+    return `- ${entity.entityKey}｜${entity.kind}｜${entity.name}｜地点=${entity.locationKey ?? '无'}｜生命周期=${entity.lifecycleStatus}${attributes ? `｜属性=${attributes}` : ''}`
+  })
+  const memoryLines = state.memories.slice(-80).map(memory => (
+    `- ${memory.subjectKey}｜${memory.status}｜${memory.content}`
+  ))
+  const narrativeLines = state.narratives.slice(-40).map(item => `- #${item.eventSequence} ${item.text}`)
+  const ttrpg = state.ttrpg
+  const ttrpgLines = ttrpg ? [
+    `- 场景=${ttrpg.scene?.title ?? '未开始'}｜状态=${ttrpg.scene?.status ?? '无'}｜地点=${ttrpg.scene?.locationKey ?? '无'}`,
+    `- 回合=${ttrpg.round}｜当前行动者=${ttrpg.activeActorKey ?? '无'}｜顺序=${ttrpg.turnOrder.join(' → ') || '无'}`,
+    ...ttrpg.actions.slice(-20).map(action => `- 动作 #${action.eventSequence}｜${action.actorKey}｜${action.text}`),
+    ...ttrpg.checks.slice(-20).map(check => (
+      `- 检定 #${check.eventSequence}｜${check.actorKey}｜${check.skill}｜${check.expression}=${check.total} vs DC ${check.dc}｜${check.success ? '成功' : '失败'}`
+    )),
+    ...(ttrpg.attacks ?? []).slice(-20).map(attack => (
+      `- 攻击｜${attack.actorKey} → ${attack.targetKey}｜${attack.attackExpression}=${attack.attackTotal} vs AC ${attack.armorClass}｜${attack.hit ? `命中，${attack.resourceKey} ${attack.damageTotal}` : '未命中'}`
+    )),
+    ...(ttrpg.encounter ? [
+      `- 遭遇=${ttrpg.encounter.title}｜状态=${ttrpg.encounter.status}｜战斗回合=${ttrpg.encounter.round}｜当前=${ttrpg.encounter.activeActorKey ?? '无'}`,
+      ...ttrpg.encounter.turnOrder.map(key => {
+        const combatant = ttrpg.encounter?.combatants[key]
+        if (!combatant) return `- 参与者=${key}`
+        const resources = Object.entries(combatant.resources).map(([name, resource]) => `${name}=${resource.current}/${resource.maximum}`).join(', ')
+        const conditions = combatant.conditions.map(condition => `${condition.name}${condition.stacks > 1 ? `×${condition.stacks}` : ''}`).join('、') || '无'
+        return `- 战斗参与者=${key}｜先攻=${combatant.initiative}｜AC=${combatant.armorClass}｜资源=${resources}｜状态=${conditions}`
+      }),
+    ] : []),
+    ...(ttrpg.campaign ? [
+      `- 长期战役摘要=${ttrpg.campaign.summary || '暂无'}`,
+      ...ttrpg.campaign.quests.slice(-40).map(quest => (
+        `- 任务=${quest.questId}｜${quest.title}｜状态=${quest.status}｜优先级=${quest.priority}${quest.dueClock == null ? '' : `｜期限=${quest.dueClock}`}${quest.description ? `｜${quest.description}` : ''}`
+      )),
+      ...ttrpg.campaign.npcSchedules.slice(-40).map(schedule => (
+        `- NPC日程=${schedule.scheduleId}｜${schedule.entityKey}｜${schedule.startClock}-${schedule.endClock ?? '持续'}｜地点=${schedule.locationKey ?? '无'}｜${schedule.activity}｜重复=${schedule.recurrence}`
+      )),
+    ] : []),
+  ] : []
+  const chat = state.chat
+  const chatLines = chat ? [
+    `- 角色=${chat.characterKey}｜用户=${chat.identity.name}${chat.identity.description ? `｜身份=${chat.identity.description}` : ''}`,
+    `- 场景=${chat.scene.title}${chat.scene.description ? `｜${chat.scene.description}` : ''}`,
+    ...chat.messages
+      .filter(message => message.supersededBySequence == null)
+      .slice(-24)
+      .map(message => `- ${message.role === 'user' ? chat.identity.name : (state.entities[message.speakerKey ?? '']?.name ?? message.speakerKey ?? '角色')}｜${message.text}`),
+  ] : []
+  return [
+    `【冻结运行时会话】${session.title}｜类型=${session.kind}｜逻辑时间=${state.clock}｜事件序号=${state.lastSequence}`,
+    `【冻结世界】${snapshot.worldLabel}｜worldGroupId=${snapshot.worldGroupId ?? 'null'}｜快照=${snapshot.snapshotHash.slice(0, 16)}`,
+    '【冻结 Canon 来源（只读）】',
+    ...(sourceLines.length ? sourceLines : ['- 暂无冻结来源']),
+    '【运行时实体（只读）】',
+    ...(entityLines.length ? entityLines : ['- 暂无运行时实体']),
+    '【运行时记忆（只读）】',
+    ...(memoryLines.length ? memoryLines : ['- 暂无记忆']),
+    '【最近运行时叙事（只读）】',
+    ...(narrativeLines.length ? narrativeLines : ['- 暂无叙事']),
+    ...(ttrpgLines.length ? ['【跑团场景与回合（只读）】', ...ttrpgLines] : []),
+    ...(chatLines.length ? ['【角色聊天状态（只读）】', ...chatLines] : []),
+  ].join('\n')
+}
 
 async function readWorldview(projectId: number, worldGroupId?: number | null): Promise<Worldview | null> {
   const rows = await db.worldviews.where('projectId').equals(projectId).toArray()
@@ -196,6 +280,18 @@ async function readEmotionBeats(projectId: number, chapterId?: number | null): P
     card.overallArc ? `整体弧线:${card.overallArc}` : '',
     ...beats.map(b => `- ${b.label}${b.sceneGoal ? `: ${b.sceneGoal}` : ''}`),
   ].filter(Boolean).join('\n')
+}
+
+/** FLOW-3D：只读的一致性影响摘要，供节点图接线查看，不产生任何写回。 */
+async function readConsistencyReport(projectId: number, chapterId?: number | null): Promise<string> {
+  if (chapterId == null) return ''
+  const impact = await analyzeEditImpact(projectId, chapterId)
+  const staleFacts = impact.factsFromChapter.filter(fact => ['stale', 'source-missing', 'invalid-range'].includes(fact.status))
+  const lines = [
+    `【一致性影响报告】当前章节来源事实 ${impact.factsFromChapter.length} 条；后续可能受影响章节 ${impact.downstreamChapterIds.length} 个。`,
+    staleFacts.length ? `【待复核事实】${staleFacts.map(fact => `${fact.subjectName}/${fact.predicate}=${fact.value}`).join('；')}` : '【待复核事实】暂无已标记失效事实。',
+  ]
+  return lines.join('\n')
 }
 
 async function readStateCards(projectId: number, referenceText?: string, extraIds?: number[]): Promise<string> {
@@ -551,6 +647,17 @@ async function readCharacterPassages(projectId: number, name?: string, worldGrou
 
 export const CONTEXT_SOURCES: ContextSource[] = [
   {
+    // SIM-1C: NPC 演进只读冻结快照与事件回放，不读取可变 Canon 表。
+    key: 'simulationRuntime',
+    label: '冻结运行时状态',
+    scope: 'runtime',
+    layer: 'L0',
+    budgetTokens: 8000,
+    protectedFromTrim: true,
+    requiresSimulationSessionId: true,
+    read: readSimulationRuntimeContext,
+  },
+  {
     // AGENT-1: 对话副驾只读工具使用的紧凑项目摘要，不返回整表原始数据。
     key: 'projectStatus',
     label: '项目概况',
@@ -709,6 +816,17 @@ export const CONTEXT_SOURCES: ContextSource[] = [
     budgetTokens: 2500,
     requiresChapterId: true,
     read: input => readRetrievedPassages(input.projectId, input.chapterId, input.outlineNodeId, input.worldGroupId),
+  },
+  {
+    key: 'consistencyReport',
+    label: '一致性报告',
+    scope: 'chapter',
+    layer: 'L1',
+    budgetTokens: 1800,
+    protectedFromTrim: true,
+    requiresChapterId: true,
+    acceptsOutlineNodeAsChapterBoundary: true,
+    read: input => readConsistencyReport(input.projectId, input.chapterId),
   },
   {
     key: 'detailedOutline',

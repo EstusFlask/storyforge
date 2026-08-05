@@ -79,6 +79,8 @@ export interface ProseCopilotInput {
   assembled: Awaited<ReturnType<typeof assembleContext>>
   previousTail: string
   config: AIConfig
+  parameterValues?: Record<string, unknown>
+  generationOverrides?: { temperature?: number; maxTokens?: number }
   routingCategory?: string
   signal?: AbortSignal
 }
@@ -263,7 +265,11 @@ function buildProseMessages(input: ProseCopilotInput) {
   const supplemental = input.supplementalContext.trim()
     ? `\n\n【本轮上游候选（尚未采纳，不属于 Canon）】\n${input.supplementalContext.trim()}`
     : ''
-  const hint = `${input.authorRequest}${supplemental}`
+  const targetWordCount = Number(input.parameterValues?.wordCount)
+  const wordCountHint = Number.isFinite(targetWordCount) && targetWordCount > 0
+    ? `\n\n【节点字数目标】正文候选尽量接近 ${Math.floor(targetWordCount)} 字。`
+    : ''
+  const hint = `${input.authorRequest}${wordCountHint}${supplemental}`
   if (input.operation === 'continue') {
     const context = characters ? `${world}\n\n${characters}` : world
     return buildContinuePrompt(
@@ -391,6 +397,10 @@ export async function prepareProseCopilot(input: {
   supplementalContext?: string
   routingCategory?: string
   contextProfile?: AgentContextProfile
+  parameterValues?: Record<string, unknown>
+  /** 节点级 AI preset 的解析结果；未提供时沿用全局路由配置。 */
+  configOverride?: AIConfig
+  generationOverrides?: { temperature?: number; maxTokens?: number }
   signal?: AbortSignal
 }): Promise<PreparedProseCopilot> {
   const project = await db.projects.get(input.projectId)
@@ -413,7 +423,7 @@ export async function prepareProseCopilot(input: {
   const snapshot = await snapshotOf(target.outline, target.chapter, target.ordinal)
   const defaultCategory = operation === 'continue' ? 'chapter.continue' : 'chapter.content'
   const routingCategory = input.routingCategory ?? defaultCategory
-  const config = resolveRequestConfig(
+  const config = input.configOverride ?? resolveRequestConfig(
     useAIConfigStore.getState().config,
     { category: routingCategory },
   ).config
@@ -453,6 +463,8 @@ export async function prepareProseCopilot(input: {
     assembled,
     previousTail,
     config,
+    parameterValues: input.parameterValues,
+    generationOverrides: input.generationOverrides,
     routingCategory,
     signal: input.signal,
   }
@@ -488,7 +500,12 @@ export function createProseCopilotNode(
   const runAI = dependencies.runAI ?? (messages => chat(messages, input.config, {
     category: input.routingCategory ?? (input.operation === 'continue' ? 'chapter.continue' : 'chapter.content'),
     projectId: input.project.id!,
-    configOverrides: { maxTokens: 16_000 },
+    configOverrides: {
+      maxTokens: input.generationOverrides?.maxTokens ?? 16_000,
+      ...(input.generationOverrides?.temperature != null
+        ? { temperature: input.generationOverrides.temperature }
+        : {}),
+    },
     contextOverflowPolicy: 'reject',
   }, input.signal))
   return {

@@ -4,6 +4,30 @@ import type { Project, CreateProjectInput } from '../lib/types'
 import { migrateGenre } from '../lib/types'
 import { requireBackupBefore } from '../lib/safety/require-backup-before'
 import { cascadeDeleteProject } from '../lib/registry/lifecycle'
+import {
+  generateWorldCode,
+  hasShareableWorldIdentity,
+  withWorldIdentity,
+} from '../lib/product/world-identity'
+
+async function ensureWorldIdentity(project: Project): Promise<Project> {
+  if (hasShareableWorldIdentity(project)) return project
+  if (!project.id) return withWorldIdentity(project)
+
+  // Legacy projects are upgraded in a transaction so concurrent entry points
+  // cannot assign different world codes to the same project.
+  return db.transaction('rw', db.projects, async () => {
+    const latest = await db.projects.get(project.id!)
+    if (!latest) return withWorldIdentity(project)
+    if (hasShareableWorldIdentity(latest)) return migrateGenre(latest)
+    const normalized = withWorldIdentity(migrateGenre(latest))
+    await db.projects.update(project.id!, {
+      worldCode: normalized.worldCode,
+      worldVersion: normalized.worldVersion,
+    })
+    return normalized
+  })
+}
 
 interface ProjectStore {
   projects: Project[]
@@ -27,14 +51,14 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
     set({ loading: true })
     const raw = await db.projects.orderBy('updatedAt').reverse().toArray()
     // 兼容旧数据：确保每条记录都有 genres[] 和 status
-    const projects = raw.map(migrateGenre)
+    const projects = await Promise.all(raw.map(rawProject => ensureWorldIdentity(migrateGenre(rawProject))))
     set({ projects, loading: false })
   },
 
   loadProject: async (id: number) => {
     const raw = await db.projects.get(id)
     if (!raw) return undefined
-    const project = migrateGenre(raw)
+    const project = await ensureWorldIdentity(migrateGenre(raw))
     const projects = get().projects
     const exists = projects.some(p => p.id === id)
     const nextProjects = exists
@@ -50,6 +74,8 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
       ...data,
       genres: data.genres ?? [],
       status: data.status ?? 'drafting',
+      worldCode: data.worldCode ?? generateWorldCode(),
+      worldVersion: data.worldVersion ?? 1,
       createdAt: now,
       updatedAt: now,
     } as Project)

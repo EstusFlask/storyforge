@@ -1,7 +1,9 @@
 import { create } from 'zustand'
 import { db } from '../lib/db/schema'
 import type { NodeFlow, NodeRunRecord } from '../lib/types'
-import { EMPTY_NODE_FLOW_GRAPH, parseNodeFlowGraph } from '../lib/types'
+import { parseAuthoringGraph } from '../lib/node-authoring/migration'
+import { emptyAuthoringGraph, safeAuthoringGraphJson } from '../lib/node-authoring/contracts'
+import type { AuthoringNodeGraph } from '../lib/node-authoring/contracts'
 
 interface NodeFlowStore {
   projectId: number | null
@@ -9,7 +11,7 @@ interface NodeFlowStore {
   runs: NodeRunRecord[]
   loading: boolean
   load(projectId: number): Promise<void>
-  createFlow(projectId: number, worldGroupId: number | null): Promise<number>
+  createFlow(projectId: number, worldGroupId: number | null, options?: { name?: string; description?: string; graph?: AuthoringNodeGraph }): Promise<number>
   saveFlow(flow: NodeFlow): Promise<number>
   removeFlow(flowId: number): Promise<void>
   loadRuns(projectId: number, flowId?: number): Promise<void>
@@ -28,14 +30,14 @@ export const useNodeFlowStore = create<NodeFlowStore>((set, get) => ({
     set({ projectId, flows, loading: false })
   },
 
-  createFlow: async (projectId, worldGroupId) => {
+  createFlow: async (projectId, worldGroupId, options) => {
     const now = Date.now()
     const row: NodeFlow = {
       projectId,
       worldGroupId,
-      name: '未命名节点图',
-      description: '',
-      graphJson: JSON.stringify(EMPTY_NODE_FLOW_GRAPH),
+      name: options?.name ?? '未命名节点图',
+      description: options?.description ?? '',
+      graphJson: JSON.stringify(options?.graph ?? emptyAuthoringGraph()),
       createdAt: now,
       updatedAt: now,
     }
@@ -47,9 +49,9 @@ export const useNodeFlowStore = create<NodeFlowStore>((set, get) => ({
   saveFlow: async flow => {
     // 草稿阶段允许缺少连线、必需输入或暂时存在循环；运行前会进行完整图校验。
     // 这里只验证 JSON 外壳，避免作者尚未完成的节点图无法被持久化。
-    parseNodeFlowGraph(flow.graphJson)
+    parseAuthoringGraph(flow.graphJson)
     const now = Date.now()
-    const id = await db.nodeFlows.put({ ...flow, updatedAt: now }) as number
+    const id = await db.nodeFlows.put({ ...flow, graphJson: safeAuthoringGraphJson(flow.graphJson), updatedAt: now }) as number
     await get().load(flow.projectId)
     return id
   },

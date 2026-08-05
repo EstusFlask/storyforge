@@ -24,6 +24,11 @@ const entrypoints = [
   // AGENT-1 Phase 27.1-a/b is a headless public boundary for tools and the read-only AgentRunner.
   // Keep it independently testable without eagerly bundling the future copilot into the current UI.
   'src/lib/agent/index.ts',
+  // FLOW-3 public domain-node boundary is exercised by regression tests and external tooling.
+  'src/lib/node-authoring/index.ts',
+  // FLOW-2 compatibility workspace remains intentionally reachable for old graphs and migration tests
+  // while the product entry points use NodeAuthoringWorkspace.
+  'src/components/node-flow/NodeModeWorkspace.tsx',
 ].map(file => path.resolve(root, file))
 
 const graph = new Map()
