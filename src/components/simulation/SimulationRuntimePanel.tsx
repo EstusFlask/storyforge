@@ -99,6 +99,9 @@ function eventSummary(type: string, payloadJson: string): string {
     if (type === 'ttrpg.campaign.summary.updated') return '更新长期战役摘要'
     if (type === 'ttrpg.campaign.quest.upserted') return `任务：${(payload.quest as Record<string, unknown>)?.title ?? ''}`
     if (type === 'ttrpg.campaign.schedule.upserted') return `日程：${(payload.schedule as Record<string, unknown>)?.activity ?? ''}`
+    if (type === 'chat.session.configured') return `聊天场景：${(payload.scene as Record<string, unknown>)?.title ?? ''}`
+    if (type === 'chat.message.recorded') return `用户：${payload.text ?? ''}`
+    if (type === 'chat.reply.recorded') return `角色：${payload.text ?? ''}`
     if (type.startsWith('entity.')) return String(payload.entityKey ?? type)
     return type
   } catch {

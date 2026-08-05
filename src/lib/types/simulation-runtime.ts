@@ -258,6 +258,33 @@ export interface SimulationTtrpgCampaignState {
   npcSchedules: SimulationTtrpgNpcSchedule[]
 }
 
+export interface SimulationChatIdentity {
+  name: string
+  description: string
+}
+
+export interface SimulationChatScene {
+  title: string
+  description: string
+}
+
+export interface SimulationChatMessage {
+  messageId: string
+  eventSequence: number
+  role: 'user' | 'character'
+  speakerKey: string | null
+  text: string
+  replyToSequence: number | null
+  supersededBySequence: number | null
+}
+
+export interface SimulationChatState {
+  characterKey: string
+  identity: SimulationChatIdentity
+  scene: SimulationChatScene
+  messages: SimulationChatMessage[]
+}
+
 export interface SimulationRuntimeState {
   version: 1
   clock: number
@@ -269,6 +296,8 @@ export interface SimulationRuntimeState {
   }>
   /** 旧存档缺少该字段时按 null 处理。 */
   ttrpg?: SimulationTtrpgState | null
+  /** 旧存档缺少该字段时按 null 处理。 */
+  chat?: SimulationChatState | null
   lastSequence: number
 }
 
@@ -315,6 +344,9 @@ export const SIMULATION_EVENT_TYPES = [
   'ttrpg.campaign.summary.updated',
   'ttrpg.campaign.quest.upserted',
   'ttrpg.campaign.schedule.upserted',
+  'chat.session.configured',
+  'chat.message.recorded',
+  'chat.reply.recorded',
 ] as const
 export type SimulationEventType = typeof SIMULATION_EVENT_TYPES[number]
 
@@ -350,5 +382,6 @@ export const EMPTY_SIMULATION_STATE: SimulationRuntimeState = {
   memories: [],
   narratives: [],
   ttrpg: null,
+  chat: null,
   lastSequence: 0,
 }

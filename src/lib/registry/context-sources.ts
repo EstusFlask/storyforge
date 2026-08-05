@@ -120,6 +120,15 @@ async function readSimulationRuntimeContext(input: AssembleContextInput): Promis
       )),
     ] : []),
   ] : []
+  const chat = state.chat
+  const chatLines = chat ? [
+    `- 角色=${chat.characterKey}｜用户=${chat.identity.name}${chat.identity.description ? `｜身份=${chat.identity.description}` : ''}`,
+    `- 场景=${chat.scene.title}${chat.scene.description ? `｜${chat.scene.description}` : ''}`,
+    ...chat.messages
+      .filter(message => message.supersededBySequence == null)
+      .slice(-24)
+      .map(message => `- ${message.role === 'user' ? chat.identity.name : (state.entities[message.speakerKey ?? '']?.name ?? message.speakerKey ?? '角色')}｜${message.text}`),
+  ] : []
   return [
     `【冻结运行时会话】${session.title}｜类型=${session.kind}｜逻辑时间=${state.clock}｜事件序号=${state.lastSequence}`,
     `【冻结世界】${snapshot.worldLabel}｜worldGroupId=${snapshot.worldGroupId ?? 'null'}｜快照=${snapshot.snapshotHash.slice(0, 16)}`,
@@ -132,6 +141,7 @@ async function readSimulationRuntimeContext(input: AssembleContextInput): Promis
     '【最近运行时叙事（只读）】',
     ...(narrativeLines.length ? narrativeLines : ['- 暂无叙事']),
     ...(ttrpgLines.length ? ['【跑团场景与回合（只读）】', ...ttrpgLines] : []),
+    ...(chatLines.length ? ['【角色聊天状态（只读）】', ...chatLines] : []),
   ].join('\n')
 }
 

@@ -185,7 +185,7 @@ AI 输出经 `adopt({ target, data })` 写回,只有这里登记的字段可写(
 
 ## 四、AI 调用点（消耗统计 category · 在哪触发)
 
-共 62 个 category。
+共 63 个 category。
 未分类调用: 0 个。动态 category 调用: 9 个。
 
 | category | 触发文件 |
@@ -241,6 +241,7 @@ AI 输出经 `adopt({ target, data })` 写回,只有这里登记的字段可写(
 | `review.revise` | `src/components/editor/ChapterEditor.tsx:768` |
 | `rules.generate` | `src/components/rules/CreativeRulesPanel.tsx:80` |
 | `scene.verify` | `src/components/scene/SceneVerifyPanel.tsx:81` |
+| `simulation.chatgame` | `src/components/simulation/ChatGamePanel.tsx:178`<br/>`src/components/simulation/ChatGamePanel.tsx:194` |
 | `story-arc.generate` | `src/components/outline/StoryArcPanel.tsx:85` |
 | `story.generate` | `src/components/worldview/StoryCorePanel.tsx:200` |
 | `story.timeline` | `src/components/timeline/StoryTimelinePanel.tsx:85` |
@@ -267,4 +268,4 @@ AI 输出经 `adopt({ target, data })` 写回,只有这里登记的字段可写(
 
 ---
 
-生成时间基准:commit `caec434`
+生成时间基准:commit `5777120`

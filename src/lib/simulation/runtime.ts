@@ -24,6 +24,10 @@ import {
   type SimulationTtrpgCombatant,
   type SimulationTtrpgCondition,
   type SimulationTtrpgCampaignState,
+  type SimulationChatIdentity,
+  type SimulationChatScene,
+  type SimulationChatState,
+  type SimulationChatMessage,
   type SimulationTtrpgEncounter,
   type SimulationTtrpgEncounterCandidate,
   type SimulationTtrpgNpcSchedule,
@@ -555,6 +559,67 @@ function parseTtrpgCampaignState(value: unknown): SimulationTtrpgCampaignState {
   return { summary, quests, npcSchedules }
 }
 
+function assertChatIdentity(value: unknown): SimulationChatIdentity {
+  if (!isObject(value)) throw new Error('聊天用户身份必须是对象。')
+  const name = String(value.name ?? '').trim()
+  const description = String(value.description ?? '').trim()
+  if (!name || name.length > 160) throw new Error('聊天用户身份名称无效。')
+  if (description.length > 2_000) throw new Error('聊天用户身份描述过长。')
+  return { name, description }
+}
+
+function assertChatScene(value: unknown): SimulationChatScene {
+  if (!isObject(value)) throw new Error('聊天场景必须是对象。')
+  const title = String(value.title ?? '').trim()
+  const description = String(value.description ?? '').trim()
+  if (!title || title.length > 200) throw new Error('聊天场景标题无效。')
+  if (description.length > 8_000) throw new Error('聊天场景描述过长。')
+  return { title, description }
+}
+
+function assertChatMessage(value: unknown): SimulationChatMessage {
+  if (!isObject(value)) throw new Error('聊天消息必须是对象。')
+  const messageId = String(value.messageId ?? '').trim()
+  const eventSequence = assertFiniteInteger(value.eventSequence, '聊天消息事件序号', 1, Number.MAX_SAFE_INTEGER)
+  const role = String(value.role ?? '')
+  const speakerKey = value.speakerKey == null ? null : String(value.speakerKey).trim() || null
+  const text = String(value.text ?? '').trim()
+  const replyToSequence = value.replyToSequence == null
+    ? null
+    : assertFiniteInteger(value.replyToSequence, '聊天回复目标序号', 1, Number.MAX_SAFE_INTEGER)
+  const supersededBySequence = value.supersededBySequence == null
+    ? null
+    : assertFiniteInteger(value.supersededBySequence, '聊天替代序号', 1, Number.MAX_SAFE_INTEGER)
+  if (!messageId || messageId.length > 160) throw new Error('聊天消息 ID 无效。')
+  if (role !== 'user' && role !== 'character') throw new Error('聊天消息角色无效。')
+  if (role === 'user' && speakerKey != null) throw new Error('用户消息不能绑定角色实体。')
+  if (role === 'character' && !speakerKey) throw new Error('角色回复缺少角色实体。')
+  if (!text || text.length > 20_000) throw new Error('聊天消息文本无效。')
+  if (role === 'user' && replyToSequence != null) throw new Error('用户消息不能引用回复目标。')
+  if (role === 'character' && replyToSequence == null) throw new Error('角色回复必须引用用户消息。')
+  return { messageId, eventSequence, role: role as SimulationChatMessage['role'], speakerKey, text, replyToSequence, supersededBySequence }
+}
+
+function parseChatState(value: unknown): SimulationChatState | null {
+  if (value == null) return null
+  if (!isObject(value)) throw new Error('角色聊天状态必须是对象。')
+  const characterKey = String(value.characterKey ?? '').trim()
+  if (!characterKey || characterKey.length > 160) throw new Error('角色聊天缺少有效角色。')
+  const identity = assertChatIdentity(value.identity)
+  const scene = assertChatScene(value.scene)
+  if (!Array.isArray(value.messages)) throw new Error('角色聊天消息必须是数组。')
+  const messages = value.messages.map(assertChatMessage)
+  if (new Set(messages.map(message => message.messageId)).size !== messages.length) {
+    throw new Error('角色聊天消息 ID 不能重复。')
+  }
+  return { characterKey, identity, scene, messages }
+}
+
+function requireChatState(state: SimulationRuntimeState): SimulationChatState {
+  if (!state.chat) throw new Error('角色聊天尚未配置。')
+  return state.chat
+}
+
 function requireTtrpgState(state: SimulationRuntimeState): SimulationTtrpgState {
   if (!state.ttrpg) state.ttrpg = emptyTtrpgState()
   return state.ttrpg
@@ -640,6 +705,7 @@ export function parseSimulationState(value: string | SimulationRuntimeState): Si
     memories,
     narratives,
     ttrpg: parseTtrpgState(parsed.ttrpg),
+    chat: parseChatState(parsed.chat),
     lastSequence,
   }
 }
@@ -721,6 +787,78 @@ export function applySimulationEvent(
       const text = String(payload.text ?? '').trim()
       if (!text || text.length > 20_000) throw new Error('运行时叙事文本无效。')
       state.narratives.push({ eventSequence: event.sequence, text })
+      break
+    }
+    case 'chat.session.configured': {
+      const characterKey = String(payload.characterKey ?? '').trim()
+      const character = state.entities[characterKey]
+      if (!character || !['character', 'npc'].includes(character.kind)) {
+        throw new Error(`角色聊天角色不存在或类型不支持: ${characterKey}`)
+      }
+      const identity = assertChatIdentity(payload.identity)
+      const scene = assertChatScene(payload.scene)
+      const current = state.chat
+      if (current && current.messages.length > 0 && current.characterKey !== characterKey) {
+        throw new Error('已有聊天消息后不能更换角色；请从当前会话建立分支。')
+      }
+      state.chat = {
+        characterKey,
+        identity,
+        scene,
+        messages: current?.messages ?? [],
+      }
+      break
+    }
+    case 'chat.message.recorded': {
+      const chat = requireChatState(state)
+      if (chat.messages.some(message => message.role === 'user' && message.supersededBySequence == null && message.replyToSequence == null)) {
+        const last = chat.messages[chat.messages.length - 1]
+        if (last?.role === 'user') throw new Error('上一条用户消息尚未得到角色回复。')
+      }
+      const message = assertChatMessage({
+        ...payload,
+        eventSequence: event.sequence,
+        role: 'user',
+        speakerKey: null,
+        replyToSequence: null,
+        supersededBySequence: null,
+      })
+      chat.messages.push(message)
+      break
+    }
+    case 'chat.reply.recorded': {
+      const chat = requireChatState(state)
+      const replyToSequence = assertFiniteInteger(payload.replyToSequence, '聊天回复目标序号', 1, event.sequence - 1)
+      const target = chat.messages.find(message => message.eventSequence === replyToSequence)
+      if (!target || target.role !== 'user') throw new Error('聊天回复必须引用当前会话中的用户消息。')
+      const activeReply = chat.messages.find(message => (
+        message.role === 'character'
+        && message.replyToSequence === replyToSequence
+        && message.supersededBySequence == null
+      ))
+      const supersedesSequence = payload.supersedesSequence == null
+        ? null
+        : assertFiniteInteger(payload.supersedesSequence, '聊天替代回复序号', 1, event.sequence - 1)
+      if (activeReply && supersedesSequence !== activeReply.eventSequence) {
+        throw new Error('该用户消息已有当前回复；重生成必须明确替代原回复。')
+      }
+      if (supersedesSequence != null) {
+        const superseded = chat.messages.find(message => message.eventSequence === supersedesSequence)
+        if (!superseded || superseded.role !== 'character' || superseded.replyToSequence !== replyToSequence || superseded.supersededBySequence != null) {
+          throw new Error('待替代的聊天回复无效或已经被替代。')
+        }
+        superseded.supersededBySequence = event.sequence
+      }
+      const message = assertChatMessage({
+        ...payload,
+        eventSequence: event.sequence,
+        messageId: payload.messageId ?? `chat:${event.sequence}`,
+        role: 'character',
+        speakerKey: chat.characterKey,
+        replyToSequence,
+        supersededBySequence: null,
+      })
+      chat.messages.push(message)
       break
     }
     case 'ttrpg.scene.opened': {
@@ -1150,6 +1288,9 @@ export async function appendSimulationEvent(input: {
     || input.type === 'ttrpg.campaign.summary.updated'
     || input.type === 'ttrpg.campaign.quest.upserted'
     || input.type === 'ttrpg.campaign.schedule.upserted'
+    || input.type === 'chat.session.configured'
+    || input.type === 'chat.message.recorded'
+    || input.type === 'chat.reply.recorded'
   ) {
     throw new Error('受治理的互动事件只能通过对应的专用 API 生成。')
   }
@@ -1173,6 +1314,93 @@ export async function appendSimulationEvent(input: {
       actorKey: input.actorKey ?? null,
       targetKey: input.targetKey ?? null,
       payloadJson: JSON.stringify(payload),
+    }
+  })
+}
+
+export async function configureChatSession(input: {
+  sessionId: number
+  characterKey: string
+  identity: SimulationChatIdentity
+  scene: SimulationChatScene
+  baseSequence?: number
+}): Promise<SimulationEvent> {
+  const characterKey = input.characterKey.trim()
+  const identity = assertChatIdentity(input.identity)
+  const scene = assertChatScene(input.scene)
+  return appendBuiltEvent(input.sessionId, ({ session, state }) => {
+    if (session.kind !== 'chatgame') throw new Error('角色聊天配置只能写入角色聊天会话。')
+    if (input.baseSequence != null && input.baseSequence !== state.lastSequence) {
+      throw new Error('聊天场景配置生成期间会话已变化，请刷新后重试。')
+    }
+    const character = state.entities[characterKey]
+    if (!character || !['character', 'npc'].includes(character.kind)) {
+      throw new Error('角色聊天必须绑定当前会话中的角色或 NPC。')
+    }
+    return {
+      type: 'chat.session.configured',
+      actorKey: characterKey,
+      targetKey: characterKey,
+      payloadJson: JSON.stringify({ characterKey, identity, scene }),
+    }
+  })
+}
+
+export async function appendChatMessage(input: {
+  sessionId: number
+  text: string
+}): Promise<SimulationEvent> {
+  const text = input.text.trim()
+  if (!text || text.length > 12_000) throw new Error('用户聊天消息无效。')
+  return appendBuiltEvent(input.sessionId, ({ session, state, sequence }) => {
+    if (session.kind !== 'chatgame') throw new Error('聊天消息只能写入角色聊天会话。')
+    const chat = requireChatState(state)
+    const last = chat.messages[chat.messages.length - 1]
+    if (last?.role === 'user' && last.supersededBySequence == null) {
+      throw new Error('上一条用户消息尚未得到角色回复。')
+    }
+    return {
+      type: 'chat.message.recorded',
+      payloadJson: JSON.stringify({ messageId: `chat:${sequence}`, text }),
+    }
+  })
+}
+
+export async function appendChatReply(input: {
+  sessionId: number
+  replyToSequence: number
+  text: string
+  baseSequence: number
+  supersedesSequence?: number | null
+}): Promise<SimulationEvent> {
+  const text = input.text.trim()
+  if (!text || text.length > 20_000) throw new Error('角色回复无效。')
+  return appendBuiltEvent(input.sessionId, ({ session, state, sequence }) => {
+    if (session.kind !== 'chatgame') throw new Error('角色回复只能写入角色聊天会话。')
+    const chat = requireChatState(state)
+    if (input.baseSequence !== state.lastSequence) throw new Error('角色回复生成期间会话已变化，请重新生成。')
+    const target = chat.messages.find(message => message.eventSequence === input.replyToSequence)
+    if (!target || target.role !== 'user') throw new Error('角色回复目标已不存在，请重新发送。')
+    const activeReply = chat.messages.find(message => (
+      message.role === 'character'
+      && message.replyToSequence === input.replyToSequence
+      && message.supersededBySequence == null
+    ))
+    const supersedesSequence = input.supersedesSequence ?? null
+    if (activeReply && supersedesSequence !== activeReply.eventSequence) {
+      throw new Error('该消息已有当前回复；重生成必须替代原回复。')
+    }
+    if (!activeReply && supersedesSequence != null) throw new Error('没有可替代的角色回复。')
+    return {
+      type: 'chat.reply.recorded',
+      actorKey: chat.characterKey,
+      targetKey: chat.characterKey,
+      payloadJson: JSON.stringify({
+        messageId: `chat:${sequence}`,
+        replyToSequence: input.replyToSequence,
+        supersedesSequence,
+        text,
+      }),
     }
   })
 }
