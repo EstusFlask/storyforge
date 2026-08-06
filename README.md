@@ -316,9 +316,11 @@ StoryForge 使用 [MIT License](./LICENSE) 开源。你可以自由使用、复�
 
 ## Star History
 
-[![StoryForge Star History](./docs/assets/architecture/storyforge-star-history.svg)](https://star-history.com/#yuanbw2025/storyforge&Date)
+[![StoryForge Star History](https://raw.githubusercontent.com/yuanbw2025/storyforge/readme-assets/storyforge-star-history.svg)](https://www.star-history.com/?repos=yuanbw2025%2Fstoryforge&type=date&legend=top-left)
 
-折线图由 GitHub 官方 stargazer 时间数据生成；更新命令：`node scripts/generate-star-history.mjs`。
+折线图由 GitHub 官方 stargazer 时间数据生成，并由
+[`star-history.yml`](./.github/workflows/star-history.yml) 每 15 分钟刷新到独立的
+`readme-assets` 分支；也可在 Actions 中手动触发，不会产生主干提交或应用部署。
 
 ---
 
