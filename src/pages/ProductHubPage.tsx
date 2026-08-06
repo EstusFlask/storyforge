@@ -23,10 +23,13 @@ import {
 import type { Project, SimulationSessionKind } from '../lib/types'
 import { useProjectStore } from '../stores/project'
 import { useWorldGroupStore } from '../stores/world-group'
+import type { WorldProjection } from '../lib/world-engine/domain'
+import { loadWorldProjections } from '../lib/world-engine/domain'
+import WorldEngineWorkspace from '../components/world-engine/WorldEngineWorkspace'
+import type { SidebarModule } from '../components/layout/sidebar-tree'
 import WorldSharingPanel from '../components/product/WorldSharingPanel'
 import './product-hub.css'
 
-const WorldGroupOverview = lazy(() => import('../components/world-group/WorldGroupOverview'))
 const NodeAuthoringWorkspace = lazy(() => import('../components/node-authoring/NodeAuthoringWorkspace'))
 const SimulationRuntimePanel = lazy(() => import('../components/simulation/SimulationRuntimePanel'))
 const ChatGamePanel = lazy(() => import('../components/simulation/ChatGamePanel'))
@@ -47,6 +50,7 @@ type ProductWorld = {
   accent: Accent
   completeness: number
   project: Project
+  projection?: WorldProjection
 }
 
 const NAV_TABS: Array<{ id: TabId; label: string; icon: typeof LayoutDashboard }> = [
@@ -106,10 +110,7 @@ function StatusDot({ tone = 'success' }: { tone?: 'success' | 'warning' | 'neutr
   return <span className={`sf-status-dot sf-status-dot-${tone}`} aria-hidden="true" />
 }
 
-function projectToWorld(project: Project, index: number): ProductWorld {
-  const progress = project.targetWordCount > 0
-    ? Math.round(Math.min(1, (project.currentWordCount ?? 0) / project.targetWordCount) * 100)
-    : 0
+function projectToWorld(project: Project, index: number, projection?: WorldProjection): ProductWorld {
   const tags = (project.genres?.length ? project.genres : [project.genre]).filter(Boolean).slice(0, 2)
   return {
     projectId: project.id!,
@@ -117,11 +118,12 @@ function projectToWorld(project: Project, index: number): ProductWorld {
     name: project.name,
     description: project.description || '这个世界还没有写下简介。',
     version: project.worldVersion ?? 1,
-    source: project.communityOrigin ? `社区导入 · ${project.communityOrigin.sourceWorldCode}` : project.enableMultiWorld ? '我的世界引擎' : '分步骤项目',
+    source: project.communityOrigin ? `社区导入 · ${project.communityOrigin.sourceWorldCode}` : project.enableMultiWorld ? '世界草稿 · 多世界结构' : '世界草稿',
     tags,
     accent: (['ochre', 'teal', 'blue', 'violet'] as Accent[])[index % 4],
-    completeness: Math.max(18, Math.min(100, progress || (project.description ? 42 : 18))),
+    completeness: projection?.completeness ?? 0,
     project,
+    projection,
   }
 }
 
@@ -180,7 +182,7 @@ function useSelectedWorldGroupId(project?: Project): number | null {
 }
 
 function EmptyProjectState({ onCreate }: { onCreate: () => void }) {
-  return <section className="sf-product-empty"><Globe2 className="h-8 w-8" /><h2>先建立一个世界或作品</h2><p>世界引擎可以独立创建；已有分步骤作品也可以稍后同步为可复用世界。</p><Button variant="primary" icon={Plus} onClick={onCreate}>新建内容</Button></section>
+  return <section className="sf-product-empty"><Globe2 className="h-8 w-8" /><h2>先建立一个世界或作品</h2><p>世界引擎可以独立创建；分步骤作品中的完整设定也会直接进入同一个世界工作台。</p><Button variant="primary" icon={Plus} onClick={onCreate}>新建内容</Button></section>
 }
 
 function FeaturePanelFallback() {
@@ -197,37 +199,17 @@ function HomePage({ worlds, activeProject, onSelect, onSelectWorld, onOpenCreate
 }
 
 function WorldCard({ world, onOpen }: { world: ProductWorld; onOpen: () => void }) {
-  return <button className="sf-world-card" onClick={onOpen}><WorldGlyph accent={world.accent} /><div className="sf-world-card-body"><div className="sf-card-topline"><span className="sf-overline"><Hash className="h-3 w-3" /> {world.code}</span><span className="sf-version">v{world.version}</span></div><h3>{world.name}</h3><p>{world.description}</p><div className="sf-tag-row">{world.tags.map(tag => <span className="sf-tag" key={tag}>{tag}</span>)}</div><div className="sf-world-card-footer"><span className="sf-source"><StatusDot tone={world.source === '我的世界引擎' ? 'success' : 'neutral'} />{world.source}</span><span className="sf-completeness">{world.completeness}%</span></div></div></button>
+  return <button className="sf-world-card" onClick={onOpen}><WorldGlyph accent={world.accent} /><div className="sf-world-card-body"><div className="sf-card-topline"><span className="sf-overline"><Hash className="h-3 w-3" /> {world.code}</span><span className="sf-version">v{world.version}</span></div><h3>{world.name}</h3><p>{world.description}</p><div className="sf-tag-row">{world.tags.map(tag => <span className="sf-tag" key={tag}>{tag}</span>)}</div><div className="sf-world-card-footer"><span className="sf-source"><StatusDot tone={world.project.communityOrigin ? 'neutral' : 'success'} />{world.source}</span><span className="sf-completeness">{world.completeness}%</span></div></div></button>
 }
 
-function WorldEnginePage({ worlds, activeWorld, onSelectWorld, onOpenCreate, onOpenWorldPicker, onImported }: { worlds: ProductWorld[]; activeWorld?: ProductWorld; onSelectWorld: (world: ProductWorld) => void; onOpenCreate: () => void; onOpenWorldPicker: () => void; onImported: (projectId: number) => void }) {
-  const { updateProject } = useProjectStore()
-  const { migrateToMultiWorld, ensurePrimaryGroup } = useWorldGroupStore()
-  const [syncing, setSyncing] = useState(false)
-  const [message, setMessage] = useState('')
+function WorldEnginePage({ worlds, activeWorld, onSelectWorld, onOpenCreate, onOpenWorldPicker, onImported, onOpenModule }: { worlds: ProductWorld[]; activeWorld?: ProductWorld; onSelectWorld: (world: ProductWorld) => void; onOpenCreate: () => void; onOpenWorldPicker: () => void; onImported: (projectId: number) => void; onOpenModule: (module: SidebarModule) => void }) {
   if (!activeWorld) return <><PageHeading eyebrow="FOUNDATION / WORLD ENGINE" title="世界引擎" description="独立创建、版本化并复用世界设定。" action={<Button variant="primary" icon={Plus} onClick={onOpenCreate}>从零创建世界</Button>} /><EmptyProjectState onCreate={onOpenCreate} /><WorldSharingPanel onImported={onImported} /></>
-  const sync = async () => {
-    setSyncing(true); setMessage('')
-    try {
-      if (activeWorld.project.id) {
-        const migrated = await migrateToMultiWorld(activeWorld.project.id)
-        if (!migrated) {
-          setMessage('已取消同步，原项目保持不变。')
-          return
-        }
-        await ensurePrimaryGroup(activeWorld.project.id)
-        await updateProject(activeWorld.project.id, { enableMultiWorld: true })
-        setMessage('已同步为世界引擎。原有分步骤内容保持不变。')
-      }
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : String(error))
-    } finally { setSyncing(false) }
-  }
+  const projection = activeWorld.projection
   return <>
     <PageHeading eyebrow="FOUNDATION / WORLD ENGINE" title="世界引擎" description="世界是所有写作、节点和互动功能的共同基座。每个世界都有独立编号和版本。" action={<><Button icon={Hash} onClick={onOpenWorldPicker}>使用世界编号</Button><Button variant="primary" icon={Plus} onClick={onOpenCreate}>从零创建世界</Button></>} />
     <div className="sf-subnav">{worlds.map(world => <button key={world.code} className={world.code === activeWorld.code ? 'active' : ''} onClick={() => onSelectWorld(world)}><WorldGlyph accent={world.accent} small /><span>{world.name}</span><span>{world.code}</span></button>)}<span className="sf-subnav-spacer" /></div>
-    <section className="sf-worlds-featured"><div className="sf-worlds-featured-visual"><WorldGlyph accent={activeWorld.accent} /></div><div className="sf-worlds-featured-copy"><span className="sf-overline">WORLD ENGINE · {activeWorld.source}</span><h2>{activeWorld.name}</h2><p>{activeWorld.description}</p><span className="sf-world-code-large"><Hash className="h-4 w-4" /> {activeWorld.code} · v{activeWorld.version}</span><div className="sf-worlds-featured-actions"><Button variant="primary" icon={ArrowRight} onClick={() => document.getElementById('world-engine-editor')?.scrollIntoView({ behavior: 'smooth' })}>管理世界设定</Button>{!activeWorld.project.enableMultiWorld && <Button icon={Check} onClick={() => void sync()} disabled={syncing}>{syncing ? '同步中…' : '同步分步骤设定'}</Button>}</div>{message && <p className="sf-product-message">{message}</p>}</div><div className="sf-worlds-featured-stats"><div><strong>{activeWorld.completeness}%</strong><span>资料完整度</span></div><div><strong>v{activeWorld.version}</strong><span>当前版本</span></div><div><strong>{activeWorld.project.enableMultiWorld ? '可引用' : '待同步'}</strong><span>基座状态</span></div></div></section>
-    <section id="world-engine-editor" className="sf-product-panel"><div className="sf-section-header"><div><div className="sf-eyebrow">WORLD CONTENT</div><h2>{activeWorld.project.enableMultiWorld ? '世界设定工作台' : '分步骤项目设定'}</h2></div><span className="sf-project-status"><StatusDot tone={activeWorld.project.enableMultiWorld ? 'success' : 'warning'} />{activeWorld.project.enableMultiWorld ? '世界引擎已启用' : '同步后可被其他功能引用'}</span></div>{activeWorld.project.enableMultiWorld ? <Suspense fallback={<FeaturePanelFallback />}><WorldGroupOverview project={activeWorld.project} /></Suspense> : <div className="sf-product-inline-empty"><p>当前项目仍按旧的分步骤模式保存。同步操作会先将现有设定归属到主世界，再开启世界引擎入口，不会拆分或删除原内容。</p><Button variant="primary" icon={Check} onClick={() => void sync()} disabled={syncing}>{syncing ? '同步中…' : '同步为世界引擎'}</Button></div>}</section>
+    <section className="sf-worlds-featured"><div className="sf-worlds-featured-visual"><WorldGlyph accent={activeWorld.accent} /></div><div className="sf-worlds-featured-copy"><span className="sf-overline">WORLD ENGINE · {activeWorld.source}</span><h2>{activeWorld.name}</h2><p>{activeWorld.description}</p><span className="sf-world-code-large"><Hash className="h-4 w-4" /> {activeWorld.code} · v{activeWorld.version}</span><div className="sf-worlds-featured-actions"><Button variant="primary" icon={ArrowRight} onClick={() => document.getElementById('world-engine-editor')?.scrollIntoView({ behavior: 'smooth' })}>管理世界设定</Button><Button icon={BookOpenText} onClick={() => onOpenModule('outline')}>继续分步骤创作</Button></div></div><div className="sf-worlds-featured-stats"><div><strong>{activeWorld.completeness}%</strong><span>世界内容覆盖</span></div><div><strong>v{activeWorld.version}</strong><span>当前草稿版本</span></div><div><strong>{projection?.readiness === 'usable' ? '可创作' : projection?.readiness === 'building' ? '建设中' : '待建立'}</strong><span>世界状态</span></div></div></section>
+    <section id="world-engine-editor" className="sf-product-panel"><WorldEngineWorkspace projection={projection} onOpenModule={onOpenModule} /></section>
     <WorldSharingPanel project={activeWorld.project} onImported={onImported} />
   </>
 }
@@ -273,7 +255,7 @@ function CreatePanel({ onClose, onCreated }: { onClose: () => void; onCreated: (
     if (!name.trim()) return
     setBusy(true)
     try {
-      const id = await createProject({ name: name.trim(), genre: 'other', genres: ['other'], status: 'drafting', description: description.trim(), targetWordCount: 500000, enableMultiWorld: kind === 'worlds' })
+      const id = await createProject({ name: name.trim(), genre: 'other', genres: ['other'], status: 'drafting', description: description.trim(), targetWordCount: 500000, enableMultiWorld: false })
       onCreated(kind === 'worlds' ? 'worlds' : 'novel', id)
     } finally { setBusy(false) }
   }
@@ -299,6 +281,7 @@ export default function ProductHubPage() {
   const [showCreate, setShowCreate] = useState(false)
   const [showWorldPicker, setShowWorldPicker] = useState(false)
   const [showMobileNav, setShowMobileNav] = useState(false)
+  const [projections, setProjections] = useState<Record<number, WorldProjection>>({})
 
   useEffect(() => { void loadProjects() }, [loadProjects])
   useEffect(() => {
@@ -306,7 +289,22 @@ export default function ProductHubPage() {
     setActiveProjectId(projects[0]?.id ?? null)
   }, [activeProjectId, projects])
 
-  const worlds = useMemo(() => projects.filter(project => project.id != null).map(projectToWorld), [projects])
+  useEffect(() => {
+    let cancelled = false
+    const load = async () => {
+      try {
+        const loaded = await loadWorldProjections(projects.filter(project => project.id != null))
+        if (!cancelled) setProjections(Object.fromEntries(loaded.map(projection => [projection.projectId, projection])))
+      } catch (error) {
+        console.error('[WORLD-2] 读取世界投影失败', error)
+        if (!cancelled) setProjections({})
+      }
+    }
+    void load()
+    return () => { cancelled = true }
+  }, [projects])
+
+  const worlds = useMemo(() => projects.filter(project => project.id != null).map((project, index) => projectToWorld(project, index, projections[project.id!])), [projects, projections])
   const activeWorld = worlds.find(world => world.projectId === activeProjectId) ?? worlds[0]
   const activeProject = activeWorld?.project
   const selectWorld = (world: ProductWorld) => setActiveProjectId(world.projectId)
@@ -314,7 +312,7 @@ export default function ProductHubPage() {
 
   const renderPage = () => {
     switch (activeTab) {
-      case 'worlds': return <WorldEnginePage worlds={worlds} activeWorld={activeWorld} onSelectWorld={selectWorld} onOpenCreate={() => setShowCreate(true)} onOpenWorldPicker={() => setShowWorldPicker(true)} onImported={async projectId => { await loadProjects(); setActiveProjectId(projectId); setActiveTab('worlds') }} />
+      case 'worlds': return <WorldEnginePage worlds={worlds} activeWorld={activeWorld} onSelectWorld={selectWorld} onOpenCreate={() => setShowCreate(true)} onOpenWorldPicker={() => setShowWorldPicker(true)} onImported={async projectId => { await loadProjects(); setActiveProjectId(projectId); setActiveTab('worlds') }} onOpenModule={module => { if (activeProject?.id) navigate(`/workspace/${activeProject.id}?module=${module}`) }} />
       case 'novel': return <NovelPage project={activeProject} world={activeWorld} onOpenWorldPicker={() => setShowWorldPicker(true)} onCreate={() => setShowCreate(true)} />
       case 'nodes': return <NodesPage project={activeProject} world={activeWorld} onOpenWorldPicker={() => setShowWorldPicker(true)} onCreate={() => setShowCreate(true)} />
       case 'ttrpg': return <TtrpgPage project={activeProject} world={activeWorld} onOpenWorldPicker={() => setShowWorldPicker(true)} onCreate={() => setShowCreate(true)} />

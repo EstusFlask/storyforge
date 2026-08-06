@@ -22,6 +22,14 @@ export type TableOwner =
   | 'blob'         // Blob 存储,特殊 owner(如 importFiles 复用为 master blob)
   | 'global'       // 全局(不绑项目,不参与 deleteProject 级联)
 
+/**
+ * 世界引擎产品域的内容归属。
+ *
+ * 这不是第二套数据库生命周期注册表，而是 PROJECT_TABLES 上的产品投影元数据：
+ * 世界工作台、完整度和发布预检都从同一份表登记派生，避免组件再次手写表清单。
+ */
+export type WorldDomainArea = 'foundation' | 'assets' | 'narrative' | 'structure' | 'runtime'
+
 /** 简单外键引用(table[field] 形式) */
 export interface SimpleRef {
   kind: 'simple'
@@ -147,6 +155,8 @@ export interface TableSpec<T = any> {
   worldGroupField?: string
   /** 是否带 homeWorldGroupId(仅 characters) */
   homeWorldScoped?: boolean
+  /** 世界引擎产品投影域；同一表可同时属于多个域。 */
+  worldDomains?: readonly WorldDomainArea[]
   /** 树形(parentId 字段名) */
   tree?: { parentField: string }
   /** 外键/引用关系(删除级联用) */

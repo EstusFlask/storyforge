@@ -52,7 +52,7 @@ test('产品综合首页可从零创建世界引擎并分配稳定编号', async
   await expect(page.getByRole('heading', { name: '世界引擎', exact: true })).toBeVisible()
   await expect(page.locator('.sf-worlds-featured').getByRole('heading', { name: '潮汐之后', exact: true })).toBeVisible()
   await expect(page.locator('.sf-world-code-large')).toHaveText(/W-[A-Z0-9]+-[A-Z0-9]+ · v1/)
-  await expect(page.getByText('世界引擎已启用', { exact: true })).toBeVisible()
+  await expect(page.getByText('从基础设定开始', { exact: true })).toBeVisible()
 
   await page.getByRole('button', { name: '回到总览', exact: true }).click()
   await page.getByRole('banner').getByRole('button', { name: '新建', exact: true }).click()
@@ -69,6 +69,26 @@ test('产品综合首页可从零创建世界引擎并分配稳定编号', async
 
   await page.getByRole('banner').getByRole('button', { name: '搜索世界', exact: true }).click()
   await expect(page.getByRole('heading', { name: '选择一个世界', exact: true })).toBeVisible()
+})
+
+test('分步骤作品进入世界引擎时直接复用完整工作台，不要求开启多世界', async ({ page }) => {
+  await page.addInitScript(() => {
+    localStorage.setItem('storyforge_guide_completed', 'e2e')
+  })
+  await page.goto('./')
+  await page.getByRole('banner').getByRole('button', { name: '新建', exact: true }).click()
+  await page.getByRole('button', { name: /分步骤作品/ }).click()
+  await page.getByPlaceholder('例如：《幽都遗闻》').fill('分步骤世界基线')
+  await page.getByRole('button', { name: '创建分步骤作品', exact: true }).click()
+  await expect(page).toHaveURL(/\/storyforge\/workspace\/\d+\?module=outline$/)
+
+  await page.goto('./')
+  await page.getByRole('button', { name: '世界引擎', exact: true }).click()
+  await expect(page.getByRole('heading', { name: '完整世界工作台', exact: true })).toBeVisible()
+  await expect(page.getByRole('button', { name: '同步分步骤设定', exact: true })).toHaveCount(0)
+  await expect(page.getByRole('button', { name: '自然环境', exact: true })).toBeVisible()
+  await page.getByRole('button', { name: '大纲与细纲', exact: true }).click()
+  await expect(page).toHaveURL(/\/storyforge\/workspace\/\d+\?module=outline$/)
 })
 
 test('世界引擎可生成并预检本地世界分享包，再导入为新编号副本', async ({ page }) => {

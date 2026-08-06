@@ -19,7 +19,7 @@ import { useFolderAutoBackup } from '../hooks/useFolderAutoBackup'
 import { MessageSquare, PanelRight } from 'lucide-react'
 import Sidebar, { type SidebarModule } from '../components/layout/Sidebar'
 import ContentTypeBadge from '../components/layout/ContentTypeBadge'
-import { getModuleContentType } from '../components/layout/sidebar-tree'
+import { getModuleContentType, MODULE_CONTENT_TYPES } from '../components/layout/sidebar-tree'
 import PropertiesPanel from '../components/layout/PropertiesPanel'
 import ProjectInfoPanel from '../components/project/ProjectInfoPanel'
 // 旧「作品学习」面板已整合进 ReferencePanel（Phase 20，子系统于 v32 下线）
@@ -75,12 +75,11 @@ export default function WorkspacePage() {
   const navigate = useNavigate()
   const { loadProject, projects, currentProjectId } = useProjectStore()
   const initialModule = new URLSearchParams(location.search).get('module')
-  const backPath = initialModule ? '/' : '/projects'
-  const [activeModule, setActiveModule] = useState<SidebarModule>(
-    initialModule === 'outline' || initialModule === 'chapters-list' || initialModule === 'visual-workflows' || initialModule === 'simulation-runtime'
-      ? initialModule
-      : 'info',
-  )
+  const initialSidebarModule = initialModule && Object.prototype.hasOwnProperty.call(MODULE_CONTENT_TYPES, initialModule)
+    ? initialModule as SidebarModule
+    : null
+  const backPath = initialSidebarModule ? '/' : '/projects'
+  const [activeModule, setActiveModule] = useState<SidebarModule>(initialSidebarModule ?? 'info')
   const [loading, setLoading] = useState(true)
   const [editorNodeId, setEditorNodeId] = useState<number | null>(null)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
@@ -112,10 +111,8 @@ export default function WorkspacePage() {
 
   // 加载项目 + 所有关联数据
   useEffect(() => {
-    if (initialModule === 'outline' || initialModule === 'chapters-list' || initialModule === 'visual-workflows' || initialModule === 'simulation-runtime') {
-      setActiveModule(initialModule)
-    }
-  }, [initialModule])
+    if (initialSidebarModule) setActiveModule(initialSidebarModule)
+  }, [initialSidebarModule])
 
   useEffect(() => {
     const load = async () => {
