@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="320" viewBox="0 0 960 320" role="img" aria-labelledby="title description">
+  <title id="title">StoryForge star history</title>
+  <desc id="description">GitHub stars grew from 0 to 469 between 2026-05-05 and 2026-08-06.</desc>
+  <style>
+    .background { fill: #ffffff; }
+    .text { fill: #24292f; font: 13px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+    .muted { fill: #57606a; font: 12px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+    .grid { stroke: #d0d7de; stroke-width: 1; }
+    .area { fill: #0969da; opacity: .12; }
+    .line { fill: none; stroke: #0969da; stroke-width: 3; stroke-linejoin: round; stroke-linecap: round; }
+    .endpoint { fill: #0969da; stroke: #ffffff; stroke-width: 3; }
+    @media (prefers-color-scheme: dark) {
+      .background { fill: #0d1117; }
+      .text { fill: #e6edf3; }
+      .muted { fill: #8d96a0; }
+      .grid { stroke: #30363d; }
+      .area { fill: #58a6ff; opacity: .16; }
+      .line { stroke: #58a6ff; }
+      .endpoint { fill: #58a6ff; stroke: #0d1117; }
+    }
+  </style>
+  <rect class="background" width="960" height="320" rx="8" />
+  <text class="text" x="58" y="28" font-size="18" font-weight="600">Star History</text>
+  <text class="muted" x="58" y="48">yuanbw2025/storyforge · 2026-05-05 to 2026-08-06</text>
+  <text class="text" x="918" y="30" text-anchor="end" font-size="22" font-weight="600">469 stars</text>
+  <line class="grid" x1="58" y1="278" x2="918" y2="278" /><text class="muted" x="48" y="282" text-anchor="end">0</text>
+  <line class="grid" x1="58" y1="236" x2="918" y2="236" /><text class="muted" x="48" y="240" text-anchor="end">100</text>
+  <line class="grid" x1="58" y1="194" x2="918" y2="194" /><text class="muted" x="48" y="198" text-anchor="end">200</text>
+  <line class="grid" x1="58" y1="152" x2="918" y2="152" /><text class="muted" x="48" y="156" text-anchor="end">300</text>
+  <line class="grid" x1="58" y1="110" x2="918" y2="110" /><text class="muted" x="48" y="114" text-anchor="end">400</text>
+  <line class="grid" x1="58" y1="68" x2="918" y2="68" /><text class="muted" x="48" y="72" text-anchor="end">500</text>
+  <text class="muted" x="58" y="304" text-anchor="middle">May 5</text>
+  <text class="muted" x="270.68817204301075" y="304" text-anchor="middle">May 28</text>
+  <text class="muted" x="492.6236559139785" y="304" text-anchor="middle">Jun 21</text>
+  <text class="muted" x="705.3118279569892" y="304" text-anchor="middle">Jul 14</text>
+  <text class="muted" x="918" y="304" text-anchor="middle">Aug 6</text>
+  <path class="area" d="M 58.00 278.00 L 67.25 277.58 L 76.49 277.58 L 85.74 277.58 L 94.99 277.58 L 104.24 277.58 L 113.48 277.58 L 122.73 277.58 L 131.98 277.16 L 141.23 277.16 L 150.47 276.32 L 159.72 272.12 L 168.97 269.18 L 178.22 265.82 L 187.46 264.56 L 196.71 262.88 L 205.96 260.36 L 215.20 259.10 L 224.45 259.10 L 233.70 258.26 L 242.95 256.16 L 252.19 254.48 L 261.44 252.80 L 270.69 251.96 L 279.94 250.70 L 289.18 248.18 L 298.43 247.34 L 307.68 246.08 L 316.92 244.82 L 326.17 243.56 L 335.42 243.56 L 344.67 241.88 L 353.91 241.88 L 363.16 241.46 L 372.41 240.62 L 381.66 238.94 L 390.90 236.42 L 400.15 235.58 L 409.40 234.32 L 418.65 233.90 L 427.89 233.48 L 437.14 232.64 L 446.39 232.64 L 455.63 230.96 L 464.88 230.54 L 474.13 230.12 L 483.38 230.12 L 492.62 229.28 L 501.87 227.18 L 511.12 226.34 L 520.37 225.08 L 529.61 224.66 L 538.86 224.66 L 548.11 222.56 L 557.35 219.20 L 566.60 214.58 L 575.85 210.80 L 585.10 201.56 L 594.34 199.04 L 603.59 190.22 L 612.84 186.86 L 622.09 183.92 L 631.33 180.56 L 640.58 178.04 L 649.83 174.68 L 659.08 170.90 L 668.32 165.86 L 677.57 163.34 L 686.82 161.24 L 696.06 155.78 L 705.31 152.84 L 714.56 149.48 L 723.81 145.70 L 733.05 141.92 L 742.30 138.14 L 751.55 133.10 L 760.80 128.06 L 770.04 123.02 L 779.29 120.50 L 788.54 116.30 L 797.78 112.10 L 807.03 109.16 L 816.28 105.80 L 825.53 102.86 L 834.77 100.76 L 844.02 99.50 L 853.27 97.82 L 862.52 94.46 L 871.76 91.52 L 881.01 88.58 L 890.26 86.90 L 899.51 84.80 L 908.75 81.86 L 918.00 81.02 L 918.00 278 L 58 278 Z" />
+  <path class="line" d="M 58.00 278.00 L 67.25 277.58 L 76.49 277.58 L 85.74 277.58 L 94.99 277.58 L 104.24 277.58 L 113.48 277.58 L 122.73 277.58 L 131.98 277.16 L 141.23 277.16 L 150.47 276.32 L 159.72 272.12 L 168.97 269.18 L 178.22 265.82 L 187.46 264.56 L 196.71 262.88 L 205.96 260.36 L 215.20 259.10 L 224.45 259.10 L 233.70 258.26 L 242.95 256.16 L 252.19 254.48 L 261.44 252.80 L 270.69 251.96 L 279.94 250.70 L 289.18 248.18 L 298.43 247.34 L 307.68 246.08 L 316.92 244.82 L 326.17 243.56 L 335.42 243.56 L 344.67 241.88 L 353.91 241.88 L 363.16 241.46 L 372.41 240.62 L 381.66 238.94 L 390.90 236.42 L 400.15 235.58 L 409.40 234.32 L 418.65 233.90 L 427.89 233.48 L 437.14 232.64 L 446.39 232.64 L 455.63 230.96 L 464.88 230.54 L 474.13 230.12 L 483.38 230.12 L 492.62 229.28 L 501.87 227.18 L 511.12 226.34 L 520.37 225.08 L 529.61 224.66 L 538.86 224.66 L 548.11 222.56 L 557.35 219.20 L 566.60 214.58 L 575.85 210.80 L 585.10 201.56 L 594.34 199.04 L 603.59 190.22 L 612.84 186.86 L 622.09 183.92 L 631.33 180.56 L 640.58 178.04 L 649.83 174.68 L 659.08 170.90 L 668.32 165.86 L 677.57 163.34 L 686.82 161.24 L 696.06 155.78 L 705.31 152.84 L 714.56 149.48 L 723.81 145.70 L 733.05 141.92 L 742.30 138.14 L 751.55 133.10 L 760.80 128.06 L 770.04 123.02 L 779.29 120.50 L 788.54 116.30 L 797.78 112.10 L 807.03 109.16 L 816.28 105.80 L 825.53 102.86 L 834.77 100.76 L 844.02 99.50 L 853.27 97.82 L 862.52 94.46 L 871.76 91.52 L 881.01 88.58 L 890.26 86.90 L 899.51 84.80 L 908.75 81.86 L 918.00 81.02" />
+  <circle class="endpoint" cx="918" cy="81.02000000000001" r="5" />
+</svg>
