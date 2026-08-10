@@ -158,6 +158,48 @@ describe('AUDIT-6 · 大纲生成 controller', () => {
     expect(controller.pendingRequest).toBeNull()
   })
 
+  it('透明模式先停在最终消息闸门，编辑后才把本次副本交给 AI', async () => {
+    const ai = createAI()
+    await mount({ ai })
+
+    await act(async () => { await controller.prepare({ kind: 'chapters', volumeId: 1 }) })
+    const originalMessages = controller.preparedNode!.messages.map(message => ({ ...message }))
+    await act(async () => controller.setTransparentMode(true))
+    await act(async () => { await controller.confirm() })
+
+    expect(ai.start).not.toHaveBeenCalled()
+    expect(controller.promptReviewOpen).toBe(true)
+    expect(controller.pendingRequest).toEqual({ kind: 'chapters', volumeId: 1 })
+
+    const editedMessages = originalMessages.map((message, index) => (
+      index === originalMessages.length - 1
+        ? { ...message, content: `${message.content}\n作者本次补充：避免巧合推进。` }
+        : message
+    ))
+    await act(async () => { await controller.confirmMessages(editedMessages) })
+
+    expect(ai.start).toHaveBeenCalledOnce()
+    expect(ai.start.mock.calls[0][0]).toEqual(editedMessages)
+    expect(originalMessages.at(-1)?.content).not.toContain('作者本次补充')
+    expect(controller.pendingRequest).toBeNull()
+  })
+
+  it('取消或发起新请求会清掉透明模式与未发送草稿入口', async () => {
+    await mount()
+    await act(async () => { await controller.prepare({ kind: 'chapters', volumeId: 1 }) })
+    await act(async () => controller.setTransparentMode(true))
+    await act(async () => { await controller.confirm() })
+    expect(controller.promptReviewOpen).toBe(true)
+
+    await act(async () => controller.cancel())
+    expect(controller.transparentMode).toBe(false)
+    expect(controller.promptReviewOpen).toBe(false)
+
+    await act(async () => { await controller.prepare({ kind: 'chapters', volumeId: 2 }) })
+    expect(controller.transparentMode).toBe(false)
+    expect(controller.promptReviewOpen).toBe(false)
+  })
+
   it('重试时上下文装配失败会重置会话并反馈，不产生悬空异常', async () => {
     const ai = createAI('outline.volume:batch')
     const onError = vi.fn()

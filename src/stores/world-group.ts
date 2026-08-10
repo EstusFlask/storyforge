@@ -35,7 +35,7 @@ interface WorldGroupStore {
   ensurePrimaryGroup: (projectId: number) => Promise<number>
 
   // 开启多世界：确保主世界组 + 把现有项目级数据归属到主世界组
-  migrateToMultiWorld: (projectId: number) => Promise<void>
+  migrateToMultiWorld: (projectId: number) => Promise<boolean>
 
   // 切换活跃世界
   setActiveGroup: (id: number | null) => void
@@ -139,22 +139,24 @@ export const useWorldGroupStore = create<WorldGroupStore>((set, get) => ({
   },
 
   ensurePrimaryGroup: async (projectId: number) => {
-    const existing = await db.worldGroups
-      .where('projectId').equals(projectId)
-      .filter(g => g.type === 'primary')
-      .first()
-    if (existing?.id) return existing.id
+    const id = await db.transaction('rw', db.worldGroups, async () => {
+      const existing = await db.worldGroups
+        .where('projectId').equals(projectId)
+        .filter(g => g.type === 'primary')
+        .first()
+      if (existing?.id) return existing.id
 
-    const id = await db.worldGroups.add({
-      projectId,
-      name: '主世界',
-      description: '',
-      type: 'primary',
-      icon: '🏠',
-      order: 0,
-      createdAt: now(),
-      updatedAt: now(),
-    } as WorldGroup) as number
+      return db.worldGroups.add({
+        projectId,
+        name: '主世界',
+        description: '',
+        type: 'primary',
+        icon: '🏠',
+        order: 0,
+        createdAt: now(),
+        updatedAt: now(),
+      } as WorldGroup) as Promise<number>
+    })
 
     // 刷新
     const groups = await db.worldGroups
@@ -174,14 +176,15 @@ export const useWorldGroupStore = create<WorldGroupStore>((set, get) => ({
       projectId,
       details: '此操作将把现有项目数据(世界观、力量体系、大纲、词条等)迁移到「主世界」归属。建议先导出备份。',
     })
-    if (!proceed) return  // 用户取消
+    if (!proceed) return false  // 用户取消
 
     // 1. 确保主世界组存在
     const primaryId = await get().ensurePrimaryGroup(projectId)
 
     // 2. Phase 1.1b: 盖章从 PROJECT_TABLES 注册表派生(所有 worldScoped 表的 null 记录
-    //    盖章到主世界;codexCategories 分类结构保持全局不盖)。行为与手写版等价(R-02 保证)。
+    //    盖章到主世界；codexCategories 是项目级共享 schema，不在 worldScoped 清单中)。
     await stampPrimaryWorld(projectId, primaryId)
+    return true
   },
 
   setActiveGroup: (id) => {

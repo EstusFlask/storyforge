@@ -32,6 +32,67 @@ function normalize(data: any) {
     delete row._sceneCharacterIndexes
   }
   for (const row of data.creativeRules ?? []) delete row._citedReferenceIndexes
+  // CONSISTENCY-2: 新表没有旧手写版 fixture 对应字段；其格式与 FK 往返由
+  // R-export-fullcoverage 单独锁死，这里仍只比较旧格式共有部分。
+  delete data.knowledgeLedger
+  // Phase 39 同理；StoryArc 现在为下游动态表提供显式 exportId，旧 fixture 不含。
+  delete data.storylineProgress
+  delete data.storylineCrossings
+  for (const row of data.storyArcs ?? []) delete row._exportId
+  for (const row of data.worldNodes ?? []) {
+    if (row.portalsJSON === undefined) delete row.portalsJSON
+  }
+  // INV-1: itemLedger now carries heldByName + characterId + _characterExportId;
+  // legacy fixture predates these fields. Strip them for format-compat comparison.
+  for (const row of data.itemLedger ?? []) {
+    delete row.heldByName
+    delete row.characterId
+    delete row._characterExportId
+  }
+  // CONSISTENCY-3: temporalFacts 新增四类可移植设定来源 FK。旧 fixture 没有这些
+  // 影子字段；新格式的实际往返由 R-CONSISTENCY3-world-constitution 锁定。
+  for (const row of data.temporalFacts ?? []) {
+    delete row._srcWorldviewExportId
+    delete row._srcPowerSystemExportId
+    delete row._srcStoryCoreExportId
+    delete row._srcCharacterExportId
+    delete row._srcCultivationSystemExportId
+  }
+  // WORLD-1:修炼体系及角色/词条的新便携 FK 没有旧 fixture 对应字段；
+  // 新表和这些 FK 的往返由 R-export-fullcoverage 锁定。
+  delete data.cultivationSystems
+  delete data.cultivationProgress
+  // STORY-1:角色驱动方案及项目 active 影子引用为新格式；专项往返由 R-CF9C 锁定。
+  delete data.characterDrivenPlans
+  delete data.project?._activeCharacterDrivenPlanExportId
+  // IDEA-1:增量灵感工作区晚于旧 v3 fixture；来源/版本往返由 R-CM1 与
+  // R-export-fullcoverage 锁定。
+  delete data.inspirationWorkspaces
+  // IDEA-1 reference analysis runs are a new portable layer. Legacy chunks had no
+  // run shadow id; version/remap behavior is covered by R-IDEA1-reference-evolution.
+  delete data.referenceAnalysisRuns
+  for (const row of data.referenceChunkAnalysis ?? []) delete row._analysisRunExportId
+  // AGENT-2 / FLOW-2 project process data is newer than the legacy v3 fixture.
+  // Its exact remap and roundtrip contract is covered by R-export-fullcoverage.
+  delete data.agentConversations
+  delete data.agentEvents
+  delete data.nodeFlows
+  delete data.nodeRuns
+  // SIM-1 process/runtime data is newer than the legacy v3 fixture.
+  // Parent/session/world remaps are covered by R-export-fullcoverage and R-SIM1-runtime-core.
+  delete data.simulationSessions
+  delete data.simulationEvents
+  delete data.simulationCheckpoints
+  for (const row of data.characters ?? []) {
+    delete row._raceEntryExportId
+    delete row._cultivationSystemExportId
+    delete row.cultivationStageId
+  }
+  for (const row of data.codexEntries ?? []) {
+    delete row._cultivationSystemExportId
+    delete row._importantLocationExportId
+    delete row.cultivationStageId
+  }
   return data
 }
 

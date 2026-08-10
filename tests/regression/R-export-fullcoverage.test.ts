@@ -2,7 +2,7 @@
  * R-export-fullcoverage · 全部 exportable 表 · 多世界全量导出/导入安全网
  *
  * 目的(AUDIT-1 重构安全网):在把 json-export 从「手写枚举」重构为「注册表派生」之前,
- * 先用一个**覆盖全部 31 张 exportable 表 + 双世界组**的种子做往返,锁死当前手写版的正确行为。
+ * 先用一个**覆盖全部 exportable 表 + 双世界组**的种子做往返,锁死当前手写版的正确行为。
  * 重构后此测试必须保持全绿——任何外键重映射/树重建/世界组重映射的行为漂移都会被它抓到。
  *
  * 比 R-export-import-roundtrip 更严:那条是单世界(worldGroupId 全 null),本条是**双世界组**,
@@ -63,6 +63,12 @@ describe('R-export-fullcoverage · 全表多世界往返安全网', () => {
     const newChars = await db.characters.where('projectId').equals(newId).toArray()
     const newChar1 = newChars.find(c => c.name === '林惊羽')!
     expect(newChar1.homeWorldGroupId).toBe(newWgA)
+    const newCultivation = await db.cultivationSystems.where('projectId').equals(newId).first()
+    const newCodexEntries = await db.codexEntries.where('projectId').equals(newId).toArray()
+    expect(newCultivation?.worldGroupId).toBe(newWgA)
+    expect(newChar1.cultivationSystemId).toBe(newCultivation?.id)
+    expect(newChar1.cultivationStageId).toBe('qi')
+    expect(newChar1.raceEntryId).toBe(newCodexEntries.find(entry => entry.name === '青云宗')?.id)
 
     // 角色关系重映射
     const newRels = await db.characterRelations.where('projectId').equals(newId).toArray()
@@ -80,6 +86,17 @@ describe('R-export-fullcoverage · 全表多世界往返安全网', () => {
     const newChapter = await db.chapters.where('projectId').equals(newId).first()
     expect(newChapter!.outlineNodeId).toBe(newChapNode.id)
     expect(newChapter!.content).toContain('废墟中睁眼')
+
+    // Phase 34 修炼进度 → 世界/角色/体系/章节全部重映射
+    const newCultivationProgress = await db.cultivationProgress.where('projectId').equals(newId).first()
+    expect(newCultivationProgress).toMatchObject({
+      worldGroupId: newWgA,
+      characterId: newChar1.id,
+      cultivationSystemId: newCultivation!.id,
+      sourceChapterId: newChapter!.id,
+      stageId: 'qi',
+      status: 'confirmed',
+    })
 
     // 细纲外键(outlineNodeId 重映射正确)
     const newDetail = await db.detailedOutlines.where('projectId').equals(newId).first()
@@ -99,6 +116,58 @@ describe('R-export-fullcoverage · 全表多世界往返安全网', () => {
     const newSte = await db.storyTimelineEvents.where('projectId').equals(newId).first()
     expect(newSte!.chapterId).toBe(newChapter!.id)
 
+    // Phase 39 动态故事线 → StoryArc / Chapter 全部重映射
+    const newArc = await db.storyArcs.where('projectId').equals(newId).first()
+    const newProgress = await db.storylineProgress.where('projectId').equals(newId).first()
+    const newCrossing = await db.storylineCrossings.where('projectId').equals(newId).first()
+    expect(newProgress).toMatchObject({
+      arcId: newArc!.id,
+      lastActiveChapterId: newChapter!.id,
+      status: 'active',
+    })
+    expect(newCrossing).toMatchObject({
+      arcIdA: newArc!.id,
+      arcIdB: newArc!.id,
+      chapterId: newChapter!.id,
+    })
+
+    // SIM-1 运行时 → 世界、父分支与会话引用全部重映射
+    const newSimulationSessions = await db.simulationSessions
+      .where('projectId').equals(newId).toArray()
+    const newSimulationParent = newSimulationSessions.find(row => row.title === '青云山战役')!
+    const newSimulationChild = newSimulationSessions.find(row => row.title === '青云山战役 · 分支')!
+    expect(newSimulationParent.worldGroupId).toBe(newWgA)
+    expect(newSimulationChild).toMatchObject({
+      worldGroupId: newWgA,
+      parentSessionId: newSimulationParent.id,
+      parentThroughSequence: 0,
+    })
+    const newSimulationEvent = await db.simulationEvents.where('projectId').equals(newId).first()
+    const newSimulationCheckpoint = await db.simulationCheckpoints
+      .where('projectId').equals(newId).first()
+    expect(newSimulationEvent).toMatchObject({
+      worldGroupId: newWgA,
+      sessionId: newSimulationChild.id,
+      sequence: 1,
+    })
+    expect(newSimulationCheckpoint).toMatchObject({
+      worldGroupId: newWgA,
+      sessionId: newSimulationChild.id,
+      throughSequence: 1,
+    })
+
+    // knowledgeLedger → 世界/角色/章节/事实全部重映射
+    const newKnowledge = await db.knowledgeLedger.where('projectId').equals(newId).first()
+    const newFact = await db.temporalFacts.where('projectId').equals(newId).first()
+    expect(newKnowledge).toMatchObject({
+      worldGroupId: newWgA,
+      characterId: newChar1.id,
+      sourceChapterId: newChapter!.id,
+      factId: newFact!.id,
+      knowledgeKey: 'self.power_stage',
+      status: 'confirmed',
+    })
+
     // 重要地点树
     const newLocs = await db.importantLocations.where('projectId').equals(newId).toArray()
     const newLocParent = newLocs.find(l => l.name === '青云山')!
@@ -114,6 +183,7 @@ describe('R-export-fullcoverage · 全表多世界往返安全网', () => {
     const newEntry = await db.codexEntries.where('projectId').equals(newId).first()
     expect(newEntry!.categoryId).toBe(newSubCat.id)
     expect(newEntry!.worldGroupId).toBe(newWgA)
+    expect(newEntry!.importantLocationId).toBe(newLocParent.id)
 
     // creativeRules 引用 reference 重映射
     const newRefs = await db.references.where('projectId').equals(newId).toArray()
@@ -131,5 +201,20 @@ describe('R-export-fullcoverage · 全表多世界往返安全网', () => {
     const portals = parseWorldPortals(newRoot.portalsJSON)
     expect(portals).toHaveLength(1)
     expect(portals[0].targetWorldId).toBe(newMirror.id)
+  })
+
+  it('认知账本导入遇到不可映射 FK 时保留事件但降级复核，不把缺失章节误当基线', async () => {
+    const src = await seedEverything()
+    const exported = await exportProjectJSON(src.projectId)
+    expect(exported.knowledgeLedger).toHaveLength(1)
+    ;(exported.knowledgeLedger![0] as any)._sourceChapterExportId = 9999
+
+    const newId = await importProjectJSON(exported)
+    const imported = await db.knowledgeLedger.where('projectId').equals(newId).first()
+    expect(imported).toMatchObject({
+      sourceChapterId: null,
+      status: 'source-missing',
+      knowledgeKey: 'self.power_stage',
+    })
   })
 })

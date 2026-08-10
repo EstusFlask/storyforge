@@ -1,8 +1,8 @@
 # 设定层重构设计文档 — 词条系统 + 修炼体系
 
 > Phase 35（世界观词条化重构）+ Phase 37（修炼体系）+ 关联 Phase 34（力量阶段追踪）/ Phase 36（上下游标记）
-> 状态：**设计定稿**（4 项决策已拍板，修炼体系支持分叉）| 作者构想 + 实现设计
-> 配套：`docs/ROADMAP.md`（Phase 34/35/36/37 概要）
+> 状态：**Phase 35 主体已落地；Phase 37-a、Phase 34 已完成（2026-07-25）**
+> 配套：`docs/roadmap/README.md`（WORLD-1 当前归属与施工顺序）；原 Phase 34/35/36/37 完整历史见 `docs/ROADMAP-LEGACY.md`。
 
 ---
 
@@ -213,11 +213,14 @@ export interface CultivationStage {
 
 ## 五、Phase 34 力量阶段追踪（下游产物，依赖 37）
 
-- **参照修炼体系阶梯**（不是世界底层力量体系）：把角色主修的 `CultivationSystem.stages`（含分叉）喂给 AI
-- AI 从已写正文检测主角当前境界 + **走的是哪条分支** → 记录到新表 `cultivationProgress`（角色 + 体系 + 当前阶 id + 已走路径 stageId[] + 每次突破章节/触发）
-- 展示：当前境界 + 晋升历程时间线（"修为进度条"），分叉体系下高亮主角实际走过的那条路径
-- 可选注入后续章节写作，防境界倒退、防走错分支
-- 归属"下游提取产物"，与物品栏/故事年表同构（复用逐章提取 + 去重管线）
+- ✅ **参照修炼体系阶梯**（不是世界底层力量体系）：把角色主修的
+  `CultivationSystem.stages`（含分叉）作为闭集交给 AI。
+- ✅ AI 从已写正文提出境界事件候选；角色、体系、境界 ID 和正文唯一逐字证据经代码
+  校验，候选只驻留内存，作者逐条确认后写入 `cultivationProgress` 事件流。
+- ✅ 当前境界、实际路径和晋升时间线按规范章序实时投影；分叉 DAG 高亮已确认路径。
+- ✅ 可选注入后续章节写作，项目开关默认关闭；开启后严格排除目标章自身和未来章。
+- ✅ 角色卡的“当前设定境界”保持上游身份，不覆盖也不冒充正文派生的下游进度。
+- 完整冻结契约与生命周期见 `docs/CULTIVATION-PROGRESS-DESIGN.md`。
 
 ---
 
@@ -319,10 +322,13 @@ export interface CultivationStage {
 
 ## 十一、分期实施
 
-**Phase 37-a 修炼体系（先，独立、是 34 前置）**
-- `cultivationSystems` 表 + store + 面板（多套 + 境界阶梯编辑）
-- 角色卡关联主修体系
-- 验证：能建多套体系、排境界
+**Phase 37-a 修炼体系（✅ 完成 2026-07-25，是 34 前置）**
+- ✅ DB v41 `cultivationSystems` + store + 力量体系页内的多套境界 DAG 编辑
+- ✅ 角色卡关联种族、主修体系和当前设定境界；异兽词条关联体系/境界
+- ✅ 多世界精确隔离、AI 上下文、世界宪法来源、删除/迁移/导出导入生命周期
+- ✅ DAG 可线性、分叉、合流；拒绝重复 ID、悬空父节点、自环和任意有向环
+- 代码入口：`types/cultivation.ts`、`stores/cultivation.ts`、
+  `components/worldview/CultivationSystemsPanel.tsx`、`ai/cultivation-context.ts`
 
 **Phase 35-a 词条地基（✅ 完成 2026-06-04）**
 - ✅ `codexCategories` / `codexEntries` 表（DB v25）+ 内置 7 类分类 seed（含各自 fieldSchema）
@@ -335,11 +341,17 @@ export interface CultivationStage {
 - 人文政经文化拆字段、历史线并入历史年表、重镇移位
 - 侧栏「道具系统」下线，世界观面板重组
 
-**Phase 35-c 导入 AI 分类**
-- 导入流程接入 AI 按新分类结构化为词条
+**Phase 35-c 导入 AI 分类（✅ 完成 2026-07-25）**
+- ✅ 分块导入按当前项目分类目录生成带逐字证据的词条候选
+- ✅ 稳定分类引用代替数据库 ID；本地校验证据、分类和字段
+- ✅ 跨块去重后由作者逐条选择、改名、改分类，再经 `adopt()` 写回
+- ✅ 同名既有词条只补空内容，多世界按导入目标严格隔离
 
-**Phase 34 力量阶段追踪**
-- `cultivationProgress` + 逐章提取 + 进度/历程视图
+**Phase 34 力量阶段追踪（✅ 完成 2026-07-25）**
+- ✅ DB v42 `cultivationProgress` 作者确认事件流
+- ✅ 闭集/逐字证据/DAG/规范章序校验与逆序补录
+- ✅ 候选确认、进度/历程视图、默认关闭的后续写作回注
+- ✅ 章节/角色/体系/阶段/世界/项目和导出导入生命周期
 
 **Phase 36 上下游标记**
 - contentType + 徽标（可随时插入，零依赖）

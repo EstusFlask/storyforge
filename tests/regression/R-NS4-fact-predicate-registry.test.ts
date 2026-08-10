@@ -11,6 +11,7 @@ import {
   FACT_PREDICATE_REGISTRY,
   getFactPredicate,
   normalizeFactPredicate,
+  normalizeFactValue,
 } from '../../src/lib/registry/fact-predicate-registry'
 
 describe('NS-4 · FACT_PREDICATE_REGISTRY', () => {
@@ -41,5 +42,12 @@ describe('NS-4 · FACT_PREDICATE_REGISTRY', () => {
     expect(getFactPredicate('owns')?.objectEntityTypes).toContain('codexEntry')
     expect(getFactPredicate('knows')?.factKind).toBe('event') // event 只增不改
     expect(getFactPredicate('legacyState')).toMatchObject({ cardinality: 'multi', conflictPolicy: 'manual' }) // 旧状态卡零丢失候选
+  })
+
+  it('枚举事实值必须归一到登记闭集', () => {
+    const aliveStatus = getFactPredicate('aliveStatus')!
+    expect(normalizeFactValue(aliveStatus, '身亡')).toBe('dead')
+    expect(normalizeFactValue(aliveStatus, 'ALIVE')).toBe('alive')
+    expect(normalizeFactValue(aliveStatus, '半死不活')).toBeNull()
   })
 })

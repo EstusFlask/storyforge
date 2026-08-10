@@ -9,7 +9,11 @@
  */
 import type { ChatMessage } from '../../types'
 import type { TemporalFact } from '../../types/temporal-fact'
-import { normalizeFactPredicate, FACT_PREDICATE_REGISTRY } from '../../registry/fact-predicate-registry'
+import {
+  normalizeFactPredicate,
+  normalizeFactValue,
+  FACT_PREDICATE_REGISTRY,
+} from '../../registry/fact-predicate-registry'
 
 export interface ExtractedFactCandidate {
   subjectName: string
@@ -28,7 +32,7 @@ export function buildFactExtractPrompt(args: {
   /** 注入受控谓词清单，引导模型只产已登记谓词 */
 }): ChatMessage[] {
   const predicateList = FACT_PREDICATE_REGISTRY
-    .map(p => `${p.key}(${p.label})`)
+    .map(p => `${p.key}(${p.label}${p.enums?.length ? `，值只能是 ${p.enums.join('|')}` : ''})`)
     .join('、')
   return [
     {
@@ -72,11 +76,11 @@ export function parseFactExtractResult(args: {
   return parsed.facts.flatMap((raw): ExtractedFactCandidate[] => {
     if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return []
     const item = raw as Record<string, unknown>
-    const subjectName = String(item.subject ?? '').trim()
-    const value = String(item.value ?? '').trim()
-    const quote = String(item.quote ?? '').trim()
+    const subjectName = String(item.subject ?? item.subjectName ?? '').trim()
+    const quote = String(item.quote ?? item.sourceQuote ?? '').trim()
     // 谓词必须过受控注册表，未登记直接丢（不入权威账本）
     const spec = normalizeFactPredicate(String(item.predicate ?? ''))
+    const value = spec ? normalizeFactValue(spec, item.value) : null
     if (!spec || !subjectName || !value) return []
     // 引文必须逐字回查正文，否则丢（杜绝幻觉证据）
     if (!quote || !args.chapterContent.includes(quote)) return []

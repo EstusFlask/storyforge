@@ -1,17 +1,17 @@
-import { BookOpenCheck, ClipboardList, ShieldCheck, StickyNote, Search } from 'lucide-react'
+import { BookOpenCheck, ClipboardList, Loader2, ShieldCheck, StickyNote, Search } from 'lucide-react'
 import { CInput } from '../shared/CompositionInput'
 
 interface Props {
   isStreaming: boolean
   hasText: boolean
-  extractingState: boolean
-  extractingFacts: boolean
-  factStreaming: boolean
+  organizingChapter: boolean
+  hasOrganizationCandidate: boolean
   analyzingImpact: boolean
   impactInfo: string | null
   hasOutline: boolean
   showOutlinePreview: boolean
   showReviewPanel: boolean
+  consistencyAlertCount: number
   showNotePanel: boolean
   showSettingsLookup: boolean
   customInstruction: string
@@ -20,8 +20,7 @@ interface Props {
   onExpand: () => void
   onPolish: () => void
   onDeAI: () => void
-  onExtractState: () => void
-  onExtractFacts: () => void
+  onOrganizeChapter: () => void
   onAnalyzeImpact: () => void
   onDismissImpact: () => void
   onToggleOutlinePreview: () => void
@@ -34,14 +33,14 @@ interface Props {
 export default function ChapterEditorToolbar({
   isStreaming,
   hasText,
-  extractingState,
-  extractingFacts,
-  factStreaming,
+  organizingChapter,
+  hasOrganizationCandidate,
   analyzingImpact,
   impactInfo,
   hasOutline,
   showOutlinePreview,
   showReviewPanel,
+  consistencyAlertCount,
   showNotePanel,
   showSettingsLookup,
   customInstruction,
@@ -50,8 +49,7 @@ export default function ChapterEditorToolbar({
   onExpand,
   onPolish,
   onDeAI,
-  onExtractState,
-  onExtractFacts,
+  onOrganizeChapter,
   onAnalyzeImpact,
   onDismissImpact,
   onToggleOutlinePreview,
@@ -82,17 +80,13 @@ export default function ChapterEditorToolbar({
         className="rounded-md border border-border bg-bg-elevated px-3 py-1.5 text-xs text-text-secondary hover:text-text-primary disabled:opacity-50 transition-colors">
         🔥 去AI味
       </button>
-      <button onClick={onExtractState} disabled={isStreaming || extractingState || !hasText}
-        title="AI 分析本章内容，提取角色/地点/物品等状态变更"
+      <button onClick={onOrganizeChapter} disabled={isStreaming || !hasText}
+        title="一次分析本章，生成状态、事实、物品、年表、关系和伏笔候选；确认前不会写入项目"
         className="flex items-center gap-1 px-3 py-1.5 bg-emerald-500/10 text-emerald-400 text-xs rounded-md hover:bg-emerald-500/20 disabled:opacity-50 transition-colors">
-        <ClipboardList className="w-3 h-3" />
-        {extractingState ? '提取中...' : '提取状态'}
-      </button>
-      <button onClick={onExtractFacts} disabled={factStreaming || extractingFacts || !hasText}
-        title="NS-4：AI 从本章正文抽取受控事实，落入事实账本候选（作者确认后注回后续生成，长期一致性）"
-        className="flex items-center gap-1 px-3 py-1.5 bg-sky-500/10 text-sky-400 text-xs rounded-md hover:bg-sky-500/20 disabled:opacity-50 transition-colors">
-        <ClipboardList className="w-3 h-3" />
-        {extractingFacts ? '抽取中...' : '提取事实'}
+        {organizingChapter
+          ? <Loader2 className="w-3 h-3 animate-spin" />
+          : <ClipboardList className="w-3 h-3" />}
+        {organizingChapter ? '停止整理' : hasOrganizationCandidate ? '查看整理结果' : '整理本章'}
       </button>
       <button onClick={onAnalyzeImpact} disabled={analyzingImpact || !hasText}
         title="NS-6：改了历史章后，检查源自本章的事实证据是否失效（失效则降级待复核），并列出需复核的后续章节。不会自动改正文。"
@@ -130,6 +124,11 @@ export default function ChapterEditorToolbar({
         }`}>
         <ShieldCheck className="w-3 h-3" />
         质量审校
+        {consistencyAlertCount > 0 && (
+          <span className="min-w-4 rounded-full bg-error/15 px-1 text-center text-[10px] text-error">
+            {consistencyAlertCount}
+          </span>
+        )}
       </button>
       <button onClick={onToggleNotePanel}
         title="便签"

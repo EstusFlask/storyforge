@@ -1,12 +1,16 @@
 # 贡献指南 · Contributing to StoryForge
 
-感谢你愿意为 StoryForge 贡献!在动手之前,请先读完本文件。
+感谢你愿意为 StoryForge 贡献!
 
 ---
 
-## 🔒 第一要务:读项目宪法
+## 🔒 第一要务:按任务读取项目约束
 
-**任何代码贡献前,必读 [`/CLAUDE.md`](./CLAUDE.md)** —— 它是项目的"宪法",包含:
+先读短入口 [`AGENTS.md`](./AGENTS.md)，再按
+[`docs/CONTEXT-ROUTING.md`](./docs/CONTEXT-ROUTING.md) 定位本次任务所需的宪法、
+路线图、Blueprint 段落、源码和测试。不要把文档地图当作全文预载清单。
+
+详细宪法 [`CLAUDE.md`](./CLAUDE.md) 包含:
 
 - **三注册表铁律**:所有 AI 读写与数据生命周期必须走三个单一事实源
   - `CONTEXT_SOURCES` + `assembleContext()` —— AI 读什么
@@ -43,6 +47,12 @@ npm run ci
 | `check:required-tables` | 表注册与 schema 一致 |
 | `check:ai-manual` | AI 说明书与代码一致(防 prompt key 漂移) |
 | `check:architecture` | 三注册表铁律(防"屎山复发") |
+| `check:agent-context` | 短入口与按任务路由防回退 |
+| `check:canon-coverage` | 一致性覆盖地图与反例状态对齐 |
+| `check:source-reachability` | 生产源码可达性 |
+| `check:roadmap` | 路线图归属与历史快照 |
+| `check:project-metrics` | Blueprint 实时指标 |
+| `check:dependencies` | 生产依赖安全审计 |
 | `tsc --noEmit` | TypeScript 严格类型 |
 | `test:coverage` | 测试 + 覆盖率门槛 |
 | `build` | 生产构建 |
@@ -94,11 +104,15 @@ npm run ci
 
 | 文档 | 用途 |
 |---|---|
-| `CLAUDE.md` | 项目宪法(必读) |
-| `docs/MASTER-BLUEPRINT.md` | 重构施工蓝图 |
+| `AGENTS.md` | 自动加载的短入口 |
+| `docs/CONTEXT-ROUTING.md` | 按任务选择上下文 |
+| `CLAUDE.md` | 详细项目宪法 |
+| `docs/MASTER-BLUEPRINT.md` | 有对应任务 ID 时读取相关施工段落 |
 | `docs/AI-FUNCTIONS-MANUAL.generated.md` | AI 行为清单(自动生成) |
 | `docs/DATA-FLOW-DIAGRAM.md` | 数据流可视化 |
-| `docs/ROADMAP.md` | 路线图 |
+| `docs/roadmap/README.md` | 当前与未来路线图 |
+| `docs/roadmap/CAPABILITY-BASELINE.md` | 当前能力基线（新功能读取对应体系） |
+| `docs/roadmap/COMPLETED.md` | 已完成开发索引 |
 
 ---
 

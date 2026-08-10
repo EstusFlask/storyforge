@@ -59,7 +59,7 @@ describe('小说创作 Prompt 内容回归主模板体系', () => {
     expect(sources('task')).toEqual(expect.arrayContaining(['chapterOutline', 'detailedOutline']))
     expect(sources('continuity')).toEqual(expect.arrayContaining(['chapterContinuityHandoff', 'currentFacts', 'heldItems']))
     expect(sources('voices')).toEqual(expect.arrayContaining(['characters', 'characterRelations']))
-    expect(sources('rules')).toEqual(expect.arrayContaining(['worldview', 'worldRules', 'creativeRules']))
+    expect(sources('rules')).toEqual(expect.arrayContaining(['canonAssertions', 'worldview', 'worldRules', 'creativeRules']))
 
     const p12e = NOVEL_CONTENT_PROMPT_SEEDS.find(seed => seed.assetId === 'P12-E')!
     expect(p12e.variableBindings?.find(binding => binding.variable === 'text')?.sourceKeys).toContain('chapterContent')
@@ -114,7 +114,7 @@ describe('小说创作 Prompt 内容回归主模板体系', () => {
 
     const templates = await db.promptTemplates.toArray()
     const migrated = templates.find(template => template.name === NOVEL_CONTENT_PROMPT_SEEDS[0].name)
-    expect(templates).toHaveLength(204)
+    expect(templates).toHaveLength(206)
     expect(migrated?.moduleKey).toBe('story.brief')
     expect(migrated?.isActive).toBe(true)
   })

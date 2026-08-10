@@ -1,5 +1,5 @@
 import { useEffect, useState, useMemo, lazy, Suspense } from 'react'
-import { useNavigate, useParams } from 'react-router-dom'
+import { useLocation, useNavigate, useParams } from 'react-router'
 import { useProjectStore } from '../stores/project'
 import { useWorldviewStore } from '../stores/worldview'
 import { useCharacterStore } from '../stores/character'
@@ -16,10 +16,10 @@ import { useWorldRulesStore } from '../stores/world-rules'
 import { useAutoBackup } from '../hooks/useAutoBackup'
 import { useGistAutoBackup } from '../hooks/useGistAutoBackup'
 import { useFolderAutoBackup } from '../hooks/useFolderAutoBackup'
-import { PanelRight } from 'lucide-react'
+import { MessageSquare, PanelRight } from 'lucide-react'
 import Sidebar, { type SidebarModule } from '../components/layout/Sidebar'
 import ContentTypeBadge from '../components/layout/ContentTypeBadge'
-import { getModuleContentType } from '../components/layout/sidebar-tree'
+import { getModuleContentType, MODULE_CONTENT_TYPES } from '../components/layout/sidebar-tree'
 import PropertiesPanel from '../components/layout/PropertiesPanel'
 import ProjectInfoPanel from '../components/project/ProjectInfoPanel'
 // 旧「作品学习」面板已整合进 ReferencePanel（Phase 20，子系统于 v32 下线）
@@ -29,6 +29,9 @@ const UsageStatsPage = lazy(() => import('../components/settings/UsageStatsPage'
 const VersionHistoryPanel = lazy(() => import('../components/system/VersionHistoryPanel'))
 const ImportDocPanel = lazy(() => import('../components/system/ImportDocPanel'))
 const PromptManagerPanel = lazy(() => import('../components/settings/prompt/PromptManagerPanel'))
+const NodeAuthoringWorkspace = lazy(() => import('../components/node-authoring/NodeAuthoringWorkspace'))
+const RagLibraryPanel = lazy(() => import('../components/retrieval/RagLibraryPanel'))
+const SimulationRuntimePanel = lazy(() => import('../components/simulation/SimulationRuntimePanel'))
 const DataManagementPanel = lazy(() => import('../components/data/DataManagementPanel'))
 const WorldRulesPanel = lazy(() => import('../components/worldview/WorldRulesPanel'))
 const StoryCorePanel = lazy(() => import('../components/worldview/StoryCorePanel'))
@@ -59,21 +62,32 @@ const LocationPanel = lazy(() => import('../components/location/LocationPanel'))
 const InventoryPanel = lazy(() => import('../components/items/InventoryPanel'))
 const FactLibraryPanel = lazy(() => import('../components/facts/FactLibraryPanel'))
 const StoryTimelinePanel = lazy(() => import('../components/timeline/StoryTimelinePanel'))
+const CultivationProgressPanel = lazy(() => import('../components/cultivation/CultivationProgressPanel'))
 const SceneVerifyPanel = lazy(() => import('../components/scene/SceneVerifyPanel'))
 const WorldGroupOverview = lazy(() => import('../components/world-group/WorldGroupOverview'))
 const GlobalReplacePanel = lazy(() => import('../components/tools/GlobalReplacePanel'))
+const ChatCopilotPanel = lazy(() => import('../components/agent/ChatCopilotPanel'))
 import { useLocationStore } from '../stores/location'
 import { useWorldGroupStore } from '../stores/world-group'
 
 export default function WorkspacePage() {
   const { projectId } = useParams()
+  const location = useLocation()
   const navigate = useNavigate()
   const { loadProject, projects, currentProjectId } = useProjectStore()
-  const [activeModule, setActiveModule] = useState<SidebarModule>('info')
+  const initialModule = new URLSearchParams(location.search).get('module')
+  const initialSidebarModule = initialModule && Object.prototype.hasOwnProperty.call(MODULE_CONTENT_TYPES, initialModule)
+    ? initialModule as SidebarModule
+    : null
+  const backPath = initialSidebarModule ? '/' : '/projects'
+  const [activeModule, setActiveModule] = useState<SidebarModule>(initialSidebarModule ?? 'info')
   const [loading, setLoading] = useState(true)
   const [editorNodeId, setEditorNodeId] = useState<number | null>(null)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   const [showProperties, setShowProperties] = useState(false)
+  const [showCopilot, setShowCopilot] = useState(false)
+  const activeWorldGroupId = useWorldGroupStore(state => state.activeGroupId)
+  const worldGroups = useWorldGroupStore(state => state.groups)
 
   // 从 Zustand Store 中动态获取当前项目，实现全局响应式更新
   const project = useMemo(() => {
@@ -97,6 +111,10 @@ export default function WorkspacePage() {
   useFolderAutoBackup(project?.id ?? null)
 
   // 加载项目 + 所有关联数据
+  useEffect(() => {
+    if (initialSidebarModule) setActiveModule(initialSidebarModule)
+  }, [initialSidebarModule])
+
   useEffect(() => {
     const load = async () => {
       if (!projectId || isNaN(Number(projectId))) {
@@ -165,8 +183,18 @@ export default function WorkspacePage() {
     setActiveModule('chapters-list')
   }
 
-  const immersiveModules = new Set<SidebarModule>(['chapters-list', 'editor', 'foreshadow'])
+  const immersiveModules = new Set<SidebarModule>([
+    'chapters-list',
+    'editor',
+    'foreshadow',
+    'visual-workflows',
+    'simulation-runtime',
+  ])
   const isImmersiveModule = immersiveModules.has(activeModule)
+  const copilotWorldGroupId = project.enableMultiWorld ? activeWorldGroupId : null
+  const copilotWorldName = project.enableMultiWorld
+    ? (worldGroups.find(group => group.id === activeWorldGroupId)?.name ?? '未选择世界')
+    : '单世界'
 
   /** 根据当前模块渲染主面板内容 */
   const renderMainPanel = () => {
@@ -190,7 +218,7 @@ export default function WorkspacePage() {
       case 'worldview-natural':
         return <WorldviewNaturalPanel project={project} />
       case 'worldview-humanity':
-        return <WorldviewHumanityPanel project={project} />
+        return <WorldviewHumanityPanel project={project} onOpenHistory={() => setActiveModule('history')} />
       case 'geography':
         return <GeographyPanel project={project} />
       case 'world-map':
@@ -226,6 +254,12 @@ export default function WorkspacePage() {
         return <OutlinePanel project={project} onOpenChapter={handleOpenChapter} />
       case 'character-driven-plot':
         return <CharacterDrivenPlotPanel project={project} />
+      case 'visual-workflows':
+        return <NodeAuthoringWorkspace project={project} worldGroupId={copilotWorldGroupId} />
+      case 'rag-library':
+        return <RagLibraryPanel project={project} />
+      case 'simulation-runtime':
+        return <SimulationRuntimePanel project={project} worldGroupId={copilotWorldGroupId} />
       case 'detailed-outline':
         return <DetailedOutlinePanel project={project} />
       case 'chapters-list':
@@ -254,6 +288,8 @@ export default function WorkspacePage() {
             if (chapter) handleOpenChapter(chapter.outlineNodeId)
           }}
         />
+      case 'cultivation-progress':
+        return <CultivationProgressPanel project={project} />
       case 'scene-verify':
         return <SceneVerifyPanel project={project} />
       case 'global-replace':
@@ -291,7 +327,7 @@ export default function WorkspacePage() {
       <Sidebar
         active={activeModule}
         onSelect={(m) => { setActiveModule(m); if (m !== 'editor') setEditorNodeId(null) }}
-        onBack={() => navigate('/')}
+        onBack={() => navigate(backPath)}
         projectName={project.name}
         collapsed={sidebarCollapsed}
         onToggleCollapse={() => setSidebarCollapsed(v => !v)}
@@ -308,13 +344,34 @@ export default function WorkspacePage() {
       >
         <div className="flex h-11 shrink-0 items-center justify-between gap-3 border-b border-border/70 bg-bg-surface/70 px-4">
           <ContentTypeBadge contentType={getModuleContentType(activeModule)} showDescription />
-          <button
-            onClick={() => setShowProperties(v => !v)}
-            title={showProperties ? '关闭属性面板' : '打开属性面板'}
-            className={`shrink-0 rounded p-1.5 text-text-muted transition-colors hover:bg-bg-hover hover:text-text-primary ${showProperties ? 'text-accent' : ''}`}
-          >
-            <PanelRight className="w-4 h-4" />
-          </button>
+          <div className="flex items-center gap-1">
+            <button
+              onClick={() => {
+                setShowCopilot(value => {
+                  if (!value) setShowProperties(false)
+                  return !value
+                })
+              }}
+              title={showCopilot ? '关闭 AI 对话副驾' : '打开 AI 对话副驾'}
+              aria-label={showCopilot ? '关闭 AI 对话副驾' : '打开 AI 对话副驾'}
+              className={`shrink-0 rounded p-1.5 text-text-muted transition-colors hover:bg-bg-hover hover:text-text-primary ${showCopilot ? 'text-accent' : ''}`}
+            >
+              <MessageSquare className="h-4 w-4" />
+            </button>
+            <button
+              onClick={() => {
+                setShowProperties(value => {
+                  if (!value) setShowCopilot(false)
+                  return !value
+                })
+              }}
+              title={showProperties ? '关闭属性面板' : '打开属性面板'}
+              aria-label={showProperties ? '关闭属性面板' : '打开属性面板'}
+              className={`shrink-0 rounded p-1.5 text-text-muted transition-colors hover:bg-bg-hover hover:text-text-primary ${showProperties ? 'text-accent' : ''}`}
+            >
+              <PanelRight className="w-4 h-4" />
+            </button>
+          </div>
         </div>
         <div className={`min-h-0 flex-1 overflow-y-auto ${isImmersiveModule ? '' : 'p-6'}`}>
           {/* Phase 3.5: 懒加载面板(地图类)加载时显示 fallback */}
@@ -330,6 +387,20 @@ export default function WorkspacePage() {
           activeModule={activeModule}
           onClose={() => setShowProperties(false)}
         />
+      )}
+      {showCopilot && (
+        <Suspense fallback={(
+          <aside className="fixed inset-y-0 right-0 z-30 flex h-full w-[min(24rem,calc(100vw-3rem))] shrink-0 items-center justify-center border-l border-border bg-bg-surface text-xs text-text-muted shadow-xl lg:static lg:z-auto lg:w-[24rem] lg:shadow-none">
+            AI 对话副驾加载中…
+          </aside>
+        )}>
+          <ChatCopilotPanel
+            project={project}
+            worldGroupId={copilotWorldGroupId}
+            worldName={copilotWorldName}
+            onClose={() => setShowCopilot(false)}
+          />
+        </Suspense>
       )}
     </div>
   )

@@ -31,6 +31,15 @@ describe('NS-4 · fact-extract adapter', () => {
     expect(out[1].predicate).toBe('powerStage')
   })
 
+  it('枚举事实值归一到闭集，未登记值拒绝写入候选', () => {
+    const raw = JSON.stringify({ facts: [
+      { subject: '林飞', predicate: 'aliveStatus', value: '身亡', quote: '只剩十六年阳寿' },
+      { subject: '林飞', predicate: 'aliveStatus', value: '半死不活', quote: '决定前往北境' },
+    ] })
+    const out = parseFactExtractResult({ raw, chapterContent: chapter })
+    expect(out).toMatchObject([{ predicate: 'aliveStatus', value: 'dead' }])
+  })
+
   it('未登记谓词整条丢弃（不入权威账本）', () => {
     const raw = JSON.stringify({ facts: [
       { subject: '林飞', predicate: '心情', value: '绝望', quote: '决定前往北境' }, // 未登记

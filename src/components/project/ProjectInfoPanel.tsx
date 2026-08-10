@@ -190,7 +190,8 @@ export default function ProjectInfoPanel({ project, onUpdate }: ProjectInfoPanel
                 const next = !project.enableMultiWorld
                 // 开启时：确保主世界组 + 把现有项目级数据归属到主世界组
                 if (next) {
-                  await useWorldGroupStore.getState().migrateToMultiWorld(project.id)
+                  const migrated = await useWorldGroupStore.getState().migrateToMultiWorld(project.id)
+                  if (!migrated) return
                 }
                 await updateProject(project.id, { enableMultiWorld: next })
                 onUpdate({ ...project, enableMultiWorld: next, updatedAt: Date.now() })

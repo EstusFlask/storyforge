@@ -1,6 +1,7 @@
 /**
  * R-NS4-current-facts · currentFacts 上下文源（NS-4 ③）
- * 守卫：只注入 confirmed 事实；按规范章序判定"截止本章有效"（生效/未生效/已失效）；按世界过滤。
+ * 守卫：注入当前 confirmed 与时点仍有效的 superseded 历史 Canon；
+ * 按规范章序判定"截止本章有效"（生效/未生效/已失效）；按世界过滤。
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { db } from '../../src/lib/db/schema'
@@ -43,6 +44,18 @@ describe('NS-4 · currentFacts 源', () => {
     await fact(pid, { value: '候选地', status: 'candidate', validFromChapterId: chaps[0] })
     const out = await currentFacts.read({ projectId: pid, chapterId: chaps[1] } as any)
     expect(out).not.toContain('候选地')
+  })
+
+  it('superseded 历史 Canon 在 validTo 之前仍注入，截止章起排除', async () => {
+    const { pid, chaps } = await seed()
+    await fact(pid, {
+      value: '旧都',
+      status: 'superseded',
+      validFromChapterId: chaps[0],
+      validToChapterId: chaps[2],
+    })
+    expect(await currentFacts.read({ projectId: pid, chapterId: chaps[1] } as any)).toContain('旧都')
+    expect(await currentFacts.read({ projectId: pid, chapterId: chaps[2] } as any)).not.toContain('旧都')
   })
 
   it('世界过滤:别的世界的事实不串入当前世界', async () => {

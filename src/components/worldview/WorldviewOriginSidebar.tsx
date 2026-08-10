@@ -24,7 +24,11 @@ export default function WorldviewOriginSidebar({ active, streamingKeys, onSelect
         const isActive = active === field.key
         const isFieldStreaming = streamingKeys.has(field.key)
         return (
-          <button key={field.key} onClick={() => onSelect(field.key)} aria-pressed={isActive}
+          <button
+            key={field.key}
+            onClick={() => onSelect(field.key)}
+            aria-label={field.label}
+            aria-pressed={isActive}
             className={`w-full flex items-center gap-2.5 px-2 py-2.5 rounded-lg text-left transition-all ${
               isActive
                 ? 'bg-accent/8 border-l-2 border-accent'

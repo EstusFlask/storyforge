@@ -1,8 +1,9 @@
-# PROJECT_TABLES_ALL · 全部 45 张表硬清单(DB v26)
+# PROJECT_TABLES_ALL · 历史硬清单（DB v26 快照）
 
-> 这份文件是 **MASTER-BLUEPRINT.md §4.0.1 中 `PROJECT_TABLES_ALL` 常量的事实来源**。
-> 实施者(5.5)在写 Phase 0/1 时,如果需要"全部表清单",直接引用本文件。
-> 核对来源: `src/lib/db/schema.ts` DB v26 + `src/lib/types/*` 字段定义 + `src/lib/export/json-export.ts` 当前导出实现(2026-06-08 重新扫描)。
+> ⚠️ 本文只保存 Phase 1 实施前的 DB v26 历史快照，不再是当前事实源。
+> 当前表清单由 `src/lib/db/schema.ts`、`src/lib/db/ensure-schema.ts` 与
+> `src/lib/registry/project-tables.ts` 三方自动校验；DB v41 当前为 46 张表。
+> 新开发不得复制本文旧清单或恢复已删除的 factions/itemSystems/master* 表。
 
 ---
 

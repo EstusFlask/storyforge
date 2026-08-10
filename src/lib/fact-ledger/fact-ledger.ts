@@ -12,21 +12,68 @@
 import { db } from '../db/schema'
 import type { TemporalFact } from '../types/temporal-fact'
 import type { ExtractedFactCandidate } from '../ai/adapters/fact-extract-adapter'
-import { getFactPredicate } from '../registry/fact-predicate-registry'
+import { getFactPredicate, normalizeFactValue } from '../registry/fact-predicate-registry'
+import {
+  checkSettingAssertionClashes,
+  validateSettingAssertionSource,
+  type SettingAssertionClash,
+} from './setting-assertions'
+import { resolveCanonicalChapterSequence } from '../ai/chapter-memory/canonical-chapter-sequence'
 
 const now = () => Date.now()
 
-/** 按名字解析角色 FK（同项目精确匹配）。无主表实体返回 null，仅留 subjectName。 */
-async function resolveCharacterId(projectId: number, name: string): Promise<number | null> {
+function sameFactSubject(left: TemporalFact, right: TemporalFact): boolean {
+  const typedFields = [
+    'characterId',
+    'locationId',
+    'storyArcId',
+    'subjectWorldGroupId',
+    'codexEntryId',
+  ] as const
+  const leftTyped = typedFields.find(field => left[field] != null)
+  const rightTyped = typedFields.find(field => right[field] != null)
+  if (leftTyped && rightTyped) {
+    return leftTyped === rightTyped && left[leftTyped] === right[rightTyped]
+  }
+  // 兼容旧事实：一侧尚未回填 typed FK 时，以同世界精确 subjectName 对齐。
+  return left.subjectName === right.subjectName
+}
+
+async function canonicalOrderForProject(projectId: number): Promise<Map<number, number>> {
+  const [outlineNodes, chapters] = await Promise.all([
+    db.outlineNodes.where('projectId').equals(projectId).toArray(),
+    db.chapters.where('projectId').equals(projectId).toArray(),
+  ])
+  const { sequence } = resolveCanonicalChapterSequence(outlineNodes, chapters)
+  const orderOf = new Map<number, number>()
+  sequence.forEach((entry, index) => {
+    if (entry.chapter.id != null) orderOf.set(entry.chapter.id, index)
+  })
+  return orderOf
+}
+
+/** 按名字 + 世界解析唯一角色 FK。重名歧义不猜，保留 subjectName 等待人工复核。 */
+async function resolveCharacterId(
+  projectId: number,
+  name: string,
+  worldGroupId?: number | null,
+): Promise<number | null> {
   if (!name) return null
-  const hit = await db.characters.where('projectId').equals(projectId).filter(c => c.name === name).first()
-  return hit?.id ?? null
+  const matches = await db.characters.where('projectId').equals(projectId)
+    .filter(character =>
+      character.name === name
+      && (character.isCrossWorld
+        || character.homeWorldGroupId == null
+        || character.homeWorldGroupId === (worldGroupId ?? null)))
+    .toArray()
+  return matches.length === 1 ? matches[0].id ?? null : null
 }
 
 export interface AdoptFactsResult {
   written: number
   skippedDuplicate: number
   skippedUnknownPredicate: number
+  skippedInvalidValue: number
 }
 
 /**
@@ -39,25 +86,38 @@ export async function adoptFactCandidates(args: {
   worldGroupId?: number | null
   candidates: ExtractedFactCandidate[]
 }): Promise<AdoptFactsResult> {
-  const result: AdoptFactsResult = { written: 0, skippedDuplicate: 0, skippedUnknownPredicate: 0 }
+  const result: AdoptFactsResult = {
+    written: 0,
+    skippedDuplicate: 0,
+    skippedUnknownPredicate: 0,
+    skippedInvalidValue: 0,
+  }
 
   // 本项目当前所有未关闭候选，用于去重（一次性取，避免逐条查库）
   const existing = await db.temporalFacts
     .where('projectId').equals(args.projectId)
     .filter(f => f.validToChapterId == null && f.status === 'candidate')
     .toArray()
-  const seen = new Set(existing.map(f => `${f.subjectName}|${f.predicate}|${f.value}`))
+  const seen = new Set(existing.map(f => {
+    const spec = getFactPredicate(f.predicate)
+    const value = spec ? normalizeFactValue(spec, f.value) ?? f.value : f.value
+    return `${f.worldGroupId ?? 'null'}|${f.subjectName}|${f.predicate}|${value}`
+  }))
 
   for (const c of args.candidates) {
     const spec = getFactPredicate(c.predicate)
     if (!spec) { result.skippedUnknownPredicate++; continue }   // 受控谓词守卫（双保险）
+    const normalizedValue = normalizeFactValue(spec, c.value)
+    if (!normalizedValue) { result.skippedInvalidValue++; continue }
 
-    const key = `${c.subjectName}|${c.predicate}|${c.value}`
+    const key = `${args.worldGroupId ?? 'null'}|${c.subjectName}|${c.predicate}|${normalizedValue}`
     if (seen.has(key)) { result.skippedDuplicate++; continue }
     seen.add(key)
 
-    const characterId = await resolveCharacterId(args.projectId, c.subjectName)
-    const objectCharacterId = c.objectName ? await resolveCharacterId(args.projectId, c.objectName) : null
+    const characterId = await resolveCharacterId(args.projectId, c.subjectName, args.worldGroupId)
+    const objectCharacterId = c.objectName
+      ? await resolveCharacterId(args.projectId, c.objectName, args.worldGroupId)
+      : null
 
     const fact: TemporalFact = {
       projectId: args.projectId,
@@ -67,7 +127,7 @@ export async function adoptFactCandidates(args: {
       objectCharacterId: spec.objectEntityTypes?.includes('character') ? objectCharacterId : null,
       predicate: c.predicate,
       factKind: c.factKind,
-      value: c.value,
+      value: normalizedValue,
       sourceType: 'chapter',
       sourceChapterId: args.sourceChapterId,
       sourceQuote: c.sourceQuote,
@@ -88,36 +148,164 @@ export async function adoptFactCandidates(args: {
  * 作者确认候选/异常事实 → 升为 Canon（confirmed）。§14.4：state 单值谓词在此【关闭被它取代的旧有效事实】，
  * 不按字符串相似度自动覆盖、不动 locked、event 不可被 supersede。
  */
-export async function confirmFactCandidate(factId: number): Promise<void> {
-  const fact = await db.temporalFacts.get(factId)
-  if (!fact || fact.id == null) return
-  if (!['candidate', 'stale', 'source-missing', 'invalid-range'].includes(fact.status)) return
-  const spec = getFactPredicate(fact.predicate)
+export interface ConfirmFactResult {
+  confirmed: boolean
+  clashes: SettingAssertionClash[]
+  reason?: 'missing' | 'invalid-status' | 'source-stale' | 'source-missing'
+}
 
-  // 单值 state 谓词：关闭同主体+谓词、当前仍有效、非锁定的旧事实（明确取代）。
+export async function confirmFactCandidate(factId: number): Promise<ConfirmFactResult> {
+  const fact = await db.temporalFacts.get(factId)
+  if (!fact || fact.id == null) return { confirmed: false, clashes: [], reason: 'missing' }
+  if (!['candidate', 'stale', 'source-missing', 'invalid-range'].includes(fact.status)) {
+    return { confirmed: false, clashes: [], reason: 'invalid-status' }
+  }
+  const spec = getFactPredicate(fact.predicate)
+  if (spec?.constitution) {
+    const sourceState = await validateSettingAssertionSource(fact)
+    if (sourceState !== 'current') {
+      await db.temporalFacts.update(fact.id, { status: sourceState, updatedAt: now() })
+      return {
+        confirmed: false,
+        clashes: [],
+        reason: sourceState === 'stale' ? 'source-stale' : 'source-missing',
+      }
+    }
+    const confirmed = await db.temporalFacts
+      .where('projectId').equals(fact.projectId)
+      .filter(row => row.status === 'confirmed')
+      .toArray()
+    const clashes = checkSettingAssertionClashes(fact, confirmed)
+    if (clashes.length) return { confirmed: false, clashes }
+  }
+
+  let confirmedStatus: TemporalFact['status'] = 'confirmed'
+  let validToChapterId = fact.validToChapterId ?? null
+  let supersedesFactId = fact.supersedesFactId ?? null
+
+  // 单值 state 谓词：按规范章序关闭同主体+谓词的旧事实。
+  // 若作者先确认了后章、再补确认前章，前章事实成为有截止点的历史 Canon，
+  // 不能倒过来把后章当前状态关闭。
   if (spec && spec.factKind === 'state' && spec.cardinality === 'single' && spec.conflictPolicy === 'supersede') {
     const priors = await db.temporalFacts
       .where('projectId').equals(fact.projectId)
       .filter(f =>
         f.id !== fact.id &&
         f.predicate === fact.predicate &&
-        f.subjectName === fact.subjectName &&
+        (f.worldGroupId ?? null) === (fact.worldGroupId ?? null) &&
+        sameFactSubject(f, fact) &&
         f.validToChapterId == null &&
-        f.status === 'confirmed' &&
-        !f.locked,
+        f.status === 'confirmed',
       )
       .toArray()
-    for (const p of priors) {
-      if (p.id != null) {
-        await db.temporalFacts.update(p.id, {
-          validToChapterId: fact.validFromChapterId ?? null,
-          status: 'superseded',
-          updatedAt: now(),
-        })
+    const orderOf = spec.temporal ? await canonicalOrderForProject(fact.projectId) : null
+    const factOrder = fact.validFromChapterId == null
+      ? -1
+      : orderOf?.get(fact.validFromChapterId)
+    const closable: TemporalFact[] = []
+    const future: Array<{ fact: TemporalFact; order: number }> = []
+    for (const prior of priors) {
+      const priorOrder = prior.validFromChapterId == null
+        ? -1
+        : orderOf?.get(prior.validFromChapterId)
+      if (orderOf && factOrder != null && priorOrder != null) {
+        if (priorOrder > factOrder) future.push({ fact: prior, order: priorOrder })
+        else if (!prior.locked) closable.push(prior)
+      } else if (!prior.locked) {
+        closable.push(prior)
       }
     }
+    future.sort((a, b) => a.order - b.order || (a.fact.id ?? 0) - (b.fact.id ?? 0))
+    if (future[0]?.fact.validFromChapterId != null) {
+      validToChapterId = future[0].fact.validFromChapterId
+      confirmedStatus = 'superseded'
+    }
+    const timestamp = now()
+    await db.transaction('rw', db.temporalFacts, async () => {
+      for (const prior of closable) {
+        if (prior.id == null) continue
+        await db.temporalFacts.update(prior.id, {
+          validToChapterId: fact.validFromChapterId ?? null,
+          status: 'superseded',
+          updatedAt: timestamp,
+        })
+        supersedesFactId ??= prior.id
+      }
+      await db.temporalFacts.update(fact.id!, {
+        status: confirmedStatus,
+        validToChapterId,
+        supersedesFactId,
+        updatedAt: timestamp,
+      })
+    })
+    return { confirmed: true, clashes: [] }
   }
-  await db.temporalFacts.update(fact.id, { status: 'confirmed', supersedesFactId: fact.supersedesFactId ?? null, updatedAt: now() })
+  await db.temporalFacts.update(fact.id, {
+    status: confirmedStatus,
+    validToChapterId,
+    supersedesFactId,
+    updatedAt: now(),
+  })
+  return { confirmed: true, clashes: [] }
+}
+
+export interface ReplaceConstitutionFactResult {
+  confirmed: boolean
+  clashes: SettingAssertionClash[]
+  replaced: number
+  reason?: ConfirmFactResult['reason'] | 'not-constitution' | 'locked-conflict'
+}
+
+/**
+ * 作者第二次显式操作：以候选取代所有同主体/同主题的互斥世界宪法。
+ * 普通确认绝不会走这里；locked 旧断言仍拒绝覆盖。
+ */
+export async function replaceConstitutionFactCandidate(
+  factId: number,
+): Promise<ReplaceConstitutionFactResult> {
+  const fact = await db.temporalFacts.get(factId)
+  if (!fact || fact.id == null) return { confirmed: false, clashes: [], replaced: 0, reason: 'missing' }
+  const spec = getFactPredicate(fact.predicate)
+  if (!spec?.constitution) {
+    return { confirmed: false, clashes: [], replaced: 0, reason: 'not-constitution' }
+  }
+  if (!['candidate', 'stale', 'source-missing', 'invalid-range'].includes(fact.status)) {
+    return { confirmed: false, clashes: [], replaced: 0, reason: 'invalid-status' }
+  }
+  const sourceState = await validateSettingAssertionSource(fact)
+  if (sourceState !== 'current') {
+    await db.temporalFacts.update(fact.id, { status: sourceState, updatedAt: now() })
+    return {
+      confirmed: false,
+      clashes: [],
+      replaced: 0,
+      reason: sourceState === 'stale' ? 'source-stale' : 'source-missing',
+    }
+  }
+  const confirmed = await db.temporalFacts
+    .where('projectId').equals(fact.projectId)
+    .filter(row => row.status === 'confirmed')
+    .toArray()
+  const clashes = checkSettingAssertionClashes(fact, confirmed)
+  if (clashes.some(clash => clash.confirmed.locked)) {
+    return { confirmed: false, clashes, replaced: 0, reason: 'locked-conflict' }
+  }
+  const timestamp = now()
+  await db.transaction('rw', db.temporalFacts, async () => {
+    for (const clash of clashes) {
+      if (clash.confirmed.id == null) continue
+      await db.temporalFacts.update(clash.confirmed.id, {
+        status: 'superseded',
+        updatedAt: timestamp,
+      })
+    }
+    await db.temporalFacts.update(fact.id!, {
+      status: 'confirmed',
+      supersedesFactId: clashes[0]?.confirmed.id ?? null,
+      updatedAt: timestamp,
+    })
+  })
+  return { confirmed: true, clashes, replaced: clashes.length }
 }
 
 /** 作者否决候选/异常事实（不入 Canon、不再注入生成）。不动已确认/已锁定事实。 */

@@ -409,11 +409,13 @@
 #### 动作①：AI 生成 Voronoi 地图配置
 - **触发**：🔘 手动
 - **读**：
-  - `worldviews.worldStructure / continentLayout / climateByRegion / mountainsRivers / factionLayout`（地理铺垫）
-  - 已有 `worldNodes`（避免重建）
-  - `用户输入提示`
+  - 当前世界 `worldviews` 的结构、尺寸、地貌、山川、气候、资源、势力和城池等已填字段
+  - 当前世界登记的 `codex` 与 `locations` 上下文
 - **提示词**：`world-map.voronoi`
-- **写**：`worldNodes.mapConfigJSON（覆盖）` 🌍按世界
+- **候选契约**：宏观参数 + 命名实体 + 规模 + 八向方位/距离；explicit 必须带用户消息
+  逐字证据，AI 不输出坐标或数据库 ID
+- **本地决议**：闭集/枚举/证据校验 → 确定性空间求解 → Voronoi 命名实体对齐
+- **写**：`worldNodes.mapConfigJSON（作者手动触发后覆盖；手动比例尺增量写回）` 🌍按世界
 
 ---
 
@@ -484,7 +486,8 @@
 - 章节正文、大纲、细纲、场景、角色生成 等所有动作通过 `buildCodexContext` 注入；按当前世界隔离（全局项+本世界专属）
 
 **作为下游被写入**：
-- 待 Phase 35-c "AI 导入分类"上线后，导入文件 → AI 分类到对应词条
+- 文档解析 → AI 按当前分类目录生成带逐字证据的词条候选 → 作者逐条确认 → `adopt()` 写入；
+  AI 不输出数据库 ID，候选不会自动入库
 
 ---
 
@@ -1214,7 +1217,7 @@
 - **被读取**：章节正文、章节细纲、章节审校、buildMemory Semantic 层
 
 ### `codex` 词条
-- **被写入**：用户手动 CRUD（Phase 35-c 后 AI 导入分类）
+- **被写入**：用户手动 CRUD；文档解析的带证据 AI 分类候选经作者确认后写入
 - **被读取**：所有"读 worldCtx + codex"的动作（§4.2 大纲、§4.5 章节正文、§3.1 角色生成、§4.6 细纲、§4.12 场景考证 等）
 
 ---
@@ -1250,6 +1253,6 @@
 - `DATA-FLOW-DIAGRAM.md` — Mermaid 可视化（侧重关系图）
 - **本文档** — AI 行为目录（侧重"每个 AI 动作的读 / 写"）
 - `ARCHITECTURE-REFACTOR.md` — 重构方案（三根支柱的工程实现细节）
-- `ROADMAP.md` — 待开发清单（含本说明书引用的 Phase 38/39/40 等）
+- `roadmap/README.md` — 当前功能体系与待开发入口；旧 Phase 38/39/40 规格回查 `ROADMAP-LEGACY.md`
 
 四份文档"四位一体"，覆盖同一个事实源的不同切片。改其一须同步另三个。

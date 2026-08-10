@@ -1,3 +1,5 @@
+import type { RagDocumentMetadata } from './rag-library'
+
 /** 伏笔状态 */
 export type ForeshadowStatus =
   | 'planned'     // 计划中
@@ -19,7 +21,7 @@ export type ForeshadowType =
   | 'callback'      // 回调伏笔
 
 /** 伏笔 */
-export interface Foreshadow {
+export interface Foreshadow extends RagDocumentMetadata {
   id?: number
   projectId: number
   name: string               // 伏笔名称

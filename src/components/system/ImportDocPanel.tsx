@@ -12,6 +12,7 @@ import { useOutlineStore } from '../../stores/outline'
 import { useWorldGroupStore } from '../../stores/world-group'
 import ImportConfirmModal from './import/ImportConfirmModal'
 import ImportReportModal from './import/ImportReportModal'
+import CodexImportReviewModal from './import/CodexImportReviewModal'
 import { ImportDocIntro, ImportReusableSessionBanner } from './import/ImportDocOverview'
 import ImportRuntimeView, { ImportPipelineControls } from './import/ImportRuntimeView'
 import ImportUnfinishedBanner from './import/ImportUnfinishedBanner'
@@ -23,6 +24,11 @@ import type { ImportSession, ChunkState, ImportTarget } from '../../lib/types/im
 import type { SidebarModule } from '../layout/Sidebar'
 import { useDialog } from '../shared/Dialog'
 import { useToast } from '../shared/Toast'
+import {
+  applyCodexImportCandidates,
+  loadCodexImportCategoryOptions,
+  type CodexImportCategoryOption,
+} from '../../lib/import/codex-classification'
 
 interface Props {
   project: Project
@@ -49,6 +55,10 @@ export default function ImportDocPanel({ project, onNavigate }: Props) {
 
   // 报告 modal + 未完成会话
   const [reportSession, setReportSession] = useState<ImportSession | null>(null)
+  const [codexReview, setCodexReview] = useState<{
+    session: ImportSession
+    categories: CodexImportCategoryOption[]
+  } | null>(null)
   const [applyingReuse, setApplyingReuse] = useState(false)
   const recovery = useImportSessionRecovery(project.id!)
   const {
@@ -131,7 +141,7 @@ export default function ImportDocPanel({ project, onNavigate }: Props) {
         status: 'pending',
         attempts: 0,
       })),
-      merged: { worldview: {}, characters: [], outline: [] },
+      merged: { worldview: {}, characters: [], outline: [], codexCandidates: [] },
       rollingContext: '',
       importTarget,
       analysisDepth: importTarget === 'reference' ? (depth ?? 'quick') : undefined,
@@ -341,6 +351,56 @@ export default function ImportDocPanel({ project, onNavigate }: Props) {
     if (session) setReportSession(session)
   }
 
+  const handleOpenCodexReview = async (session: ImportSession) => {
+    if (!session.merged?.codexCandidates?.length || session.codexAdoption) return
+    try {
+      const categories = await loadCodexImportCategoryOptions(project.id!)
+      setCodexReview({ session, categories })
+    } catch (error) {
+      toast.error(`加载词条分类失败：${error instanceof Error ? error.message : String(error)}`)
+    }
+  }
+
+  const handleConfirmCodex = async (
+    session: ImportSession,
+    candidates: import('../../lib/types').CodexImportCandidate[],
+  ) => {
+    const worldGroupId = session.importTarget === 'project'
+      ? session.targetWorldGroupId ?? null
+      : (project.enableMultiWorld ? targetWorldGroupId : null)
+    if (project.enableMultiWorld && worldGroupId == null) {
+      toast.error('请先选择词条候选要写入的目标世界。')
+      return
+    }
+    try {
+      const result = await applyCodexImportCandidates({
+        projectId: project.id!,
+        worldGroupId,
+        candidates,
+      })
+      if (session.id != null) {
+        await useImportSessionStore.getState().patch(session.id, {
+          codexAdoption: {
+            adoptedAt: Date.now(),
+            imported: result.imported,
+            updated: result.updated,
+            skipped: result.skipped,
+          },
+        })
+        const fresh = await useImportSessionStore.getState().load(session.id)
+        if (fresh) {
+          setReportSession(current => current?.id === fresh.id ? fresh : current)
+        }
+      }
+      setCodexReview(null)
+      clearReusable()
+      const detail = result.errors.length ? `；${result.errors.slice(0, 2).join('；')}` : ''
+      toast.success(`词条审查完成：新增 ${result.imported}、补全 ${result.updated}、跳过 ${result.skipped}${detail}`)
+    } catch (error) {
+      toast.error(`词条写入失败，候选仍保留：${error instanceof Error ? error.message : String(error)}`)
+    }
+  }
+
   const handleRestart = () => {
     if (status.sessionId) {
       clearChunkTexts(status.sessionId)
@@ -398,6 +458,7 @@ export default function ImportDocPanel({ project, onNavigate }: Props) {
           originalTextAvailable={hasChunkTexts(reusable.id!)}
           onApplyProject={handleReuseToProject}
           onApplyReference={handleReuseToReference}
+          onReviewCodex={() => handleOpenCodexReview(reusable)}
           onIgnore={clearReusable}
         />
       )}
@@ -454,11 +515,23 @@ export default function ImportDocPanel({ project, onNavigate }: Props) {
           onRetryFailed={handleRetryFailed}
           onClose={handleCloseReport}
           onDiscard={handleDiscardSession}
+          onReviewCodex={(reportSession.merged?.codexCandidates?.length || 0) > 0
+            ? () => handleOpenCodexReview(reportSession)
+            : undefined}
           onNavigate={onNavigate && (() => {
             // 当前项目 → 跳设定库(世界观起源);项目参考 → 跳项目参考页
             onNavigate(reportSession.importTarget === 'reference' ? 'references' : 'worldview-origin')
             handleCloseReport()
           })}
+        />
+      )}
+      {codexReview && (
+        <CodexImportReviewModal
+          filename={codexReview.session.filename}
+          candidates={codexReview.session.merged?.codexCandidates || []}
+          categories={codexReview.categories}
+          onConfirm={candidates => handleConfirmCodex(codexReview.session, candidates)}
+          onCancel={() => setCodexReview(null)}
         />
       )}
     </div>

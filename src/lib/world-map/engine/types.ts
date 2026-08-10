@@ -88,6 +88,8 @@ export interface River {
   source: number
   /** 父河流（汇入的河流 ID） */
   parent?: number
+  /** 用户设定中的规模层级 */
+  scaleTier?: SpatialScaleTier
 }
 
 /** 城镇 */
@@ -104,6 +106,8 @@ export interface Burg {
   port: boolean
   /** 人口 */
   population: number
+  /** 用户设定中的规模层级 */
+  scaleTier?: SpatialScaleTier
 }
 
 /** 国家 */
@@ -121,6 +125,110 @@ export interface State {
   area: number
   /** 总人口 */
   totalPopulation: number
+  /** 用户设定中的规模层级 */
+  scaleTier?: SpatialScaleTier
+}
+
+/** 空间约束中的实体类型 */
+export type SpatialEntityKind =
+  | 'state'
+  | 'settlement'
+  | 'fortress'
+  | 'mountain'
+  | 'river'
+  | 'region'
+  | 'landmark'
+
+/** 影响领土、人口与标签视觉权重的规模层级 */
+export type SpatialScaleTier =
+  | 'supercontinent'
+  | 'empire'
+  | 'kingdom'
+  | 'province'
+  | 'metropolis'
+  | 'city'
+  | 'town'
+  | 'village'
+  | 'fortress'
+  | 'landmark'
+
+/** 八向相对方位 */
+export type SpatialDirection =
+  | 'north'
+  | 'north-east'
+  | 'east'
+  | 'south-east'
+  | 'south'
+  | 'south-west'
+  | 'west'
+  | 'north-west'
+
+/** 未提供绝对距离时使用的定性距离档 */
+export type SpatialDistanceTier = 'adjacent' | 'near' | 'medium' | 'far' | 'very-far'
+
+/** AI 可抽取的原始距离单位 */
+export type SpatialDistanceUnit = 'km' | 'li' | 'day' | 'month'
+
+export type SpatialSource = 'explicit' | 'inferred'
+
+/** AI 抽取、经本地校验后的命名空间实体 */
+export interface MapSpatialEntity {
+  name: string
+  kind: SpatialEntityKind
+  scaleTier?: SpatialScaleTier
+  /** 国家实体可用此字段将其约束坐标落实到首都 */
+  capitalName?: string
+  source: SpatialSource
+  /** explicit 事实必须能在输入文本中逐字找到 */
+  evidenceQuote?: string
+}
+
+/** 两个闭集实体之间的定性或定量空间关系 */
+export interface MapSpatialRelation {
+  from: string
+  to: string
+  direction?: SpatialDirection
+  distanceTier?: SpatialDistanceTier
+  distanceValue?: number
+  distanceUnit?: SpatialDistanceUnit
+  source: SpatialSource
+  /** explicit 事实必须能在输入文本中逐字找到 */
+  evidenceQuote?: string
+}
+
+/** 约束求解后的稳定画布坐标 */
+export interface SpatialPlacement {
+  name: string
+  kind: SpatialEntityKind
+  scaleTier?: SpatialScaleTier
+  x: number
+  y: number
+}
+
+export type MapScaleSource = 'manual' | 'map-width' | 'explicit-distance' | 'estimated'
+
+/** 比例尺既保存数值，也公开它是用户锚定还是系统估算 */
+export interface MapScaleResolution {
+  kmPerPixel: number
+  source: MapScaleSource
+  /** 旅行日程/月程换算得到的公里数只是一种估算 */
+  travelEstimate: boolean
+  anchorCount: number
+}
+
+/** 单条关系的残差，用于公开矛盾设定而非静默丢弃 */
+export interface SpatialConstraintViolation {
+  relationIndex: number
+  from: string
+  to: string
+  directionError: number
+  distanceError: number
+  severity: 'warning' | 'conflict'
+}
+
+export interface SpatialLayoutDiagnostics {
+  iterations: number
+  violations: SpatialConstraintViolation[]
 }
 
 /** 省份 */
@@ -194,6 +302,12 @@ export interface VoronoiMapData {
   roads: Road[]
   /** 地图名称 */
   name: string
+  /** 用户命名实体的约束布局结果 */
+  spatialPlacements?: SpatialPlacement[]
+  /** 当前地图采用的比例尺及可信来源 */
+  scaleResolution?: MapScaleResolution
+  /** 无法同时满足的关系残差 */
+  spatialDiagnostics?: SpatialLayoutDiagnostics
 }
 
 /** 高度图模板 */
@@ -299,4 +413,16 @@ export interface MapGenConfig {
   burgNames?: string[]
   /** 河流名称列表 */
   riverNames?: string[]
+
+  // ── 命名实体空间约束（WORLD-1 / ENH-WORLDMAP-2） ──
+  /** 参与约束布局的命名实体闭集 */
+  spatialEntities?: MapSpatialEntity[]
+  /** 实体闭集内的相对方位与距离关系 */
+  spatialRelations?: MapSpatialRelation[]
+  /** 用户明确提供的地图横向尺寸（公里） */
+  mapWidthKm?: number
+  /** mapWidthKm 对应的逐字原文证据 */
+  mapWidthEvidenceQuote?: string
+  /** 手动覆盖的比例尺；优先于自动锚定 */
+  kmPerPixel?: number
 }

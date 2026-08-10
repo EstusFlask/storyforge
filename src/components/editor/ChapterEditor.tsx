@@ -11,8 +11,6 @@ import { useBeforeUnload } from '../../hooks/useBeforeUnload'
 import { buildChapterContentPrompt, buildContinuePrompt, buildPolishPrompt, buildExpandPrompt, buildDeAIPrompt } from '../../lib/ai/adapters/chapter-adapter'
 import { buildReviewRevisePrompt, type ReviewResult } from '../../lib/ai/adapters/review-adapter'
 import { buildStateExtractPrompt, parseStateDiffs } from '../../lib/ai/adapters/state-extract-adapter'
-import { buildFactExtractPrompt, parseFactExtractResult } from '../../lib/ai/adapters/fact-extract-adapter'
-import { useFactLedgerStore } from '../../stores/fact-ledger'
 import { rebuildChapterChunks, ensureChunkEmbeddings, rebuildProjectNarrativeSummaries } from '../../lib/retrieval/retrieval'
 import { isEmbeddingReady } from '../../lib/ai/adapters/embedding-adapter'
 import { propagateChapterEditStale, analyzeEditImpact } from '../../lib/consistency/impact-analysis'
@@ -20,7 +18,8 @@ import { runChapterMemoryTask } from '../../lib/ai/chapter-memory/run-chapter-me
 import { prepareContinuityContext } from '../../lib/ai/chapter-memory/continuity-context'
 import { isPlanReconciliationCurrent } from '../../lib/ai/chapter-memory/plan-reconciliation'
 import { findNextCanonicalChapter, findPreviousCanonicalChapter } from '../../lib/ai/chapter-memory/canonical-chapter-sequence'
-import { chat } from '../../lib/ai/client'
+import { chat, resolveRequestConfig } from '../../lib/ai/client'
+import { getAIConfigRequiredMessage, isAIConfigReady } from '../../lib/ai/config-readiness'
 import { db } from '../../lib/db/schema'
 import { buildGenreConstraintContext } from '../../lib/ai/genre-metadata'
 import { buildStylePromptInjection } from '../../lib/ai/writing-styles'
@@ -37,6 +36,16 @@ import { useDialog } from '../shared/Dialog'
 import { useReviewResultStore } from '../../stores/review-result'
 import { useAIConfigStore } from '../../stores/ai-config'
 import { analyzeContextSegments, calculateBudget, getModelPreset, type ContextBudget } from '../../lib/ai/context-budget'
+import {
+  prepareGenerationNode,
+  runGenerationNode,
+  type PreparedGenerationNode,
+} from '../../lib/generation/generation-node'
+import {
+  createChapterGenerationNode,
+  type ChapterGenerationCategory,
+  type ChapterGenerationOperation,
+} from '../../lib/generation/chapter-generation-node'
 import RichEditor, { type RichEditorHandle } from './RichEditor'
 import EmotionBeatCard from './EmotionBeatCard'
 import CoordinationView from './CoordinationView'
@@ -46,13 +55,32 @@ import ChapterMemoryPanel from './ChapterMemoryPanel'
 import ChapterContextPreview from './ChapterContextPreview'
 import ChapterEditorToolbar from './ChapterEditorToolbar'
 import { type ReconciliationActionMap } from './ReconciliationTable'
+import PromptPreviewGate from '../shared/PromptPreviewGate'
 import { useItemLedgerStore } from '../../stores/item-ledger'
 import { useLocationStore } from '../../stores/location'
 import { useCodexStore } from '../../stores/codex'
 import { useDetailedOutlineStore } from '../../stores/detailed-outline'
 import { useEmotionBeatStore } from '../../stores/emotion-beat'
 import { buildEditorEntityReferences } from '../../lib/editor/entity-reference'
-import type { Project, StateDiffItem } from '../../lib/types'
+import type { ChatMessage, Project, StateDiffItem } from '../../lib/types'
+import {
+  adoptChapterOrganizationSelection,
+  isChapterOrganizationCurrent,
+  persistChapterOrganizationCandidate,
+  readLatestChapterOrganizationRun,
+  runChapterOrganization,
+  type ChapterOrganizationRun,
+  type ChapterOrganizationSelection,
+} from '../../lib/agent/chapter-organization'
+import { AgentTeamBudgetTracker } from '../../lib/agent/team-budget'
+import {
+  isConsistencyAgentCurrent,
+  persistConsistencyAgentCandidate,
+  readLatestConsistencyAgentRun,
+  runBackgroundConsistencyAgent,
+  toConsistencyAuditResult,
+  type ConsistencyAgentRun,
+} from '../../lib/agent/consistency-agent'
 
 const StateDiffModal = lazy(() => import('../state/StateDiffModal'))
 const OutlinePreview = lazy(() => import('../outline/OutlinePreview'))
@@ -60,6 +88,7 @@ const ReviewPanel = lazy(() => import('./ReviewPanel'))
 const NotePanel = lazy(() => import('./NotePanel'))
 const ComparePolishPanel = lazy(() => import('./ComparePolishPanel'))
 const SettingLookupPanel = lazy(() => import('./SettingLookupPanel'))
+const ChapterOrganizationModal = lazy(() => import('./ChapterOrganizationModal'))
 
 function LazyPanelFallback() {
   return <div className="rounded-lg border border-border bg-bg-surface p-4 text-sm text-text-muted">面板加载中...</div>
@@ -67,6 +96,13 @@ function LazyPanelFallback() {
 
 /** 生成任务类型(原 memory-builder 三层记忆已被 assembleContext 取代,此类型仅用于调试日志标签) */
 type MemoryTaskType = 'write' | 'plan' | 'review'
+
+interface PendingChapterGeneration {
+  operation: ChapterGenerationOperation
+  category: ChapterGenerationCategory
+  prepared: PreparedGenerationNode
+  backgroundMemoryIds: number[]
+}
 
 interface Props {
   project: Project
@@ -103,8 +139,6 @@ export default function ChapterEditor({ project, outlineNodeId }: Props) {
   const [manualSaveError, setManualSaveError] = useState('')
   const [showContext, setShowContext] = useState(false)
   const [customInstruction, setCustomInstruction] = useState('')
-  const [extracting, setExtracting] = useState(false)
-  const [extractingFacts, setExtractingFacts] = useState(false)
   const [impactInfo, setImpactInfo] = useState<string | null>(null)
   const [analyzingImpact, setAnalyzingImpact] = useState(false)
   const [pendingDiffs, setPendingDiffs] = useState<StateDiffItem[] | null>(null)
@@ -118,8 +152,9 @@ export default function ChapterEditor({ project, outlineNodeId }: Props) {
   ))
   const stateAI = useAIStream()
   const memoryAI = useAIStream()
-  const factAI = useAIStream()
   const editorRef = useRef<RichEditorHandle>(null)
+  const organizationAbortRef = useRef<AbortController | null>(null)
+  const consistencyRunRef = useRef<ConsistencyAgentRun | null>(null)
   const memoryRebuildInFlightRef = useRef(new Set<number>())
   const creatingChapterForOutlineRef = useRef(new Set<number>())
   const reviseReportRef = useRef<ReviewResult | null>(null)  // G8：记住上次"按报告修改"的报告，供重试
@@ -131,9 +166,22 @@ export default function ChapterEditor({ project, outlineNodeId }: Props) {
   const [showSettingsLookup, setShowSettingsLookup] = useState(false)
   const [compareSourceHtml, setCompareSourceHtml] = useState<string | null>(null)
   const [contextBudget, setContextBudget] = useState<ContextBudget | null>(null)
+  const [transparentMode, setTransparentMode] = useState(false)
+  const [pendingGeneration, setPendingGeneration] = useState<PendingChapterGeneration | null>(null)
   const [planReconciliationCurrent, setPlanReconciliationCurrent] = useState(false)
+  const [organizationRun, setOrganizationRun] = useState<ChapterOrganizationRun | null>(null)
+  const [organizationCurrent, setOrganizationCurrent] = useState(false)
+  const [organizingChapter, setOrganizingChapter] = useState(false)
+  const [organizationError, setOrganizationError] = useState('')
+  const [showOrganization, setShowOrganization] = useState(false)
+  const [consistencyRun, setConsistencyRun] = useState<ConsistencyAgentRun | null>(null)
+  const [consistencyCurrent, setConsistencyCurrent] = useState(false)
   const aiConfig = useAIConfigStore(s => s.config)
   const dialog = useDialog()
+
+  useEffect(() => {
+    consistencyRunRef.current = consistencyRun
+  }, [consistencyRun])
 
   // 字数（基于纯文本）
   const wordCount = useMemo(() => countWords(plainText), [plainText])
@@ -151,6 +199,53 @@ export default function ChapterEditor({ project, outlineNodeId }: Props) {
   useEffect(() => { loadCodex(project.id!) }, [project.id, loadCodex])
   useEffect(() => { loadDetailedOutlines(project.id!) }, [project.id, loadDetailedOutlines])
   useEffect(() => { loadEmotionBeats(project.id!) }, [project.id, loadEmotionBeats])
+  useEffect(() => {
+    let active = true
+    setOrganizationRun(null)
+    setOrganizationCurrent(false)
+    setShowOrganization(false)
+    setOrganizationError('')
+    if (!currentChapter?.id) return () => { active = false }
+    void (async () => {
+      const run = await readLatestChapterOrganizationRun({
+        projectId: project.id!,
+        chapterId: currentChapter.id!,
+      })
+      const current = run ? await isChapterOrganizationCurrent(run.candidate) : false
+      if (!active) return
+      setOrganizationRun(run)
+      setOrganizationCurrent(current)
+    })().catch(error => {
+      if (active) setOrganizationError(error instanceof Error ? error.message : '读取整理记录失败')
+    })
+    return () => { active = false }
+  }, [currentChapter?.id, project.id])
+  useEffect(() => {
+    let active = true
+    setConsistencyRun(null)
+    setConsistencyCurrent(false)
+    if (!currentChapter?.id) return () => { active = false }
+    void (async () => {
+      const run = await readLatestConsistencyAgentRun({
+        projectId: project.id!,
+        chapterId: currentChapter.id!,
+      })
+      const current = run ? await isConsistencyAgentCurrent(run.candidate) : false
+      if (!active) return
+      setConsistencyRun(run)
+      setConsistencyCurrent(current)
+      if (run) {
+        useReviewResultStore.getState().setConsistency(
+          currentChapter.id!,
+          toConsistencyAuditResult(run.candidate),
+        )
+      }
+    })()
+    return () => { active = false }
+  }, [currentChapter?.id, project.id])
+  useEffect(() => {
+    setPendingGeneration(null)
+  }, [currentChapter?.id, outlineNodeId])
 
   // 如果从大纲进入，选择/创建对应章节（自动创建）
   useEffect(() => {
@@ -256,6 +351,56 @@ export default function ChapterEditor({ project, outlineNodeId }: Props) {
     }
     return null
   }, [project.enableMultiWorld, outlineNode, nodes])
+
+  // 后台一致性 Agent：正文稳定落盘后只跑零 token 确定性守卫。
+  // 没有告警时不制造归档记录；LLM fast/deep 必须由质量审校面板中的明确按钮触发。
+  useEffect(() => {
+    let active = true
+    const chapterId = currentChapter?.id
+    const savedPlain = htmlToPlainText(savedContent).trim()
+    if (!chapterId || !savedPlain) return () => { active = false }
+    const timer = setTimeout(() => {
+      void (async () => {
+        if (consistencyRunRef.current) {
+          const current = await isConsistencyAgentCurrent(consistencyRunRef.current.candidate)
+          if (active) setConsistencyCurrent(current)
+        }
+        const budget = new AgentTeamBudgetTracker(
+          useAIConfigStore.getState().agentTeamBudgetProfile,
+        )
+        const candidate = await runBackgroundConsistencyAgent({
+          projectId: project.id!,
+          chapterId,
+          chapterTitle: outlineNode?.title || currentChapter.title || '未知章节',
+          worldGroupId: chapterWorldGroupId ?? null,
+          chapterContent: savedContent,
+          budget,
+        })
+        if (!active || candidate.findings.length === 0) return
+        const run = await persistConsistencyAgentCandidate(candidate)
+        if (!active) return
+        setConsistencyRun(run)
+        setConsistencyCurrent(true)
+        useReviewResultStore.getState().setConsistency(
+          chapterId,
+          toConsistencyAuditResult(candidate),
+        )
+      })().catch(error => {
+        console.error('[ConsistencyAgent] 后台确定性检查失败:', error)
+      })
+    }, 350)
+    return () => {
+      active = false
+      clearTimeout(timer)
+    }
+  }, [
+    chapterWorldGroupId,
+    currentChapter?.id,
+    currentChapter?.title,
+    outlineNode?.title,
+    project.id,
+    savedContent,
+  ])
   const entityReferences = useMemo(() => buildEditorEntityReferences({
     characters,
     itemEntries,
@@ -276,7 +421,7 @@ export default function ChapterEditor({ project, outlineNodeId }: Props) {
       chapterId: currentChapter?.id ?? null,
       provider: aiConfig.provider,
       model: aiConfig.model,
-      sourceKeys: ['contextMemo', 'chapterOutline', 'worldview', 'storyCore', 'powerSystem', 'codex', 'characters', 'creativeRules', 'worldRules', 'historical', 'locations', 'userStyleProfile'],
+      sourceKeys: ['contextMemo', 'chapterOutline', 'canonAssertions', 'worldview', 'storyCore', 'characterDrivenPlan', 'powerSystem', 'cultivationProgress', 'codex', 'characters', 'creativeRules', 'worldRules', 'historical', 'locations', 'userStyleProfile'],
     }).then(assembled => {
       if (cancelled) return
       const charIdx = assembled.included.indexOf('characters')
@@ -409,7 +554,9 @@ export default function ChapterEditor({ project, outlineNodeId }: Props) {
         'recentChapterSummaries',
         'worldview',
         'storyCore',
+        'characterDrivenPlan',
         'powerSystem',
+        'cultivationProgress',
         'codex',
         'creativeRules',
         'worldRules',
@@ -417,9 +564,12 @@ export default function ChapterEditor({ project, outlineNodeId }: Props) {
         'locations',
         'foreshadows',
         'storyArcs',
+        'storylineProgress',
         'emotionBeats',
         'stateCards',
         'currentFacts', // NS-4:当前章生效的已确认事实，回注生成防止前后矛盾
+        'canonAssertions', // CONSISTENCY-3:不依赖章节时点的已确认世界宪法
+        'characterKnowledge', // CONSISTENCY-2:按角色限制本章可知信息，防提前知情
         'heldItems', // CONSISTENCY-1:当前已持有物品，避免新章重复写首次获得
         'retrievedPassages', // NS-5:相关前文召回，防远距离细节/伏笔矛盾
         'references',
@@ -470,6 +620,54 @@ export default function ChapterEditor({ project, outlineNodeId }: Props) {
     }
   }
 
+  const chapterGenerationNode = (
+    operation: ChapterGenerationOperation,
+    category: ChapterGenerationCategory,
+  ) => createChapterGenerationNode({
+    operation,
+    category,
+    projectId: project.id!,
+    chapterIdentity: currentChapter?.id ?? outlineNodeId ?? 'unselected',
+    ai,
+  })
+
+  const runPreparedChapterGeneration = (
+    operation: ChapterGenerationOperation,
+    category: ChapterGenerationCategory,
+    prepared: PreparedGenerationNode,
+    backgroundMemoryIds: number[],
+    messages?: ChatMessage[],
+  ) => {
+    ai.setOperation(operation)
+    const node = chapterGenerationNode(operation, category)
+    void runGenerationNode(node, prepared, { messages }).catch(error => {
+      console.error('[ChapterEditor] 生成节点执行失败:', error)
+    })
+    scheduleRecentMemoryRebuild(backgroundMemoryIds)
+  }
+
+  const prepareOrRunChapterGeneration = (
+    operation: ChapterGenerationOperation,
+    category: ChapterGenerationCategory,
+    messages: ChatMessage[],
+    backgroundMemoryIds: number[],
+  ) => {
+    const node = chapterGenerationNode(operation, category)
+    const prepared = prepareGenerationNode(node, messages)
+    if (transparentMode) {
+      ai.setOperation(operation)
+      setPendingGeneration({ operation, category, prepared, backgroundMemoryIds })
+      return
+    }
+    setPendingGeneration(null)
+    runPreparedChapterGeneration(
+      operation,
+      category,
+      prepared,
+      backgroundMemoryIds,
+    )
+  }
+
   const handleGenerate = async () => {
     if (!outlineNode) return
     const backgroundMemoryIds = await prepareContinuityBeforeGeneration()
@@ -500,9 +698,12 @@ export default function ChapterEditor({ project, outlineNodeId }: Props) {
     ])
     setContextBudget(calculateBudget(aiConfig.provider, aiConfig.model, segments, aiConfig.contextWindow))
 
-    ai.setOperation('generate')
-    void ai.start(messages, undefined, { category: 'chapter.content', projectId: project.id! })
-    scheduleRecentMemoryRebuild(backgroundMemoryIds)
+    prepareOrRunChapterGeneration(
+      'generate',
+      'chapter.content',
+      messages,
+      backgroundMemoryIds,
+    )
   }
 
   const handleContinue = async () => {
@@ -518,9 +719,12 @@ export default function ChapterEditor({ project, outlineNodeId }: Props) {
       customInstruction.trim() || undefined,
       { continuity, continuityBudgetTokens },
     )
-    ai.setOperation('continue')
-    void ai.start(messages, undefined, { category: 'chapter.continue', projectId: project.id! })
-    scheduleRecentMemoryRebuild(backgroundMemoryIds)
+    prepareOrRunChapterGeneration(
+      'continue',
+      'chapter.continue',
+      messages,
+      backgroundMemoryIds,
+    )
   }
 
   const handlePolish = () => {
@@ -574,50 +778,113 @@ export default function ChapterEditor({ project, outlineNodeId }: Props) {
     ai.start(messages, undefined, { category: 'review.revise', projectId: project.id! })
   }
 
-  // ── 状态提取 ──
-  const handleExtractState = async () => {
-    if (!currentChapter || !plainText) return
-    setExtracting(true)
-    try {
-      const stateCtx = buildSelectiveStateContext(plainText, extraStateIds).text
-      const chapterTitle = outlineNode?.title || currentChapter.title || '未知章节'
-      const characterNames = characters.map(character => character.name)
-      const messages = buildStateExtractPrompt(stateCtx, chapterTitle, plainText, characterNames)
-      console.log('[StateExtract] 开始提取，章节:', chapterTitle)
-      const raw = await stateAI.start(messages, undefined, { category: 'state.extract', projectId: project.id! })
-      const { diffs, error } = parseStateDiffs(raw, characterNames)
-      if (error) {
-        console.error('[StateExtract] 解析失败:', error)
+  const handleRunChapterOrganization = async (force = false) => {
+    if (!currentChapter?.id || !plainText.trim()) return
+    if (organizingChapter) {
+      organizationAbortRef.current?.abort()
+      return
+    }
+    if (organizationRun && !force) {
+      const current = await isChapterOrganizationCurrent(organizationRun.candidate)
+      setOrganizationCurrent(current)
+      const hasPending = Object.values(organizationRun.candidate.domainStatus).some(
+        status => status === 'pending' || status === 'failed',
+      )
+      if (hasPending || !current) {
+        setShowOrganization(true)
+        return
       }
-      setPendingDiffs(diffs as StateDiffItem[])
-    } catch (err) {
-      console.error('[StateExtract] 提取失败:', err)
+    }
+
+    const effectiveConfig = resolveRequestConfig(aiConfig, { category: 'chapter.organize' }).config
+    if (!isAIConfigReady(effectiveConfig)) {
+      const message = getAIConfigRequiredMessage(effectiveConfig)
+      setOrganizationError(message)
+      await dialog.alert({ title: '无法整理本章', message })
+      return
+    }
+    const persisted = await persistCurrentEditorContent()
+    if (!persisted) return
+
+    const controller = new AbortController()
+    organizationAbortRef.current?.abort()
+    organizationAbortRef.current = controller
+    setOrganizingChapter(true)
+    setOrganizationError('')
+    try {
+      const [allRelations] = await Promise.all([
+        db.characterRelations.where('projectId').equals(project.id!).toArray(),
+        loadForeshadows(project.id!),
+      ])
+      const scopedCharacters = project.enableMultiWorld
+        ? characters.filter(character => (
+          character.isCrossWorld
+          || (character.homeWorldGroupId ?? null) === (chapterWorldGroupId ?? null)
+        ))
+        : characters
+      const scopedCharacterIds = new Set(
+        scopedCharacters.flatMap(character => character.id != null ? [character.id] : []),
+      )
+      const existingRelations = allRelations.filter(relation => (
+        scopedCharacterIds.has(relation.fromCharacterId)
+        && scopedCharacterIds.has(relation.toCharacterId)
+      ))
+      const chapterTitle = outlineNode?.title || currentChapter.title || '未知章节'
+      const budget = new AgentTeamBudgetTracker(useAIConfigStore.getState().agentTeamBudgetProfile)
+      const candidate = await runChapterOrganization({
+        projectId: project.id!,
+        chapterId: currentChapter.id,
+        chapterTitle,
+        worldGroupId: chapterWorldGroupId ?? null,
+        chapterContent: persisted.html,
+        stateContext: buildSelectiveStateContext(persisted.plain, extraStateIds).text,
+        characters: scopedCharacters,
+        knownItemNames: itemEntries.map(entry => entry.itemName),
+        existingRelations,
+        foreshadows: useForeshadowStore.getState().foreshadows,
+        budget,
+        call: messages => chat(messages, aiConfig, {
+          category: 'chapter.organize',
+          projectId: project.id!,
+          configOverrides: { maxTokens: 8_000 },
+          contextOverflowPolicy: 'reject',
+        }, controller.signal),
+      })
+      const run = await persistChapterOrganizationCandidate(candidate)
+      setOrganizationRun(run)
+      setOrganizationCurrent(true)
+      setShowOrganization(true)
+    } catch (error) {
+      if (!controller.signal.aborted) {
+        const message = error instanceof Error ? error.message : '整理本章失败'
+        setOrganizationError(message)
+        await dialog.alert({ title: '整理本章失败', message })
+      }
     } finally {
-      setExtracting(false)
+      if (organizationAbortRef.current === controller) organizationAbortRef.current = null
+      setOrganizingChapter(false)
     }
   }
 
-  // NS-4：从本章正文抽取事实候选，走 fact-ledger 单一入口写回（不裸写）。
-  const handleExtractFacts = async () => {
-    if (!currentChapter?.id || !plainText) return
-    setExtractingFacts(true)
+  const handleApplyChapterOrganization = async (selection: ChapterOrganizationSelection) => {
+    if (!organizationRun || organizingChapter) return
+    setOrganizingChapter(true)
+    setOrganizationError('')
     try {
-      const chapterTitle = outlineNode?.title || currentChapter.title || '未知章节'
-      const messages = buildFactExtractPrompt({ chapterTitle, chapterContent: plainText })
-      const raw = await factAI.start(messages, undefined, { category: 'fact.extract', projectId: project.id! })
-      const candidates = parseFactExtractResult({ raw, chapterContent: plainText })
-      const written = await useFactLedgerStore.getState().adopt({
-        projectId: project.id!,
-        sourceChapterId: currentChapter.id,
-        worldGroupId: chapterWorldGroupId ?? null,
-        candidates,
-      })
-      console.log(`[FactExtract] 抽取 ${candidates.length} 条，写入候选 ${written} 条`)
-    } catch (err) {
-      console.error('[FactExtract] 失败:', err)
+      const result = await adoptChapterOrganizationSelection({ run: organizationRun, selection })
+      setOrganizationRun(result.run)
+      setOrganizationCurrent(true)
+      const failed = Object.entries(result.run.candidate.domainErrors)
+      if (failed.length) {
+        setOrganizationError(failed.map(([domain, message]) => `${domain}: ${message}`).join('；'))
+      }
+    } catch (error) {
+      setOrganizationError(error instanceof Error ? error.message : '写入整理结果失败')
+      if (organizationRun) {
+        setOrganizationCurrent(await isChapterOrganizationCurrent(organizationRun.candidate))
+      }
     } finally {
-      factAI.reset()
-      setExtractingFacts(false)
+      setOrganizingChapter(false)
     }
   }
 
@@ -999,14 +1266,19 @@ export default function ChapterEditor({ project, outlineNodeId }: Props) {
         <ChapterEditorToolbar
           isStreaming={ai.isStreaming}
           hasText={!!plainText}
-          extractingState={extracting}
-          extractingFacts={extractingFacts}
-          factStreaming={factAI.isStreaming}
+          organizingChapter={organizingChapter}
+          hasOrganizationCandidate={Boolean(
+            organizationRun
+            && Object.values(organizationRun.candidate.domainStatus).some(
+              status => status === 'pending' || status === 'failed',
+            ),
+          )}
           analyzingImpact={analyzingImpact}
           impactInfo={impactInfo}
           hasOutline={!!outlineNodeId}
           showOutlinePreview={showOutlinePreview}
           showReviewPanel={showReviewPanel}
+          consistencyAlertCount={consistencyCurrent ? consistencyRun?.candidate.findings.length ?? 0 : 0}
           showNotePanel={showNotePanel}
           showSettingsLookup={showSettingsLookup}
           customInstruction={customInstruction}
@@ -1015,8 +1287,7 @@ export default function ChapterEditor({ project, outlineNodeId }: Props) {
           onExpand={handleExpand}
           onPolish={handlePolish}
           onDeAI={() => { void handleDeAI() }}
-          onExtractState={() => { void handleExtractState() }}
-          onExtractFacts={() => { void handleExtractFacts() }}
+          onOrganizeChapter={() => { void handleRunChapterOrganization() }}
           onAnalyzeImpact={() => { void handleEditImpact() }}
           onDismissImpact={() => setImpactInfo(null)}
           onToggleOutlinePreview={() => setShowOutlinePreview(!showOutlinePreview)}
@@ -1077,6 +1348,15 @@ export default function ChapterEditor({ project, outlineNodeId }: Props) {
               stateContext={stateCards.slice(0, 10).map(sc => `${sc.category}:${sc.entityName} — ${sc.fields?.slice(0, 50)}`).join('\n')}
               onClose={() => setShowReviewPanel(false)}
               onReviseByReport={handleReviseByReport}
+              consistencyRun={consistencyRun}
+              consistencyCurrent={consistencyCurrent}
+              onConsistencyRun={run => {
+                setConsistencyRun(run)
+                setConsistencyCurrent(true)
+              }}
+              onBeforeConsistencyRun={async () => {
+                await persistCurrentEditorContent()
+              }}
             />
           </Suspense>
         </div>
@@ -1167,9 +1447,54 @@ export default function ChapterEditor({ project, outlineNodeId }: Props) {
       })()}
 
       {/* Phase 21.3: 上下文预算条 */}
+      <details className="mb-2 rounded-lg border border-border bg-bg-surface/60 px-3 py-2 text-xs">
+        <summary className="cursor-pointer text-text-secondary hover:text-text-primary">
+          AI 生成高级选项
+          {transparentMode && <span className="ml-2 text-accent">透明模式已开启</span>}
+        </summary>
+        <label className="mt-2 flex cursor-pointer items-start gap-2 border-t border-border pt-2">
+          <input
+            type="checkbox"
+            checked={transparentMode}
+            onChange={event => {
+              setTransparentMode(event.target.checked)
+              setPendingGeneration(null)
+            }}
+            className="mt-0.5 accent-accent"
+          />
+          <span>
+            <span className="font-medium text-text-secondary">发送前预览最终提示词</span>
+            <span className="ml-2 text-[10px] text-text-muted">
+              默认关闭；开启后可临时编辑拼接后的真实消息，不写回模板或作品资料。
+            </span>
+          </span>
+        </label>
+      </details>
+
       {contextBudget && (
         <div className="mb-2">
           <ContextBudgetBar budget={contextBudget} compact={ai.isStreaming} />
+        </div>
+      )}
+
+      {pendingGeneration && (
+        <div className="mb-3 rounded-lg border border-accent/30 bg-accent/5 p-3">
+          <PromptPreviewGate
+            messages={pendingGeneration.prepared.messages}
+            backLabel="取消本次预览"
+            onBack={() => setPendingGeneration(null)}
+            onConfirm={messages => {
+              const pending = pendingGeneration
+              setPendingGeneration(null)
+              runPreparedChapterGeneration(
+                pending.operation,
+                pending.category,
+                pending.prepared,
+                pending.backgroundMemoryIds,
+                messages,
+              )
+            }}
+          />
         </div>
       )}
 
@@ -1311,6 +1636,20 @@ export default function ChapterEditor({ project, outlineNodeId }: Props) {
             onConfirm={handleAcceptDiffs}
             onCancel={() => { setPendingDiffs(null); stateAI.reset() }}
             showSkip={autoProcessing !== 'idle'}
+          />
+        </Suspense>
+      )}
+
+      {organizationRun && showOrganization && (
+        <Suspense fallback={null}>
+          <ChapterOrganizationModal
+            run={organizationRun}
+            current={organizationCurrent}
+            busy={organizingChapter}
+            error={organizationError}
+            onApply={selection => { void handleApplyChapterOrganization(selection) }}
+            onRerun={() => { void handleRunChapterOrganization(true) }}
+            onClose={() => setShowOrganization(false)}
           />
         </Suspense>
       )}

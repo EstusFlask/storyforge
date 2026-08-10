@@ -1,6 +1,6 @@
 /**
  * 物品栏提取适配器 — Phase 25.5.2-b
- * 从章节正文中提取主角的物品获得/消耗事件。
+ * 从章节正文中提取各角色的物品获得/消耗事件。
  */
 import type { ChatMessage, ItemLedgerAction } from '../../types'
 import { usePromptStore } from '../../../stores/prompt'
@@ -8,6 +8,7 @@ import { renderPrompt } from '../prompt-engine'
 
 export interface ExtractedItemEvent {
   itemName: string
+  heldByName: string
   action: ItemLedgerAction
   quantity: number
   note: string
@@ -18,12 +19,14 @@ export function buildInventoryExtractPrompt(
   chapterTitle: string,
   chapterText: string,
   knownItemNames: string[] = [],
+  characterNames: string[] = [],
 ): ChatMessage[] {
   const tpl = usePromptStore.getState().getActive('inventory.extract')
   const { messages } = renderPrompt(tpl, {
     chapterTitle,
     chapterText,
     knownItemNames: knownItemNames.join('、') || '无',
+    characterNames: characterNames.join('、') || '未提供',
   })
   return messages
 }
@@ -43,11 +46,12 @@ export function parseInventoryEvents(raw: string): ExtractedItemEvent[] {
     return arr
       .map((e: Record<string, unknown>): ExtractedItemEvent => ({
         itemName: String(e.itemName || '').trim(),
+        heldByName: String(e.heldByName || '').trim(),
         action: e.action === 'consume' ? 'consume' : 'gain',
         quantity: Math.max(1, Math.round(Number(e.quantity) || 1)),
         note: String(e.note || '').trim(),
       }))
-      .filter(e => e.itemName)
+      .filter(e => e.itemName && e.heldByName)
   } catch {
     return []
   }

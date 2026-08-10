@@ -8,6 +8,27 @@
  * (userStyleProfile);生成由 store.learnFromChapters 调 AI(style.learn)产出并 upsert。
  */
 
+export interface StyleRevisionPair {
+  id: string
+  sourceChapterId?: number | null
+  chapterTitle: string
+  beforeText: string
+  afterText: string
+  authorNote?: string
+  capturedAt: number
+}
+
+export type StyleCalibrationVerdict = 'closer' | 'needs-adjustment'
+
+export interface StyleCalibrationFeedback {
+  id: string
+  verdict: StyleCalibrationVerdict
+  note: string
+  sourceExcerpt: string
+  resultExcerpt: string
+  createdAt: number
+}
+
 /** 文风画像(每项目单例,按 projectId 唯一) */
 export interface UserStyleProfile {
   id?: number
@@ -22,6 +43,10 @@ export interface UserStyleProfile {
   sampleCount: number
   /** 采样总字数 */
   sampleWords: number
+  /** FB-5 高级校准：有界改前/改后样本 StyleRevisionPair[] */
+  revisionPairs?: string
+  /** FB-5 高级校准：互动校准反馈 StyleCalibrationFeedback[] */
+  calibrationFeedback?: string
   createdAt: number
   updatedAt: number
 }

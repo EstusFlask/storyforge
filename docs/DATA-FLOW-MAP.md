@@ -74,7 +74,7 @@
 | **角色** characters | `name/role/alignment/shortDescription/appearance/personality/background/motivation/abilities/relationships/arc`、章节出场范围、世界归属 | `worldContext`(★ 已接词条) + 已有角色名单 | 角色 JSON → characters 表 |
 | **重要地点** importantLocations | `name/tags/description/significance/parentId`(树状) | （作者填） | → importantLocations |
 | **历史年表** histories/historical* | 概述 + 时间线事件 + 关键词（按世界标签） | （作者填，与世界规则「事件」联动） | → historical* |
-| **世界地图** worldNodes | 节点/区域/连线 | `factionLayout`（人文势力自由文本）⚠️ 未接词条 | → worldNodes |
+| **世界地图** worldNodes | 节点/区域/连线、空间实体/关系、比例尺 | 当前世界观 + `codex` + `locations` 登记上下文 | → `worldNodes.mapConfigJSON` |
 | **故事线** storyArcs | `name/type(main/sub)/stages`(起承转合) | `worldContext`(★ 已接词条) + `storyCore` + 大纲摘要 | → storyArc |
 | **大纲** outlineNodes | `parentId/type(volume/chapter)/title/summary/order/worldGroupId` | `worldContext`(★) + `storyCore` + `characterContext` + `worldRulesContext` | 卷/章 JSON → outlineNodes |
 | **伏笔** foreshadows | `name/type/status/description/plantChapterId/echoChapterIds/resolveChapterId/importance/urgency` | `worldContext`(★) + `characterContext` + 已有伏笔 | 伏笔 JSON → foreshadows |
@@ -132,7 +132,8 @@
 - **道具**：`worldview.itemDesign` + `itemSystems` 表 + 词条 `artifact` 三处。
 - **自然物产**：`worldview.naturalResources` + 词条 `mineral/herb/beast` 两处。
 - **力量**：`worldview.powerHierarchy`(字段) + `powerSystems`(表) + 未来「修炼体系」。
-- 现状：世界地图仍读旧 `factionLayout`，词条尚未供它读 → **不贯通点**。（Phase 35-b 合并后消除）
+- 已收口：世界地图同时读取当前世界的正式世界观字段、Codex 与重要地点登记上下文；
+  `factionLayout` 继续作为无损兼容来源，但不再是唯一来源。
 
 ### 🔴 F. 「半截改版」读写错位全项目扫描结果（2026-06-04）
 

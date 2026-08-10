@@ -8,7 +8,19 @@ function seedDigest(): string {
 
 describe('AUDIT-6 · 提示词领域拆分完整性', () => {
   it('聚合后的模板数量、顺序和内容保持逐字段一致', () => {
-    expect(SYSTEM_PROMPT_SEEDS).toHaveLength(86)
-    expect(seedDigest()).toBe('ab87774fdda1e803d32ce0fb8dd850fe399280dde41e2b8717cd9aeca5f56ed1')
+    expect(SYSTEM_PROMPT_SEEDS).toHaveLength(88)
+    // WORLD-1 导入分类、STORY-1 中途重规划、FB-5 互动校准与 CM-1
+    // 增量融合边界都属于有序系统模板契约。
+    expect(seedDigest()).toBe('7c99b087293f3a567085100d9f828ed89ce60ef92f7bba6eac75f26c17921986')
+  })
+
+  it('分块导入把固定分类目录放在变化的块序号和滚动上下文之前，保留可缓存前缀', () => {
+    const template = SYSTEM_PROMPT_SEEDS.find(seed => seed.moduleKey === 'import.parse-chunk')!
+    const catalogAt = template.systemPrompt.indexOf('{{codexCategoryCatalog}}')
+    const chunkAt = template.systemPrompt.indexOf('{{chunkIndex}}')
+    const contextAt = template.systemPrompt.indexOf('{{knownContext}}')
+    expect(catalogAt).toBeGreaterThan(0)
+    expect(catalogAt).toBeLessThan(chunkAt)
+    expect(catalogAt).toBeLessThan(contextAt)
   })
 })

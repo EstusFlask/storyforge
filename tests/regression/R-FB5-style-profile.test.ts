@@ -68,11 +68,24 @@ describe('R-FB5 · 文风画像持久化 + 注入 + 生命周期', () => {
   it('③ 导出含画像 / 导入重映射 projectId / 删项目级联清除', async () => {
     const pid = await createProject()
     await useUserStyleStore.getState().saveProfile(pid, { profile: PROFILE_TEXT, sourceChapterIds: [], sampleCount: 1, sampleWords: 100 })
+    await useUserStyleStore.getState().captureRevisionPair(pid, {
+      chapterTitle: '导出样本',
+      beforeText: '他非常快速地走过去。',
+      afterText: '他快步过去。',
+    })
+    await useUserStyleStore.getState().addCalibrationFeedback(pid, {
+      verdict: 'closer',
+      note: '节奏正确',
+      sourceText: '原文',
+      resultText: '结果',
+    })
 
     // 导出包含 userStyleProfiles
     const exported = await exportProjectJSON(pid)
     expect(exported.userStyleProfiles?.length).toBe(1)
     expect(exported.userStyleProfiles?.[0].profile).toBe(PROFILE_TEXT)
+    expect(exported.userStyleProfiles?.[0].revisionPairs).toContain('导出样本')
+    expect(exported.userStyleProfiles?.[0].calibrationFeedback).toContain('节奏正确')
 
     // 导入到新项目,projectId 重映射
     const newPid = await importProjectJSON(exported as any)
@@ -80,6 +93,8 @@ describe('R-FB5 · 文风画像持久化 + 注入 + 生命周期', () => {
     const imported = await db.userStyleProfiles.where('projectId').equals(newPid).first()
     expect(imported?.profile).toBe(PROFILE_TEXT)
     expect(imported?.projectId).toBe(newPid)
+    expect(imported?.revisionPairs).toContain('导出样本')
+    expect(imported?.calibrationFeedback).toContain('节奏正确')
 
     // 删原项目级联清除其画像,新项目的画像不受影响
     await cascadeDeleteProject(pid)

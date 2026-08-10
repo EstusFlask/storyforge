@@ -99,7 +99,7 @@ StoryForge 不是“一键生成完本小说”的黑箱工具，而是给作者
 - 故事线：主线/支线、阶段卡、进度和 AI 生成。
 - 章节：章节列表、TipTap 正文编辑、自动保存、续写、润色、扩写、去 AI 味、审校、便签。
 - 伏笔：伏笔类型、埋设/呼应/回收状态、紧急度、看板和 AI 建议。
-- 文风学习：从已写章节提取作者文风画像，反哺后续生成。
+- 文风学习：从已写章节与作者确认的改前/改后短样本提取画像，并通过互动校准持续反哺后续生成。
 - 重要地点：地点树、标签、层级关系和地点资料。
 - 状态表：角色、地点、物品、势力等状态卡和事件时间线。
 - 物品栏：追踪物品获得、持有、转移、消耗等账本。
@@ -299,7 +299,12 @@ npm run ci
 | [CHANGELOG.md](./CHANGELOG.md) | 版本变更记录 |
 | [CLAUDE.md](./CLAUDE.md) | AI/开发者接手项目必须遵守的规则 |
 | [docs/MASTER-BLUEPRINT.md](./docs/MASTER-BLUEPRINT.md) | 重构施工蓝图与架构权威 |
+| [docs/WORLD-ENGINE-COMMUNITY-ARCHITECTURE.md](./docs/WORLD-ENGINE-COMMUNITY-ARCHITECTURE.md) | 世界引擎、作品实例、状态机与社区的目标架构 |
+| [docs/roadmap/README.md](./docs/roadmap/README.md) | 当前功能体系、待开发组合与施工顺序 |
+| [docs/roadmap/CAPABILITY-BASELINE.md](./docs/roadmap/CAPABILITY-BASELINE.md) | 当前已有能力与禁止重复建设边界 |
+| [docs/roadmap/COMPLETED.md](./docs/roadmap/COMPLETED.md) | 已完成开发单位与历史证据入口 |
 | [docs/AI-FUNCTIONS-MANUAL.generated.md](./docs/AI-FUNCTIONS-MANUAL.generated.md) | 由代码生成的 AI 功能清单 |
+| [SECURITY.md](./SECURITY.md) | 漏洞报告、响应流程与支持版本政策 |
 
 ---
 
@@ -311,12 +316,26 @@ StoryForge 使用 [MIT License](./LICENSE) 开源。你可以自由使用、复�
 
 ## Star History
 
-[![StoryForge Star History](./docs/assets/architecture/storyforge-star-history.svg)](https://star-history.com/#yuanbw2025/storyforge&Date)
+[![StoryForge Star History](https://raw.githubusercontent.com/yuanbw2025/storyforge/readme-assets/storyforge-star-history.svg)](https://www.star-history.com/?repos=yuanbw2025%2Fstoryforge&type=date&legend=top-left)
 
-折线图由 GitHub 官方 stargazer 时间数据生成；更新命令：`node scripts/generate-star-history.mjs`。
+折线图由 GitHub 官方 stargazer 时间数据生成，并由
+[`star-history.yml`](./.github/workflows/star-history.yml) 每 15 分钟刷新到独立的
+`readme-assets` 分支；也可在 Actions 中手动触发，不会产生主干提交或应用部署。
 
 ---
 
 ## 功能全景指南
 
 完整图文版功能说明书见 [docs/FEATURE-GUIDE.md](./docs/FEATURE-GUIDE.md)。文档按页面和二级页签展开，包含功能说明、项目逻辑说明和配套截图。
+
+---
+
+## 自愿赞助
+
+StoryForge 的全部功能与后续更新不会因是否赞助而有任何区别：赞助不会获得额外功能或特殊权益，不赞助也不会失去任何功能或更新，一切完全自愿。赞助款将用于缓解开发者的大模型订阅成本，并在一定程度上帮助加快项目开发。
+
+感谢每一份自愿支持。我会继续认真开发和维护 StoryForge，也希望它能帮助你把脑海中的世界变成故事、游戏与更多有趣的体验，让你在使用和创作的过程中获得快乐、灵感与满足感。
+
+<p align="center">
+  <img src="./docs/assets/support/afdian-aloneone.jpeg" alt="StoryForge 爱发电赞助二维码" width="420" />
+</p>

@@ -40,6 +40,35 @@ describe('R-inspiration-parse（灵感反推解析健壮性 · 社区反馈"第�
     expect(r!.worldview.worldOrigin).toBe('灵界崩塌')
   })
 
+  it('完整对象偶发使用单引号 → JSON5 兼容解析后仍走闭集整形', () => {
+    const output = `\`\`\`json
+{
+  "worldview": {"worldOrigin": "潮汐旧城"},
+  "storyCore": {"logline": '守塔人保存所有被遗忘的名字', "theme": "记忆"},
+  "characters": [],
+}
+\`\`\``
+    const r = parseReverseOutput(output)
+    expect(r?.storyCore.logline).toBe('守塔人保存所有被遗忘的名字')
+    expect(r?.worldview.worldOrigin).toBe('潮汐旧城')
+  })
+
+  it('模型把文本字段返回成对象数组时可读整形，不出现 [object Object]', () => {
+    const output = JSON.stringify({
+      worldview: {
+        worldOrigin: '潮汐旧城',
+        races: [{ name: '潮生者', trait: '能听见海的低语' }],
+        factionLayout: [{ name: '档案局', goal: '保存名字' }],
+      },
+      storyCore: { logline: '保存名字' },
+      characters: [],
+    })
+    const r = parseReverseOutput(output)
+    expect(r?.worldview.races).toContain('潮生者')
+    expect(r?.worldview.races).toContain('能听见海的低语')
+    expect(r?.worldview.factionLayout).not.toContain('[object Object]')
+  })
+
   it('完全不是 JSON（模型拒答）→ 返回 null，不抛异常', () => {
     expect(parseReverseOutput('抱歉，我无法根据这个灵感生成设定。')).toBeNull()
     expect(parseReverseOutput('')).toBeNull()

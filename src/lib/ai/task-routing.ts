@@ -1,10 +1,28 @@
 import type { AIConfig, AIConfigPreset } from '../types'
 import { aiProviderAllowsEmptyKey } from './config-readiness'
 
-export const AI_TASK_KINDS = ['creation', 'extraction', 'analysis', 'review'] as const
+export const GENERAL_AI_TASK_KINDS = ['creation', 'extraction', 'analysis', 'review'] as const
+export const AGENT_ROLE_TASK_KINDS = [
+  'agent-orchestrator',
+  'agent-world-origin',
+  'agent-character',
+  'agent-inspiration',
+  'agent-outline',
+  'agent-prose',
+] as const
+export const AI_TASK_KINDS = [...GENERAL_AI_TASK_KINDS, ...AGENT_ROLE_TASK_KINDS] as const
 
 export type AITaskKind = typeof AI_TASK_KINDS[number]
 export type AITaskRoutes = Partial<Record<AITaskKind, string>>
+
+export const AGENT_ROLE_CATEGORIES = {
+  orchestrator: 'agent.orchestrator',
+  'world-origin': 'agent.world-origin',
+  character: 'agent.character',
+  inspiration: 'agent.inspiration',
+  outline: 'agent.outline',
+  prose: 'agent.prose',
+} as const
 
 export interface ResolvedAITaskConfig {
   config: AIConfig
@@ -21,6 +39,7 @@ const EXTRACTION_PREFIXES = [
   'codex.extract',
   'location.extract',
   'story.timeline',
+  'chapter.organize',
   'chapter.memory',
   'character.structure',
   'foreshadow.structure',
@@ -37,6 +56,7 @@ const ANALYSIS_PREFIXES = [
 ]
 
 const REVIEW_PREFIXES = [
+  'agent.',
   'review.',
   'scene.verify',
   'history.consult',
@@ -59,8 +79,20 @@ const CREATION_PREFIXES = [
   'history.storm',
   'technology',
   'emotion.beat',
+  'simulation.',
   'inspiration.',
+  'node.',
+  'style.calibrate',
 ]
+
+const AGENT_ROLE_CATEGORY_ENTRIES = [
+  [AGENT_ROLE_CATEGORIES.orchestrator, 'agent-orchestrator'],
+  [AGENT_ROLE_CATEGORIES['world-origin'], 'agent-world-origin'],
+  [AGENT_ROLE_CATEGORIES.character, 'agent-character'],
+  [AGENT_ROLE_CATEGORIES.inspiration, 'agent-inspiration'],
+  [AGENT_ROLE_CATEGORIES.outline, 'agent-outline'],
+  [AGENT_ROLE_CATEGORIES.prose, 'agent-prose'],
+] as const
 
 function matchesPrefix(category: string, prefixes: readonly string[]): boolean {
   return prefixes.some(prefix => category === prefix || category.startsWith(prefix))
@@ -70,6 +102,10 @@ function matchesPrefix(category: string, prefixes: readonly string[]): boolean {
 export function classifyAITask(category?: string): AITaskKind | null {
   const normalized = category?.trim().toLowerCase()
   if (!normalized) return null
+  const agentRole = AGENT_ROLE_CATEGORY_ENTRIES.find(([prefix]) => (
+    normalized === prefix || normalized.startsWith(`${prefix}.`)
+  ))
+  if (agentRole) return agentRole[1]
   if (matchesPrefix(normalized, EXTRACTION_PREFIXES)) return 'extraction'
   if (matchesPrefix(normalized, ANALYSIS_PREFIXES)) return 'analysis'
   if (matchesPrefix(normalized, REVIEW_PREFIXES)) return 'review'

@@ -111,6 +111,11 @@
 
 分 agent 使用不同模型是安全的前提，不是“相信每个模型都不会跑偏”，而是团队共享同一套确定性检测尺子。任何模型生成的产物，都要过同一套 canon 校验器与写入确认流程。
 
+> 2026-07-27 实施进度：已先交付五领域 `精简 / 均衡 / 完整` 档位。档位按比例收窄
+> `CONTEXT_SOURCES` 的登记预算，并冻结候选的实际纳入/省略/裁剪来源与 token 估算；
+> 已实现跨调用团队三档总预算和整轮一次受控 Canon 打回；尚未开放任意单源滑块、并行
+> 团队、模型投票或无限重试。
+
 ### 2.2 检测环：确定性主干，向量副手
 
 Phase 27 的一致性检测不能继续设计成“让另一个 LLM 看一遍”。原则必须改为：
@@ -135,8 +140,13 @@ Agent 编排不是从零开始做一个新的一致性系统。它站在“收�
 
 ## 三、工具层（Tool Registry）—— 与现有代码精确对应
 
-每个工具 = `{ name, description, parameters(JSON schema), execute(args) }`。
+每个工具 = `{ name, description, parameters(JSON schema), execute(context, args) }`。
 工具分三类：**只读 / 生成 / 写入**。写入类与生成类全部**复用现有 store 方法和 adapter**，不重写业务逻辑。
+
+> 2026-07-25 实施校正：Phase 27.1-a 已按
+> [`AGENT-TOOL-REGISTRY-DESIGN.md`](./AGENT-TOOL-REGISTRY-DESIGN.md) 落地。旧表中“直接读
+> store state”只表达能力映射，不再是运行时路径；实际读取统一经过
+> `CONTEXT_SOURCES → assembleContext()`，以保留预算、作用域与审计单一入口。
 
 ### 3.1 只读工具（查询项目，零风险，先做）
 
@@ -380,30 +390,68 @@ loop（受步数/Token 上限约束）:
 
 ## 八、分期实施
 
-**Phase 27.1-a 工具层地基（只读工具优先）**
-- 定义 Tool 接口 + 注册表；先实现全部**只读工具**（零风险）
-- 验证：能让 AI 通过工具"看懂"整个项目
+**Phase 27.1-a 工具层地基（2026-07-25 已完成）**
+- 已定义 Tool 接口 + 注册表并实现全部 13 个只读工具
+- 已验证注册表读取、项目/世界隔离、有界搜索、总预算与零写入；当前为 headless 地基，尚未宣称 AI tool calling 已接通
 
-**Phase 27.1-b Agent 执行引擎 + 提供商适配**
-- AgentRunner 多步循环 + `client.ts` tools 注入 + 兼容/降级
-- 验证：拿"一致性检查"（纯只读 Agent）跑通整条 tool calling 链路，验证成本
+**Phase 27.1-b Agent 执行引擎 + 提供商适配（2026-07-25 已完成）**
+- AgentRunner 多步循环 + provider-neutral 严格 JSON 动作协议；协议与 transport 分离，
+  原生 `tool_calls` 保留为后续能力探测优化，不复制执行内核
+- 已用纯只读项目巡检跑通“模型 → 工具 → 证据 → 最终答复”，验证预算、取消、循环、
+  作用域、消息裁剪拒绝、消耗统计和内容表零写入
 
-**Phase 27.1-c 对话副驾 MVP（前台）**
-- 右侧对话栏 UI + 意图识别 + 确认卡片 + 面板同步
-- 先接**生成 + 写入工具的一个闭环**：对话引导填世界观（最高频入口）
-- 验证：用户能"聊着把世界观建好"，面板实时刷新
+**Phase 27.1-c 对话副驾 MVP（前台，2026-07-25 已完成）**
+- 已交付右侧对话栏、当前项目/世界作用域、可编辑确认卡和面板同步；窄屏使用覆盖式右栏，
+  不挤压主面板
+- 首个闭环严格限定为 `read_project_status/read_worldview → worldview.dimension →
+  可见候选 → 作者明确确认 → GenerationNode gate → adopt(worldviews.worldOrigin)`
+- 确认采纳可见候选时不会再次调用模型；来源变化、空/过短/过长/无变化候选均阻断
+- 当前尚未实现泛化意图识别，不能据此宣称“任意对话建完整世界观”；详细边界见
+  [`CHAT-COPILOT-MVP-DESIGN.md`](./CHAT-COPILOT-MVP-DESIGN.md)
 
-**Phase 27.1-d 扩展对话覆盖面**
-- 逐步接入：灵感对话反推、角色/大纲/正文的对话生成
-- 写入工具全面接入确认机制
+**Phase 27.1-d 扩展对话覆盖面（已完成）**
+- 灵感对话反推的首个独立闭环已接入：作者选择已保存碎片，正式 read tool 有界装配，
+  结构化候选可编辑，确认后只复用既有灵感版本写回，不自动采纳项目主档
+- 详细边界与验收见
+  [`CHAT-COPILOT-INSPIRATION-DESIGN.md`](./CHAT-COPILOT-INSPIRATION-DESIGN.md)
+- 角色生成的第二个独立闭环已接入：正式 `read_worldview/read_characters` 装配当前世界
+  关联闭包，复用 `character.generate` 生成闭集 JSON；作者编辑确认后只经
+  `GenerationNode → adopt(characters)` 新增角色，同名与并发过期阻断
+- 详细边界与验收见
+  [`CHAT-COPILOT-CHARACTER-DESIGN.md`](./CHAT-COPILOT-CHARACTER-DESIGN.md)
+- 大纲生成的第三个独立闭环已接入：复用手工大纲入口的 17 个正式上下文源、
+  `outline.volume/outline.chapter` 提示和 `adopt(outlineNodes)`；候选整批可编辑，
+  世界作用域、同层重复、并发快照和上游候选采纳依赖均由确定性代码阻断
+- 详细边界与验收见
+  [`CHAT-COPILOT-OUTLINE-DESIGN.md`](./CHAT-COPILOT-OUTLINE-DESIGN.md)
+- 正文生成的第四个独立闭环已接入：空白章生成与已有正文显式续写复用正式章节上下文、
+  `chapter.content/chapter.continue` 和 `adopt(chapters)`；目标章、正文 fingerprint、
+  旧检索证据失效和非覆盖边界由代码保证
+- 详细边界与验收见
+  [`CHAT-COPILOT-PROSE-DESIGN.md`](./CHAT-COPILOT-PROSE-DESIGN.md)
+- 27.1-d 四个领域已闭环；后续能力仍须逐项冻结读、候选、gate、确认写回与非范围，
+  不提前泛化成任意意图
 
 **Phase 27.1-e 多 agent 团队编排**
 - 总 agent 负责任务拆解、领域分发、收敛与打回
 - 分 agent 按世界观 / 故事 / 角色 / 大纲 / 章节细纲等领域配置专属模型/API与输入权重
 - 复用确定性 canon 校验器做跨 agent 产物匹配检测，不通过则带证据打回
+- 首个增量已实现六角色专属模型/API 路由：主 Agent 编排与世界、角色、灵感、大纲、正文
+  分别绑定已有预设，且在上下文装配前解析实际模型；随后交付五领域上下文档位、可见输入
+  证据、跨调用团队预算和一次确定性 Canon 打回。并行自治、任意单源权重、模型投票与长期
+  后台团队仍未完成。详细边界见
+  [`AGENT-TEAM-ROLE-ROUTING-DESIGN.md`](./AGENT-TEAM-ROLE-ROUTING-DESIGN.md)
+  与 [`AGENT-TEAM-BUDGET-CANON-DESIGN.md`](./AGENT-TEAM-BUDGET-CANON-DESIGN.md)。
 
-**Phase 27.2b / 5.2 后台 Agent**
-- 整理本章 Agent（先）→ 一致性 Agent → NPC 演进 Agent（最后，最复杂）
+**Phase 27.2b-c / 5.2 后台 Agent**
+- 整理本章 Agent 已完成：一次调用生成状态/事实/物品/年表/关系/伏笔六域证据候选，
+  复用归档 Agent 事件流恢复，作者确认与正文 hash 守卫后才写回。详细边界见
+  [`CHAPTER-ORGANIZATION-AGENT-DESIGN.md`](./CHAPTER-ORGANIZATION-AGENT-DESIGN.md)。
+- 一致性 Agent 已完成：保存正文只运行零模型调用的确定性 Fast Guard；作者明确运行
+  fast/deep 时最多调用模型一次，逐字证据经白名单校验，Canon 硬判仍由代码完成。报告
+  复用归档 Agent 事件流，可恢复、有 hash 过期守卫且全程只读。详细边界见
+  [`CONSISTENCY-AGENT-DESIGN.md`](./CONSISTENCY-AGENT-DESIGN.md)。
+- 下一顺序：SIM-1 创作/运行时分层地基 → NPC 演进 Agent（最后，最复杂）
 
 **每期独立可用**：工具层本身有用；只读 Agent 不写数据先验证；对话副驾从世界观单点切入。
 

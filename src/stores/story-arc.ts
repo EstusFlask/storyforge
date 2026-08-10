@@ -6,6 +6,7 @@ import { create } from 'zustand'
 import { db } from '../lib/db/schema'
 import type { StoryArc } from '../lib/types'
 import { parseStages, stringifyStages, type StoryStage } from '../lib/types/story-arc'
+import { deleteStoryArcLifecycle, updateStoryArcStagesLifecycle } from '../lib/storyline/lifecycle'
 
 const now = () => Date.now()
 
@@ -17,7 +18,11 @@ interface StoryArcStore {
   loadAll: (projectId: number) => Promise<void>
   setActiveArc: (id: number | null) => void
   addArc: (arc: Omit<StoryArc, 'id' | 'createdAt' | 'updatedAt'>) => Promise<number>
-  updateArc: (id: number, data: Partial<StoryArc>) => Promise<void>
+  /** 静态阶段必须走 updateStages()，以便同步清理动态投影的悬空 stageId。 */
+  updateArc: (
+    id: number,
+    data: Partial<Pick<StoryArc, 'name' | 'description' | 'type'>>,
+  ) => Promise<void>
   deleteArc: (id: number) => Promise<void>
 
   /** 获取当前活跃故事线的阶段列表 */
@@ -66,7 +71,7 @@ export const useStoryArcStore = create<StoryArcStore>((set, get) => ({
   },
 
   deleteArc: async (id) => {
-    await db.storyArcs.delete(id)
+    await deleteStoryArcLifecycle(id)
     const arcs = get().arcs.filter(a => a.id !== id)
     set({ arcs, activeArcId: get().activeArcId === id ? (arcs[0]?.id ?? null) : get().activeArcId })
   },
@@ -80,7 +85,16 @@ export const useStoryArcStore = create<StoryArcStore>((set, get) => ({
 
   updateStages: async (arcId, stages) => {
     const stagesJson = stringifyStages(stages)
-    await get().updateArc(arcId, { stages: stagesJson })
+    await updateStoryArcStagesLifecycle({
+      arcId,
+      stages: stagesJson,
+      validStageIds: stages.map(stage => stage.id),
+    })
+    set({
+      arcs: get().arcs.map(arc => arc.id === arcId
+        ? { ...arc, stages: stagesJson, updatedAt: now() }
+        : arc),
+    })
   },
 
   buildStoryArcContext: (currentChapterOrder?: number) => {

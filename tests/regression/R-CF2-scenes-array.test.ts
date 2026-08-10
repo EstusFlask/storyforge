@@ -29,11 +29,16 @@ describe('R-CF2-scenes-array', () => {
 
     await adopt({
       projectId, target: 'detailedOutlines', mode: 'add',
-      data: { outlineNodeId: nodeId, scenes: [scene(), scene({ sceneId: 's2', title: '冲突' })] },
+      data: {
+        outlineNodeId: nodeId,
+        scenes: [scene(), scene({ sceneId: 's2', title: '冲突' })],
+        prohibitions: ['不能提前知情'],
+      },
     })
     const row = await db.detailedOutlines.where('outlineNodeId').equals(nodeId).first()
     expect(Array.isArray(row!.scenes)).toBe(true)          // 关键：不是字符串
     expect(row!.scenes).toHaveLength(2)
+    expect(row!.prohibitions).toEqual(['不能提前知情'])
     expect(() => (row!.scenes as DetailedScene[]).reduce((s, sc) => s + sc.estimatedWords, 0)).not.toThrow()
   })
 

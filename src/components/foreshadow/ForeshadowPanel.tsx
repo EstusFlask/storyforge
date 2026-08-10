@@ -199,7 +199,7 @@ export default function ForeshadowPanel({ project }: Props) {
       worldGroupId: null,
       provider: config.provider,
       model: config.model,
-      sourceKeys: ['worldview', 'storyCore', 'powerSystem', 'codex', 'characters', 'creativeRules', 'worldRules', 'historical', 'locations'],
+      sourceKeys: ['canonAssertions', 'worldview', 'storyCore', 'powerSystem', 'cultivationProgress', 'codex', 'characters', 'creativeRules', 'worldRules', 'historical', 'locations'],
     })
     const charIdx = assembled.included.indexOf('characters')
     const worldCtx = assembled.text

@@ -88,4 +88,33 @@ describe('R-WF · 工作流步骤上下文整形', () => {
     })
     expect(ctx.userHint).toBe('保留悬疑感\n一个失忆侦探发现自己是凶手。')
   })
+
+  it('FLOW-1:显式图只注入目标节点自己的入边并按端口变量分组', () => {
+    const ctx = assembleWorkflowStepVars({
+      step: { label: '汇合生成' },
+      prevOutput: '不应读取的拓扑相邻输出',
+      projectName: '测试书',
+      genres: '悬疑',
+      assembledContext: '【已存设定】雾港',
+      upstreamInputs: [
+        {
+          sourceStepId: 'world',
+          sourceLabel: '世界设定',
+          targetVariable: 'worldContext',
+          output: '记忆可以买卖',
+        },
+        {
+          sourceStepId: 'character',
+          sourceLabel: '角色设计',
+          targetVariable: 'characters',
+          output: '失忆侦探林默',
+        },
+      ],
+    })
+
+    expect(ctx.characters).toContain('失忆侦探林默')
+    expect(ctx.worldContext).toContain('世界设定 → worldContext')
+    expect(ctx.worldContext).toContain('记忆可以买卖')
+    expect(ctx.worldContext).not.toContain('不应读取的拓扑相邻输出')
+  })
 })

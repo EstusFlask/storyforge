@@ -1,3 +1,5 @@
+import type { RagDocumentMetadata } from './rag-library'
+
 /** 历史事件 */
 export interface HistoricalEvent {
   id: string           // 内部唯一标识
@@ -10,7 +12,7 @@ export interface HistoricalEvent {
 }
 
 /** 历史年表 */
-export interface History {
+export interface History extends RagDocumentMetadata {
   id?: number
   projectId: number
   overview: string         // 历史总述
@@ -130,4 +132,3 @@ export interface HistoricalKeyword {
   createdAt: number
   updatedAt: number
 }
-

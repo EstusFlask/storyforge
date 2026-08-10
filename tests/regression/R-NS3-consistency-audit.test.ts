@@ -74,6 +74,7 @@ describe('NS-3 · evidence-backed consistency audit', () => {
       chapterTitle: '测试',
       chapterContent: longChapter,
       evidenceContext: evidence,
+      lifecycleCatalog: 'characterId=7 | 林飞 | status=dead',
     })
     const deep = buildConsistencyAuditPrompt({
       mode: 'deep',
@@ -83,6 +84,8 @@ describe('NS-3 · evidence-backed consistency audit', () => {
     })
     expect(fast.at(-1)?.content).toContain(longChapter)
     expect(fast[0].content).toContain('低误报')
+    expect(fast[0].content).toContain('lifecycleReferences')
+    expect(fast.at(-1)?.content).toContain('status=dead')
     expect(deep[0].content).toContain('因果链')
   })
 })

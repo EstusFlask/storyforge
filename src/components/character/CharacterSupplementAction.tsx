@@ -56,7 +56,7 @@ export default function CharacterSupplementAction({ character, projectId, worldG
       worldGroupId: worldGroupId ?? null,
       provider: aiConfig.provider,
       model: aiConfig.model,
-      sourceKeys: ['worldview', 'storyCore', 'powerSystem', 'codex', 'creativeRules', 'worldRules', 'locations'],
+      sourceKeys: ['canonAssertions', 'worldview', 'storyCore', 'powerSystem', 'codex', 'creativeRules', 'worldRules', 'locations'],
     })
     // C2：反向哺喂——以该角色为主体，召回剧情里已确认的事实 + 正文真实表现作为硬约束
     let evidenceContext: string | undefined

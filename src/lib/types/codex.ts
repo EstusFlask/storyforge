@@ -1,3 +1,5 @@
+import type { RagDocumentMetadata } from './rag-library'
+
 /**
  * Phase 35-a — 词条系统（Codex）数据模型
  *
@@ -47,7 +49,8 @@ export type BuiltInCodexKey =
   | 'artifact'  // 人工器物
   // 世界观各方面的"全貌+词条"分类（每个面板子页一个）
   | 'natStructure' | 'natDimension' | 'natTerrain' | 'natWater' | 'natClimate' // 自然环境各方面
-  | 'humEra' | 'humEvent' | 'humSociety' | 'humConflict'                       // 人文环境各方面
+  | 'humEra' | 'humEvent' | 'humSociety' | 'humPolitics' | 'humEconomy'
+  | 'humCulture' | 'humConflict'                                                // 人文环境各方面
   | 'originPower' | 'originDeity'                                              // 世界起源:力量体系/神明信仰
 
 /** 词条分类（树状，内置 + 用户自定义） */
@@ -66,14 +69,17 @@ export interface CodexCategory {
   /** 是否隐藏（内置分类不可删，但可隐藏） */
   hidden?: boolean
   order: number
-  /** 多世界：所属世界组（null = 主世界/单世界） */
+  /**
+   * 历史兼容字段。分类 schema 由整个项目共享，不按世界复制；
+   * 新数据始终写 null，旧备份中的数值也按项目级分类处理。
+   */
   worldGroupId?: number | null
   createdAt: number
   updatedAt: number
 }
 
 /** 一条词条 */
-export interface CodexEntry {
+export interface CodexEntry extends RagDocumentMetadata {
   id?: number
   projectId: number
   categoryId: number
@@ -94,6 +100,12 @@ export interface CodexEntry {
    * 也可用于任意词条。未设/0 表示未标记。非索引字段，零 DB 迁移。
    */
   importance?: number
+  /** 异兽等词条采用的修炼体系（WORLD-1）。 */
+  cultivationSystemId?: number | null
+  /** 该词条在所选体系中的当前境界 stage id。 */
+  cultivationStageId?: string | null
+  /** 城池词条对应的空间地点；人文属性与地点树分层，删除地点只断开软引用。 */
+  importantLocationId?: number | null
   order: number
   worldGroupId?: number | null
   createdAt: number
@@ -144,6 +156,31 @@ export function stringifyEntryRefs(refs: Record<string, number[]>): string {
   return JSON.stringify(refs)
 }
 
+/**
+ * Codex 词条的世界作用域判定。
+ *
+ * - `target === undefined`：调用方明确未启用作用域过滤，返回全部（如项目级维护工具）。
+ * - `target === null`：单世界数据，只读取尚未归属世界组的词条。
+ * - `target === number`：多世界数据，只读取该世界的词条；null 不是“全局词条”。
+ *
+ * 开启多世界时，stampPrimaryWorld 会把既有 null 词条迁移到主世界。因此把 null
+ * 继续视为全局会让迁移后新建错位数据泄漏到所有世界。
+ */
+export function codexEntryInWorld(
+  entry: Pick<CodexEntry, 'worldGroupId'>,
+  target?: number | null,
+): boolean {
+  if (target === undefined) return true
+  return (entry.worldGroupId ?? null) === (target ?? null)
+}
+
+export function filterCodexEntriesByWorld<T extends Pick<CodexEntry, 'worldGroupId'>>(
+  entries: readonly T[],
+  target?: number | null,
+): T[] {
+  return entries.filter(entry => codexEntryInWorld(entry, target))
+}
+
 // ── 内置分类与字段 schema（预置 seed，见设计文档 3.2） ──────────────
 
 /** 内置分类的种子定义（不含 projectId/时间，落库时补全） */
@@ -186,9 +223,9 @@ export const BUILTIN_CATEGORIES: BuiltInCategorySeed[] = [
     domain: 'natural', builtInKey: 'beast', name: '灵兽异兽', icon: '🐅',
     fields: [
       { key: 'kind', label: '类别', type: 'select', options: ['走兽', '飞禽', '水族', '虫豸', '异种'] },
-      // Phase 37 修炼体系落地后升级为 ref→cultivationSystems；当前以文本占位
-      { key: 'cultivation', label: '修炼体系', type: 'text', placeholder: '所属修炼体系（Phase 37 后可关联）' },
-      { key: 'realm', label: '当前境界', type: 'text' },
+      // WORLD-1 已有结构化关联；保留这两个旧文本字段承载老项目无法自动推断的数据。
+      { key: 'cultivation', label: '修炼体系（旧文本备注）', type: 'text', placeholder: '旧数据兼容；新数据请使用上方结构化关联' },
+      { key: 'realm', label: '境界（旧文本备注）', type: 'text' },
       { key: 'body', label: '体型外貌', type: 'longtext' },
       { key: 'habit', label: '习性性情', type: 'longtext' },
       { key: 'habitat', label: '栖息地', type: 'text' },
@@ -231,8 +268,7 @@ export const BUILTIN_CATEGORIES: BuiltInCategorySeed[] = [
     domain: 'humanity', builtInKey: 'city', name: '城池重镇', icon: '🏰',
     fields: [
       { key: 'faction', label: '所属势力', type: 'ref', refCategory: 'faction', refMulti: false },
-      // Phase 联动后升级为 ref→importantLocations；当前文本占位
-      { key: 'location', label: '地理位置', type: 'text', placeholder: '可关联「重要地点」（后续升级）' },
+      { key: 'locationNote', label: '位置备注（旧文本）', type: 'text', placeholder: '结构化位置请使用上方「重要地点」关联' },
       { key: 'scale', label: '规模人口', type: 'text' },
       { key: 'ruler', label: '统治者', type: 'text' },
       { key: 'economy', label: '经济特产', type: 'longtext' },
@@ -317,6 +353,33 @@ export const BUILTIN_CATEGORIES: BuiltInCategorySeed[] = [
     fields: [
       { key: 'type', label: '类别', type: 'select', options: ['政体', '货币', '赋税', '阶层制度', '宗教信仰', '风俗节庆', '其他'] },
       { key: 'detail', label: '说明', type: 'longtext' },
+    ],
+  },
+  {
+    domain: 'humanity', builtInKey: 'humPolitics', name: '政治制度', icon: '🏛️',
+    fields: [
+      { key: 'type', label: '制度类型', type: 'select', options: ['政体', '官制', '法律', '军事', '外交', '阶层', '其他'] },
+      { key: 'scope', label: '适用范围', type: 'text' },
+      { key: 'authority', label: '权力主体', type: 'text' },
+      { key: 'detail', label: '制度说明', type: 'longtext' },
+    ],
+  },
+  {
+    domain: 'humanity', builtInKey: 'humEconomy', name: '经济制度', icon: '💰',
+    fields: [
+      { key: 'type', label: '制度类型', type: 'select', options: ['货币', '税赋', '贸易', '产业', '资源分配', '金融', '其他'] },
+      { key: 'scope', label: '流通范围', type: 'text' },
+      { key: 'actors', label: '主要参与者', type: 'text' },
+      { key: 'detail', label: '制度说明', type: 'longtext' },
+    ],
+  },
+  {
+    domain: 'humanity', builtInKey: 'humCulture', name: '文化制度', icon: '🎭',
+    fields: [
+      { key: 'type', label: '文化类型', type: 'select', options: ['语言', '宗教', '教育', '礼仪', '节庆', '艺术', '习俗', '其他'] },
+      { key: 'region', label: '流行区域/群体', type: 'text' },
+      { key: 'taboo', label: '禁忌', type: 'text' },
+      { key: 'detail', label: '文化说明', type: 'longtext' },
     ],
   },
   {

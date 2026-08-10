@@ -1,3 +1,5 @@
+import type { RagDocumentMetadata } from './rag-library'
+
 /** 角色关系类型 */
 export type RelationType =
   | 'family'       // 亲属
@@ -12,7 +14,7 @@ export type RelationType =
   | 'other'        // 其他
 
 /** 角色关系 */
-export interface CharacterRelation {
+export interface CharacterRelation extends RagDocumentMetadata {
   id?: number
   projectId: number
   fromCharacterId: number   // 角色 A

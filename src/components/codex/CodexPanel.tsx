@@ -11,7 +11,7 @@ import {
 } from 'lucide-react'
 import { useCodexStore } from '../../stores/codex'
 import {
-  CODEX_DOMAIN_LABELS, parseFieldSchema,
+  CODEX_DOMAIN_LABELS, filterCodexEntriesByWorld, parseFieldSchema,
   type CodexDomain, type CodexCategory, type CodexEntry,
 } from '../../lib/types/codex'
 import type { Project } from '../../lib/types'
@@ -53,6 +53,7 @@ export default function CodexPanel({ project, fixedDomain, fixedCategoryKeys, em
   const toast = useToast()
   const aiConfig = useAIConfigStore(s => s.config)
   const activeGroupId = useWorldGroupStore(s => s.activeGroupId)
+  const worldGroups = useWorldGroupStore(s => s.groups)
   const projectId = project.id!
   const {
     categories, entries, loadAll,
@@ -82,6 +83,17 @@ export default function CodexPanel({ project, fixedDomain, fixedCategoryKeys, em
 
   useEffect(() => { loadAll(projectId) }, [projectId, loadAll])
 
+  const activeGroupBelongsToProject = worldGroups.some(group =>
+    group.projectId === projectId && group.id === activeGroupId)
+  const scopedWorldGroupId = project.enableMultiWorld
+    ? (activeGroupBelongsToProject ? activeGroupId! : undefined)
+    : null
+  const scopeReady = scopedWorldGroupId !== undefined
+  const scopedEntries = useMemo(
+    () => scopeReady ? filterCodexEntriesByWorld(entries, scopedWorldGroupId) : [],
+    [entries, scopeReady, scopedWorldGroupId],
+  )
+
   // 当前领域的分类（按 order）。若锁定了 builtInKey 列表,则只取那几类(跨域亦可)。
   const domainCats = useMemo(
     () => {
@@ -108,7 +120,7 @@ export default function CodexPanel({ project, fixedDomain, fixedCategoryKeys, em
 
   const activeCat = categories.find(c => c.id === activeCatId) || null
   const catEntries = useMemo(() => {
-    const list = entries.filter(e => e.categoryId === activeCatId)
+    const list = scopedEntries.filter(e => e.categoryId === activeCatId)
     if (sortMode === 'importance') {
       return [...list].sort((a, b) => (b.importance ?? 0) - (a.importance ?? 0) || a.order - b.order)
     }
@@ -117,18 +129,18 @@ export default function CodexPanel({ project, fixedDomain, fixedCategoryKeys, em
       return [...list].sort((a, b) => (a.name || '').localeCompare(b.name || '', 'zh-Hans-CN'))
     }
     return [...list].sort((a, b) => a.order - b.order)
-  }, [entries, activeCatId, sortMode])
+  }, [scopedEntries, activeCatId, sortMode])
   // 同分类内重名的词条名集合(用于"已有同名"提示)
   const dupNames = useMemo(() => {
     const count = new Map<string, number>()
-    for (const e of entries) {
+    for (const e of scopedEntries) {
       if (e.categoryId !== activeCatId) continue
       const n = (e.name || '').trim()
       if (n) count.set(n, (count.get(n) ?? 0) + 1)
     }
     return new Set([...count.entries()].filter(([, n]) => n > 1).map(([k]) => k))
-  }, [entries, activeCatId])
-  const activeEntry = entries.find(e => e.id === activeEntryId) || null
+  }, [scopedEntries, activeCatId])
+  const activeEntry = catEntries.find(e => e.id === activeEntryId) || null
 
   // ── 分类操作 ──
   const handleAddCategory = async () => {
@@ -150,7 +162,7 @@ export default function CodexPanel({ project, fixedDomain, fixedCategoryKeys, em
     if (cat.builtInKey) return
     const ok = await dialog.confirm({
       title: `删除自定义分类「${cat.name}」？`,
-      message: '其下所有词条也会被删除，此操作不可撤销。',
+      message: '其下所有世界中的词条也会被删除，此操作不可撤销。',
       confirmText: '删除',
       tone: 'danger',
     })
@@ -161,11 +173,15 @@ export default function CodexPanel({ project, fixedDomain, fixedCategoryKeys, em
   // ── 词条操作 ──
   const handleAddEntry = async () => {
     if (!activeCatId) return
+    if (!scopeReady) {
+      toast.error('世界数据尚未加载完成，请稍后再试。')
+      return
+    }
     const id = await addEntry({
       projectId, categoryId: activeCatId,
       name: '新词条', summary: '', description: '',
       fields: '{}', refs: '{}',
-      order: catEntries.length, worldGroupId: activeCat?.worldGroupId ?? null,
+      order: catEntries.length, worldGroupId: scopedWorldGroupId,
     })
     setActiveEntryId(id)
   }
@@ -183,6 +199,10 @@ export default function CodexPanel({ project, fixedDomain, fixedCategoryKeys, em
   }
 
   const openExtractor = () => {
+    if (!scopeReady) {
+      toast.error('世界数据尚未加载完成，请稍后再试。')
+      return
+    }
     setExtractText(extractionSourceText)
     setCandidates([])
     setSelectedCandidates(new Set())
@@ -226,11 +246,11 @@ export default function CodexPanel({ project, fixedDomain, fixedCategoryKeys, em
   }
 
   const handleAdoptCandidates = async () => {
-    if (!activeCat) return
+    if (!activeCat || !scopeReady) return
     const chosen = candidates.filter((_, index) => selectedCandidates.has(index))
     const result = await adopt({
       projectId,
-      worldGroupId: project.enableMultiWorld ? activeGroupId : null,
+      worldGroupId: scopedWorldGroupId,
       target: 'codexEntries',
       mode: 'add-many',
       data: chosen.map((item, index) => ({
@@ -244,7 +264,7 @@ export default function CodexPanel({ project, fixedDomain, fixedCategoryKeys, em
         tags: JSON.stringify(item.tags),
         importance: item.importance,
         order: catEntries.length + index,
-        worldGroupId: project.enableMultiWorld ? activeGroupId : null,
+        worldGroupId: scopedWorldGroupId,
       })),
     })
     await loadAll(projectId)
@@ -306,7 +326,7 @@ export default function CodexPanel({ project, fixedDomain, fixedCategoryKeys, em
                 <span>{cat.icon || '📁'}</span>
                 <span className="truncate flex-1">{cat.name}</span>
                 <span className="text-[10px] text-text-muted">
-                  {entries.filter(e => e.categoryId === cat.id).length || ''}
+                  {scopedEntries.filter(e => e.categoryId === cat.id).length || ''}
                 </span>
                 {cat.builtInKey ? (
                   <button
@@ -383,14 +403,14 @@ export default function CodexPanel({ project, fixedDomain, fixedCategoryKeys, em
           <div className="m-2 space-y-1.5">
             <button
               onClick={openExtractor}
-              disabled={!activeCatId}
+              disabled={!activeCatId || !scopeReady}
               className="w-full px-2 py-1.5 text-xs rounded-lg border border-accent/30 text-accent hover:bg-accent/10 disabled:opacity-40 inline-flex items-center justify-center gap-1"
             >
               <Sparkles className="w-3.5 h-3.5" /> AI 从内容拆分词条
             </button>
             <button
               onClick={handleAddEntry}
-              disabled={!activeCatId}
+              disabled={!activeCatId || !scopeReady}
               className="w-full px-2 py-1.5 text-xs rounded-lg bg-accent text-white hover:bg-accent/90 disabled:opacity-40 inline-flex items-center justify-center gap-1"
             >
               <Plus className="w-3.5 h-3.5" /> 新建词条
@@ -415,7 +435,7 @@ export default function CodexPanel({ project, fixedDomain, fixedCategoryKeys, em
               entry={activeEntry}
               category={activeCat}
               allCategories={categories}
-              allEntries={entries}
+              allEntries={scopedEntries}
               nameDuplicate={!!activeEntry.name && dupNames.has(activeEntry.name.trim())}
               onChange={(patch) => updateEntry(activeEntry.id!, patch)}
             />

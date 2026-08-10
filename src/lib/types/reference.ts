@@ -1,4 +1,5 @@
 import { FICTION_DIMENSIONS, FICTION_DIMENSION_LABELS } from './import-session-data'
+import type { RagDocumentMetadata } from './rag-library'
 export type { FictionDimension } from './import-session-data'
 export { FICTION_DIMENSIONS, FICTION_DIMENSION_LABELS } from './import-session-data'
 
@@ -11,8 +12,30 @@ export type ReferenceAnalysisDepth = 'quick' | 'deep'
 /** 深度分析状态 */
 export type ReferenceAnalysisStatus = 'none' | 'pending' | 'analyzing' | 'done' | 'failed'
 
+/** 作者对本次分析材料来源的声明。StoryForge 只记录声明，不代替版权核验。 */
+export type ReferenceSourceKind =
+  | 'own-work'
+  | 'authorized'
+  | 'public-domain'
+  | 'research'
+  | 'unknown'
+
+/** 声明的使用范围；当前版本只消费 analysis-only / creative-reference 的方法论。 */
+export type ReferenceUsageScope =
+  | 'analysis-only'
+  | 'creative-reference'
+  | 'continuation-authorized'
+
+export type ReferenceAnalysisRunStatus =
+  | 'analyzing'
+  | 'ready'
+  | 'active'
+  | 'superseded'
+  | 'failed'
+  | 'cancelled'
+
 /** 参考书目条目 */
-export interface Reference {
+export interface Reference extends RagDocumentMetadata {
   id?: number
   projectId: number
   title: string        // 书名 / 文件名
@@ -40,7 +63,7 @@ export interface Reference {
   /** 分析进度 0-100 */
   analysisProgress?: number
   /** 分析失败时的错误信息 */
-  analysisError?: string
+  analysisError?: string | null
   /** Phase 28.3: AI 全书总结 JSON（各维度 100-200 字精炼总结） */
   analysisSummary?: string
   /** Phase 28.5: AI 聚合去重后的角色卡 JSON（AIMergedCharacter[]，替代正则抠名） */
@@ -60,6 +83,8 @@ export interface ImportedReferenceData {
   outline?: Array<Record<string, unknown>>
   /** 写作技法分析 */
   writingTechniques?: import('./import-session-data').WritingTechniques
+  /** Phase 35-c：保留待作者审查的词条候选，不会自动写入当前项目。 */
+  codexCandidates?: import('./import-session-data').CodexImportCandidate[]
   /** 原始文件名 */
   sourceFilename?: string
   /** 导入时间 */
@@ -87,6 +112,8 @@ export interface ReferenceChunkAnalysis {
   id?: number
   /** 关联的 Reference id */
   referenceId: number
+  /** IDEA-1：所属分析版本；旧项目的历史行允许缺省并由运行时兼容桥接。 */
+  analysisRunId?: number
   /** 块序号（0-based） */
   chunkIndex: number
   /** 本块标签（如"第 X 章"或"3/48 块"） */
@@ -138,6 +165,57 @@ export interface ReferenceChunkAnalysis {
   /** 本块引用的精彩片段（~200 字） */
   rawExcerpt?: string
 
+  createdAt: number
+}
+
+/**
+ * IDEA-1 参考资料分析版本。
+ *
+ * 新分析先写入独立 run，只有作者激活后才会进入引用手法上下文。来源声明绑定
+ * fileHash + version，不会因后来重新上传而改写旧版本的语义。
+ */
+export interface ReferenceAnalysisRun {
+  id?: number
+  projectId: number
+  referenceId: number
+  version: number
+  status: ReferenceAnalysisRunStatus
+  depth: ReferenceAnalysisDepth
+  sourceFilename: string
+  fileHash: string
+  totalChars: number
+  sourceKind: ReferenceSourceKind
+  usageScope: ReferenceUsageScope
+  rightsNote: string
+  /** 是否由作者在 UI 中显式确认；旧导入兼容桥接为 false。 */
+  rightsConfirmed: boolean
+  rightsDeclaredAt: number
+  expectedChunks: number
+  completedChunks: number
+  progress: number
+  error?: string | null
+  analysisSummary?: string
+  mergedCharacters?: string
+  completedAt?: number
+  activatedAt?: number
+  createdAt: number
+  updatedAt: number
+}
+
+/** 本地断点续跑用原文，不随项目 JSON 导出。 */
+export interface ReferenceAnalysisSource {
+  /** 与 ReferenceAnalysisRun.id 相同，作为主键。 */
+  analysisRunId: number
+  filename: string
+  fileHash: string
+  chunks: Array<{
+    index: number
+    startChar: number
+    endChar: number
+    charCount: number
+    label?: string
+    text: string
+  }>
   createdAt: number
 }
 

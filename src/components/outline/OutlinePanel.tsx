@@ -193,10 +193,13 @@ export default function OutlinePanel({ project, onOpenChapter }: Props) {
       provider: aiConfig.provider,
       model: aiConfig.model,
       sourceKeys: [
+        'canonAssertions',
         'worldview',
         'storyCore',
         'storyArcs',
+        'characterDrivenPlan',
         'powerSystem',
+        'cultivationProgress',
         'codex',
         'characters',
         'creativeRules',
@@ -204,6 +207,8 @@ export default function OutlinePanel({ project, onOpenChapter }: Props) {
         'historical',
         'locations',
         'foreshadows',
+        'storyArcs',
+        'storylineProgress',
         'existingVolumeOutlines',
         'writtenChapterProgress',
       ],
@@ -560,6 +565,12 @@ export default function OutlinePanel({ project, onOpenChapter }: Props) {
             preparedContext={generation.preparedContext}
             loading={generation.contextLoading}
             error={generation.contextError}
+            messages={generation.preparedNode?.messages}
+            transparentMode={generation.transparentMode}
+            promptReviewOpen={generation.promptReviewOpen}
+            onTransparentModeChange={generation.setTransparentMode}
+            onClosePromptReview={generation.closePromptReview}
+            onConfirmMessages={messages => { void generation.confirmMessages(messages) }}
             onRetry={() => { void generation.prepare(generation.pendingRequest!) }}
             onCancel={generation.cancel}
             onConfirm={(mode, chunkedConfig) => { void handleChunkedConfirm(mode, chunkedConfig) }}

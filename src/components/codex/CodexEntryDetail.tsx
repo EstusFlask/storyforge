@@ -1,7 +1,8 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { ChevronRight, Star } from 'lucide-react'
 import { CInput, CTextarea } from '../shared/CompositionInput'
 import {
+  codexEntryInWorld,
   parseEntryFields,
   parseEntryRefs,
   parseFieldSchema,
@@ -13,6 +14,9 @@ import type {
   CodexEntry,
   CodexFieldDef,
 } from '../../lib/types/codex'
+import { parseCultivationStages } from '../../lib/types/cultivation'
+import { useCultivationStore } from '../../stores/cultivation'
+import { useLocationStore } from '../../stores/location'
 
 interface Props {
   entry: CodexEntry
@@ -108,6 +112,13 @@ export default function CodexEntryDetail({
         className="w-full px-3 py-2 rounded-lg bg-bg-elevated border border-border text-sm resize-y"
       />
 
+      {category.builtInKey === 'beast' && (
+        <CodexCultivationLink entry={entry} onChange={onChange} />
+      )}
+      {category.builtInKey === 'city' && (
+        <CodexImportantLocationLink entry={entry} onChange={onChange} />
+      )}
+
       {schema.length > 0 && <div className="border-t border-border pt-3 text-xs text-text-muted">专属属性</div>}
       {schema.map(definition => (
         <CodexFieldRow
@@ -118,10 +129,94 @@ export default function CodexEntryDetail({
           allCategories={allCategories}
           allEntries={allEntries}
           currentEntryId={entry.id!}
+          worldGroupId={entry.worldGroupId ?? null}
           onValue={value => setField(definition.key, value)}
           onRef={ids => setRef(definition.key, ids)}
         />
       ))}
+    </div>
+  )
+}
+
+function CodexImportantLocationLink({
+  entry,
+  onChange,
+}: {
+  entry: CodexEntry
+  onChange: (patch: Partial<CodexEntry>) => void
+}) {
+  const locations = useLocationStore(state => state.locations)
+  const loadAll = useLocationStore(state => state.loadAll)
+  useEffect(() => { void loadAll(entry.projectId) }, [entry.projectId, loadAll])
+  const projectLocations = locations.filter(location => location.projectId === entry.projectId)
+
+  return (
+    <label className="block border-t border-border pt-3">
+      <span className="block text-xs text-text-muted mb-1">结构化重要地点</span>
+      <select
+        aria-label="城池重要地点"
+        value={entry.importantLocationId ?? ''}
+        onChange={event => onChange({
+          importantLocationId: event.target.value ? Number(event.target.value) : null,
+        })}
+        className="w-full px-3 py-1.5 rounded-lg bg-bg-elevated border border-border text-sm"
+      >
+        <option value="">未关联</option>
+        {projectLocations.map(location => (
+          <option key={location.id} value={location.id}>{location.name}</option>
+        ))}
+      </select>
+      <span className="block mt-1 text-[11px] text-text-muted">
+        地点树负责空间层级；这里保留城池的人文属性。删除地点只会断开关联，不会删除词条。
+      </span>
+    </label>
+  )
+}
+
+function CodexCultivationLink({
+  entry,
+  onChange,
+}: {
+  entry: CodexEntry
+  onChange: (patch: Partial<CodexEntry>) => void
+}) {
+  const systems = useCultivationStore(state => state.systems)
+  const loadAll = useCultivationStore(state => state.loadAll)
+  useEffect(() => { loadAll(entry.projectId) }, [entry.projectId, loadAll])
+  const visible = systems.filter(system =>
+    (system.worldGroupId ?? null) === (entry.worldGroupId ?? null))
+  const selected = visible.find(system => system.id === entry.cultivationSystemId)
+  const stages = parseCultivationStages(selected?.stages)
+  return (
+    <div className="grid grid-cols-2 gap-2 border-t border-border pt-3">
+      <label>
+        <span className="block text-xs text-text-muted mb-1">结构化修炼体系</span>
+        <select
+          aria-label="异兽修炼体系"
+          value={entry.cultivationSystemId ?? ''}
+          onChange={event => onChange({
+            cultivationSystemId: event.target.value ? Number(event.target.value) : null,
+            cultivationStageId: null,
+          })}
+          className="w-full px-3 py-1.5 rounded-lg bg-bg-elevated border border-border text-sm"
+        >
+          <option value="">未关联</option>
+          {visible.map(system => <option key={system.id} value={system.id}>{system.name}</option>)}
+        </select>
+      </label>
+      <label>
+        <span className="block text-xs text-text-muted mb-1">当前境界</span>
+        <select
+          aria-label="异兽当前境界"
+          disabled={!selected}
+          value={entry.cultivationStageId ?? ''}
+          onChange={event => onChange({ cultivationStageId: event.target.value || null })}
+          className="w-full px-3 py-1.5 rounded-lg bg-bg-elevated border border-border text-sm disabled:opacity-40"
+        >
+          <option value="">未指定</option>
+          {stages.map(stage => <option key={stage.id} value={stage.id}>{stage.name}</option>)}
+        </select>
+      </label>
     </div>
   )
 }
@@ -133,6 +228,7 @@ function CodexFieldRow({
   allCategories,
   allEntries,
   currentEntryId,
+  worldGroupId,
   onValue,
   onRef,
 }: {
@@ -142,6 +238,7 @@ function CodexFieldRow({
   allCategories: CodexCategory[]
   allEntries: CodexEntry[]
   currentEntryId: number
+  worldGroupId: number | null
   onValue: (value: string) => void
   onRef: (ids: number[]) => void
 }) {
@@ -172,6 +269,7 @@ function CodexFieldRow({
             allCategories={allCategories}
             allEntries={allEntries}
             currentEntryId={currentEntryId}
+            worldGroupId={worldGroupId}
             onChange={onRef}
           />
         )}
@@ -191,6 +289,7 @@ function CodexRefSelector({
   allCategories,
   allEntries,
   currentEntryId,
+  worldGroupId,
   onChange,
 }: {
   refCategory?: string
@@ -199,6 +298,7 @@ function CodexRefSelector({
   allCategories: CodexCategory[]
   allEntries: CodexEntry[]
   currentEntryId: number
+  worldGroupId: number | null
   onChange: (ids: number[]) => void
 }) {
   const [open, setOpen] = useState(false)
@@ -208,9 +308,10 @@ function CodexRefSelector({
       : []
     return allEntries
       .filter(entry => entry.id !== currentEntryId)
+      .filter(entry => codexEntryInWorld(entry, worldGroupId))
       .filter(entry => hintCategoryIds.length === 0 || hintCategoryIds.includes(entry.categoryId))
       .sort((left, right) => left.name.localeCompare(right.name))
-  }, [allCategories, allEntries, currentEntryId, refCategory])
+  }, [allCategories, allEntries, currentEntryId, refCategory, worldGroupId])
   const selected = allEntries.filter(entry => value.includes(entry.id!))
 
   const toggle = (id: number) => {

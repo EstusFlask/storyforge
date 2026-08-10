@@ -1,11 +1,19 @@
-import { useCallback, useRef, useState } from 'react'
+import { useCallback, useMemo, useRef, useState } from 'react'
 import type { UseAIStreamReturn } from '../../hooks/useAIStream'
 import type { RunOptions } from '../../lib/ai/adapters/outline-adapter'
 import {
-  buildOutlineGenerationPlan,
+  prepareGenerationNode,
+  runGenerationNode,
+  type PreparedGenerationNode,
+} from '../../lib/generation/generation-node'
+import {
   findGenerationTargetVolume,
   outlineGenerationTargetError,
 } from '../../lib/outline/generation-plan'
+import {
+  createOutlineGenerationNode,
+  OutlineGenerationSkipError,
+} from '../../lib/outline/generation-node'
 import {
   decodeGenerationOperation,
   encodeGenerationOperation,
@@ -15,7 +23,7 @@ import {
 } from '../../lib/outline/generation-request'
 import type { GenerationMode, ChunkedGenerationConfig } from '../../lib/outline/generation-modes'
 import type { AssembleContextResult } from '../../lib/registry/types'
-import type { OutlineNode, Project } from '../../lib/types'
+import type { ChatMessage, OutlineNode, Project } from '../../lib/types'
 
 type GenerationAI = Pick<
   UseAIStreamReturn,
@@ -57,6 +65,8 @@ export function useOutlineGenerationController({
   const [preparedContext, setPreparedContext] = useState<PreparedGenerationContext | null>(null)
   const [contextLoading, setContextLoading] = useState(false)
   const [contextError, setContextError] = useState('')
+  const [transparentMode, setTransparentModeState] = useState(false)
+  const [promptReviewOpen, setPromptReviewOpen] = useState(false)
   const contextRequestRef = useRef(0)
 
   const moduleKey: 'outline.volume' | 'outline.chapter' = pendingRequest
@@ -67,9 +77,47 @@ export function useOutlineGenerationController({
         ? 'outline.volume'
         : activeModuleKey
 
+  const buildNode = useCallback((request: OutlineGenerationRequest) => (
+    createOutlineGenerationNode({
+      request,
+      project,
+      nodes,
+      volumes,
+      hint,
+      runOptions,
+      ai,
+    })
+  ), [ai, hint, nodes, project, runOptions, volumes])
+
+  const preparedNodeResult = useMemo<{
+    prepared: PreparedGenerationNode | null
+    error: string
+  }>(() => {
+    if (!pendingRequest || !preparedContext) return { prepared: null, error: '' }
+    if (preparedContext.operation !== encodeGenerationOperation(pendingRequest)) {
+      return { prepared: null, error: '' }
+    }
+    try {
+      return {
+        prepared: prepareGenerationNode(
+          buildNode(pendingRequest),
+          preparedContext.assembled,
+        ),
+        error: '',
+      }
+    } catch (error) {
+      return {
+        prepared: null,
+        error: error instanceof Error ? error.message : '无法装配最终提示词',
+      }
+    }
+  }, [buildNode, pendingRequest, preparedContext])
+
   const execute = useCallback(async (
     request: OutlineGenerationRequest,
     contextSnapshot?: AssembleContextResult | null,
+    preparedSnapshot?: PreparedGenerationNode | null,
+    messageOverride?: ChatMessage[],
   ) => {
     setActiveModuleKey(outlineGenerationModuleKey(request))
     ai.setOperation(encodeGenerationOperation(request))
@@ -86,32 +134,21 @@ export function useOutlineGenerationController({
       const targetVolume = findGenerationTargetVolume(request, nodes, volumes)
       const assembled = contextSnapshot
         ?? await assembleContext(targetVolume?.worldGroupId ?? null, targetVolume?.id)
-      const plan = buildOutlineGenerationPlan({
-        request,
-        project,
-        nodes,
-        volumes,
-        assembled,
-        hint,
-        options: runOptions,
-      })
-      if (plan.status === 'skip') {
+      const node = buildNode(request)
+      const prepared = preparedSnapshot ?? prepareGenerationNode(node, assembled)
+      await runGenerationNode(node, prepared, { messages: messageOverride })
+    } catch (error) {
+      if (error instanceof OutlineGenerationSkipError) {
         ai.reset()
-        if (plan.reason.includes('无需继续生成')) onInfo(plan.reason)
-        else onError(plan.reason)
+        if (error.message.includes('无需继续生成')) onInfo(error.message)
+        else onError(error.message)
         return
       }
-      if (plan.category === 'outline.volume') {
-        await ai.start(plan.messages, undefined, { category: 'outline.volume', projectId: project.id! })
-      } else {
-        await ai.start(plan.messages, undefined, { category: 'outline.chapter', projectId: project.id! })
-      }
-    } catch (error) {
       console.error('[Outline] 准备生成失败:', error)
       ai.reset()
       onError(`准备大纲生成时出错：${error instanceof Error ? error.message : '未知错误'}。`)
     }
-  }, [ai, assembleContext, clearPreview, hint, nodes, onError, onInfo, project, runOptions, volumes])
+  }, [ai, assembleContext, buildNode, clearPreview, nodes, onError, onInfo, volumes])
 
   const prepare = useCallback(async (request: OutlineGenerationRequest) => {
     const requestId = contextRequestRef.current + 1
@@ -122,6 +159,8 @@ export function useOutlineGenerationController({
     setPreparedContext(null)
     setContextLoading(true)
     setContextError('')
+    setTransparentModeState(false)
+    setPromptReviewOpen(false)
     openPromptPanel()
     clearPreview()
 
@@ -147,23 +186,66 @@ export function useOutlineGenerationController({
     setPreparedContext(null)
     setContextLoading(false)
     setContextError('')
+    setTransparentModeState(false)
+    setPromptReviewOpen(false)
   }, [])
 
   const confirm = useCallback(async (mode?: GenerationMode, chunkedConfig?: ChunkedGenerationConfig) => {
-    if (!pendingRequest) return
-    if (contextLoading) return
-    if (contextError) return
-    
-    if (!preparedContext?.assembled) return
-    
+    if (!pendingRequest || contextLoading || contextError || preparedNodeResult.error) return
+    const operation = encodeGenerationOperation(pendingRequest)
+    const contextSnapshot = preparedContext?.operation === operation
+      ? preparedContext.assembled
+      : null
+    if (!contextSnapshot || !preparedNodeResult.prepared) return
+    if (transparentMode) {
+      setPromptReviewOpen(true)
+      return
+    }
     const request = pendingRequest.kind === 'chapters'
       ? { ...pendingRequest, mode, chunkedConfig }
       : pendingRequest
-    
     setPendingRequest(null)
     setPreparedContext(null)
-    await execute(request, preparedContext.assembled)
-  }, [contextError, contextLoading, execute, pendingRequest, preparedContext])
+    await execute(request, contextSnapshot, preparedNodeResult.prepared)
+  }, [
+    contextError,
+    contextLoading,
+    execute,
+    pendingRequest,
+    preparedContext,
+    preparedNodeResult,
+    transparentMode,
+  ])
+
+  const confirmMessages = useCallback(async (messages: ChatMessage[]) => {
+    if (!pendingRequest || !promptReviewOpen || !preparedNodeResult.prepared) return
+    const operation = encodeGenerationOperation(pendingRequest)
+    const contextSnapshot = preparedContext?.operation === operation
+      ? preparedContext.assembled
+      : null
+    if (!contextSnapshot) return
+    const request = pendingRequest
+    setPromptReviewOpen(false)
+    setPendingRequest(null)
+    setPreparedContext(null)
+    await execute(
+      request,
+      contextSnapshot,
+      preparedNodeResult.prepared,
+      messages,
+    )
+  }, [
+    execute,
+    pendingRequest,
+    preparedContext,
+    preparedNodeResult,
+    promptReviewOpen,
+  ])
+
+  const setTransparentMode = useCallback((enabled: boolean) => {
+    setTransparentModeState(enabled)
+    setPromptReviewOpen(false)
+  }, [])
 
   const retry = useCallback(async () => {
     const request = decodeGenerationOperation(ai.operation)
@@ -174,11 +256,17 @@ export function useOutlineGenerationController({
     moduleKey,
     pendingRequest,
     preparedContext,
+    preparedNode: preparedNodeResult.prepared,
     contextLoading,
-    contextError,
+    contextError: contextError || preparedNodeResult.error,
+    transparentMode,
+    promptReviewOpen,
     prepare,
     cancel,
-    confirm: confirm as (mode?: GenerationMode, chunkedConfig?: ChunkedGenerationConfig) => Promise<void>,
+    confirm,
+    confirmMessages,
+    closePromptReview: () => setPromptReviewOpen(false),
+    setTransparentMode,
     retry,
   }
 }

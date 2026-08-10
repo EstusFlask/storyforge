@@ -11,6 +11,33 @@ import { FIELD_BY_TARGET } from './field-registry'
 import { ADOPTION_BY_TARGET } from './adoption-schema'
 import type { AdoptInput, AdoptResult, CollectionAdoptionSpec, FieldSpec, TableSpec } from './types'
 import { normalizeCharacterAxes } from '../character/character-axes'
+import {
+  refreshSettingAssertionSourceStatus,
+} from '../fact-ledger/setting-assertions'
+import type { CanonAssertionSourceTable } from './canon-assertion-source-registry'
+
+const CANON_SOURCE_TABLES = new Set<CanonAssertionSourceTable>([
+  'worldviews',
+  'powerSystems',
+  'cultivationSystems',
+  'storyCores',
+  'characters',
+])
+
+async function refreshCanonSourceAfterWrite(
+  target: string,
+  projectId: number,
+  recordId: number,
+  fields: readonly string[],
+): Promise<void> {
+  if (!CANON_SOURCE_TABLES.has(target as CanonAssertionSourceTable)) return
+  await refreshSettingAssertionSourceStatus({
+    projectId,
+    table: target as CanonAssertionSourceTable,
+    recordId,
+    changedFields: fields,
+  })
+}
 
 export async function adopt(input: AdoptInput): Promise<AdoptResult> {
   const result = emptyResult()
@@ -30,6 +57,83 @@ export async function adopt(input: AdoptInput): Promise<AdoptResult> {
   const isCollection = input.mode === 'add' || input.mode === 'add-many' || input.mode === 'merge-diffs'
   if (isCollection) return adoptCollection(input, fieldSpecs, tableSpec, result)
   return adoptSingleton(input, fieldSpecs, tableSpec, result)
+}
+
+/**
+ * 按 ADOPTION_SCHEMA.replaceScope 清理既有集合。
+ * 用于“整批结果替换”场景，避免 AI pipeline 在 adopt() 之外裸删旧结果。
+ */
+export async function clearAdoptedCollection(input: {
+  projectId: number
+  target: string
+  scope: Record<string, unknown>
+}): Promise<number> {
+  const adoption = ADOPTION_BY_TARGET.get(input.target)
+  const tableSpec = REGISTRY_BY_NAME.get(input.target)
+  const fields = FIELD_BY_TARGET.get(input.target) ?? []
+  if (!adoption || !tableSpec || !adoption.replaceScope?.length) {
+    throw new Error(`[adopt] target ${input.target} 未登记 replaceScope`)
+  }
+
+  const result = emptyResult()
+  const normalized = normalizeAndValidate(input.scope, fields, result)
+  if (!normalized || result.unknown.length || result.typeErrors.length) {
+    throw new Error(`[adopt] ${input.target} replaceScope 非法`)
+  }
+  for (const field of adoption.replaceScope) {
+    if (normalized[field] == null) throw new Error(`[adopt] ${input.target} replaceScope 缺少 ${field}`)
+  }
+  if (!await applyFkChecks(normalized, input.scope, adoption, result, input.projectId)) {
+    throw new Error(`[adopt] ${input.target} replaceScope FK 不属于当前项目`)
+  }
+
+  const rows = await rowsForProject(input.projectId, tableSpec)
+  const ids = rows
+    .filter(row => adoption.replaceScope!.every(field => (row[field] ?? null) === (normalized[field] ?? null)))
+    .map(row => row.id)
+    .filter((id): id is number => typeof id === 'number')
+  if (ids.length) await tableSpec.table.bulkDelete(ids)
+  return ids.length
+}
+
+/**
+ * 在同一 IndexedDB 事务中完成“按登记范围清理旧结果 → 写入整批新结果”。
+ * 任一条未能写入都会抛错并回滚，避免提取结果解析/FK 异常时先删掉作者已有数据。
+ */
+export async function replaceAdoptedCollection(input: {
+  projectId: number
+  target: string
+  scope: Record<string, unknown>
+  data: Record<string, unknown>[]
+}): Promise<AdoptResult> {
+  const adoption = ADOPTION_BY_TARGET.get(input.target)
+  const tableSpec = REGISTRY_BY_NAME.get(input.target)
+  if (!adoption || !tableSpec || !adoption.replaceScope?.length) {
+    throw new Error(`[adopt] target ${input.target} 未登记 replaceScope`)
+  }
+  const relatedTables = (adoption.fkChecks ?? [])
+    .map(check => REGISTRY_BY_NAME.get(check.target)?.table)
+    .filter((table): table is NonNullable<typeof table> => table != null)
+  const tables = [...new Set([tableSpec.table, ...relatedTables])]
+  return db.transaction('rw', tables, async () => {
+    await clearAdoptedCollection({
+      projectId: input.projectId,
+      target: input.target,
+      scope: input.scope,
+    })
+    const result = await adopt({
+      projectId: input.projectId,
+      target: input.target,
+      mode: 'add-many',
+      data: input.data,
+    })
+    if (result.written.length !== input.data.length) {
+      throw new Error(
+        `[adopt] ${input.target} 整批替换未完整写入（${result.written.length}/${input.data.length}），已回滚。`,
+      )
+    }
+    return result
+  })
 }
 
 function emptyResult(): AdoptResult {
@@ -54,7 +158,7 @@ async function adoptCollectionRecord(
     return adoptChapterMemoryRecordWithCas(input, fieldSpecs, tableSpec, result)
   }
   const target = await tableSpec.table.get(input.recordId!)
-  if (!target || target.projectId !== input.projectId) {
+  if (!target || !await rowBelongsToProject(target, input.projectId, tableSpec)) {
     result.skipped.push({ reason: `record ${input.recordId} 不存在或不属于当前项目`, data: input.data })
     return result
   }
@@ -74,6 +178,7 @@ async function adoptCollectionRecord(
 
   patch.updatedAt = Date.now()
   await tableSpec.table.update(input.recordId!, patch as any)
+  await refreshCanonSourceAfterWrite(input.target, input.projectId, input.recordId!, Object.keys(patch))
   result.written.push({ id: input.recordId!, fields: Object.keys(patch) })
   return result
 }
@@ -189,6 +294,7 @@ async function adoptSingleton(
   const now = Date.now()
   if (target?.id != null) {
     await tableSpec.table.update(target.id, { ...patch, updatedAt: now } as any)
+    await refreshCanonSourceAfterWrite(input.target, input.projectId, target.id, Object.keys(patch))
     result.written.push({ id: target.id, fields: Object.keys(patch) })
   } else {
     const row = {
@@ -224,8 +330,13 @@ async function adoptCollection(
     if (!item) continue
     item = applyTableDefaults(item, tableSpec)
     if (input.target === 'characters') item = normalizeCharacterAxes(item)
+    if (input.target === 'itemLedger') {
+      item = await resolveItemLedgerOwner(input.projectId, item)
+    }
+    // AI/结构化采纳只能生成待确认候选，不能借输入字段绕过人工确认。
+    if (input.target === 'knowledgeLedger') item = { ...item, status: 'candidate' }
     if (!applyRequired(item, raw, adoption, result)) continue
-    if (!await applyFkChecks(item, raw, adoption, result)) continue
+    if (!await applyFkChecks(item, raw, adoption, result, input.projectId)) continue
     await applyArrayMemberChecks(item, adoption, result)
     applyAutoStamps(item, input, tableSpec, adoption)
 
@@ -239,11 +350,13 @@ async function adoptCollection(
         const patch: Record<string, unknown> = { updatedAt: Date.now() }
         for (const [k, v] of Object.entries(item)) if (v !== null) patch[k] = v
         await tableSpec.table.update(existing.id, patch as any)
+        await refreshCanonSourceAfterWrite(input.target, input.projectId, existing.id, Object.keys(patch))
         result.written.push({ id: existing.id, fields: Object.keys(patch) })
       } else if (adoption.duplicatePolicy === 'merge') {
         const patch = mergeByStrategy(existing, item, adoption.mergeStrategy ?? 'overwrite-non-empty')
         patch.updatedAt = Date.now()
         await tableSpec.table.update(existing.id, patch as any)
+        await refreshCanonSourceAfterWrite(input.target, input.projectId, existing.id, Object.keys(patch))
         result.written.push({ id: existing.id, fields: Object.keys(patch) })
       } else {
         throw new Error(`[adopt] 重复记录 ${input.target}.${JSON.stringify(identityValue(item, adoption))}`)
@@ -254,6 +367,21 @@ async function adoptCollection(
     }
   }
   return result
+}
+
+async function resolveItemLedgerOwner(
+  projectId: number,
+  item: Record<string, unknown>,
+): Promise<Record<string, unknown>> {
+  if (item.characterId != null || typeof item.heldByName !== 'string') return item
+  const heldByName = item.heldByName.trim()
+  if (!heldByName) return item
+  const matches = (await db.characters.where('projectId').equals(projectId).toArray())
+    .filter(character => character.name.trim() === heldByName)
+  return {
+    ...item,
+    characterId: matches.length === 1 ? matches[0].id ?? null : null,
+  }
 }
 
 function applyTableDefaults(item: Record<string, unknown>, tableSpec: TableSpec): Record<string, unknown> {
@@ -415,6 +543,7 @@ async function applyFkChecks(
   raw: unknown,
   adoption: CollectionAdoptionSpec,
   result: AdoptResult,
+  projectId: number,
 ): Promise<boolean> {
   for (const fk of adoption.fkChecks ?? []) {
     const refValue = item[fk.field]
@@ -422,7 +551,7 @@ async function applyFkChecks(
     const targetSpec = PROJECT_TABLES.find(s => s.name === fk.target)
     if (!targetSpec) continue
     const exists = await targetSpec.table.get(refValue as number)
-    if (!exists) {
+    if (!exists || !await rowBelongsToProject(exists, projectId, targetSpec)) {
       result.fkErrors.push({ field: fk.field, refValue })
       result.skipped.push({ reason: 'FK 校验失败', data: raw })
       return false
@@ -473,8 +602,41 @@ async function findExisting(
   adoption: CollectionAdoptionSpec,
 ): Promise<any | null> {
   if (adoption.identity === 'id' && item.id != null) return tableSpec.table.get(item.id as number)
-  const candidates = await tableSpec.table.where('projectId').equals(projectId).toArray()
+  const candidates = await rowsForProject(projectId, tableSpec)
   return (candidates as any[]).find(row => identityMatches(row, item, adoption)) ?? null
+}
+
+function indirectLinkField(tableSpec: TableSpec): string | null {
+  const indirect = tableSpec.refs?.find(ref => ref.kind === 'indirect')
+  return indirect?.kind === 'indirect' ? indirect.via.field : null
+}
+
+async function rowsForProject(projectId: number, tableSpec: TableSpec): Promise<any[]> {
+  if (tableSpec.owner === 'project' || tableSpec.owner === 'transient') {
+    return tableSpec.table.where('projectId').equals(projectId).toArray()
+  }
+  if ((tableSpec.owner === 'direct-child' || tableSpec.owner === 'indirect') && tableSpec.projectResolver) {
+    const parentKeys = await tableSpec.projectResolver(projectId)
+    const linkField = indirectLinkField(tableSpec)
+    if (!linkField || parentKeys.length === 0) return []
+    return tableSpec.table.where(linkField).anyOf(parentKeys).toArray()
+  }
+  if (tableSpec.owner === 'global') return tableSpec.table.toArray()
+  return []
+}
+
+async function rowBelongsToProject(row: any, projectId: number, tableSpec: TableSpec): Promise<boolean> {
+  if (tableSpec.owner === 'global') return true
+  if (tableSpec.owner === 'project' || tableSpec.owner === 'transient') {
+    return row.projectId === projectId
+  }
+  if ((tableSpec.owner === 'direct-child' || tableSpec.owner === 'indirect') && tableSpec.projectResolver) {
+    const linkField = indirectLinkField(tableSpec)
+    if (!linkField) return false
+    const parentKeys = await tableSpec.projectResolver(projectId)
+    return parentKeys.includes(row[linkField])
+  }
+  return false
 }
 
 function identityMatches(row: Record<string, unknown>, item: Record<string, unknown>, adoption: CollectionAdoptionSpec): boolean {

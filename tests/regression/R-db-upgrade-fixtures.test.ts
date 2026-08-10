@@ -186,7 +186,135 @@ class UpgradedV35StateCardsDB extends Dexie {
   }
 }
 
+class OldV45ReferenceDB extends Dexie {
+  constructor(name: string) {
+    super(name)
+    this.version(45).stores({
+      references: '++id, projectId, type, createdAt',
+      referenceChunkAnalysis: '++id, referenceId, chunkIndex',
+      inspirationWorkspaces: '++id, projectId, updatedAt',
+    })
+  }
+}
+
+class UpgradedV46ReferenceDB extends Dexie {
+  constructor(name: string) {
+    super(name)
+    this.version(45).stores({
+      references: '++id, projectId, type, createdAt',
+      referenceChunkAnalysis: '++id, referenceId, chunkIndex',
+      inspirationWorkspaces: '++id, projectId, updatedAt',
+    })
+    this.version(46).stores({
+      referenceAnalysisRuns: '++id, projectId, referenceId, [referenceId+version], status, updatedAt',
+      referenceAnalysisSources: 'analysisRunId, fileHash, createdAt',
+      referenceChunkAnalysis: '++id, referenceId, analysisRunId, [analysisRunId+chunkIndex], chunkIndex',
+    })
+  }
+}
+
+class OldV47ProcessDB extends Dexie {
+  constructor(name: string) {
+    super(name)
+    this.version(47).stores({
+      agentConversations: '++id, projectId, worldGroupId, status, updatedAt',
+      agentEvents: '++id, projectId, conversationId, [conversationId+sequence], kind, createdAt',
+      nodeFlows: '++id, projectId, worldGroupId, updatedAt',
+      nodeRuns: '++id, projectId, flowId, status, updatedAt',
+    })
+  }
+}
+
+class UpgradedV48SimulationDB extends Dexie {
+  constructor(name: string) {
+    super(name)
+    this.version(47).stores({
+      agentConversations: '++id, projectId, worldGroupId, status, updatedAt',
+      agentEvents: '++id, projectId, conversationId, [conversationId+sequence], kind, createdAt',
+      nodeFlows: '++id, projectId, worldGroupId, updatedAt',
+      nodeRuns: '++id, projectId, flowId, status, updatedAt',
+    })
+    this.version(48).stores({
+      simulationSessions: '++id, projectId, worldGroupId, kind, status, parentSessionId, updatedAt',
+      simulationEvents: '++id, projectId, worldGroupId, sessionId, &[sessionId+sequence], type, createdAt',
+      simulationCheckpoints: '++id, projectId, worldGroupId, sessionId, [sessionId+throughSequence], createdAt',
+    })
+  }
+}
+
 describe('DB upgrade fixtures · real Dexie version transitions', () => {
+  it('v47→v48 只新增空运行时表，保留 Agent 与节点创作过程数据', async () => {
+    const name = nextName('upgrade-v48-simulation')
+    const oldDb = track(new OldV47ProcessDB(name))
+    await oldDb.open()
+    const conversationId = await oldDb.table('agentConversations').add({
+      projectId: 1,
+      worldGroupId: null,
+      title: '保留会话',
+      status: 'archived',
+      createdAt: 1,
+      updatedAt: 2,
+    })
+    await oldDb.table('agentEvents').add({
+      projectId: 1,
+      conversationId,
+      sequence: 1,
+      kind: 'message',
+      content: '保留事件',
+      payload: '{}',
+      createdAt: 2,
+    })
+    oldDb.close()
+
+    const upgraded = track(new UpgradedV48SimulationDB(name))
+    await upgraded.open()
+    expect(await upgraded.table('agentConversations').get(conversationId)).toMatchObject({
+      title: '保留会话',
+    })
+    expect(await upgraded.table('agentEvents').count()).toBe(1)
+    expect(await upgraded.table('simulationSessions').count()).toBe(0)
+    expect(await upgraded.table('simulationEvents').count()).toBe(0)
+    expect(await upgraded.table('simulationCheckpoints').count()).toBe(0)
+  })
+
+  it('v45→v46 only adds version/source stores and preserves legacy analysis verbatim', async () => {
+    const name = nextName('upgrade-v46-reference')
+    const oldDb = track(new OldV45ReferenceDB(name))
+    await oldDb.open()
+    const refId = await oldDb.table('references').add({
+      projectId: 1,
+      title: '旧参考',
+      type: 'story',
+      analysisStatus: 'done',
+      analysisSummary: '{"openingTechnique":"旧总结"}',
+      createdAt: 1,
+      updatedAt: 2,
+    })
+    const chunkId = await oldDb.table('referenceChunkAnalysis').add({
+      referenceId: refId,
+      chunkIndex: 0,
+      openingTechnique: '旧钩子',
+      createdAt: 3,
+    })
+    oldDb.close()
+
+    const upgraded = track(new UpgradedV46ReferenceDB(name))
+    await upgraded.open()
+    expect(await upgraded.table('referenceAnalysisRuns').count()).toBe(0)
+    expect(await upgraded.table('referenceAnalysisSources').count()).toBe(0)
+    expect(await upgraded.table('references').get(refId)).toMatchObject({
+      analysisStatus: 'done',
+      analysisSummary: '{"openingTechnique":"旧总结"}',
+    })
+    expect(await upgraded.table('referenceChunkAnalysis').get(chunkId)).toEqual({
+      id: chunkId,
+      referenceId: refId,
+      chunkIndex: 0,
+      openingTechnique: '旧钩子',
+      createdAt: 3,
+    })
+  })
+
   it('v30→v31 clears old reference analysis but preserves import session blobs', async () => {
     const name = nextName('upgrade-v31')
     const oldDb = track(new OldV30AnalysisDB(name))

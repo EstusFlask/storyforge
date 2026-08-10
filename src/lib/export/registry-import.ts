@@ -17,6 +17,10 @@ import { migrateStateCardsToTemporalFactCandidates } from '../migrations/state-c
 import type { TableSpec } from '../registry/types'
 import type { ProjectExportData } from './json-export'
 import { normalizeCharacterAxes } from '../character/character-axes'
+import {
+  parseCharacterDrivenPlanArcs,
+  stringifyCharacterDrivenPlanArcs,
+} from '../types/character-driven-plan'
 
 /** 表级拓扑排序:被 remapVia 指向的表必须先导入(selfTree 不算表间依赖) */
 function deriveImportOrder(specs: TableSpec[]): TableSpec[] {
@@ -91,10 +95,21 @@ export async function deriveImportProjectJSON(data: ProjectExportData): Promise<
   const now = Date.now()
   const specs = PROJECT_TABLES.filter(s => s.exportable && s.name !== 'projects')
   const order = deriveImportOrder(specs)
+  const projectSpec = PROJECT_TABLES.find(spec => spec.name === 'projects')
+  if (!projectSpec) throw new Error('[deriveImport] PROJECT_TABLES 缺少 projects 根表')
 
   return await db.transaction('rw', transactionTablesFor('importProject'), async () => {
+    const projectData: Record<string, any> = { ...data.project }
+    const pendingProjectRefs = new Map<string, number | null>()
+    for (const rm of projectSpec.exportRemap ?? []) {
+      const exportValue = projectData[rm.exportAs]
+      pendingProjectRefs.set(rm.field, typeof exportValue === 'number' ? exportValue : null)
+      delete projectData[rm.exportAs]
+      // 数据库主键不具备跨项目便携性；旧备份若只有原始 ID，宁可清空也不能误绑定。
+      delete projectData[rm.field]
+    }
     const newProjectId = await db.projects.add({
-      ...data.project,
+      ...projectData,
       name: `${data.project.name}（导入）`,
       createdAt: now,
       updatedAt: now,
@@ -126,6 +141,9 @@ export async function deriveImportProjectJSON(data: ProjectExportData): Promise<
 
         // 外键:_exportAs → 真实 db id
         let dropRow = false
+        let hasUnmappedKnowledgeRef = false
+        let hasUnmappedTemporalSourceRef = false
+        let hasUnmappedCultivationProgressRef = false
         for (const rm of spec.exportRemap ?? []) {
           const exportVal = obj[rm.exportAs]
           delete obj[rm.exportAs]
@@ -134,6 +152,11 @@ export async function deriveImportProjectJSON(data: ProjectExportData): Promise<
             const m = rm.selfTree ? newIdMap : newIdMaps.get(rm.remapVia)
             const got = m?.get(exportVal)
             if (got == null) {
+              if (spec.name === 'knowledgeLedger') hasUnmappedKnowledgeRef = true
+              if (spec.name === 'cultivationProgress') hasUnmappedCultivationProgressRef = true
+              if (spec.name === 'temporalFacts' && rm.field.startsWith('source')) {
+                hasUnmappedTemporalSourceRef = true
+              }
               if (rm.onUnmapped === 'drop') { dropRow = true; break }
               if (rm.onUnmapped === 'require') {
                 throw new Error(`[deriveImport] 缺失必填外键映射:${spec.name}.${rm.field}=${exportVal}`)
@@ -144,6 +167,23 @@ export async function deriveImportProjectJSON(data: ProjectExportData): Promise<
           obj[rm.field] = mappedId
         }
         if (dropRow) continue
+        if (spec.name === 'knowledgeLedger' && hasUnmappedKnowledgeRef && obj.status !== 'rejected') {
+          obj.status = 'source-missing'
+        }
+        if (spec.name === 'cultivationProgress' && hasUnmappedCultivationProgressRef) {
+          obj.status = 'source-missing'
+        }
+        if (spec.name === 'temporalFacts' && hasUnmappedTemporalSourceRef
+          && obj.status !== 'rejected' && obj.status !== 'superseded') {
+          obj.status = 'source-missing'
+        }
+        if (spec.name === 'temporalFacts' && obj.sourceType === 'setting' && obj.sourceFingerprint
+          && obj.sourceWorldviewId == null && obj.sourcePowerSystemId == null
+          && obj.sourceCultivationSystemId == null
+          && obj.sourceStoryCoreId == null && obj.sourceCharacterId == null
+          && obj.status !== 'rejected' && obj.status !== 'superseded') {
+          obj.status = 'source-missing'
+        }
 
         if (spec.owner === 'project') obj.projectId = newProjectId
         if (spec.name === 'characters') {
@@ -193,7 +233,15 @@ export async function deriveImportProjectJSON(data: ProjectExportData): Promise<
             if (portableRefs == null) continue // 旧备份没有影子字段：保留原值，不猜测旧 db id。
             const patch = rr.kind === 'id-array'
               ? remapPortableIdArray(portableRefs, refMap, rr.storage === 'json-string')
-              : await remapSceneCharacterIndexes((db as any)[spec.name], pending.newId, rr.field, portableRefs, refMap)
+              : rr.kind === 'scene-character-ids'
+                ? await remapSceneCharacterIndexes((db as any)[spec.name], pending.newId, rr.field, portableRefs, refMap)
+                : await remapCharacterPlanArcIndexes(
+                  (db as any)[spec.name],
+                  pending.newId,
+                  rr.field,
+                  portableRefs,
+                  refMap,
+                )
             if (patch !== undefined) {
               await (db as any)[spec.name].update(pending.newId, { [rr.field]: patch, updatedAt: now })
             }
@@ -202,6 +250,17 @@ export async function deriveImportProjectJSON(data: ProjectExportData): Promise<
       }
 
       newIdMaps.set(spec.name, newIdMap)
+    }
+
+    const projectPatch: Record<string, number | null> = {}
+    for (const rm of projectSpec.exportRemap ?? []) {
+      const exportValue = pendingProjectRefs.get(rm.field)
+      projectPatch[rm.field] = exportValue == null
+        ? null
+        : (newIdMaps.get(rm.remapVia)?.get(exportValue) ?? null)
+    }
+    if (Object.keys(projectPatch).length > 0) {
+      await db.projects.update(newProjectId, projectPatch as any)
     }
 
     // NS-4：旧备份可能只有 stateCards、没有 temporalFacts。导入后用新项目内的
@@ -241,4 +300,23 @@ async function remapSceneCharacterIndexes(
       : []
     return { ...(scene as Record<string, unknown>), characterIds }
   })
+}
+
+async function remapCharacterPlanArcIndexes(
+  table: any,
+  rowId: number,
+  field: string,
+  portableRefs: unknown,
+  idMap: Map<number, number>,
+): Promise<string | undefined> {
+  if (!Array.isArray(portableRefs)) return undefined
+  const row = await table.get(rowId)
+  const arcs = parseCharacterDrivenPlanArcs(row?.[field])
+  return stringifyCharacterDrivenPlanArcs(arcs.map((arc, index) => {
+    const exportIndex = portableRefs[index]
+    return {
+      ...arc,
+      characterId: typeof exportIndex === 'number' ? (idMap.get(exportIndex) ?? null) : null,
+    }
+  }))
 }

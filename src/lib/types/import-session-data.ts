@@ -7,8 +7,33 @@ export interface UnifiedParseResult {
   worldview?: Record<string, string>
   characters?: Array<Record<string, unknown>>
   outline?: Array<Record<string, unknown>>
+  /**
+   * Phase 35-c：AI 只生成待作者审查的词条候选。
+   * categoryRef 是稳定分类引用，不是数据库 categoryId。
+   */
+  codexCandidates?: CodexImportCandidate[]
   /** 写作技法分析（项目参考模式核心价值） */
   writingTechniques?: WritingTechniques
+}
+
+export interface CodexImportEvidence {
+  /** 0-based 原文分块序号，由本地解析器盖章，不接受 AI 自报。 */
+  chunkIndex: number
+  /** 必须能在对应分块原文中逐字找到。 */
+  quote: string
+}
+
+export interface CodexImportCandidate {
+  /** builtin:<builtInKey> 或 custom:<domain>:<deterministic-token>。 */
+  categoryRef: string
+  name: string
+  summary: string
+  description: string
+  /** 只允许所属分类 schema 中的普通字段；ref/FK 由作者后续维护。 */
+  fields: Record<string, string>
+  tags: string[]
+  confidence: number
+  evidence: CodexImportEvidence[]
 }
 
 /** 写作技法分析结构 */

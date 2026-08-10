@@ -1,3 +1,5 @@
+import type { RagDocumentMetadata } from './rag-library'
+
 /** 大纲节点类型 */
 export type OutlineNodeType =
   | 'volume'      // 卷
@@ -94,7 +96,7 @@ export interface ChapterPlanReconciliation {
 }
 
 /** 章节 */
-export interface Chapter {
+export interface Chapter extends RagDocumentMetadata {
   id?: number
   projectId: number
   outlineNodeId: number      // 关联的大纲节点

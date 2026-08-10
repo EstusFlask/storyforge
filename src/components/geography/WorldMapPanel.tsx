@@ -3,7 +3,7 @@
  * 顶层容器：世界树导航 + AI 生成按钮 + Voronoi/2D/3D 切换 + Canvas + 属性编辑器
  */
 
-import { useState, useEffect, lazy, Suspense } from 'react'
+import { useState, useEffect, useCallback, lazy, Suspense } from 'react'
 import { Sparkles, Loader2, RefreshCw, Map, Box, Globe } from 'lucide-react'
 import { useGeographyStore } from '../../stores/project-singletons'
 import { useWorldviewStore } from '../../stores/worldview'
@@ -17,7 +17,7 @@ import {
   buildVoronoiMapPrompt,
   parseVoronoiMapConfig,
 } from '../../lib/ai/adapters/voronoi-map-adapter'
-import { buildCodexContext } from '../../lib/ai/codex-context'
+import { assembleContext } from '../../lib/registry/assemble-context'
 import type { Project, Location, Worldview, Geography } from '../../lib/types'
 import type { MapGenConfig } from '../../lib/world-map/engine'
 import WorldTreeSidebar from './WorldTreeSidebar'
@@ -98,13 +98,22 @@ export default function WorldMapPanel({ project }: Props) {
 
     setParseError(null)
     // 读全:把当前世界作用域下的自然/人文词条(具体山川/势力/城池)也喂给地图生成
-    const codexCtx = await buildCodexContext(project.id!, scopedGroupId, { maxChars: 2000 })
+    const codexCtx = (await assembleContext({
+      projectId: project.id!,
+      worldGroupId: scopedGroupId,
+      sourceKeys: ['codex', 'locations'],
+    })).text
     const messages = buildVoronoiMapPrompt(wv, overview, locations, codexCtx)
     const result = await ai.start(messages, undefined, { category: 'geography.world-map', projectId: project.id! })
     if (!result) return
 
     try {
-      const config = parseVoronoiMapConfig(result)
+      // 证据只能命中用户资料，不能借用 system prompt 中的示例文字。
+      const sourceText = messages
+        .filter(message => message.role === 'user')
+        .map(message => message.content)
+        .join('\n\n')
+      const config = parseVoronoiMapConfig(result, sourceText)
       if (activeNode) {
         config.mapName = activeNode.name
       }
@@ -121,6 +130,16 @@ export default function WorldMapPanel({ project }: Props) {
       setParseError(`AI 返回的地图参数解析失败，请重试。错误：${err instanceof Error ? err.message : '未知错误'}`)
     }
   }
+
+  const handleMapConfigChange = useCallback(async (patch: Partial<MapGenConfig>) => {
+    const nextConfig = { ...(voronoiConfig ?? {}), ...patch }
+    setVoronoiConfig(nextConfig)
+    if (activeWorldId) {
+      await updateNode(activeWorldId, {
+        mapConfigJSON: JSON.stringify(nextConfig),
+      })
+    }
+  }, [activeWorldId, updateNode, voronoiConfig])
 
   // ── 渲染 ─────────────────────────────────────────────────
   const generateButtonLabel = voronoiConfig ? 'AI 重新生成' : 'AI 生成地图'
@@ -235,6 +254,7 @@ export default function WorldMapPanel({ project }: Props) {
             <WorldMapVoronoi
               key={activeWorldId ?? 'default'}
               config={voronoiConfig}
+              onConfigChange={handleMapConfigChange}
             />
           </Suspense>
         </div>

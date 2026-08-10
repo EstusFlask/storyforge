@@ -3,6 +3,8 @@ import { Settings2 } from 'lucide-react'
 import type { PreparedGenerationContext, OutlineGenerationRequest } from '../../lib/outline/generation-request'
 import type { GenerationMode, ChunkedGenerationConfig } from '../../lib/outline/generation-modes'
 import { DEFAULT_CHUNKED_CONFIG, GENERATION_MODE_LABELS } from '../../lib/outline/generation-modes'
+import type { ChatMessage } from '../../lib/types'
+import PromptPreviewGate from '../shared/PromptPreviewGate'
 import OutlineGenerationBasis from './OutlineGenerationBasis'
 
 interface Props {
@@ -13,6 +15,12 @@ interface Props {
   onRetry: () => void
   onCancel: () => void
   onConfirm: (mode?: GenerationMode, chunkedConfig?: ChunkedGenerationConfig) => void
+  messages?: ChatMessage[] | null
+  transparentMode?: boolean
+  promptReviewOpen?: boolean
+  onTransparentModeChange?: (enabled: boolean) => void
+  onClosePromptReview?: () => void
+  onConfirmMessages?: (messages: ChatMessage[]) => void
 }
 
 function requestTitle(request: OutlineGenerationRequest): string {
@@ -30,6 +38,12 @@ export default function OutlineGenerationRequestPanel({
   onRetry,
   onCancel,
   onConfirm,
+  messages = null,
+  transparentMode = false,
+  promptReviewOpen = false,
+  onTransparentModeChange,
+  onClosePromptReview,
+  onConfirmMessages,
 }: Props) {
   const isChapterBatch = request.kind === 'chapters'
   const chapterRequest = isChapterBatch ? request : null
@@ -43,6 +57,18 @@ export default function OutlineGenerationRequestPanel({
     setMode(isChapter ? request.mode ?? 'quick' : 'quick')
     setChunkedConfig(isChapter ? request.chunkedConfig ?? DEFAULT_CHUNKED_CONFIG : DEFAULT_CHUNKED_CONFIG)
   }, [request])
+
+  if (promptReviewOpen && messages && onClosePromptReview && onConfirmMessages) {
+    return (
+      <div className="rounded-lg border border-accent/30 bg-accent/5 px-3 py-3">
+        <PromptPreviewGate
+          messages={messages}
+          onBack={onClosePromptReview}
+          onConfirm={onConfirmMessages}
+        />
+      </div>
+    )
+  }
 
   const handleConfirm = () => {
     if (isChapterBatch) {
@@ -83,7 +109,7 @@ export default function OutlineGenerationRequestPanel({
             disabled={loading || Boolean(error) || !preparedContext}
             className="px-2.5 py-1 text-xs text-white bg-accent rounded hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-40"
           >
-            确认生成
+            {transparentMode ? '预览最终提示词' : '确认生成'}
           </button>
         </div>
       </div>
@@ -165,6 +191,20 @@ export default function OutlineGenerationRequestPanel({
         </div>
       )}
 
+      <label className="flex cursor-pointer items-start gap-2 rounded border border-border/70 bg-bg-base/60 px-2.5 py-2 text-xs">
+        <input
+          type="checkbox"
+          checked={transparentMode}
+          onChange={event => onTransparentModeChange?.(event.target.checked)}
+          className="mt-0.5 accent-accent"
+        />
+        <span>
+          <span className="font-medium text-text-secondary">透明模式（高级）</span>
+          <span className="ml-2 text-[10px] text-text-muted">
+            发送前查看并临时编辑拼接后的最终消息；默认关闭，本次编辑不会保存。
+          </span>
+        </span>
+      </label>
       <div className="border-t border-accent/20 pt-3">
         <OutlineGenerationBasis
           context={preparedContext?.assembled ?? null}

@@ -19,6 +19,7 @@ import {
   type FindReplaceUndoPatch,
 } from '../../lib/editor/find-replace-operation'
 import type { Chapter, OutlineNode } from '../../lib/types'
+import EntityRenamePanel from './EntityRenamePanel'
 
 type SearchScope = 'chapter' | 'book'
 
@@ -60,6 +61,7 @@ export default function FindReplacePanel({
   const [selected, setSelected] = useState<{ chapterId: number; occurrenceIndex: number } | null>(null)
   const [busy, setBusy] = useState(false)
   const [undoPatch, setUndoPatch] = useState<FindReplaceUndoPatch | null>(null)
+  const [panelMode, setPanelMode] = useState<'text' | 'entity'>('text')
 
   useEffect(() => {
     queryInputRef.current?.focus()
@@ -223,14 +225,42 @@ export default function FindReplacePanel({
     <div className="rounded-xl border border-border bg-bg-surface shadow-theme-sm">
       <div className="flex items-center justify-between gap-3 border-b border-border px-4 py-3">
         <div>
-          <p className="text-sm font-medium text-text-primary">全书查找替换</p>
-          <p className="text-[11px] text-text-muted">基于已保存正文查找；批量替换前自动创建快照。</p>
+          <p className="text-sm font-medium text-text-primary">
+            {panelMode === 'text' ? '全书查找替换' : '智能实体改名'}
+          </p>
+          <p className="text-[11px] text-text-muted">
+            {panelMode === 'text'
+              ? '基于已保存正文查找；批量替换前自动创建快照。'
+              : '同步稳定实体、正文和结构化冗余名称；执行前先预览并创建快照。'}
+          </p>
         </div>
         <button onClick={onClose} className="rounded p-1 text-text-muted hover:bg-bg-hover hover:text-text-primary" aria-label="关闭查找替换">
           <X className="h-4 w-4" />
         </button>
       </div>
 
+      <div className="flex gap-1 border-b border-border px-4 pt-2">
+        <button
+          onClick={() => setPanelMode('text')}
+          className={`rounded-t-md px-3 py-1.5 text-xs ${
+            panelMode === 'text' ? 'bg-accent/10 text-accent' : 'text-text-muted hover:text-text-primary'
+          }`}
+        >
+          文字替换
+        </button>
+        <button
+          onClick={() => setPanelMode('entity')}
+          className={`rounded-t-md px-3 py-1.5 text-xs ${
+            panelMode === 'entity' ? 'bg-accent/10 text-accent' : 'text-text-muted hover:text-text-primary'
+          }`}
+        >
+          智能实体改名
+        </button>
+      </div>
+
+      {panelMode === 'entity' ? (
+        <EntityRenamePanel projectId={projectId} onSelectOutlineNode={onSelectOutlineNode} />
+      ) : (
       <div className="grid gap-3 p-4 lg:grid-cols-[minmax(0,1fr)_260px]">
         <div className="space-y-3">
           <div className="grid gap-2 md:grid-cols-2">
@@ -384,6 +414,7 @@ export default function FindReplacePanel({
           )}
         </aside>
       </div>
+      )}
     </div>
   )
 }

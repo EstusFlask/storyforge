@@ -7,7 +7,7 @@
  * - 谓词必须存在于 FACT_PREDICATE_REGISTRY；时序章节引用必须属于本项目，否则跳过。
  */
 import { db } from '../db/schema'
-import { getFactPredicate } from '../registry/fact-predicate-registry'
+import { getFactPredicate, normalizeFactValue } from '../registry/fact-predicate-registry'
 import type { FactKind, TemporalFact } from '../types/temporal-fact'
 import { resolveCanonicalChapterSequence } from '../ai/chapter-memory/canonical-chapter-sequence'
 
@@ -66,8 +66,12 @@ async function validRange(projectId: number, from: number | null, to: number | n
 }
 
 async function resolveCharacterId(projectId: number, name: string): Promise<number | null> {
-  const hit = await db.characters.where('projectId').equals(projectId).filter(character => character.name === name).first()
-  return hit?.id ?? null
+  const matches = await db.characters.where('projectId').equals(projectId)
+    .filter(character =>
+      character.name === name
+      && (character.isCrossWorld || character.homeWorldGroupId == null))
+    .toArray()
+  return matches.length === 1 ? matches[0].id ?? null : null
 }
 
 function dedupeKey(fact: Pick<TemporalFact, 'subjectName' | 'predicate' | 'value' | 'validFromChapterId'>): string {
@@ -130,7 +134,8 @@ export async function importFactCandidateDiff(projectId: number, raw: unknown): 
   const seen = new Set(existing.map(dedupeKey))
   for (const row of rows) {
     const spec = getFactPredicate(row.predicate)
-    if (!row.subjectName || !row.value || !spec) {
+    const normalizedValue = spec ? normalizeFactValue(spec, row.value) : null
+    if (!row.subjectName || !normalizedValue || !spec) {
       result.skippedInvalid++
       continue
     }
@@ -148,7 +153,7 @@ export async function importFactCandidateDiff(projectId: number, raw: unknown): 
       result.skippedInvalid++
       continue
     }
-    const key = dedupeKey({ ...row, validFromChapterId })
+    const key = dedupeKey({ ...row, value: normalizedValue, validFromChapterId })
     if (seen.has(key)) {
       result.skippedDuplicate++
       continue
@@ -161,7 +166,7 @@ export async function importFactCandidateDiff(projectId: number, raw: unknown): 
       subjectName: row.subjectName,
       predicate: row.predicate,
       factKind: spec.factKind as FactKind,
-      value: row.value,
+      value: normalizedValue,
       sourceType: 'import',
       sourceRecordTable: 'human-readable-diff',
       sourceQuote: row.sourceQuote,

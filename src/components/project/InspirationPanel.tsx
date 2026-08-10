@@ -4,21 +4,11 @@
  * 用户写碎片灵感 → AI 反向生成世界观草稿 + 故事核心 + 初始角色卡 → 选择性采纳
  */
 
-import { useState, useEffect, useRef } from 'react'
+import { useState } from 'react'
 import {
-  Lightbulb, Sparkles, Loader2, Download,
+  Lightbulb, Sparkles, Loader2, Download, Plus,
 } from 'lucide-react'
 import { useWorldGroupStore } from '../../stores/world-group'
-import { useAIStream } from '../../hooks/useAIStream'
-import { createAISessionKey } from '../../stores/ai-generation-session'
-import {
-  buildInspirationReversePrompt,
-  parseReverseOutput,
-  buildInspirationReverseMultiWorldPrompt,
-  parseReverseMultiWorldOutput,
-  type ReverseResult,
-  type ReverseMultiWorldResult,
-} from '../../lib/ai/inspiration-reverse'
 import { adopt } from '../../lib/registry/adopt'
 import { CHARACTER_DIMENSIONS } from '../../lib/character/character-dimensions'
 import AIStreamOutput from '../shared/AIStreamOutput'
@@ -27,6 +17,10 @@ import type { Project } from '../../lib/types'
 import { characterAxesLabel } from '../../lib/character/character-axes'
 import InspirationMultiWorldResult from './InspirationMultiWorldResult'
 import InspirationSingleResult from './InspirationSingleResult'
+import InspirationFusionReview from './InspirationFusionReview'
+import type { InspirationSourceKind } from '../../lib/types/inspiration-workspace'
+import { useIncrementalInspiration } from '../../hooks/useIncrementalInspiration'
+import { MAX_INSPIRATION_FRAGMENT_CHARS } from '../../lib/inspiration/workspace'
 
 interface Props {
   project: Project
@@ -34,78 +28,40 @@ interface Props {
 
 export default function InspirationPanel({ project }: Props) {
   const wgStore = useWorldGroupStore()
-  const ai = useAIStream(createAISessionKey(project.id!, 'inspiration.reverse'))
-  const isMW = !!project.enableMultiWorld
-
-  const draftKey = `sf-inspiration-draft-${project.id}`
-  const [inspiration, setInspiration] = useState('')
-  const [userHint, setUserHint] = useState('')
-  const [result, setResult] = useState<ReverseResult | null>(null)
-  const [mwResult, setMwResult] = useState<ReverseMultiWorldResult | null>(null)
-  const [mwAdopted, setMwAdopted] = useState(false)
   const [expandedSections, setExpandedSections] = useState<Set<string>>(new Set(['worldview', 'storyCore', 'characters']))
   const [adoptedSections, setAdoptedSections] = useState<Set<string>>(new Set())
-  const [selectedChars, setSelectedChars] = useState<Set<number>>(new Set())
   const [adopting, setAdopting] = useState(false)
-  const draftLoaded = useRef(false)
-
-  // 草稿持久化：进入时加载灵感输入 + 已生成的反推结果（切走再回来不丢）
-  useEffect(() => {
-    try {
-      const saved = localStorage.getItem(draftKey)
-      if (saved) {
-        const d = JSON.parse(saved)
-        setInspiration(d.inspiration || '')
-        setUserHint(d.userHint || '')
-        if (d.result) setResult(d.result)
-        if (d.mwResult) {
-          setMwResult(d.mwResult)
-          setMwAdopted(!!d.mwAdopted)
-        }
-        if (d.result?.characters) setSelectedChars(new Set(d.result.characters.map((_: unknown, i: number) => i)))
-      }
-    } catch { /* ignore */ }
-    draftLoaded.current = true
-  }, [draftKey])
-  // 变化时保存（含反推结果），首次加载完成后才开始写，避免覆盖已存草稿
-  useEffect(() => {
-    if (!draftLoaded.current) return
-    const t = setTimeout(() => {
-      try {
-        localStorage.setItem(draftKey, JSON.stringify({ inspiration, userHint, result, mwResult, mwAdopted }))
-      } catch { /* ignore */ }
-    }, 500)
-    return () => clearTimeout(t)
-  }, [draftKey, inspiration, userHint, result, mwResult, mwAdopted])
-
-  // 解析 AI 输出（多世界 / 单世界两条路径）
-  useEffect(() => {
-    if (ai.isStreaming || !ai.output) return
-    if (isMW) {
-      const parsed = parseReverseMultiWorldOutput(ai.output)
-      if (parsed) setMwResult(parsed)
-    } else {
-      const parsed = parseReverseOutput(ai.output)
-      if (parsed) {
-        setResult(parsed)
-        setSelectedChars(new Set(parsed.characters.map((_, i) => i)))
-      }
-    }
-  }, [ai.isStreaming, ai.output, isMW])
-
-  const handleGenerate = async () => {
-    if (!inspiration.trim()) return
-    setResult(null)
-    setMwResult(null)
-    setMwAdopted(false)
-    setAdoptedSections(new Set())
-
-    const genres = project.genres?.join('/') || project.genre || ''
-    const messages = isMW
-      ? buildInspirationReverseMultiWorldPrompt(project.name, genres, inspiration, userHint || undefined)
-      : buildInspirationReversePrompt(project.name, genres, inspiration, userHint || undefined)
-    await ai.start(messages, undefined, { category: 'inspiration.reverse', projectId: project.id! })
-  }
+  const fusion = useIncrementalInspiration(project, () => setAdoptedSections(new Set()))
+  const {
+    ai,
+    isMultiWorld: isMW,
+    mode,
+    workspace: inspirationWorkspace,
+    inspiration,
+    setInspiration,
+    userHint,
+    setUserHint,
+    result,
+    mwResult,
+    mwAdopted,
+    setMwAdopted,
+    selectedChars,
+    setSelectedChars,
+    fragmentLabel,
+    setFragmentLabel,
+    sourceKind,
+    setSourceKind,
+    selectedFragmentIds,
+    setSelectedFragmentIds,
+    pendingDiff,
+    confirmingFusion,
+    fusionError,
+    addCurrentFragment,
+    generate: handleGenerate,
+    confirmFusion: handleConfirmFusion,
+    discardFusion: handleDiscardFusion,
+    removeFragment: handleRemoveFragment,
+  } = fusion
 
   // ── 多世界：一键采纳（创建世界组 + 各世界世界观 + 故事核心 + 角色归属）──
   const handleAdoptMultiWorld = async () => {
@@ -113,7 +69,8 @@ export default function InspirationPanel({ project }: Props) {
     setAdopting(true)
     try {
       // 确保多世界已开启 + 主世界组存在
-      await wgStore.migrateToMultiWorld(project.id!)
+      const migrated = await wgStore.migrateToMultiWorld(project.id!)
+      if (!migrated) return
 
       // 1. 故事核心（项目级）
       const sc = mwResult.storyCore
@@ -400,13 +357,70 @@ export default function InspirationPanel({ project }: Props) {
             className="w-full text-sm bg-bg-base border border-border rounded-lg px-4 py-3 text-text-primary placeholder:text-text-muted resize-none"
             minRows={5}
           />
+          <div className="mt-2 flex flex-wrap items-center gap-2">
+            <select
+              value={sourceKind}
+              onChange={event => setSourceKind(event.target.value as InspirationSourceKind)}
+              className="rounded border border-border bg-bg-elevated px-2 py-1.5 text-xs text-text-secondary"
+              aria-label="灵感来源"
+            >
+              <option value="author">本人灵感</option>
+              <option value="reference">参考启发</option>
+              <option value="research">研究资料</option>
+              <option value="other">其他</option>
+            </select>
+            <input
+              value={fragmentLabel}
+              onChange={event => setFragmentLabel(event.target.value)}
+              maxLength={80}
+              placeholder="碎片标题（可选）"
+              className="min-w-44 flex-1 rounded border border-border bg-bg-elevated px-2.5 py-1.5 text-xs text-text-primary placeholder:text-text-muted"
+            />
+            <button
+              onClick={() => { void addCurrentFragment() }}
+              disabled={!inspiration.trim() || inspiration.trim().length > MAX_INSPIRATION_FRAGMENT_CHARS}
+              className="flex items-center gap-1 rounded border border-accent/40 px-3 py-1.5 text-xs text-accent hover:bg-accent/10 disabled:opacity-40"
+            >
+              <Plus className="h-3.5 w-3.5" /> 加入素材库
+            </button>
+          </div>
           {/* CF-5: 超长非阻断提示——不静默截断，明确告知只适合短文本 */}
-          {inspiration.length > 1500 && (
-            <p className="mt-1.5 text-xs text-warning">
-              ⚠️ 当前输入约 {inspiration.length} 字，偏长。灵感反推面向短灵感设计，过长内容 AI 可能只吃前半段；长篇正文请改用「文档解析 / 项目参考导入」。
+          {inspiration.trim().length > 1500 && (
+            <p className={`mt-1.5 text-xs ${
+              inspiration.trim().length > MAX_INSPIRATION_FRAGMENT_CHARS ? 'text-red-400' : 'text-warning'
+            }`}>
+              {inspiration.trim().length > MAX_INSPIRATION_FRAGMENT_CHARS
+                ? `当前输入 ${inspiration.trim().length} 字，超过单碎片 ${MAX_INSPIRATION_FRAGMENT_CHARS} 字上限。请拆成多个碎片；系统不会静默截断。`
+                : `⚠️ 当前输入约 ${inspiration.trim().length} 字，偏长。灵感反推面向短灵感设计；长篇正文请改用「文档解析 / 项目参考导入」。`}
             </p>
           )}
         </section>
+
+        {fusionError && (
+          <p role="alert" className="rounded border border-red-500/30 bg-red-500/5 px-3 py-2 text-xs text-red-400">
+            {fusionError}
+          </p>
+        )}
+
+        <InspirationFusionReview
+          fragments={inspirationWorkspace.fragments}
+          versions={inspirationWorkspace.versions}
+          selectedIds={selectedFragmentIds}
+          mode={mode}
+          pendingDiff={pendingDiff}
+          confirming={confirmingFusion}
+          onToggle={fragmentId => {
+            setSelectedFragmentIds(current => {
+              const next = new Set(current)
+              if (next.has(fragmentId)) next.delete(fragmentId)
+              else next.add(fragmentId)
+              return next
+            })
+          }}
+          onRemove={fragmentId => { void handleRemoveFragment(fragmentId) }}
+          onConfirm={() => { void handleConfirmFusion() }}
+          onDiscard={handleDiscardFusion}
+        />
 
         {/* ── 补充说明 ────────────────────────────── */}
         <section>
@@ -424,7 +438,11 @@ export default function InspirationPanel({ project }: Props) {
         <div className="flex items-center gap-3">
           <button
             onClick={handleGenerate}
-            disabled={!inspiration.trim() || ai.isStreaming}
+            disabled={
+              (!inspiration.trim() && selectedFragmentIds.size === 0)
+              || inspiration.trim().length > MAX_INSPIRATION_FRAGMENT_CHARS
+              || ai.isStreaming
+            }
             className="flex items-center gap-1.5 px-4 py-2 bg-accent text-white rounded-lg text-sm font-medium hover:bg-accent-hover disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
           >
             {ai.isStreaming ? (
@@ -432,7 +450,7 @@ export default function InspirationPanel({ project }: Props) {
             ) : (
               <Sparkles className="w-4 h-4" />
             )}
-            {ai.isStreaming ? '推演中...' : '开始反推'}
+            {ai.isStreaming ? '融合中...' : inspirationWorkspace.versions.some(version => version.mode === mode) ? '融合并更新' : '开始反推'}
           </button>
           {ai.isStreaming && (
             <button onClick={ai.stop} className="text-xs text-text-muted hover:text-red-500 transition-colors">
@@ -449,18 +467,6 @@ export default function InspirationPanel({ project }: Props) {
             error={ai.error}
             tokenUsage={ai.tokenUsage}
             onStop={ai.stop}
-            onAccept={() => {
-              if (isMW) {
-                const parsed = parseReverseMultiWorldOutput(ai.output)
-                if (parsed) setMwResult(parsed)
-              } else {
-                const parsed = parseReverseOutput(ai.output)
-                if (parsed) {
-                  setResult(parsed)
-                  setSelectedChars(new Set(parsed.characters.map((_, i) => i)))
-                }
-              }
-            }}
             onRetry={handleGenerate}
             placeholder="等待 AI 反推故事框架..."
             moduleKey={isMW ? 'inspiration.reverse.multiworld' : 'inspiration.reverse'}
@@ -473,6 +479,7 @@ export default function InspirationPanel({ project }: Props) {
             result={mwResult}
             adopted={mwAdopted}
             adopting={adopting}
+            adoptionLocked={pendingDiff !== null}
             onAdopt={handleAdoptMultiWorld}
           />
         )}
@@ -485,6 +492,7 @@ export default function InspirationPanel({ project }: Props) {
             adoptedSections={adoptedSections}
             selectedChars={selectedChars}
             adopting={adopting}
+            adoptionLocked={pendingDiff !== null}
             onToggleSection={toggleSection}
             onToggleCharacter={toggleChar}
             onAdoptWorldview={handleAdoptWorldview}

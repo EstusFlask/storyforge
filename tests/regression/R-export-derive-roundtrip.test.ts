@@ -20,8 +20,8 @@ async function tableCount(name: string, projectId: number): Promise<number> {
 }
 
 /** 断言新项目每张项目级表行数与源一致 */
-async function expectSameCounts(srcId: number, newId: number) {
-  for (const name of EXPORTABLE_PROJECT_TABLES) {
+async function expectSameCounts(srcId: number, newId: number, tableNames = EXPORTABLE_PROJECT_TABLES) {
+  for (const name of tableNames) {
     const a = await tableCount(name, srcId)
     const b = await tableCount(name, newId)
     expect(b, `表 ${name} 往返后行数应一致`).toBe(a)
@@ -78,6 +78,9 @@ describe('R-export-derive-roundtrip · 派生往返 + 旧格式兼容', () => {
     await expectKeysRemapped(newId)
     // fixture 即 seedFullProject 的导出,行数应与重新 seed 的源项目一致
     const { projectId: freshSrc } = await seedFullProject()
-    await expectSameCounts(freshSrc, newId)
+    // 旧备份只需完整恢复它实际包含的表；新增表不能被要求凭空生成记录。
+    const legacyTables = EXPORTABLE_PROJECT_TABLES.filter(name => Array.isArray(legacy[name]))
+    await expectSameCounts(freshSrc, newId, legacyTables)
+    expect(await db.knowledgeLedger.where('projectId').equals(newId).count()).toBe(0)
   })
 })
