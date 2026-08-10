@@ -260,10 +260,10 @@ export const NAV_TREE: TreeSection[] = [
     label: '创作区',
     children: [
       leaf('rules',            '创作规则', Ruler),
-      leaf('outline',          '大纲',     BookOpen),
-      leaf('character-driven-plot', '角色驱动', Drama),
-      leaf('story-arc',        '故事线',   GitBranch),
-      leaf('chapters-list',    '章节',     FilePen),
+      leaf('story-arc',        '故事线',   GitBranch),      // 架构级规划（起承转合）
+      leaf('outline',          '大纲',     BookOpen),       // 卷结构规划
+      leaf('character-driven-plot', '角色驱动', Drama),  // 角色线规划
+      leaf('chapters-list',    '章节',     FilePen),        // 具体章节生成
       leaf('foreshadow',       '伏笔',     Eye),
       leaf('style-learning',   '文风学习', Feather),
       leaf('global-replace',   '全局替换', Replace),

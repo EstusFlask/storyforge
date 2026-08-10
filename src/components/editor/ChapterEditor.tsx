@@ -39,14 +39,18 @@ import { useAIConfigStore } from '../../stores/ai-config'
 import { analyzeContextSegments, calculateBudget, getModelPreset, type ContextBudget } from '../../lib/ai/context-budget'
 import RichEditor, { type RichEditorHandle } from './RichEditor'
 import EmotionBeatCard from './EmotionBeatCard'
+import CoordinationView from './CoordinationView'
 import FloatingToolbar from './FloatingToolbar'
 import ChapterEditorHeader from './ChapterEditorHeader'
 import ChapterMemoryPanel from './ChapterMemoryPanel'
 import ChapterContextPreview from './ChapterContextPreview'
 import ChapterEditorToolbar from './ChapterEditorToolbar'
+import { type ReconciliationActionMap } from './ReconciliationTable'
 import { useItemLedgerStore } from '../../stores/item-ledger'
 import { useLocationStore } from '../../stores/location'
 import { useCodexStore } from '../../stores/codex'
+import { useDetailedOutlineStore } from '../../stores/detailed-outline'
+import { useEmotionBeatStore } from '../../stores/emotion-beat'
 import { buildEditorEntityReferences } from '../../lib/editor/entity-reference'
 import type { Project, StateDiffItem } from '../../lib/types'
 
@@ -88,6 +92,8 @@ export default function ChapterEditor({ project, outlineNodeId }: Props) {
   const { entries: itemEntries, loadAll: loadItemLedger } = useItemLedgerStore()
   const { locations, loadAll: loadLocations } = useLocationStore()
   const { categories: codexCategories, entries: codexEntries, loadExisting: loadCodex } = useCodexStore()
+  const { detailedOutlines, loadAll: loadDetailedOutlines } = useDetailedOutlineStore()
+  const { cards: emotionBeatCards, loadAll: loadEmotionBeats } = useEmotionBeatStore()
 
   // content 为 HTML 字符串；旧数据是纯文本，RichEditor 内部会自动包装
   const [content, setContent] = useState('')
@@ -143,6 +149,8 @@ export default function ChapterEditor({ project, outlineNodeId }: Props) {
   useEffect(() => { loadItemLedger(project.id!) }, [project.id, loadItemLedger])
   useEffect(() => { loadLocations(project.id!) }, [project.id, loadLocations])
   useEffect(() => { loadCodex(project.id!) }, [project.id, loadCodex])
+  useEffect(() => { loadDetailedOutlines(project.id!) }, [project.id, loadDetailedOutlines])
+  useEffect(() => { loadEmotionBeats(project.id!) }, [project.id, loadEmotionBeats])
 
   // 如果从大纲进入，选择/创建对应章节（自动创建）
   useEffect(() => {
@@ -722,8 +730,82 @@ export default function ChapterEditor({ project, outlineNodeId }: Props) {
     })
   }
 
+  // 保存对账结果的函数
+  const handleSaveReconciliation = async (actions: ReconciliationActionMap) => {
+    if (!currentChapter?.id || !currentChapter.planReconciliation) return
+    
+    const reconciliation = currentChapter.planReconciliation
+    
+    // 检查是否有 apply 操作
+    const hasApplyActions = Object.values(actions).some(action => action.action === 'apply')
+    
+    const updatedReconciliation = {
+      ...reconciliation,
+      actions: actions,
+      reviewStatus: hasApplyActions ? 'applied-outline' : 'confirmed-constraint' as const,
+      reviewedAt: Date.now(),
+    }
+
+    await updateChapter(currentChapter.id, {
+      planReconciliation: updatedReconciliation,
+    })
+
+    // 处理需要更新到章纲的项目 (apply 操作)
+    if (outlineNode?.id) {
+      const itemsToAdd: string[] = []
+      
+      Object.entries(actions).forEach(([sectionKey, action]) => {
+        if (action.action === 'apply') {
+          const items = reconciliation[sectionKey as keyof typeof reconciliation] as Array<{ text: string }> | undefined
+          if (items) {
+            action.indices.forEach(index => {
+              if (items[index]) {
+                const prefix = sectionKey === 'unfinishedGoals' ? '[待完成]' : 
+                              sectionKey === 'deviations' ? '[补充]' :
+                              sectionKey === 'newConstraints' ? '[新约束]' : '[更新]'
+                itemsToAdd.push(`${prefix} ${items[index].text}`)
+              }
+            })
+          }
+        }
+      })
+
+      if (itemsToAdd.length > 0) {
+        const currentSummary = outlineNode.summary || ''
+        const additions = itemsToAdd.join('\n')
+        const newSummary = currentSummary 
+          ? `${currentSummary}\n\n[基于对账更新]\n${additions}` 
+          : additions
+        await updateNode(outlineNode.id, { summary: newSummary })
+      }
+    }
+
+    console.log('[Reconciliation] Saved actions:', actions)
+  }
+
+  // 设置伏笔的函数
+  const handleForeshadowReconciliation = async (item: { section: string; index: number; text: string }) => {
+    try {
+      // 使用 foreshadow store 添加伏笔
+      const foreshadowStore = useForeshadowStore.getState()
+      await foreshadowStore.addForeshadow({
+        projectId: project.id!,
+        content: item.text,
+        sourceChapterId: currentChapter?.id,
+        status: 'pending',
+        importance: 'medium',
+        createdAt: Date.now(),
+      })
+      
+      console.log('[Reconciliation] Added foreshadow:', item.text)
+    } catch (err) {
+      console.error('[Reconciliation] Failed to add foreshadow:', err)
+      throw err
+    }
+  }
+
   // ── Phase A1: 生成正文完成后的自动流程 ──
-  // 接受 AI 生成的文本后，自动触发状态提取 → 一次统一章节记忆抽取。
+  // 接受 AI 生成的文本后，自动触发：先章节记忆+对账，再状态提取。
   const handleAutoPostGenerate = async (task: {
     chapterId: number
     chapterTitle: string
@@ -749,7 +831,14 @@ export default function ChapterEditor({ project, outlineNodeId }: Props) {
       }
     } catch (e) { console.error('[AutoPost] 检索块重建失败:', e) }
 
-    // 1. 自动提取状态
+    // 1. summary + handoff + 对账（优先，用户最关心的结果）
+    await handleChapterMemory({
+      chapterId: task.chapterId,
+      chapterTitle: task.chapterTitle,
+      chapterContent: task.chapterContent,
+    })
+
+    // 2. 自动提取状态（对账完成后再提取，避免弹窗与对账重叠）
     setAutoProcessing('extracting')
     try {
       const stateCtx = buildSelectiveStateContext(task.chapterPlainText, extraStateIds).text
@@ -769,13 +858,6 @@ export default function ChapterEditor({ project, outlineNodeId }: Props) {
     } catch (err) {
       console.error('[AutoPost] 状态提取失败:', err)
     }
-
-    // 2. summary + handoff 只发起这一轮统一调用，不增加第三次正文读取。
-    await handleChapterMemory({
-      chapterId: task.chapterId,
-      chapterTitle: task.chapterTitle,
-      chapterContent: task.chapterContent,
-    })
   }
 
   const handleAcceptAI = async (text: string) => {
@@ -1039,6 +1121,51 @@ export default function ChapterEditor({ project, outlineNodeId }: Props) {
         />
       )}
 
+      {/* A4: 三层协调视图 */}
+      {outlineNode && currentChapter?.id && (() => {
+        // 计算当前章节索引（用于 5 轨叙事引擎）
+        const sortedChapters = [...chapters].sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
+        const chapterIndex = sortedChapters.findIndex(c => c.id === currentChapter.id) + 1
+        
+        // 获取当前章节的场景细纲
+        const currentDetailedOutline = detailedOutlines.find(
+          d => d.outlineNodeId === outlineNode.id
+        )
+        
+        // 获取当前章节的情感节拍
+        const currentEmotionCard = emotionBeatCards.find(
+          c => c.chapterId === currentChapter.id
+        )
+        
+        return (
+          <CoordinationView
+            chapterTitle={outlineNode.title || currentChapter.title}
+            chapterIndex={chapterIndex}
+            totalChapters={sortedChapters.length}
+            detailedOutline={currentDetailedOutline}
+            emotionBeats={currentEmotionCard?.beats || []}
+            onApplyOutline={async (newOutline) => {
+              if (currentDetailedOutline) {
+                await import('../../stores/detailed-outline').then(({ useDetailedOutlineStore }) => {
+                  useDetailedOutlineStore.getState().save(currentDetailedOutline.id, {
+                    scenes: newOutline.scenes,
+                  })
+                })
+              }
+            }}
+            onApplyBeats={async (newBeats) => {
+              if (currentEmotionCard) {
+                await import('../../stores/emotion-beat').then(({ useEmotionBeatStore }) => {
+                  useEmotionBeatStore.getState().updateCard(currentEmotionCard.id, {
+                    beats: newBeats,
+                  })
+                })
+              }
+            }}
+          />
+        )
+      })()}
+
       {/* Phase 21.3: 上下文预算条 */}
       {contextBudget && (
         <div className="mb-2">
@@ -1083,11 +1210,18 @@ export default function ChapterEditor({ project, outlineNodeId }: Props) {
         summary={currentChapter.summary}
         hasText={!!plainText}
         memoryBusy={autoProcessing === 'memory' || memoryAI.isStreaming}
+        chapterId={currentChapter.id!}
+        projectId={project.id!}
+        chapterTitle={chapterDisplay?.title ?? currentChapter.title}
+        nextChapterTitle={(() => {
+          const next = findNextCanonicalChapter(nodes, chapters, currentChapter)
+          return next?.title
+        })()}
         reconciliation={currentChapter.planReconciliation}
         reconciliationCurrent={planReconciliationCurrent}
         onGenerateMemory={() => { void handleManualMemory() }}
-        onConfirmActualProgress={() => { void handleConfirmActualProgress() }}
-        onApplyOutlineCandidate={() => { void handleApplyOutlineCandidate() }}
+        onSaveReconciliation={handleSaveReconciliation}
+        onForeshadowReconciliation={handleForeshadowReconciliation}
       />
 
       {/* TipTap 富文本编辑器 / 对照润色模式 */}

@@ -13,6 +13,7 @@ import {
   type OutlineGenerationRequest,
   type PreparedGenerationContext,
 } from '../../lib/outline/generation-request'
+import type { GenerationMode, ChunkedGenerationConfig } from '../../lib/outline/generation-modes'
 import type { AssembleContextResult } from '../../lib/registry/types'
 import type { OutlineNode, Project } from '../../lib/types'
 
@@ -148,17 +149,20 @@ export function useOutlineGenerationController({
     setContextError('')
   }, [])
 
-  const confirm = useCallback(async () => {
-    if (!pendingRequest || contextLoading || contextError) return
-    const operation = encodeGenerationOperation(pendingRequest)
-    const contextSnapshot = preparedContext?.operation === operation
-      ? preparedContext.assembled
-      : null
-    if (!contextSnapshot) return
-    const request = pendingRequest
+  const confirm = useCallback(async (mode?: GenerationMode, chunkedConfig?: ChunkedGenerationConfig) => {
+    if (!pendingRequest) return
+    if (contextLoading) return
+    if (contextError) return
+    
+    if (!preparedContext?.assembled) return
+    
+    const request = pendingRequest.kind === 'chapters'
+      ? { ...pendingRequest, mode, chunkedConfig }
+      : pendingRequest
+    
     setPendingRequest(null)
     setPreparedContext(null)
-    await execute(request, contextSnapshot)
+    await execute(request, preparedContext.assembled)
   }, [contextError, contextLoading, execute, pendingRequest, preparedContext])
 
   const retry = useCallback(async () => {
@@ -174,7 +178,7 @@ export function useOutlineGenerationController({
     contextError,
     prepare,
     cancel,
-    confirm,
+    confirm: confirm as (mode?: GenerationMode, chunkedConfig?: ChunkedGenerationConfig) => Promise<void>,
     retry,
   }
 }
