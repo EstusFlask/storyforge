@@ -1,8 +1,11 @@
+import type { NarrativeModuleKind, NarrativeNodeKind } from './narrative-blueprint'
+
 export const SIMULATION_SESSION_KINDS = [
   'sandbox',
   'npc-evolution',
   'ttrpg',
   'chatgame',
+  'storygame',
 ] as const
 export type SimulationSessionKind = typeof SIMULATION_SESSION_KINDS[number]
 
@@ -285,6 +288,32 @@ export interface SimulationChatState {
   messages: SimulationChatMessage[]
 }
 
+export interface SimulationNarrativeNodeSnapshot {
+  key: string
+  kind: NarrativeNodeKind
+  title: string
+  summary: string
+  conditionJson: string
+  effectsJson: string
+  successorKeys: string[]
+}
+
+export interface SimulationNarrativeState {
+  schema: 'storyforge.simulation-narrative'
+  version: 1
+  sourceModuleId: number | null
+  sourceModuleExportId: number | null
+  moduleKind: NarrativeModuleKind
+  moduleTitle: string
+  sourceHash: string
+  nodes: SimulationNarrativeNodeSnapshot[]
+  currentNodeKey: string | null
+  visitedNodeKeys: string[]
+  availableNodeKeys: string[]
+  variables: Record<string, unknown>
+  completed: boolean
+}
+
 export interface SimulationRuntimeState {
   version: 1
   clock: number
@@ -298,6 +327,8 @@ export interface SimulationRuntimeState {
   ttrpg?: SimulationTtrpgState | null
   /** 旧存档缺少该字段时按 null 处理。 */
   chat?: SimulationChatState | null
+  /** WORLD-2F: frozen executable narrative; legacy sessions default to null. */
+  narrative?: SimulationNarrativeState | null
   lastSequence: number
 }
 
@@ -305,6 +336,14 @@ export interface SimulationSession {
   id?: number
   projectId: number
   worldGroupId?: number | null
+  /** WORLD-2F immutable release binding; legacy sessions may omit it. */
+  worldId?: number | null
+  workId?: number | null
+  worldReleaseId?: number | null
+  narrativeModuleId?: number | null
+  /** Portable NarrativeModule identity inside an immutable release manifest. */
+  narrativeModuleExportId?: number | null
+  draftSnapshotHash?: string | null
   kind: SimulationSessionKind
   title: string
   status: SimulationSessionStatus
@@ -326,6 +365,7 @@ export const SIMULATION_EVENT_TYPES = [
   'memory.recorded',
   'random.resolved',
   'narrative.recorded',
+  'narrative.node.advanced',
   'npc.evolution.proposed',
   'npc.evolution.accepted',
   'npc.evolution.rejected',
@@ -383,5 +423,6 @@ export const EMPTY_SIMULATION_STATE: SimulationRuntimeState = {
   narratives: [],
   ttrpg: null,
   chat: null,
+  narrative: null,
   lastSequence: 0,
 }

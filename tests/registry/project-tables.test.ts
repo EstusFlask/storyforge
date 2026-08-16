@@ -28,13 +28,40 @@ describe('Phase 1.1a · PROJECT_TABLES 注册表', () => {
       expect(result.ok, result.errors.join('; ')).toBe(true)
     })
 
-    it('登记了全部 58 张表', () => {
-      expect(PROJECT_TABLES.length).toBe(58)   // v48 SIM 会话/事件/检查点→58
+    it('登记了全部 69 张表', () => {
+      expect(PROJECT_TABLES.length).toBe(69)   // v51 HARNESS-1 新增三张可恢复运行账本表
     })
 
     it('每张表名唯一', () => {
       const names = PROJECT_TABLES.map(s => s.name)
       expect(new Set(names).size).toBe(names.length)
+    })
+
+    it('所有非 global 表都有逻辑 owner，C3 核心表已切换到显式字段 locator', () => {
+      const governed = PROJECT_TABLES.filter(spec => spec.owner !== 'global')
+      expect(governed.every(spec => spec.domainOwner != null)).toBe(true)
+      expect(PROJECT_TABLES.find(spec => spec.name === 'worlds')?.domainOwner?.locator.kind).toBe('workspace')
+      expect(PROJECT_TABLES.find(spec => spec.name === 'works')?.domainOwner?.locator).toMatchObject({
+        kind: 'field', owner: 'world', field: 'worldId',
+      })
+      expect(PROJECT_TABLES.find(spec => spec.name === 'storyCores')?.domainOwner).toMatchObject({
+        allowed: ['world', 'work'], legacyDefault: 'work', locator: { kind: 'exclusive-fields' },
+      })
+      expect(PROJECT_TABLES.find(spec => spec.name === 'chapters')?.domainOwner).toMatchObject({
+        allowed: ['work'], legacyDefault: 'work', locator: { kind: 'field', owner: 'work', field: 'workId' },
+      })
+    })
+
+    it('所有世界发布表都从同一注册表声明用户可选分区', () => {
+      const publishable = PROJECT_TABLES.filter(spec => spec.communityShare === 'world')
+      expect(publishable.length).toBeGreaterThan(0)
+      expect(publishable.every(spec => spec.releaseSection != null)).toBe(true)
+      expect(publishable.filter(spec => spec.releaseSection === 'outline').map(spec => spec.name))
+        .toEqual(expect.arrayContaining(['outlineNodes', 'detailedOutlines']))
+      expect(publishable.filter(spec => spec.releaseSection === 'narrative').map(spec => spec.name))
+        .toEqual(expect.arrayContaining(['storyCores', 'storyArcs', 'narrativeModules', 'narrativeNodes']))
+      expect(publishable.filter(spec => spec.releaseSection === 'characters').map(spec => spec.name))
+        .toEqual(expect.arrayContaining(['characters', 'characterRelations', 'workCharacterBindings']))
     })
   })
 

@@ -11,19 +11,39 @@ import { prepareGenerationNode } from '../generation/generation-node'
 import { adopt } from '../registry/adopt'
 import type { AdoptResult } from '../registry/types'
 import type { AIConfig, Worldview } from '../types'
+import type { WorkspaceScope } from '../types/world-ownership'
 import {
+  isLegacyReadScope,
+  readOwnedRows,
+  resolveReadScopeLike,
+  type WorkspaceScopeLike,
+} from '../world-engine/scope'
+import {
+  attachAgentContextInputStateV1,
   mergeContextEvidence,
   resolveAgentContextPolicy,
   splitAgentContextPolicy,
   type AgentContextEvidence,
   type AgentContextProfile,
 } from './context-policy'
-import { executeAgentTool } from './tool-registry'
+import {
+  createAgentContextCompressionSessionV1,
+  type AgentContextCompressionRuntimeV1,
+} from './context-compression'
+import { AGENT_TOOL_BY_NAME, executeAgentTool } from './tool-registry'
+import {
+  buildAgentSkillInputGuidanceV1,
+  resolveAgentSkillInputStateV1,
+  resolveAgentSkillV1,
+  type AgentSkillId,
+} from './skill-registry'
+import type { MasterCandidateModelIdentityV1 } from './master-candidate-semantic-review'
 
 const WORLD_ORIGIN_MAX_CHARS = 12_000
 
 export interface WorldOriginCopilotScope {
   projectId: number
+  scope?: WorkspaceScope
   projectName: string
   genre: string
   worldGroupId: number | null
@@ -38,6 +58,7 @@ export interface WorldOriginSnapshot {
 export interface WorldOriginCopilotInput extends WorldOriginCopilotScope {
   authorRequest: string
   contextText: string
+  inputGuidance: string
   snapshot: WorldOriginSnapshot
   config: AIConfig
   routingCategory?: string
@@ -50,6 +71,7 @@ export interface PreparedWorldOriginCopilot {
   snapshot: WorldOriginSnapshot
   contextSources: string[]
   contextEvidence: AgentContextEvidence
+  modelIdentity: MasterCandidateModelIdentityV1
 }
 
 interface WorldOriginCopilotDependencies {
@@ -66,10 +88,17 @@ export class WorldOriginCopilotStaleError extends Error {
 }
 
 async function readScopedWorldview(
-  projectId: number,
+  scopeInput: WorkspaceScopeLike,
   worldGroupId: number | null,
 ): Promise<Worldview | null> {
-  const rows = await db.worldviews.where('projectId').equals(projectId).toArray()
+  return readWorldviewFromResolvedScope(await resolveReadScopeLike(scopeInput), worldGroupId)
+}
+
+async function readWorldviewFromResolvedScope(
+  scope: WorkspaceScope,
+  worldGroupId: number | null,
+): Promise<Worldview | null> {
+  const rows = await readOwnedRows<Worldview>(scope, 'worldviews', { owner: 'world' })
   return worldGroupId == null
     ? (rows.find(row => (row.worldGroupId ?? null) === null) ?? rows[0] ?? null)
     : (rows.find(row => row.worldGroupId === worldGroupId) ?? null)
@@ -102,9 +131,12 @@ function assertAuthorRequest(value: string): string {
  */
 export async function prepareWorldOriginCopilot(
   input: Pick<WorldOriginCopilotScope, 'projectId' | 'worldGroupId'> & {
+    scope?: WorkspaceScope
     authorRequest: string
+    skillId?: AgentSkillId
     routingCategory?: string
     contextProfile?: AgentContextProfile
+    contextCompressionRuntime?: AgentContextCompressionRuntimeV1
     signal?: AbortSignal
   },
 ): Promise<PreparedWorldOriginCopilot> {
@@ -119,32 +151,67 @@ export async function prepareWorldOriginCopilot(
     { category: routingCategory },
   ).config
   const contextProfile = input.contextProfile ?? 'full'
-  const contextPolicy = resolveAgentContextPolicy('agent-world-origin', contextProfile)
-  const [statusPolicy, worldviewPolicy] = splitAgentContextPolicy(contextPolicy, [1_400, 18_000])
+  const skill = resolveAgentSkillV1('world-origin', input.skillId)
+  const authorRequest = assertAuthorRequest(input.authorRequest)
+  const compression = input.contextCompressionRuntime
+    ? createAgentContextCompressionSessionV1({
+        policy: skill.contextCompression,
+        config,
+        projectId: input.projectId,
+        authorRequest,
+        routingCategory,
+        signal: input.signal,
+        runtime: input.contextCompressionRuntime,
+      })
+    : undefined
+  const tools = skill.readToolNames.map(name => AGENT_TOOL_BY_NAME.get(name)!)
+  const [statusTool, worldviewTool] = tools
+  if (!statusTool || !worldviewTool || tools.length !== 2) {
+    throw new Error(`Agent Skill ${skill.id} 的只读工具契约无效`)
+  }
+  const contextPolicy = resolveAgentContextPolicy(skill.contextTaskKind, contextProfile)
+  const [statusPolicy, worldviewPolicy] = splitAgentContextPolicy(
+    contextPolicy,
+    tools.map(tool => tool.inputBudgetTokens),
+  )
+  const readScope = await resolveReadScopeLike(input.scope ?? input.projectId)
+  const scope = isLegacyReadScope(readScope) ? undefined : readScope
   const toolContextBase = {
     projectId: input.projectId,
+    scope,
     worldGroupId: input.worldGroupId,
     provider: config.provider,
     model: config.model,
+    sourceTransformer: compression?.sourceTransformer,
   }
   const [status, worldview, row] = await Promise.all([
-    executeAgentTool('read_project_status', { ...toolContextBase, contextPolicy: statusPolicy }),
-    executeAgentTool('read_worldview', { ...toolContextBase, contextPolicy: worldviewPolicy }),
-    readScopedWorldview(input.projectId, input.worldGroupId),
+    executeAgentTool(statusTool.name, { ...toolContextBase, contextPolicy: statusPolicy }),
+    executeAgentTool(worldviewTool.name, { ...toolContextBase, contextPolicy: worldviewPolicy }),
+    readWorldviewFromResolvedScope(readScope, input.worldGroupId),
   ])
   for (const result of [status, worldview]) {
     if (!result.ok) throw new Error(result.error || `${result.meta.toolName} 读取失败`)
   }
 
   const snapshot = snapshotOf(row)
+  const contextResults = [status.meta, worldview.meta]
+  const inputState = resolveAgentSkillInputStateV1(skill, contextResults)
+  const contextEvidence = attachAgentContextInputStateV1(
+    mergeContextEvidence(contextProfile, contextResults),
+    inputState,
+  )
+  const inputGuidance = buildAgentSkillInputGuidanceV1(skill, inputState)
   const nodeInput: WorldOriginCopilotInput = {
     projectId: input.projectId,
+    scope,
     projectName: project.name,
     genre: project.genre || project.genres.join('、'),
     worldGroupId: input.worldGroupId,
     signal: input.signal,
-    authorRequest: assertAuthorRequest(input.authorRequest),
+    authorRequest,
+    inputGuidance,
     contextText: [
+      inputGuidance,
       '【只读项目概况】',
       status.content,
       '【当前世界的已登记设定】',
@@ -160,7 +227,8 @@ export async function prepareWorldOriginCopilot(
     prepared: prepareGenerationNode(node, nodeInput),
     snapshot,
     contextSources: [...status.meta.included, ...worldview.meta.included],
-    contextEvidence: mergeContextEvidence(contextProfile, [status.meta, worldview.meta]),
+    contextEvidence,
+    modelIdentity: { provider: config.provider, model: config.model },
   }
 }
 
@@ -173,10 +241,11 @@ export function createWorldOriginCopilotNode(
   dependencies: WorldOriginCopilotDependencies = {},
 ): GenerationNode<WorldOriginCopilotInput, string, AdoptResult> {
   const readCurrent = dependencies.readCurrent
-    ?? (async () => snapshotOf(await readScopedWorldview(input.projectId, input.worldGroupId)))
+    ?? (async () => snapshotOf(await readScopedWorldview(input.scope ?? input.projectId, input.worldGroupId)))
   const adoptOutput = dependencies.adoptOutput
     ?? (async output => adopt({
       projectId: input.projectId,
+      scope: input.scope,
       worldGroupId: input.worldGroupId,
       target: 'worldviews',
       mode: 'replace',

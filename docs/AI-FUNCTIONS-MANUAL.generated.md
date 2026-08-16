@@ -8,7 +8,7 @@
 
 ## 一、Prompt 模板清单（PromptModuleKey 事实源）
 
-共 61 个唯一 moduleKey，206 条内置模板定义。
+共 64 个唯一 moduleKey，209 条内置模板定义。
 
 | moduleKey | 模板数 | 代表名称 | 说明 | 读取变量 |
 |---|---:|---|---|---|
@@ -22,6 +22,9 @@
 | `chapter.memory` | 1 | 内置-章节连续性记忆 | 一次调用同时提取章节摘要、下一章承接 handoff 与计划正文对账；引文 offset 由系统回查，不信任模型位置。 | `chapterTitle` `chapterPlan` `nextChapterPlan` `chapterText` |
 | `chapter.polish` | 1 | 内置-文本润色 | 按用户指令润色文本，保持原意不变。 | `instruction` `text` |
 | `chapter.expand` | 1 | 内置-文本扩写 | 将文本扩展丰富，增加细节、心理与环境，情节走向不变。 | `userHint` `text` |
+| `chapter.condense` | 1 | 内置-文本缩写 | 在保留事实、因果与人物立场的前提下压缩局部正文。 | `text` |
+| `chapter.rewrite` | 1 | 内置-保真改写 | 以不同表达重写局部正文，同时保持故事事实和信息边界。 | `text` |
+| `chapter.check` | 1 | 内置-局部正文查漏 | 检查局部正文中的可核对问题，只给报告，不生成替换稿。 | `text` |
 | `chapter.de-ai` | 1 | 内置-去 AI 味改写 | 把 AI 味重的文本改写得更像真人写的。 | `text` |
 | `foreshadow.generate` | 2 | 内置-伏笔建议 | 基于世界观、角色和已有伏笔，建议 3-5 个新伏笔。 | `projectName` `genres` `worldContext` `characters` `existingForeshadows` `hasNoForeshadows` |
 | `geography.concept-map` | 1 | 内置-概念地图 SVG | 基于地点列表生成奇幻风格的 SVG 概念地图。 | `overview` `locationList` |
@@ -76,7 +79,7 @@
 
 ## 二、上下文源清单（CONTEXT_SOURCES · AI 读什么）
 
-共 47 个上下文源。assembleContext({ sourceKeys }) 按 key 装配。
+共 62 个上下文源。assembleContext({ sourceKeys }) 按 key 装配。
 
 | key | 标签 | 作用域 | 层级 | 预算(token) |
 |---|---|---|---|---|
@@ -87,13 +90,23 @@
 | `searchResults` | 项目内搜索结果 | world | L2 | 2200 |
 | `ragSelection` | 作者选择的资料字段 | manual | L0 | 100000 |
 | `manualText` | 用户指定内容 | manual | L0 | 100000 |
+| `codexExtractionBaseline` | Codex 目标分类与既有词条闭集 | world | L0 | 8000 |
+| `historyAgentBaseline` | 历史 Agent 正式输入基线 | world | L0 | 12000 |
+| `referenceDerivedBaseline` | 参考分析派生 Agent 正式输入基线 | project | L0 | 36000 |
+| `styleLearningBaseline` | 文风学习正式输入基线 | project | L0 | 28000 |
+| `priorOutlineCandidate` | 同批次上一卷章纲候选 | runtime | L1 | 2400 |
 | `chapterContent` | 章节正文 | chapter | L0 | 100000 |
+| `cultivationProgressExtractionBaseline` | 修炼进度角色、体系 DAG 与既有事件闭集 | chapter | L0 | 30000 |
 | `contextMemo` | 上下文快照 | project | L3 | 1500 |
 | `chapterOutline` | 当前章节大纲 | node | L1 | 800 |
+| `adjacentChapterOutlines` | 相邻章纲 | node | L1 | 1000 |
 | `existingVolumeOutlines` | 已有卷大纲 | project | L1 | 2400 |
+| `outlineSummaries` | 大纲标题与摘要（分析） | project | L2 | 6000 |
+| `writtenChapters` | 已写章节正文（分析摘录） | project | L2 | 8000 |
 | `writtenChapterProgress` | 本卷已写正文进度 | node | L1 | 3000 |
 | `currentFacts` | 当前有效事实(事实账本投影) | chapter | L1 | 2000 |
 | `canonAssertions` | 世界宪法(已确认设定断言) | world | L1 | 1800 |
+| `constitutionScanSources` | 世界宪法扫描来源闭集 | project | L0 | 30000 |
 | `characterKnowledge` | 角色认知边界(认知账本投影) | chapter | L1 | 1600 |
 | `retrievedPassages` | 相关前文召回(NS-5 混合检索) | chapter | L2 | 2500 |
 | `consistencyReport` | 一致性报告 | chapter | L1 | 1800 |
@@ -103,16 +116,20 @@
 | `previousPlanReconciliation` | 前章计划正文对账 | chapter | L1 | 1400 |
 | `recentChapterSummaries` | 当前世界最近已验证摘要 | chapter | L1 | 2200 |
 | `worldview` | 世界观 | world | L2 | 8000 |
+| `geography` | 地理环境 | world | L2 | 3000 |
 | `storyCore` | 故事核心 | project | L1 | 4000 |
-| `characterDrivenPlan` | 当前生效角色驱动方案 | project | L1 | 5000 |
+| `activeNarrativeBlueprint` | 当前选定叙事蓝图 | project | L1 | 5000 |
+| `characterDrivenPlan` | 角色驱动方案 | project | L1 | 5000 |
 | `powerSystem` | 力量体系 | world | L2 | 4000 |
 | `codex` | 设定词条 | world | L2 | 6000 |
 | `characters` | 角色档案 | world | L2 | 8000 |
+| `targetCharacter` | 本次目标角色完整设定 | world | L0 | 8000 |
 | `creativeRules` | 创作规则 | project | L1 | 1000 |
 | `worldRules` | 真实与幻想规则 | world | L1 | 1200 |
 | `historical` | 历史时间线 | world | L2 | 1800 |
 | `locations` | 重要地点 | project | L2 | 1200 |
 | `foreshadows` | 伏笔状态 | chapter | L2 | 1200 |
+| `foreshadowSuggestionBaseline` | 伏笔建议正式基线 | project | L0 | 8000 |
 | `storyArcs` | 故事线 | project | L2 | 1500 |
 | `storylineProgress` | 作者确认的故事线进度与交汇 | project | L1 | 1400 |
 | `cultivationProgress` | 作者确认的正文修炼进度 | world | L1 | 1000 |
@@ -121,6 +138,7 @@
 | `itemLedger` | 物品流水 | project | L2 | 2400 |
 | `heldItems` | 当前已持有物品 | chapter | L1 | 1000 |
 | `storyTimeline` | 故事年表 | project | L2 | 2600 |
+| `storyTimelineTarget` | 目标故事年表事件 | project | L1 | 600 |
 | `characterRelations` | 角色关系 | project | L2 | 2200 |
 | `references` | 引用手法 | project | L3 | 2000 |
 | `userStyleProfile` | 我的文风 | project | L2 | 1800 |
@@ -136,7 +154,8 @@ AI 输出经 `adopt({ target, data })` 写回,只有这里登记的字段可写(
 
 | 目标表 | 可写字段 |
 |---|---|
-| `chapters` | `content` `continuityHandoff` `notes` `order` `outlineNodeId` `planReconciliation` `status` `summary` `summarySourceTextHash` `summaryTextNormalizationVersion` `title` `wordCount` |
+| `chapters` | `content` `continuityHandoff` `notes` `order` `outlineNodeId` `perspectiveCharacterId` `planReconciliation` `status` `summary` `summarySourceTextHash` `summaryTextNormalizationVersion` `title` `wordCount` |
+| `characterDrivenPlans` | `generatedVolumes` `status` |
 | `characterRelations` | `description` `fromCharacterId` `isBidirectional` `label` `relationType` `toCharacterId` |
 | `characters` | `abilities` `activeChapterRange` `alignment` `appearance` `arc` `background` `cultivationStageId` `cultivationSystemId` `ending` `exitChapterId` `fears` `firstAppearChapterId` `firstAppearance` `goals` `habits` `homeWorldGroupId` `identity` `innerConflict` `isCrossWorld` `keyEvents` `location` `moralAxis` `motivation` `name` `orderAxis` `personality` `powerLevel` `profile` `raceEntryId` `relationships` `role` `roleWeight` `shortDescription` `signatureItem` `speechStyle` `storyRole` `strengths` `values` `weaknesses` |
 | `codexCategories` | `builtInKey` `domain` `fieldSchema` `hidden` `icon` `name` `order` `parentId` `worldGroupId` |
@@ -145,6 +164,7 @@ AI 输出经 `adopt({ target, data })` 写回,只有这里登记的字段可写(
 | `cultivationProgress` | `characterId` `characterName` `cultivationSystemId` `cultivationSystemName` `sourceChapterId` `sourceChapterTitle` `sourceOffset` `sourceQuote` `stageId` `stageName` `status` `transition` `trigger` `worldGroupId` |
 | `cultivationSystems` | `description` `name` `stages` `worldGroupId` |
 | `detailedOutlines` | `appearingCharacterIds` `emotionArc` `endingCliffhanger` `foreshadowIds` `lastUsedSummary` `openingHook` `outlineNodeId` `prohibitions` `sceneLocation` `scenes` |
+| `emotionBeatCards` | `beats` `chapterId` `chapterTitle` `overallArc` `source` |
 | `foreshadows` | `description` `echoChapterIds` `expectedResolveChapterId` `importance` `name` `notes` `plantChapterId` `resolveChapterId` `status` `timelinePosition` `type` `urgency` |
 | `historicalKeywords` | `aiBrainstorm` `aiConsult` |
 | `historicalTimelineEvents` | `aiBrainstorm` `aiConsult` |
@@ -162,6 +182,9 @@ AI 输出经 `adopt({ target, data })` 写回,只有这里登记的字段可写(
 | `storyTimelineEvents` | `chapterId` `chapterTitle` `description` `importance` `order` `storyTime` `title` |
 | `storylineCrossings` | `arcIdA` `arcIdB` `chapterId` `chapterTitle` `evidenceQuote` `note` |
 | `storylineProgress` | `arcId` `currentStageId` `evidenceQuote` `involvedEntities` `lastActiveChapterId` `lastActiveChapterTitle` `progressNote` `status` |
+| `userStyleProfiles` | `enabled` `profile` `sampleCount` `sampleWords` `sourceChapterIds` |
+| `worldGroups` | `description` `entryCondition` `icon` `name` `order` `plannedChapterCount` `powerRestriction` `type` |
+| `worldNodes` | `mapConfigJSON` |
 | `worldviews` | `climateByRegion` `continentLayout` `culture` `cultureOverview` `divineDesign` `economy` `economyOverview` `factionLayout` `geography` `history` `historyLine` `internalConflicts` `itemDesign` `mountainsRivers` `naturalResourceOverview` `naturalResources` `politicsEconomyCulture` `politicsOverview` `powerHierarchy` `races` `regionDimensions` `rules` `society` `worldDimensions` `worldEvents` `worldOrigin` `worldStructure` |
 
 ### 领域写回扩展（不是第二套通用 adopt）
@@ -185,87 +208,88 @@ AI 输出经 `adopt({ target, data })` 写回,只有这里登记的字段可写(
 
 ## 四、AI 调用点（消耗统计 category · 在哪触发)
 
-共 63 个 category。
-未分类调用: 0 个。动态 category 调用: 9 个。
+共 48 个 category。
+未分类调用: 0 个。动态 category 调用: 25 个。
 
 | category | 触发文件 |
 |---|---|
-| `agent.orchestrator` | `src/lib/agent/orchestrator.ts:353` |
-| `agent.readonly` | `src/lib/agent/client-adapter.ts:23` |
-| `ai.restructure` | `src/lib/ai/restructure.ts:54` |
-| `canon.setting.extract` | `src/components/facts/WorldConstitutionPanel.tsx:79` |
-| `chapter.content` | `src/lib/generation/chapter-generation-node.ts:22` |
-| `chapter.content.batch` | `src/lib/ai/batch-detail-runner.ts:256` |
-| `chapter.continue` | `src/lib/generation/chapter-generation-node.ts:23` |
-| `chapter.continuity` | `src/lib/node-authoring/domain-execution.ts:431`<br/>`src/lib/node-authoring/domain-execution.ts:494` |
-| `chapter.deai` | `src/components/editor/ChapterEditor.tsx:753` |
-| `chapter.expand` | `src/components/editor/ChapterEditor.tsx:733` |
-| `chapter.memory` | `src/components/editor/ChapterEditor.tsx:471` |
-| `chapter.organize` | `src/components/editor/ChapterEditor.tsx:836` |
-| `chapter.polish` | `src/components/editor/ChapterEditor.tsx:725` |
-| `chapter.toolbar` | `src/components/editor/FloatingToolbar.tsx:105` |
-| `character.generate` | `src/components/character/CharacterPanel.tsx:160` |
-| `character.structure` | `src/lib/ai/parse-character-output.ts:80` |
-| `character.supplement` | `src/components/character/CharacterSupplementAction.tsx:80` |
-| `codex.extract` | `src/components/codex/CodexPanel.tsx:226` |
-| `cultivation.progress` | `src/components/cultivation/CultivationProgressPanel.tsx:143` |
-| `detail.chapter-planning` | `src/lib/node-authoring/domain-execution.ts:292` |
-| `detail.scene` | `src/components/outline/DetailedOutlinePanel.tsx:151`<br/>`src/components/outline/ScenePanel.tsx:126`<br/>`src/lib/ai/batch-detail-runner.ts:109` |
-| `emotion.beat` | `src/components/editor/EmotionBeatCard.tsx:66` |
-| `foreshadow.structure` | `src/components/foreshadow/ForeshadowPanel.tsx:67` |
-| `foreshadow.suggest` | `src/components/foreshadow/ForeshadowPanel.tsx:216` |
+| `agent.orchestrator` | `src/lib/agent/orchestrator.ts:611` |
+| `agent.orchestrator.replan` | `src/lib/agent/orchestrator.ts:698` |
+| `agent.readonly` | `src/lib/agent/client-adapter.ts:116` |
+| `canon.setting.extract` | `src/lib/agent/run/constitution-extraction-durable.ts:509` |
+| `chapter.content` | `src/lib/generation/chapter-generation-node.ts:23` |
+| `chapter.continue` | `src/lib/generation/chapter-generation-node.ts:24` |
+| `chapter.continuity` | `src/lib/node-authoring/domain-execution.ts:552`<br/>`src/lib/node-authoring/domain-execution.ts:616` |
+| `chapter.deai` | `src/components/editor/ChapterEditor.tsx:1590` |
+| `chapter.expand` | `src/components/editor/ChapterEditor.tsx:1570` |
+| `chapter.memory` | `src/components/editor/ChapterEditor.tsx:1059` |
+| `chapter.organize` | `src/components/editor/ChapterEditor.tsx:1715`<br/>`src/components/editor/ChapterEditor.tsx:2600` |
+| `chapter.polish` | `src/components/editor/ChapterEditor.tsx:1562` |
+| `chapter.toolbar` | `src/lib/agent/run/selection-edit-durable.ts:567` |
+| `codex.extract` | `src/lib/agent/run/codex-extraction-durable.ts:627` |
+| `cultivation.progress` | `src/lib/agent/run/cultivation-progress-extraction-durable.ts:558` |
+| `detail.chapter-planning` | `src/lib/node-authoring/domain-execution.ts:371` |
+| `detail.scene` | `src/lib/ai/batch-detail-runner.ts:193` |
+| `emotion.beat` | `src/lib/agent/run/emotion-beat-durable.ts:396` |
+| `eval.h17.compression` | `src/components/settings/HarnessEvalPanel.tsx:120` |
+| `eval.h17.generation` | `src/components/settings/HarnessEvalPanel.tsx:121` |
+| `eval.h4.verifier` | `src/components/settings/HarnessEvalPanel.tsx:150`<br/>`src/components/settings/HarnessEvalPanel.tsx:189` |
+| `foreshadow.suggest` | `src/lib/agent/run/foreshadow-suggestions-durable.ts:569` |
 | `geography.concept-map` | `src/components/geography/GeographyPanel.tsx:127` |
-| `geography.world-map` | `src/components/geography/WorldMapPanel.tsx:107` |
-| `history.consult` | `src/components/history/useHistoryAI.ts:118` |
-| `history.storm` | `src/components/history/useHistoryAI.ts:120` |
-| `inspiration.reverse` | `src/hooks/useIncrementalInspiration.ts:212` |
-| `inventory.extract` | `src/components/items/InventoryPanel.tsx:150` |
-| `location.extract` | `src/components/location/LocationPanel.tsx:106` |
-| `node.creation` | `src/lib/node-authoring/executor.ts:315`<br/>`src/lib/node-flow/executor.ts:203` |
-| `outline.chapter` | `src/lib/ai/batch-outline-runner.ts:123`<br/>`src/lib/outline/generation-node.ts:55` |
-| `outline.character-driven` | `src/components/outline/CharacterDrivenPlotPanel.tsx:198` |
-| `outline.character-revision` | `src/components/outline/CharacterRevisionPanel.tsx:169` |
-| `outline.volume` | `src/lib/outline/generation-node.ts:51` |
+| `geography.world-map` | `src/lib/agent/run/world-map-config-durable.ts:362` |
+| `inventory.extract` | `src/lib/agent/run/inventory-extraction-durable.ts:943` |
+| `location.extract` | `src/lib/agent/run/location-extraction-durable.ts:618` |
+| `node.creation` | `src/lib/node-authoring/executor.ts:362`<br/>`src/lib/node-flow/executor.ts:207` |
+| `outline.chapter` | `src/lib/ai/batch-outline-runner.ts:188`<br/>`src/lib/outline/generation-node.ts:59` |
+| `outline.impact-regenerate` | `src/lib/agent/run/impact-outline-regeneration-durable.ts:652` |
+| `outline.volume` | `src/lib/outline/generation-node.ts:55` |
 | `outline.workshop.collision` | `src/lib/outline/workshop.ts:448` |
 | `outline.workshop.motivation` | `src/lib/outline/workshop.ts:445` |
 | `outline.workshop.scan` | `src/lib/outline/workshop.ts:442` |
 | `outline.workshop.scenes` | `src/lib/outline/workshop.ts:453` |
 | `prompt.examples` | `src/components/settings/prompt/PromptExamplesEditor.tsx:108` |
-| `reference.characters` | `src/components/project/AnalysisReportViewer.tsx:151` |
-| `reference.summary` | `src/components/project/AnalysisReportViewer.tsx:119` |
-| `relation.extract` | `src/components/relations/CharacterRelationPanel.tsx:98` |
+| `relation.extract` | `src/lib/agent/run/character-relationship-durable.ts:286` |
 | `review.anti-ai` | `src/components/editor/ReviewPanel.tsx:106` |
 | `review.outline-workshop` | `src/lib/outline/workshop.ts:451` |
 | `review.quality` | `src/components/editor/ReviewPanel.tsx:98` |
 | `review.readability` | `src/components/editor/ReviewPanel.tsx:115` |
-| `review.revise` | `src/components/editor/ChapterEditor.tsx:768` |
-| `rules.generate` | `src/components/rules/CreativeRulesPanel.tsx:80` |
+| `review.revise` | `src/components/editor/ChapterEditor.tsx:1605` |
 | `scene.verify` | `src/components/scene/SceneVerifyPanel.tsx:81` |
-| `simulation.chatgame` | `src/components/simulation/ChatGamePanel.tsx:178`<br/>`src/components/simulation/ChatGamePanel.tsx:194` |
-| `story-arc.generate` | `src/components/outline/StoryArcPanel.tsx:85` |
-| `story.generate` | `src/components/worldview/StoryCorePanel.tsx:200` |
-| `story.timeline` | `src/components/timeline/StoryTimelinePanel.tsx:85` |
-| `storyline-progress.map` | `src/components/outline/StorylineProgressPanel.tsx:76` |
+| `simulation.chatgame` | `src/components/simulation/ChatGamePanel.tsx:194`<br/>`src/components/simulation/ChatGamePanel.tsx:210` |
+| `story.timeline` | `src/lib/agent/run/impact-story-timeline-regeneration-durable.ts:670`<br/>`src/lib/agent/run/story-timeline-extraction-durable.ts:758` |
 | `style.calibrate` | `src/components/style/StyleCalibrationPanel.tsx:63` |
-| `style.learn` | `src/components/style/StyleLearningPanel.tsx:125` |
-| `world-group.expand` | `src/components/world-group/WorldGroupDetail.tsx:98` |
-| `world-group.suggest` | `src/components/world-group/WorldGroupOverview.tsx:57` |
-| `worldview.dimension` | `src/components/worldview/WorldviewHumanityPanel.tsx:352`<br/>`src/components/worldview/WorldviewNaturalPanel.tsx:284`<br/>`src/components/worldview/WorldviewOriginPanel.tsx:262` |
-| `worldview.divine` | `src/components/worldview/WorldviewOriginPanel.tsx:361` |
-| `worldview.divine.split` | `src/components/worldview/WorldviewOriginPanel.tsx:385` |
+| `style.learn` | `src/lib/agent/run/style-learning-durable.ts:493` |
+| `world-group.expand` | `src/lib/agent/run/worldview-expand-durable.ts:475` |
+| `world-group.suggest` | `src/lib/agent/run/world-suggest-durable.ts:614` |
 
 ### 动态 category 调用
 
 - `src/components/editor/ReviewPanel.tsx:139 · ai.start`
-- `src/components/settings/NS0EvalPanel.tsx:50 · chat`
-- `src/lib/agent/character-copilot.ts:409 · chat`
-- `src/lib/agent/inspiration-copilot.ts:261 · chat`
-- `src/lib/agent/outline-copilot.ts:450 · chat`
-- `src/lib/agent/prose-copilot.ts:500 · chat`
-- `src/lib/agent/world-origin-copilot.ts:186 · chat`
+- `src/lib/agent/character-copilot.ts:475 · chat`
+- `src/lib/agent/character-driven-copilot.ts:507 · chat`
+- `src/lib/agent/character-revision-copilot.ts:704 · chat`
+- `src/lib/agent/character-supplement-copilot.ts:528 · chat`
+- `src/lib/agent/context-compression.ts:333 · chat`
+- `src/lib/agent/creative-rules-copilot.ts:443 · chat`
+- `src/lib/agent/inspiration-copilot.ts:328 · chat`
+- `src/lib/agent/master-candidate-semantic-review.ts:601 · chat`
+- `src/lib/agent/outline-copilot.ts:508 · chat`
+- `src/lib/agent/outline-copilot.ts:760 · chat`
+- `src/lib/agent/prose-copilot.ts:665 · chat`
+- `src/lib/agent/prose-copilot.ts:930 · chat`
+- `src/lib/agent/run/history-agent-durable.ts:514 · chat`
+- `src/lib/agent/run/reference-derived-durable.ts:506 · chat`
+- `src/lib/agent/story-arc-copilot.ts:1272 · chat`
+- `src/lib/agent/story-arc-copilot.ts:1319 · chat`
+- `src/lib/agent/story-core-copilot.ts:458 · chat`
+- `src/lib/agent/storyline-progress-copilot.ts:376 · chat`
+- `src/lib/agent/world-origin-copilot.ts:255 · chat`
+- `src/lib/agent/worldview-field-copilot.ts:603 · chat`
+- `src/lib/evals/agent-harness/story-arc-main-path-browser.ts:97 · chat`
+- `src/lib/evals/creative-reliability/browser.ts:88 · chat`
 - `src/lib/generation/workflow-generation-node.ts:23 · ai.start`
-- `src/lib/node-authoring/executor.ts:361 · chat`
+- `src/lib/node-authoring/executor.ts:416 · chat`
 
 ---
 
-生成时间基准:commit `35dde9c`
+生成时间基准:commit `3776a1b`

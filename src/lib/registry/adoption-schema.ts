@@ -5,8 +5,17 @@
  * 自动盖章 / FK 校验策略。
  */
 import type { AdoptionExtensionSpec, CollectionAdoptionSpec } from './types'
+import { REGISTRY_BY_NAME } from './project-tables'
 
-export const ADOPTION_SCHEMAS: CollectionAdoptionSpec[] = [
+const ADOPTION_SCHEMAS_RAW: CollectionAdoptionSpec[] = [
+  {
+    target: 'worldGroups',
+    identity: 'name',
+    duplicatePolicy: 'error',
+    required: ['name', 'type', 'description', 'icon', 'order', 'entryCondition', 'powerRestriction', 'plannedChapterCount'],
+    autoStamps: ['projectId', 'worldId', 'createdAt', 'updatedAt'],
+    ownerFrom: 'world',
+  },
   {
     target: 'characters',
     identity: { kind: 'composite', fields: ['homeWorldGroupId', 'name'] },
@@ -54,7 +63,10 @@ export const ADOPTION_SCHEMAS: CollectionAdoptionSpec[] = [
     duplicatePolicy: 'update',
     required: ['outlineNodeId', 'title'],
     autoStamps: ['projectId', 'createdAt', 'updatedAt'],
-    fkChecks: [{ field: 'outlineNodeId', target: 'outlineNodes' }],
+    fkChecks: [
+      { field: 'outlineNodeId', target: 'outlineNodes' },
+      { field: 'perspectiveCharacterId', target: 'characters' },
+    ],
   },
   {
     target: 'detailedOutlines',
@@ -67,6 +79,15 @@ export const ADOPTION_SCHEMAS: CollectionAdoptionSpec[] = [
       { field: 'appearingCharacterIds', itemTarget: 'characters' },
       { field: 'foreshadowIds', itemTarget: 'foreshadows' },
     ],
+  },
+  {
+    target: 'emotionBeatCards',
+    identity: { kind: 'composite', fields: ['chapterId'] },
+    duplicatePolicy: 'update',
+    required: ['chapterId', 'chapterTitle', 'overallArc', 'beats', 'source'],
+    autoStamps: ['projectId', 'createdAt', 'updatedAt'],
+    ownerFrom: 'work',
+    fkChecks: [{ field: 'chapterId', target: 'chapters' }],
   },
   {
     target: 'storyArcs',
@@ -152,6 +173,15 @@ export const ADOPTION_SCHEMAS: CollectionAdoptionSpec[] = [
     fkChecks: [{ field: 'parentId', target: 'importantLocations' }],
   },
   {
+    target: 'worldNodes',
+    identity: 'id',
+    recordOnly: true,
+    duplicatePolicy: 'update',
+    required: [],
+    autoStamps: ['projectId', 'worldGroupId', 'createdAt', 'updatedAt'],
+    ownerFrom: 'world',
+  },
+  {
     target: 'itemLedger',
     identity: { kind: 'composite', fields: ['chapterId', 'itemName', 'action', 'heldByName', 'note'] },
     duplicatePolicy: 'skip',
@@ -224,6 +254,15 @@ export const ADOPTION_SCHEMAS: CollectionAdoptionSpec[] = [
     required: [],
     autoStamps: ['projectId', 'createdAt', 'updatedAt'],
     fkChecks: [{ field: 'referenceId', target: 'references' }],
+  },
+  {
+    target: 'characterDrivenPlans',
+    identity: 'id',
+    recordOnly: true,
+    duplicatePolicy: 'update',
+    required: [],
+    autoStamps: ['projectId', 'workId', 'createdAt', 'updatedAt'],
+    ownerFrom: 'work',
   },
   {
     target: 'referenceChunkAnalysis',
@@ -382,6 +421,15 @@ export const ADOPTION_EXTENSIONS: readonly AdoptionExtensionSpec[] = Object.free
     reviewAfter: '2027-01-01',
   },
 ])
+
+/** C3: owner policy is derived from the same PROJECT_TABLES domainOwner metadata. */
+export const ADOPTION_SCHEMAS: CollectionAdoptionSpec[] = ADOPTION_SCHEMAS_RAW.map(schema => ({
+  ...schema,
+  ownerFrom: schema.ownerFrom ?? (() => {
+    const owner = REGISTRY_BY_NAME.get(schema.target)?.domainOwner?.legacyDefault
+    return owner === 'world' || owner === 'work' ? owner : undefined
+  })(),
+}))
 
 export const ADOPTION_BY_TARGET: ReadonlyMap<string, CollectionAdoptionSpec> = new Map(
   ADOPTION_SCHEMAS.map(s => [s.target, s] as const),

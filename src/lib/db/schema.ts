@@ -53,11 +53,22 @@ import type {
   InspirationWorkspace,
   AgentConversation,
   AgentEvent,
+  AgentRunRecord,
+  AgentRunEventRecord,
+  AgentRunCheckpointRecord,
   NodeFlow,
   NodeRunRecord,
   SimulationSession,
   SimulationEvent,
   SimulationCheckpoint,
+  World,
+  Work,
+  WorkCharacterBinding,
+  OwnershipMigrationReceipt,
+  NarrativeModule,
+  NarrativeNode,
+  WorldRevision,
+  WorldRelease,
 } from '../types'
 import type { AIUsageEntry } from '../ai/usage-log'
 import type { TemporalFact } from '../types/temporal-fact'
@@ -67,6 +78,10 @@ import type { NarrativeSummaryNode } from '../types/narrative-summary'
 
 class StoryForgeDB extends Dexie {
   projects!: Table<Project>
+  worlds!: Table<World, number>
+  works!: Table<Work, number>
+  workCharacterBindings!: Table<WorkCharacterBinding, number>
+  ownershipMigrations!: Table<OwnershipMigrationReceipt, number>
   worldviews!: Table<Worldview>
   storyCores!: Table<StoryCore>
   powerSystems!: Table<PowerSystem>
@@ -172,6 +187,11 @@ class StoryForgeDB extends Dexie {
   agentConversations!: Table<AgentConversation, number>
   agentEvents!: Table<AgentEvent, number>
 
+  // HARNESS-1 —— 分步骤创作 Agent 的可恢复运行账本
+  agentRuns!: Table<AgentRunRecord, number>
+  agentRunEvents!: Table<AgentRunEventRecord, number>
+  agentRunCheckpoints!: Table<AgentRunCheckpointRecord, number>
+
   // FLOW-2 —— 独立自由节点文档与逐节点可见运行记录
   nodeFlows!: Table<NodeFlow, number>
   nodeRuns!: Table<NodeRunRecord, number>
@@ -180,6 +200,10 @@ class StoryForgeDB extends Dexie {
   simulationSessions!: Table<SimulationSession, number>
   simulationEvents!: Table<SimulationEvent, number>
   simulationCheckpoints!: Table<SimulationCheckpoint, number>
+  narrativeModules!: Table<NarrativeModule, number>
+  narrativeNodes!: Table<NarrativeNode, number>
+  worldRevisions!: Table<WorldRevision, number>
+  worldReleases!: Table<WorldRelease, number>
 
   constructor() {
     super('storyforge')
@@ -496,6 +520,49 @@ class StoryForgeDB extends Dexie {
       simulationSessions: '++id, projectId, worldGroupId, kind, status, parentSessionId, updatedAt',
       simulationEvents: '++id, projectId, worldGroupId, sessionId, &[sessionId+sequence], type, createdAt',
       simulationCheckpoints: '++id, projectId, worldGroupId, sessionId, [sessionId+throughSequence], createdAt',
+    })
+
+    // v49 / WORLD-2C C1: ownership roots and migration evidence only. This is
+    // deliberately an empty schema upgrade; legacy rows are not scanned or changed.
+    this.version(49).stores({
+      worlds: '++id, projectId, code, [projectId+updatedAt]',
+      works: '++id, projectId, worldId, [projectId+worldId], [worldId+updatedAt], status',
+      workCharacterBindings: '++id, projectId, workId, characterId, &[workId+characterId], [projectId+workId]',
+      ownershipMigrations: '++id, projectId, &[projectId+contractVersion], status, updatedAt',
+    })
+
+    // v50 / WORLD-2D..2F: executable narrative blueprints, immutable world
+    // revisions/releases, and explicit release/module indexes for instances.
+    // Existing SIM rows are intentionally untouched; legacy sessions remain
+    // readable until a user creates a new bound instance.
+    this.version(50).stores({
+      narrativeModules: '++id, projectId, worldId, workId, kind, status, updatedAt',
+      narrativeNodes: '++id, projectId, moduleId, sourceOutlineNodeId, order',
+      worldRevisions: '++id, projectId, worldId, parentRevisionId, revision, contentHash, updatedAt',
+      worldReleases: '++id, projectId, worldId, revisionId, version, contentHash, createdAt',
+      simulationSessions: '++id, projectId, worldGroupId, worldId, workId, worldReleaseId, narrativeModuleId, kind, status, parentSessionId, updatedAt',
+    })
+
+    // v51 / HARNESS-1: durable Agent run ledger. The upgrade only creates empty
+    // stores; historical conversations and model outputs are not guessed into
+    // resumable runs or retroactively marked completed.
+    this.version(51).stores({
+      agentRuns: '++id, projectId, workId, worldGroupId, conversationId, status, updatedAt',
+      agentRunEvents: '++id, projectId, worldGroupId, runId, &[runId+sequence], type, createdAt',
+      agentRunCheckpoints: '++id, projectId, worldGroupId, runId, &[runId+throughSequence], createdAt',
+    })
+
+    // v52 / HARNESS-21: materialize durable parent-run lineage. Existing root
+    // runs stay roots; no historical run is guessed into a parent/child chain.
+    this.version(52).stores({
+      agentRuns: '++id, projectId, workId, worldGroupId, conversationId, parentRunId, &[parentRunId+parentRelation], status, updatedAt',
+    })
+
+    // v53 / HARNESS-25: bind durable candidate events to their current Run
+    // through an indexed lifecycle reference. Existing events are preserved;
+    // rows without a durable owner remain unbound and are not inferred.
+    this.version(53).stores({
+      agentEvents: '++id, projectId, conversationId, durableRunId, [conversationId+sequence], kind, createdAt',
     })
   }
 }

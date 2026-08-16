@@ -42,6 +42,13 @@ import { useCharacterRelationStore } from '../../stores/character-relation'
 import { useCharacterStore } from '../../stores/character'
 import { useForeshadowStore } from '../../stores/foreshadow'
 import { syncRelationToCharacterFields } from '../relations/relationship-summary'
+import {
+  assertRecordInScope,
+  readOwnedRows,
+  resolveReadScopeLike,
+  resolveScopeLike,
+  stampNewRecord,
+} from '../world-engine/scope'
 
 export const CHAPTER_ORGANIZATION_VERSION = 1
 export const CHAPTER_ORGANIZATION_PAYLOAD_TYPE = 'chapter-organization'
@@ -103,6 +110,16 @@ export interface ChapterOrganizationCandidate {
   domainStatus: Record<ChapterOrganizationDomain, ChapterOrganizationDomainStatus>
   domainErrors: Partial<Record<ChapterOrganizationDomain, string>>
   budget: AgentTeamBudgetEvidence
+  /** H5 durable harness evidence; absent for legacy/manual runs. */
+  durable?: ChapterOrganizationDurableEvidence
+}
+
+export interface ChapterOrganizationDurableEvidence {
+  runId: number
+  stepId: string
+  attempt: number
+  contextManifestHash: string
+  candidateHash: string
 }
 
 export interface ChapterOrganizationSelection {
@@ -261,6 +278,8 @@ export function buildChapterOrganizationPrompt(input: {
   knownItemNames: string[]
   existingRelations: CharacterRelation[]
   foreshadows: Foreshadow[]
+  /** H5: 由 CONTEXT_SOURCES + assembleContext() 生成的受控上下文快照。 */
+  contextSnapshot?: string
 }): ChatMessage[] {
   const characterList = input.characters
     .filter(character => character.id != null && character.name.trim())
@@ -323,6 +342,8 @@ ${foreshadowList}
 
 【正文】
 ${input.chapterText}
+
+${input.contextSnapshot ? `【Harness 受控上下文快照】\n${input.contextSnapshot}\n` : ''}
 
 请输出严格 JSON：`,
     },
@@ -388,6 +409,7 @@ export async function runChapterOrganization(input: {
   knownItemNames: string[]
   existingRelations: CharacterRelation[]
   foreshadows: Foreshadow[]
+  contextSnapshot?: string
   budget: AgentTeamBudgetTracker
   call: (messages: ChatMessage[]) => Promise<string>
 }): Promise<ChapterOrganizationCandidate> {
@@ -430,32 +452,41 @@ function isChapterOrganizationCandidate(value: unknown): value is ChapterOrganiz
 
 export async function persistChapterOrganizationCandidate(
   candidate: ChapterOrganizationCandidate,
+  options: { durable?: ChapterOrganizationDurableEvidence } = {},
 ): Promise<ChapterOrganizationRun> {
+  const storedCandidate = options.durable
+    ? { ...candidate, durable: options.durable }
+    : candidate
+  const scope = await resolveScopeLike(candidate.projectId)
+  const chapter = await db.chapters.get(candidate.chapterId)
+  if (!await assertRecordInScope(scope, 'chapters', chapter, { owner: 'work' })) {
+    throw new Error('整理本章候选的章节不存在或不属于当前作品。')
+  }
   const now = Date.now()
-  const conversation: AgentConversation = {
+  const conversation = stampNewRecord(scope, 'agentConversations', {
     projectId: candidate.projectId,
     worldGroupId: candidate.worldGroupId,
     title: `整理本章 · ${candidate.chapterTitle}`,
     status: 'archived',
     createdAt: now,
     updatedAt: now,
-  }
+  }, { owner: 'work' }) as AgentConversation
   return db.transaction('rw', db.agentConversations, db.agentEvents, async () => {
     const conversationId = await db.agentConversations.add(conversation) as number
-    const event: AgentEvent = {
+    const event = stampNewRecord(scope, 'agentEvents', {
       projectId: candidate.projectId,
       conversationId,
       sequence: 1,
       kind: 'candidate',
-      content: summarizeChapterOrganizationCandidate(candidate),
-      payload: JSON.stringify(candidate),
+      content: summarizeChapterOrganizationCandidate(storedCandidate),
+      payload: JSON.stringify(storedCandidate),
       createdAt: now,
-    }
+    }, { owner: 'work' }) as AgentEvent
     const eventId = await db.agentEvents.add(event) as number
     return {
       conversation: { ...conversation, id: conversationId },
       event: { ...event, id: eventId },
-      candidate,
+      candidate: storedCandidate,
     }
   })
 }
@@ -464,7 +495,10 @@ export async function readLatestChapterOrganizationRun(input: {
   projectId: number
   chapterId: number
 }): Promise<ChapterOrganizationRun | null> {
-  const events = await db.agentEvents.where('projectId').equals(input.projectId).toArray()
+  const scope = await resolveReadScopeLike(input.projectId)
+  const chapter = await db.chapters.get(input.chapterId)
+  if (!await assertRecordInScope(scope, 'chapters', chapter, { owner: 'work' })) return null
+  const events = await readOwnedRows<AgentEvent>(scope, 'agentEvents', { owner: 'work' })
   const matches = events
     .filter(event => event.kind === 'candidate')
     .map(event => ({ event, candidate: parseAgentEventPayload<unknown>(event, null) }))
@@ -477,7 +511,9 @@ export async function readLatestChapterOrganizationRun(input: {
   const latest = matches[0]
   if (!latest) return null
   const conversation = await db.agentConversations.get(latest.event.conversationId)
-  return conversation ? { conversation, event: latest.event, candidate: latest.candidate } : null
+  return conversation && await assertRecordInScope(scope, 'agentConversations', conversation, { owner: 'work' })
+    ? { conversation, event: latest.event, candidate: latest.candidate }
+    : null
 }
 
 export async function updateChapterOrganizationRun(input: {
@@ -493,6 +529,20 @@ export async function updateChapterOrganizationRun(input: {
   ) {
     throw new Error('整理本章运行记录不存在或范围不匹配。')
   }
+  const scope = await resolveScopeLike(input.candidate.projectId)
+  const [chapter, event, conversation] = await Promise.all([
+    db.chapters.get(input.candidate.chapterId),
+    db.agentEvents.get(input.run.event.id),
+    db.agentConversations.get(input.run.conversation.id),
+  ])
+  if (
+    !await assertRecordInScope(scope, 'chapters', chapter, { owner: 'work' })
+    || !await assertRecordInScope(scope, 'agentEvents', event, { owner: 'work' })
+    || !await assertRecordInScope(scope, 'agentConversations', conversation, { owner: 'work' })
+    || event?.conversationId !== conversation?.id
+  ) {
+    throw new Error('整理本章运行记录不存在或不属于当前作品。')
+  }
   const now = Date.now()
   return db.transaction('rw', db.agentConversations, db.agentEvents, async () => {
     await db.agentEvents.update(input.run.event.id!, {
@@ -504,7 +554,7 @@ export async function updateChapterOrganizationRun(input: {
         .where('conversationId')
         .equals(input.run.conversation.id!)
         .toArray()
-      const confirmationEvent: AgentEvent = {
+      const confirmationEvent = stampNewRecord(scope, 'agentEvents', {
         projectId: input.candidate.projectId,
         conversationId: input.run.conversation.id!,
         sequence: rows.reduce((max, event) => Math.max(max, event.sequence), 0) + 1,
@@ -512,7 +562,7 @@ export async function updateChapterOrganizationRun(input: {
         content: '作者已审核整理本章候选。',
         payload: JSON.stringify(input.confirmation),
         createdAt: now,
-      }
+      }, { owner: 'work' }) as AgentEvent
       await db.agentEvents.add(confirmationEvent)
     }
     await db.agentConversations.update(input.run.conversation.id!, { updatedAt: now })
@@ -531,10 +581,11 @@ export async function updateChapterOrganizationRun(input: {
 export async function isChapterOrganizationCurrent(
   candidate: ChapterOrganizationCandidate,
 ): Promise<boolean> {
+  const scope = await resolveReadScopeLike(candidate.projectId)
   const chapter = await db.chapters.get(candidate.chapterId)
   return Boolean(
     chapter
-    && chapter.projectId === candidate.projectId
+    && await assertRecordInScope(scope, 'chapters', chapter, { owner: 'work' })
     && await hashChapterText(chapter.content ?? '') === candidate.sourceTextHash
   )
 }
@@ -599,6 +650,14 @@ export async function adoptChapterOrganizationSelection(input: {
     domainStatus: { ...input.run.candidate.domainStatus },
     domainErrors: { ...input.run.candidate.domainErrors },
   }
+  const workspaceScope = await resolveScopeLike(candidate.projectId)
+  const sourceChapter = await db.chapters.get(candidate.chapterId)
+  if (
+    !await assertRecordInScope(workspaceScope, 'chapters', sourceChapter, { owner: 'work' })
+    || await hashChapterText(sourceChapter?.content ?? '') !== candidate.sourceTextHash
+  ) {
+    throw new Error('章节正文已变化，这批整理候选已过期；请重新运行“整理本章”。')
+  }
   const written: Record<ChapterOrganizationDomain, number> = {
     state: 0,
     facts: 0,
@@ -613,6 +672,10 @@ export async function adoptChapterOrganizationSelection(input: {
     count: number,
     action: () => Promise<number>,
   ) => {
+    // A retry after a recorded partial adoption only retries failed/pending
+    // domains. Collection replacement and state updates are otherwise liable
+    // to re-apply a transition that has already advanced.
+    if (candidate.domainStatus[domain] === 'adopted') return
     if (count === 0) {
       candidate.domainStatus[domain] = 'skipped'
       delete candidate.domainErrors[domain]
@@ -630,8 +693,8 @@ export async function adoptChapterOrganizationSelection(input: {
 
   const states = selectedAt(candidate.stateDiffs, input.selection.stateDiffs)
   await applyDomain('state', states.length, async () => {
-    await useStateCardStore.getState().loadAll(candidate.projectId)
-    await useStateCardStore.getState().applyDiffs(candidate.projectId, states, candidate.chapterId)
+    await useStateCardStore.getState().loadAll(workspaceScope)
+    await useStateCardStore.getState().applyDiffs(workspaceScope, states, candidate.chapterId)
     return states.length
   })
 
@@ -639,6 +702,7 @@ export async function adoptChapterOrganizationSelection(input: {
   await applyDomain('facts', facts.length, async () => (
     useFactLedgerStore.getState().adopt({
       projectId: candidate.projectId,
+      scope: workspaceScope,
       sourceChapterId: candidate.chapterId,
       worldGroupId: candidate.worldGroupId,
       candidates: facts,
@@ -649,6 +713,7 @@ export async function adoptChapterOrganizationSelection(input: {
   await applyDomain('inventory', inventory.length, async () => {
     const result = await replaceAdoptedCollection({
       projectId: candidate.projectId,
+      workspaceScope,
       target: 'itemLedger',
       scope: { chapterId: candidate.chapterId },
       data: inventory.map(event => ({
@@ -661,7 +726,7 @@ export async function adoptChapterOrganizationSelection(input: {
         note: event.note,
       })),
     })
-    await useItemLedgerStore.getState().loadAll(candidate.projectId)
+    await useItemLedgerStore.getState().loadAll(workspaceScope)
     return result.written.length
   })
 
@@ -669,6 +734,7 @@ export async function adoptChapterOrganizationSelection(input: {
   await applyDomain('timeline', storyEvents.length, async () => {
     const result = await replaceAdoptedCollection({
       projectId: candidate.projectId,
+      workspaceScope,
       target: 'storyTimelineEvents',
       scope: { chapterId: candidate.chapterId },
       data: storyEvents.map((event, order) => ({
@@ -681,7 +747,7 @@ export async function adoptChapterOrganizationSelection(input: {
         order,
       })),
     })
-    await useStoryTimelineStore.getState().loadAll(candidate.projectId)
+    await useStoryTimelineStore.getState().loadAll(workspaceScope)
     return result.written.length
   })
 
@@ -689,6 +755,7 @@ export async function adoptChapterOrganizationSelection(input: {
   await applyDomain('relations', relations.length, async () => {
     const result = await adopt({
       projectId: candidate.projectId,
+      scope: workspaceScope,
       target: 'characterRelations',
       mode: 'add-many',
       data: relations.map(relation => ({
@@ -700,11 +767,10 @@ export async function adoptChapterOrganizationSelection(input: {
         isBidirectional: relation.bidirectional,
       })),
     })
-    const characters = await db.characters.where('projectId').equals(candidate.projectId).toArray()
-    const currentRelations = await db.characterRelations
-      .where('projectId')
-      .equals(candidate.projectId)
-      .toArray()
+    const [characters, currentRelations] = await Promise.all([
+      readOwnedRows<Character>(workspaceScope, 'characters', { owner: 'world' }),
+      readOwnedRows<CharacterRelation>(workspaceScope, 'characterRelations', { owner: 'world' }),
+    ])
     for (const selected of relations) {
       const relation = currentRelations.find(current => (
         current.relationType === selected.type
@@ -722,13 +788,14 @@ export async function adoptChapterOrganizationSelection(input: {
       if (relation) {
         await syncRelationToCharacterFields({
           projectId: candidate.projectId,
+          scope: workspaceScope,
           relation,
           characters,
         })
       }
     }
-    await useCharacterRelationStore.getState().loadAll(candidate.projectId)
-    await useCharacterStore.getState().loadAll(candidate.projectId)
+    await useCharacterRelationStore.getState().loadAll(workspaceScope)
+    await useCharacterStore.getState().loadAll(workspaceScope)
     return result.written.length
   })
 
@@ -737,17 +804,17 @@ export async function adoptChapterOrganizationSelection(input: {
     const currentRows = await db.foreshadows.bulkGet(
       foreshadowUpdates.map(update => update.foreshadowId),
     )
-    foreshadowUpdates.forEach((update, index) => {
+    for (const [index, update] of foreshadowUpdates.entries()) {
       const current = currentRows[index]
       if (
         !current
-        || current.projectId !== candidate.projectId
+        || !await assertRecordInScope(workspaceScope, 'foreshadows', current, { owner: 'work' })
         || current.status !== update.fromStatus
         || !FORESHADOW_TRANSITIONS[current.status].includes(update.toStatus)
       ) {
         throw new Error(`伏笔“${update.name}”状态已变化，未覆盖当前数据。`)
       }
-    })
+    }
     let count = 0
     for (const [index, update] of foreshadowUpdates.entries()) {
       const current = currentRows[index]!
@@ -768,6 +835,7 @@ export async function adoptChapterOrganizationSelection(input: {
       }
       const result = await adopt({
         projectId: candidate.projectId,
+        scope: workspaceScope,
         target: 'foreshadows',
         recordId: update.foreshadowId,
         mode: 'merge-diffs',
@@ -775,7 +843,7 @@ export async function adoptChapterOrganizationSelection(input: {
       })
       count += result.written.length
     }
-    await useForeshadowStore.getState().loadAll(candidate.projectId)
+    await useForeshadowStore.getState().loadAll(workspaceScope)
     return count
   })
 

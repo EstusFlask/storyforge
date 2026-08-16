@@ -29,8 +29,12 @@ describe('R-15: character reference remap', () => {
       projectId, fromCharacterId: deletedId, toCharacterId: keptId,
       type: 'ally', description: '', createdAt: now, updatedAt: now,
     } as any)
+    const sourceOutlineId = await db.outlineNodes.add({
+      projectId, parentId: null, type: 'chapter', title: '引用章节', summary: '',
+      order: 0, createdAt: now, updatedAt: now,
+    } as any) as number
     const outlineId = await db.detailedOutlines.add({
-      projectId, outlineNodeId: 1,
+      projectId, outlineNodeId: sourceOutlineId,
       appearingCharacterIds: [deletedId, keptId],
       scenes: [scene([deletedId, keptId])],
       createdAt: now, updatedAt: now,
@@ -74,8 +78,12 @@ describe('R-15: character reference remap', () => {
       projectId, fromCharacterId: primaryId, toCharacterId: aliasId,
       type: 'ally', description: '', createdAt: now, updatedAt: now,
     } as any)
+    const sourceOutlineId = await db.outlineNodes.add({
+      projectId, parentId: null, type: 'chapter', title: '合并引用章节', summary: '',
+      order: 0, createdAt: now, updatedAt: now,
+    } as any) as number
     const outlineId = await db.detailedOutlines.add({
-      projectId, outlineNodeId: 1,
+      projectId, outlineNodeId: sourceOutlineId,
       appearingCharacterIds: [aliasId],
       scenes: [scene([primaryId, aliasId])],
       createdAt: now, updatedAt: now,
@@ -104,7 +112,7 @@ describe('R-15: character reference remap', () => {
       action: 'gain', quantity: 1, createdAt: now,
     } as any) as number
 
-    await db.transaction('rw', db.characters, db.characterRelations, db.characterDrivenPlans, db.detailedOutlines, db.stateCards, db.temporalFacts, db.itemLedger, db.knowledgeLedger, db.cultivationProgress, async () => {
+    await db.transaction('rw', db.characters, db.characterRelations, db.characterDrivenPlans, db.chapters, db.detailedOutlines, db.stateCards, db.temporalFacts, db.itemLedger, db.knowledgeLedger, db.cultivationProgress, async () => {
       await applyCharacterReferenceRemap({
         projectId,
         fromCharacterId: aliasId,

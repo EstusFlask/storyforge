@@ -2,6 +2,7 @@ import { create } from 'zustand'
 import { db } from '../lib/db/schema'
 import {
   appendSimulationEvent,
+  advanceSimulationNarrative,
   appendChatMessage,
   appendChatReply,
   configureChatSession,
@@ -30,6 +31,7 @@ import {
   verifySimulationCheckpoint,
 } from '../lib/simulation/runtime'
 import { buildSimulationCanonSnapshot } from '../lib/simulation/canon-snapshot'
+import { createWorldInstance } from '../lib/world-engine/instances'
 import {
   EMPTY_SIMULATION_STATE,
   type SimulationCheckpoint,
@@ -46,6 +48,7 @@ import {
   type SimulationTtrpgQuest,
   type SimulationChatIdentity,
   type SimulationChatScene,
+  type WorkspaceScope,
 } from '../lib/types'
 
 interface SimulationRuntimeStore {
@@ -68,6 +71,7 @@ interface SimulationRuntimeStore {
     title: string
     seed?: string
     sourceKeys: string[]
+    scope?: WorkspaceScope
     chatConfig?: {
       characterKey: string
       identity: SimulationChatIdentity
@@ -79,6 +83,7 @@ interface SimulationRuntimeStore {
   recordChatReply(input: { replyToSequence: number; text: string; baseSequence: number; supersedesSequence?: number | null }): Promise<void>
   advanceTime(amount: number): Promise<void>
   recordNarrative(text: string): Promise<void>
+  advanceNarrative(targetNodeKey: string): Promise<void>
   proposeNpcEvolution(candidate: SimulationNpcEvolutionCandidate): Promise<void>
   acceptNpcEvolution(proposalSequence: number): Promise<void>
   rejectNpcEvolution(proposalSequence: number, reason?: string): Promise<void>
@@ -183,6 +188,7 @@ export const useSimulationRuntimeStore = create<SimulationRuntimeStore>((set, ge
     createSession: async input => {
       const frozen = await buildSimulationCanonSnapshot({
         projectId: input.projectId,
+        scope: input.scope,
         worldGroupId: input.worldGroupId,
         sourceKeys: input.sourceKeys,
       })
@@ -195,15 +201,28 @@ export const useSimulationRuntimeStore = create<SimulationRuntimeStore>((set, ge
           messages: [],
         }
       }
-      const session = await createSimulationSession({
-        projectId: input.projectId,
-        worldGroupId: input.worldGroupId,
-        kind: input.kind,
-        title: input.title,
-        seed: input.seed,
-        canonSnapshot: frozen.snapshot,
-        initialState,
-      })
+      const activeWork = input.scope ? await db.works.get(input.scope.workId) : null
+      const session = input.scope
+        ? await createWorldInstance({
+          scope: input.scope,
+          kind: input.kind,
+          title: input.title,
+          seed: input.seed,
+          draftSnapshotHash: frozen.snapshot.snapshotHash,
+          narrativeModuleId: activeWork?.activeNarrativeModuleId ?? null,
+          canonSnapshot: frozen.snapshot,
+          initialState,
+          worldGroupId: input.worldGroupId,
+        })
+        : await createSimulationSession({
+          projectId: input.projectId,
+          worldGroupId: input.worldGroupId,
+          kind: input.kind,
+          title: input.title,
+          seed: input.seed,
+          canonSnapshot: frozen.snapshot,
+          initialState,
+        })
       await get().load(input.projectId, input.worldGroupId)
       await get().select(session.id!)
       return session.id!
@@ -249,6 +268,17 @@ export const useSimulationRuntimeStore = create<SimulationRuntimeStore>((set, ge
         sessionId,
         type: 'narrative.recorded',
         payload: { text },
+      })
+      await refreshSelected()
+    },
+
+    advanceNarrative: async targetNodeKey => {
+      const sessionId = get().selectedSessionId
+      if (sessionId == null) throw new Error('请先选择运行时会话。')
+      await advanceSimulationNarrative({
+        sessionId,
+        targetNodeKey,
+        baseSequence: get().runtimeState.lastSequence,
       })
       await refreshSelected()
     },

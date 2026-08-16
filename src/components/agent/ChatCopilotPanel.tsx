@@ -5,6 +5,7 @@ import {
   ChevronDown,
   ChevronRight,
   Loader2,
+  RotateCcw,
   Send,
   ShieldCheck,
   Square,
@@ -13,7 +14,11 @@ import {
 } from 'lucide-react'
 import type { Project } from '../../lib/types'
 import { parseAgentEventPayload } from '../../lib/types'
+import { creativeArtifactCanAdoptV1 } from '../../lib/agent/creative-reliability'
+import { estimateCreativeRunPreviewV1 } from '../../lib/agent/creative-run-preview'
+import { useAIConfigStore } from '../../stores/ai-config'
 import { useMasterCopilot } from './useMasterCopilot'
+import CreativeArtifactSummary from './CreativeArtifactSummary'
 
 interface Props {
   project: Project
@@ -35,6 +40,8 @@ export default function ChatCopilotPanel({
   onClose,
 }: Props) {
   const copilot = useMasterCopilot({ project, worldGroupId })
+  const creativeQualityMode = useAIConfigStore(state => state.creativeQualityMode)
+  const teamBudgetProfile = useAIConfigStore(state => state.agentTeamBudgetProfile)
   const [showDetails, setShowDetails] = useState(false)
   const endRef = useRef<HTMLDivElement | null>(null)
   const messages = copilot.events.filter(event => event.kind === 'message')
@@ -62,6 +69,16 @@ export default function ChatCopilotPanel({
     })
     return [...result.values()]
   }, [taskEvents])
+  const previewRequest = copilot.activeRequest ?? copilot.authorRequest
+  const runPreview = useMemo(() => (
+    previewRequest.trim().length >= 2
+      ? estimateCreativeRunPreviewV1({
+          request: previewRequest,
+          qualityMode: creativeQualityMode,
+          teamBudgetProfile,
+        })
+      : null
+  ), [creativeQualityMode, previewRequest, teamBudgetProfile])
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ block: 'nearest' })
@@ -165,6 +182,23 @@ export default function ChatCopilotPanel({
           </section>
         )}
 
+        {copilot.recoveryAvailable && (
+          <section className="rounded-lg border border-warning/40 bg-warning/5 p-3">
+            <div className="flex items-center justify-between gap-3">
+              <p className="text-xs leading-5 text-text-secondary">检测到一轮未完成的后台任务。</p>
+              <button
+                type="button"
+                disabled={copilot.busy}
+                onClick={() => { void copilot.resume() }}
+                className="flex shrink-0 items-center gap-1 rounded border border-warning/50 px-2.5 py-1.5 text-xs text-text-primary hover:bg-warning/10 disabled:opacity-50"
+              >
+                <RotateCcw className="h-3.5 w-3.5" />
+                从中断处恢复
+              </button>
+            </div>
+          </section>
+        )}
+
         {copilot.pendingCandidates.map(candidate => (
           <section
             key={candidate.event.id}
@@ -197,6 +231,12 @@ export default function ChatCopilotPanel({
             <p className="mt-1 text-[10px] text-text-muted">
               这是领域 Agent 的真实输出。刷新后仍会保留；只有采纳才会进入项目正式数据。
             </p>
+            {candidate.payload.creativeArtifact && (
+              <CreativeArtifactSummary
+                artifact={candidate.payload.creativeArtifact}
+                narrativeBrief={candidate.payload.narrativeBrief}
+              />
+            )}
             {candidate.payload.contextEvidence && (
               <details className="mt-2 rounded border border-border/60 bg-bg-surface px-2 py-1.5 text-[10px] text-text-muted">
                 <summary className="cursor-pointer text-text-secondary">
@@ -242,14 +282,20 @@ export default function ChatCopilotPanel({
               </button>
               <button
                 type="button"
-                disabled={copilot.busy}
+                disabled={
+                  copilot.busy
+                  || (candidate.payload.creativeArtifact != null
+                    && !creativeArtifactCanAdoptV1(candidate.payload.creativeArtifact))
+                }
                 onClick={() => { void copilot.adoptCandidate(candidate) }}
                 className="flex items-center gap-1 rounded bg-accent px-3 py-1.5 text-xs text-white hover:opacity-90 disabled:opacity-50"
               >
                 {copilot.busy
                   ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
                   : <Check className="h-3.5 w-3.5" />}
-                采纳
+                {candidate.payload.creativeArtifact?.status === 'usable-with-warnings'
+                  ? '接受提示并采纳'
+                  : '采纳'}
               </button>
             </div>
           </section>
@@ -264,6 +310,31 @@ export default function ChatCopilotPanel({
           void copilot.submit()
         }}
       >
+        {runPreview && copilot.pendingCandidates.length === 0 && (
+          <section
+            aria-label="本轮调用预估"
+            className="mb-2 rounded-md border border-accent/20 bg-accent/5 px-3 py-2 text-[10px] leading-4 text-text-secondary"
+          >
+            <p className="font-medium text-text-primary">
+              本轮预计 {runPreview.artifactCount} 份可编辑候选：{runPreview.artifactLabels.join('、')}
+            </p>
+            <p className="mt-1">
+              通常 {runPreview.usualModelCalls} 次模型调用；本轮硬上限 {runPreview.hardMaxModelCalls} 次 /{' '}
+              {runPreview.hardMaxTokens.toLocaleString()} tokens，达到上限会在调用前停止。
+            </p>
+            <p className="mt-1">
+              {runPreview.automaticRepairCallsPerArtifact
+                ? '只有可定位的结构问题才允许每份最多追加 1 次定向修复；主观质量提示不会自动重试。'
+                : '节省模式只生成 1 次，后续校验和作者修改不再调用模型。'}
+            </p>
+            {runPreview.deferredArtifactLabels.length > 0 && (
+              <p className="mt-1 text-warning">
+                {runPreview.deferredArtifactLabels.join('、')}会等你先确认故事规划后，下一轮再生成。
+              </p>
+            )}
+            <p className="mt-1 text-text-muted">执行中可随时停止；已保存的计划和候选可恢复。</p>
+          </section>
+        )}
         <textarea
           aria-label="告诉主 Agent 你的目标"
           value={copilot.authorRequest}

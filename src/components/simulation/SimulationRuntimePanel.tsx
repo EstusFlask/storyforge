@@ -28,6 +28,7 @@ import type {
   SimulationSessionKind,
   SimulationTtrpgEncounterCandidate,
   SimulationTtrpgTurnCandidate,
+  WorkspaceScope,
 } from '../../lib/types'
 import { useSimulationRuntimeStore } from '../../stores/simulation-runtime'
 import { useDialog } from '../shared/Dialog'
@@ -51,6 +52,7 @@ const KIND_LABELS: Record<SimulationSessionKind, string> = {
   'npc-evolution': 'NPC 演进',
   ttrpg: '跑团',
   chatgame: '角色聊天',
+  storygame: '文字游戏',
 }
 
 const SOURCE_KIND_LABELS: Record<SimulationCanonSourceKind, string> = {
@@ -78,6 +80,7 @@ function eventSummary(type: string, payloadJson: string): string {
       return `${payload.expression}: [${dice}] = ${payload.total}`
     }
     if (type === 'narrative.recorded') return String(payload.text ?? '')
+    if (type === 'narrative.node.advanced') return `叙事推进：${payload.fromNodeKey ?? ''} → ${payload.toNodeKey ?? ''}`
     if (type === 'ttrpg.scene.opened') return `场景开始：${(payload.scene as Record<string, unknown>)?.title ?? ''}`
     if (type === 'ttrpg.action.recorded') return `动作：${payload.text ?? ''}`
     if (type === 'ttrpg.check.resolved') {
@@ -114,6 +117,7 @@ export default function SimulationRuntimePanel(props: {
   worldGroupId: number | null
   /** 产品入口锁定为单一会话类型；旧工作区不传时仍管理全部互动存档。 */
   sessionKind?: SimulationSessionKind
+  workspaceScope?: WorkspaceScope
 }) {
   const store = useSimulationRuntimeStore()
   const dialog = useDialog()
@@ -121,7 +125,7 @@ export default function SimulationRuntimePanel(props: {
   const [newKind, setNewKind] = useState<SimulationSessionKind>(props.sessionKind ?? 'sandbox')
   const [dice, setDice] = useState('1d20')
   const [timeAmount, setTimeAmount] = useState('1')
-  const [narrative, setNarrative] = useState('')
+  const [narrativeText, setNarrativeText] = useState('')
   const [checkpointName, setCheckpointName] = useState('')
   const [branchTitle, setBranchTitle] = useState('')
   const [canonCandidates, setCanonCandidates] = useState<SimulationCanonCandidate[]>([])
@@ -170,6 +174,9 @@ export default function SimulationRuntimePanel(props: {
   const [campaignScheduleStartClock, setCampaignScheduleStartClock] = useState('0')
   const [campaignScheduleEndClock, setCampaignScheduleEndClock] = useState('')
   const [campaignScheduleLocationKey, setCampaignScheduleLocationKey] = useState('')
+  const scopeProjectId = props.workspaceScope?.projectId
+  const scopeWorldId = props.workspaceScope?.worldId
+  const scopeWorkId = props.workspaceScope?.workId
   const [campaignScheduleActivity, setCampaignScheduleActivity] = useState('')
   const [campaignScheduleRecurrence, setCampaignScheduleRecurrence] = useState<'once' | 'daily' | 'weekly'>('once')
   const { config } = useAIConfigStore()
@@ -186,6 +193,9 @@ export default function SimulationRuntimePanel(props: {
     setSelectedSourceKeys(new Set())
     void loadSimulationCanonCandidates({
       projectId: props.project.id!,
+      scope: scopeProjectId != null && scopeWorldId != null && scopeWorkId != null
+        ? { projectId: scopeProjectId, worldId: scopeWorldId, workId: scopeWorkId }
+        : undefined,
       worldGroupId: props.worldGroupId,
     }).then(result => {
       if (!cancelled) setCanonCandidates(result.candidates)
@@ -195,15 +205,19 @@ export default function SimulationRuntimePanel(props: {
       if (!cancelled) setCanonLoading(false)
     })
     return () => { cancelled = true }
-  }, [props.project.id, props.worldGroupId])
+  }, [props.project.id, props.worldGroupId, scopeProjectId, scopeWorldId, scopeWorkId])
 
   const visibleSessions = useMemo(
     () => store.sessions.filter(session => (
       session.projectId === props.project.id
       && (session.worldGroupId ?? null) === props.worldGroupId
+      && (!props.workspaceScope || (
+        (session.worldId == null && session.workId == null)
+        || (session.worldId === props.workspaceScope.worldId && session.workId === props.workspaceScope.workId)
+      ))
       && (!props.sessionKind || session.kind === props.sessionKind)
     )),
-    [props.project.id, props.sessionKind, props.worldGroupId, store.sessions],
+    [props.project.id, props.sessionKind, props.workspaceScope, props.worldGroupId, store.sessions],
   )
   const selected = useMemo(
     () => visibleSessions.find(session => session.id === store.selectedSessionId) ?? null,
@@ -217,6 +231,11 @@ export default function SimulationRuntimePanel(props: {
     () => selected ? parseSimulationCanonSnapshot(selected.canonSnapshotJson) : null,
     [selected],
   )
+  const narrative = store.runtimeState.narrative ?? null
+  const currentNarrativeNode = narrative?.nodes.find(node => node.key === narrative.currentNodeKey) ?? null
+  const narrativeChoices = narrative?.availableNodeKeys
+    .map(key => narrative.nodes.find(node => node.key === key))
+    .filter((node): node is NonNullable<typeof node> => node != null) ?? []
   const npcAI = useAIStream(createAISessionKey(
     props.project.id!,
     'simulation.npc-evolution',
@@ -534,6 +553,7 @@ export default function SimulationRuntimePanel(props: {
                 kind: props.sessionKind ?? newKind,
                 title: newTitle,
                 sourceKeys: [...selectedSourceKeys],
+                scope: props.workspaceScope,
               })
               setNewTitle('')
               setSelectedSourceKeys(new Set())
@@ -632,6 +652,47 @@ export default function SimulationRuntimePanel(props: {
                 <div className="text-xs text-text-muted">叙事记录</div>
               </div>
             </section>
+
+            {narrative && currentNarrativeNode && (
+              <section className="rounded-lg border border-accent/30 bg-bg-surface" aria-label="冻结叙事进度">
+                <div className="flex items-start justify-between gap-3 border-b border-border px-4 py-3">
+                  <div>
+                    <div className="flex items-center gap-2 text-sm font-semibold text-text-primary">
+                      <GitBranch className="h-4 w-4 text-accent" />
+                      {narrative.moduleTitle}
+                    </div>
+                    <p className="mt-1 text-xs text-text-muted">
+                      冻结叙事 · 已访问 {narrative.visitedNodeKeys.length} 个节点
+                    </p>
+                  </div>
+                  <span className={narrative.completed ? 'text-xs text-accent' : 'text-xs text-text-muted'}>
+                    {narrative.completed ? '已到达结局' : '进行中'}
+                  </span>
+                </div>
+                <div className="space-y-3 p-4">
+                  <div>
+                    <div className="text-sm font-medium text-text-primary">{currentNarrativeNode.title}</div>
+                    {currentNarrativeNode.summary && <p className="mt-1 text-sm leading-6 text-text-secondary">{currentNarrativeNode.summary}</p>}
+                  </div>
+                  {!narrative.completed && (
+                    <div className="grid gap-2 sm:grid-cols-2">
+                      {narrativeChoices.map(node => (
+                        <button
+                          key={node.key}
+                          disabled={busy}
+                          onClick={() => void run(() => store.advanceNarrative(node.key))}
+                          className="rounded border border-border bg-bg-base px-3 py-2 text-left hover:border-accent/50 hover:bg-accent/5 disabled:opacity-40"
+                        >
+                          <span className="block text-sm font-medium text-text-primary">{node.title}</span>
+                          {node.summary && <span className="mt-1 block line-clamp-2 text-xs text-text-muted">{node.summary}</span>}
+                        </button>
+                      ))}
+                      {narrativeChoices.length === 0 && <p className="text-sm text-danger">当前条件下没有可进入的后继节点。</p>}
+                    </div>
+                  )}
+                </div>
+              </section>
+            )}
 
             <section className="rounded-lg border border-border bg-bg-surface">
               <div className="flex items-center justify-between gap-3 border-b border-border px-4 py-3">
@@ -1314,16 +1375,16 @@ export default function SimulationRuntimePanel(props: {
                   </button>
                 </div>
                 <textarea
-                  value={narrative}
-                  onChange={event => setNarrative(event.target.value)}
+                  value={narrativeText}
+                  onChange={event => setNarrativeText(event.target.value)}
                   placeholder="记录只属于该会话的叙事…"
                   className="min-h-20 w-full rounded border border-border bg-bg-base px-2 py-1.5 text-sm"
                 />
                 <button
-                  disabled={busy || !narrative.trim()}
+                  disabled={busy || !narrativeText.trim()}
                   onClick={() => void run(async () => {
-                    await store.recordNarrative(narrative)
-                    setNarrative('')
+                    await store.recordNarrative(narrativeText)
+                    setNarrativeText('')
                   })}
                   className="rounded border border-border px-3 py-1.5 text-sm hover:bg-bg-hover disabled:opacity-40"
                 >

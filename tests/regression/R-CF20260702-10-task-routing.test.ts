@@ -265,6 +265,21 @@ describe('R-CF20260702-10 · route storage and client boundary', () => {
     expect(fresh.useAIConfigStore.getState().agentTeamBudgetProfile).toBe('balanced')
   })
 
+  it('persists a bounded creative quality mode and falls back to balanced', async () => {
+    const {
+      CREATIVE_QUALITY_MODE_KEY,
+      useAIConfigStore,
+    } = await import('../../src/stores/ai-config')
+    expect(useAIConfigStore.getState().creativeQualityMode).toBe('balanced')
+    useAIConfigStore.getState().setCreativeQualityMode('economy')
+    expect(localStorage.getItem(CREATIVE_QUALITY_MODE_KEY)).toBe('economy')
+
+    localStorage.setItem(CREATIVE_QUALITY_MODE_KEY, 'unlimited')
+    vi.resetModules()
+    const fresh = await import('../../src/stores/ai-config')
+    expect(fresh.useAIConfigStore.getState().creativeQualityMode).toBe('balanced')
+  })
+
   it('routes a real chat request and logs the actual provider, model and task kind', async () => {
     const routed = preset('local-writer', {
       provider: 'ollama',
@@ -312,6 +327,41 @@ describe('R-CF20260702-10 · route storage and client boundary', () => {
         outputTokens: 7,
       })
     })
+    expect(fetchMock).toHaveBeenCalledOnce()
+  })
+
+  it('routes through an inactive session-only preset without leaking its Key to localStorage', async () => {
+    const { useAIConfigStore } = await import('../../src/stores/ai-config')
+    useAIConfigStore.getState().setConfig({
+      provider: 'agnes',
+      model: 'agnes-2.5-flash',
+      baseUrl: 'https://agnes-route.invalid/v1',
+      apiKey: 'agnes-session-route-key',
+    })
+    const agnesId = useAIConfigStore.getState().saveAsPreset('Agnes 审查')
+    useAIConfigStore.getState().setTaskRoute('review', agnesId)
+    useAIConfigStore.getState().setConfig({
+      provider: 'doubao',
+      model: 'doubao-1-5-pro-32k-250115',
+      baseUrl: 'https://doubao-global.invalid/v1',
+      apiKey: 'doubao-current-key',
+    })
+    expect(JSON.parse(localStorage.getItem('storyforge-ai-presets') || '[]')[0].config.apiKey).toBe('')
+
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      expect(url).toBe('https://agnes-route.invalid/v1/chat/completions')
+      expect((init?.headers as Record<string, string>).Authorization).toBe('Bearer agnes-session-route-key')
+      expect(JSON.parse(String(init?.body)).model).toBe('agnes-2.5-flash')
+      return new Response(JSON.stringify({ choices: [{ message: { content: 'ok' } }] }), { status: 200 })
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    const { chat } = await import('../../src/lib/ai/client')
+
+    await expect(chat(
+      [{ role: 'user', content: 'review' }],
+      useAIConfigStore.getState().config,
+      { category: 'review.quality' },
+    )).resolves.toBe('ok')
     expect(fetchMock).toHaveBeenCalledOnce()
   })
 })

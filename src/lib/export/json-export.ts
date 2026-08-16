@@ -35,11 +35,21 @@ import type {
   InspirationWorkspace,
   AgentConversation,
   AgentEvent,
+  AgentRunRecord,
+  AgentRunEventRecord,
+  AgentRunCheckpointRecord,
   NodeFlow,
   NodeRunRecord,
   SimulationSession,
   SimulationEvent,
   SimulationCheckpoint,
+  World,
+  Work,
+  WorkCharacterBinding,
+  NarrativeModule,
+  NarrativeNode,
+  WorldRevision,
+  WorldRelease,
 } from '../types'
 import type { TemporalFact } from '../types/temporal-fact'
 
@@ -62,13 +72,50 @@ type HomeWorldGroupExportRef = {
  *   1 — 初始版本（14 张表）
  *   2 — 补全全部项目数据（2026-05-27）
  *   3 — 多世界系统（2026-06-02，Phase 25.4）
+ *   4 — World/Work owner 便携影子 ID（WORLD-2C C4）
  */
 export interface ProjectExportData {
   version: number
   exportedAt: number
-  project: Omit<Project, 'id' | 'activeCharacterDrivenPlanId'> & {
-    _activeCharacterDrivenPlanExportId?: number | null
+  ownership?: {
+    contractVersion: number
+    worldExportId: number
+    workExportId: number
   }
+  project: Omit<Project, 'id' | 'activeCharacterDrivenPlanId' | 'activeWorldId' | 'activeWorkId'> & {
+    _activeCharacterDrivenPlanExportId?: number | null
+    _activeWorldExportId?: number | null
+    _activeWorkExportId?: number | null
+  }
+
+  /** WORLD-2C C1 roots; absent in v1-v3 legacy fixtures and empty before C2 migration. */
+  worlds?: (Omit<World, 'id' | 'projectId'> & { _exportId: number })[]
+  works?: (
+    Omit<Work, 'id' | 'projectId' | 'worldId' | 'activeCharacterDrivenPlanId' | 'activeNarrativeModuleId'>
+    & {
+      _exportId: number
+      _worldExportId: number
+      _activeCharacterDrivenPlanExportId?: number | null
+      _activeNarrativeModuleExportId?: number | null
+    }
+  )[]
+  workCharacterBindings?: (
+    Omit<WorkCharacterBinding, 'id' | 'projectId' | 'workId' | 'characterId'>
+    & { _workExportId: number; _characterExportId: number }
+  )[]
+  narrativeModules?: (Omit<NarrativeModule, 'id' | 'projectId'> & { _exportId: number })[]
+  narrativeNodes?: (
+    Omit<NarrativeNode, 'id' | 'projectId' | 'moduleId' | 'sourceOutlineNodeId'>
+    & { _exportId: number; _moduleExportId: number; _sourceOutlineExportId?: number | null }
+  )[]
+  worldRevisions?: (
+    Omit<WorldRevision, 'id' | 'projectId' | 'worldId' | 'parentRevisionId'>
+    & { _exportId: number; _worldExportId: number; _parentExportId?: number | null }
+  )[]
+  worldReleases?: (
+    Omit<WorldRelease, 'id' | 'projectId' | 'worldId' | 'revisionId'>
+    & { _exportId: number; _worldExportId: number; _revisionExportId: number }
+  )[]
 
   // ── 原有（v1）──
   worldviews: (Omit<Worldview, 'id' | 'projectId' | 'worldGroupId'> & WorldGroupExportRef)[]
@@ -101,8 +148,29 @@ export interface ProjectExportData {
     & { _exportId: number }
   )[]
   agentEvents?: (
-    Omit<AgentEvent, 'id' | 'projectId' | 'conversationId'>
-    & { _conversationExportId: number }
+    Omit<AgentEvent, 'id' | 'projectId' | 'conversationId' | 'durableRunId'>
+    & { _conversationExportId: number; _agentRunExportId?: number | null }
+  )[]
+  /** HARNESS-1 可恢复运行账本；事件/检查点只通过便携 run ID 关联。 */
+  agentRuns?: (
+    Omit<AgentRunRecord, 'id' | 'projectId' | 'workId' | 'worldGroupId' | 'conversationId' | 'parentRunId'>
+    & WorldGroupExportRef
+    & {
+      _exportId: number
+      _parentExportId?: number | null
+      _workOwnerExportId?: number
+      _conversationExportId?: number | null
+    }
+  )[]
+  agentRunEvents?: (
+    Omit<AgentRunEventRecord, 'id' | 'projectId' | 'worldGroupId' | 'runId'>
+    & WorldGroupExportRef
+    & { _agentRunExportId: number }
+  )[]
+  agentRunCheckpoints?: (
+    Omit<AgentRunCheckpointRecord, 'id' | 'projectId' | 'worldGroupId' | 'runId'>
+    & WorldGroupExportRef
+    & { _agentRunExportId: number }
   )[]
   /** FLOW-2 独立自由节点文档与运行记录。 */
   nodeFlows?: (
@@ -183,7 +251,7 @@ export interface ProjectExportData {
 
 /** 导出项目为 JSON(注册表派生) */
 export async function exportProjectJSON(projectId: number): Promise<ProjectExportData> {
-  return deriveExportProjectJSON(projectId)
+  return deriveExportProjectJSON(projectId, { strict: true })
 }
 
 /** 下载 JSON 文件 */
