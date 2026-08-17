@@ -1,23 +1,18 @@
 import { useState, useRef, useEffect } from 'react'
 import {
   Download, Upload, FileJson, FileText, FileType,
-  Loader2, CheckCircle, AlertCircle, FolderOpen, X,
+  Loader2, CheckCircle, AlertCircle, FolderOpen,
   History, Plus, Trash2, RotateCcw, HardDrive,
   ShieldAlert, Stethoscope, RefreshCw, GitCompareArrows,
 } from 'lucide-react'
 import { exportProjectJSON, downloadJSON, importProjectJSON, type ProjectExportData } from '../../lib/export/json-export'
 import { exportProjectMarkdown, exportProjectTXT, downloadTextFile } from '../../lib/export/text-export'
 import {
-  isFSASupported, pickFolder, ensureFolderPermission, folderPermissionGranted,
+  isFSASupported, ensureFolderPermission, folderPermissionGranted,
   writeProjectSnapshotToFolder,
 } from '../../lib/storage/folder-backup'
-import {
-  clearProjectFolderHandle,
-  LAST_FOLDER_KEY,
-  loadProjectFolderHandle,
-  saveFolderHandle,
-  saveProjectFolderHandle,
-} from '../../lib/storage/folder-handle-store'
+import { loadProjectFolderHandle } from '../../lib/storage/folder-handle-store'
+import { bindCreatedProjectStorageWorkspace } from '../../lib/storage/project-storage-workspace'
 import { useBackupStore } from '../../stores/backup'
 import CloudBackupCard from './CloudBackupCard'
 import { useToast } from '../shared/Toast'
@@ -55,9 +50,10 @@ type ExportStatus = 'idle' | 'loading' | 'success' | 'error'
 interface Props {
   project: Project
   onImported?: (newProjectId: number) => void
+  onOpenStorageSettings?: () => void
 }
 
-export default function DataManagementPanel({ project, onImported }: Props) {
+export default function DataManagementPanel({ project, onImported, onOpenStorageSettings }: Props) {
   const [activeTab, setActiveTab] = useState<Tab>('export')
 
   const TABS: { id: Tab; label: string; icon: React.ComponentType<{ className?: string }> }[] = [
@@ -93,14 +89,14 @@ export default function DataManagementPanel({ project, onImported }: Props) {
         })}
       </div>
 
-      {activeTab === 'export'    && <ExportTab    project={project} onImported={onImported} />}
+      {activeTab === 'export'    && <ExportTab project={project} onImported={onImported} onOpenStorageSettings={onOpenStorageSettings} />}
       {activeTab === 'backup'    && <BackupTab    project={project} onImported={onImported} />}
     </div>
   )
 }
 
 // ── 导出/导入 Tab ────────────────────────────────────────────
-function ExportTab({ project, onImported }: Props) {
+function ExportTab({ project, onImported, onOpenStorageSettings }: Props) {
   const [status, setStatus] = useState<ExportStatus>('idle')
   const [message, setMessage] = useState('')
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -215,29 +211,15 @@ function ExportTab({ project, onImported }: Props) {
       show('loading', '正在校验并恢复工作区包...')
       const restored = await importWorkspacePackageV1(JSON.parse(await file.text()))
       await useProjectStore.getState().loadProject(restored.projectId)
-      show('success', '工作区包已完整恢复并通过回读核对')
+      show('success', restored.reboundHarnessRunCount > 0
+        ? `工作区包已恢复；${restored.reboundHarnessRunCount} 个 Harness 终态凭据因本地主键重绑定已安全标为待复核，历史证据仍保留`
+        : '工作区包已完整恢复并通过回读核对')
       onImported?.(restored.projectId)
     } catch (e) {
       show('error', `工作区包导入失败：${(e as Error).message}`)
     } finally {
       event.target.value = ''
     }
-  }
-
-  // 绑定只保存句柄。MEMORY-0 起，绑定和重新授权都不得顺带写盘。
-  const handleBindFolder = async () => {
-    const h = await pickFolder()
-    if (!h) return
-    setFolderBusy(true)
-    try {
-      const ok = await ensureFolderPermission(h)
-      if (!ok) { show('error', '未授予文件夹写入权限'); return }
-      await saveProjectFolderHandle(project, h)
-      await saveFolderHandle(LAST_FOLDER_KEY, h)
-      setFolderHandle(h); setFolderName(h.name); setFolderNeedsAuth(false)
-      show('success', `已绑定 / ${h.name}；尚未写入任何文件`)
-    } catch (e) { show('error', `绑定失败：${(e as Error).message}`) }
-    finally { setFolderBusy(false) }
   }
 
   // 重新授权（更新/刷新后浏览器把权限降回 prompt 时，一次手势恢复）
@@ -389,8 +371,13 @@ function ExportTab({ project, onImported }: Props) {
         return
       }
       const restored = await restoreWorkspaceFromFolderV1(folderHandle)
+      // The directory used to restore the project becomes that new project's
+      // storage workspace. This persists only the handle and writes no files.
+      await bindCreatedProjectStorageWorkspace(restored.projectId, folderHandle)
       await useProjectStore.getState().loadProject(restored.projectId)
-      show('success', '已从本地工作区完整恢复，并通过逐文档回读核对')
+      show('success', restored.reboundHarnessRunCount > 0
+        ? `已完整恢复并通过回读核对；${restored.reboundHarnessRunCount} 个 Harness 终态凭据因本地主键重绑定已安全标为待复核，历史证据仍保留`
+        : '已从本地工作区完整恢复，并通过逐文档回读核对')
       onImported?.(restored.projectId)
     } catch (e) {
       show('error', `恢复停止：${(e as Error).message}`)
@@ -422,11 +409,6 @@ function ExportTab({ project, onImported }: Props) {
     } finally {
       setFolderBusy(false)
     }
-  }
-
-  const handleUnbindFolder = async () => {
-    await clearProjectFolderHandle(project)
-    setFolderHandle(null); setFolderName(''); setFolderNeedsAuth(false)
   }
 
   return (
@@ -485,7 +467,7 @@ function ExportTab({ project, onImported }: Props) {
       <SectionCard
         icon={<FolderOpen className="w-5 h-5 text-orange-400" />}
         title="本地记忆工作区"
-        desc="绑定只记住文件夹，不会自动写入。你可以先核对项目与本地文件，再确认同步；完整 JSON 恢复快照仍是独立的手动操作。"
+        desc="存储位置统一在“设置 → 项目存储工作区”管理。这里负责人工核对、同步和恢复；完整 JSON 恢复快照仍是独立操作。"
         badge={!isFSASupported() ? '仅 Chrome/Edge 支持' : undefined}
       >
         <div className="flex items-center justify-between gap-3 rounded bg-bg-base px-3 py-2 text-xs">
@@ -515,13 +497,11 @@ function ExportTab({ project, onImported }: Props) {
               <div className="flex items-center gap-2 text-sm text-amber-400 bg-amber-500/10 px-3 py-2 rounded-lg">
                 <ShieldAlert className="w-4 h-4 shrink-0" />
                 <span className="flex-1 truncate">已绑定「{folderName}」，保存前需要重新授权</span>
-                <button onClick={handleUnbindFolder} className="text-text-muted hover:text-text-primary"><X className="w-4 h-4" /></button>
               </div>
             ) : (
               <div className="flex items-center gap-2 text-sm text-green-400 bg-green-500/10 px-3 py-2 rounded-lg">
                 <FolderOpen className="w-4 h-4 shrink-0" />
-                <span className="flex-1 truncate">已绑定：{folderName}（不会自动写入）</span>
-                <button onClick={handleUnbindFolder} className="text-text-muted hover:text-text-primary"><X className="w-4 h-4" /></button>
+                <span className="flex-1 truncate">项目存储工作区：{folderName}（不会自动写入）</span>
               </div>
             )}
             <div className="flex gap-2 flex-wrap">
@@ -583,9 +563,17 @@ function ExportTab({ project, onImported }: Props) {
             />}
           </div>
         ) : (
-          <ActionButton onClick={handleBindFolder} disabled={!isFSASupported() || folderBusy || status === 'loading'} variant="orange">
-            {folderBusy ? <Loader2 className="w-4 h-4 animate-spin" /> : <FolderOpen className="w-4 h-4" />} 选择本地文件夹
-          </ActionButton>
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-dashed border-border px-3 py-3">
+            <div>
+              <p className="text-sm text-text-secondary">尚未设置项目存储工作区</p>
+              <p className="mt-0.5 text-xs text-text-muted">先在设置中选择项目文件夹，再回到这里核对并确认首次写入。</p>
+            </div>
+            {onOpenStorageSettings && (
+              <ActionButton onClick={onOpenStorageSettings} disabled={!isFSASupported()} variant="orange">
+                <FolderOpen className="w-4 h-4" /> 前往设置
+              </ActionButton>
+            )}
+          </div>
         )}
         <div className="flex gap-2 flex-wrap border-t border-border/60 pt-3">
           {memoryEnabled && <>
@@ -630,6 +618,32 @@ function MemorySelfCheckSummary({
 }) {
   const { summary } = report
   const blocked = summary.fileChanged + summary.conflict + summary.extra + summary.invalid
+  const fieldLabels: Readonly<Record<string, string>> = {
+    logline: '一句话故事',
+    concept: '故事概念',
+    theme: '主题',
+    centralConflict: '核心冲突',
+    plotPattern: '情节模式',
+    mainPlot: '故事主线',
+    subPlots: '故事复线',
+    writingStyle: '写作风格',
+    narrativePOV: '叙事视角',
+    atmosphere: '基调与氛围',
+    prohibitions: '禁止事项',
+    consistencyRules: '一致性规则',
+    specialRequirements: '特殊要求',
+  }
+  const changeLabels = {
+    'project-changed': '项目内已修改，等待写入本地',
+    'file-changed': '本地文件已修改，等待确认采纳',
+    conflict: '项目与本地均有修改，需要选边',
+    'file-missing': '本地文件缺失，可恢复或按规则处理',
+    'file-extra': '本地存在未登记文件，需要人工处理',
+    invalid: '文件身份、格式或只读证据异常',
+    'same-change': '两侧改动一致，等待提交新基线',
+    clean: '已一致',
+  } as const
+  const changedItems = report.plan.items.filter(item => item.changeKind !== 'clean')
   return (
     <div className={`rounded-lg border px-3 py-2 text-xs ${blocked > 0
       ? 'border-amber-500/30 bg-amber-500/5 text-amber-200'
@@ -642,12 +656,24 @@ function MemorySelfCheckSummary({
         {' '}· 双方冲突 {summary.conflict} · 缺失 {summary.missing} · 异常 {summary.extra + summary.invalid}
       </p>
       {blocked > 0 && <p className="mt-1">本地改动、冲突或损坏项不会被“同步项目改动”覆盖。</p>}
+      {changedItems.length > 0 && (
+        <div className="mt-2 space-y-1 border-t border-border/60 pt-2">
+          <p className="font-medium">需要处理的文件</p>
+          {changedItems.slice(0, 12).map(item => (
+            <div key={item.identity.documentId} className="text-text-muted">
+              <p>{item.relativePath} · {changeLabels[item.changeKind]}</p>
+              {item.issues.map(issue => <p key={issue} className="pl-2 text-amber-300">{issue}</p>)}
+            </div>
+          ))}
+          {changedItems.length > 12 && <p className="text-text-muted">另有 {changedItems.length - 12} 项未展开</p>}
+        </div>
+      )}
       {candidates && candidates.candidates.length > 0 && (
         <div className="mt-2 space-y-1 border-t border-border/60 pt-2">
           <p className="font-medium">待确认的本地候选（未写入项目）</p>
           {candidates.candidates.map(candidate => (
             <p key={candidate.candidateId} className="text-text-muted">
-              {candidate.relativePath} · {candidate.changedFields.join('、')}
+              {candidate.relativePath} · {candidate.changedFields.map(field => fieldLabels[field] ?? field).join('、')}
             </p>
           ))}
         </div>

@@ -9,6 +9,7 @@
 > - [Agent + Harness 重构交接](../AI-HARNESS-REBUILD-HANDOFF-20260810.md)：跨电脑或跨模型接续当前功能分支时先读，包含完成度、验证状态和下一步入口。
 > - [Agent + Harness 大架构更新说明](../AI-HARNESS-REBUILD-RELEASE-20260817.md)：面向项目整体的当前架构、用户价值、验证证据与诚实边界。
 > - [记忆工程完整施工方案](../MEMORY-ENGINEERING-DEVELOPMENT-PLAN-20260817.md)：当前主体系的目标、硬盘可编辑映像、人工自检、双向同步、Harness 沉淀、施工顺序和验收门。
+> - [记忆工程收口纲领](../MEMORY-ENGINEERING-CLOSURE-CHARTER-20260817.md)：在已完成 MEMORY-0～10 基线上冻结 Deep Audit durable 化、选择性语义投影和真实长篇验收的后续边界。
 > - [历史完整快照](../ROADMAP-LEGACY.md)：本分支拆分前 `HEAD:docs/ROADMAP.md` 的原始内容，只读保存，不作为新的施工入口。
 > - [项目宪法](../../CLAUDE.md) 与 [施工蓝图](../MASTER-BLUEPRINT.md)：所有功能都必须服从三注册表和 Blueprint 的完成定义；读取范围由 [上下文路由](../CONTEXT-ROUTING.md) 决定。
 
@@ -23,11 +24,21 @@ Harness 与 CREL 工程重构已经完成，`MEMORY-0～10` 也已完成施工�
 [记忆工程完整施工与验收记录](../MEMORY-ENGINEERING-DEVELOPMENT-PLAN-20260817.md)，作者操作、恢复、
 隐私和费用边界见[本地记忆工作区指南](../MEMORY-WORKSPACE-GUIDE.md)。
 
+`MEMORY-CLOSE-1～3` 已完成：Fast Guard / Deep Audit 已进入 durable Harness 与统一记忆结算；首批
+`storyCores`、`creativeRules` 已按 Work 输出可双向编辑的中文 YAML；隔离的十万字级代表性长篇、
+多 World/Work、冲突、中断、清库恢复、历史 Run 重绑定和恢复后继续创作已形成回归证据。完成边界与
+诚实样本说明见[记忆工程收口纲领](../MEMORY-ENGINEERING-CLOSURE-CHARTER-20260817.md)。后续不重开本轮，
+也不以“全表可编辑”为目标；新增语义投影仍须逐表通过准入门。
+
 旧文件夹绑定后的“进入即覆盖 + 五分钟覆盖”路径已经下线。绑定、重新授权和检查均为零写入；稳定身份、
 共同基线、冲突检测、事务恢复、显式采纳和真实文件系统往返均已通过测试。长期一致性以结构化 Canon、
 状态账本、时间线、来源证据和依赖图为主，embedding 只允许作为可删除、可重建、无裁决权的可选派生索引。
 每个新 Harness 成功、失败或取消终态都在同一 IndexedDB 事务内追加显式记忆结算；该结算只标记硬盘待
 人工同步，不建立后台写盘旁路。
+
+`MEMORY-STORAGE-1` 已把文件夹绑定收口为项目的一等存储位置：两个正式新建入口都可选择任意硬盘目录，
+项目内“设置 → 项目存储工作区”统一显示、重新授权、更换或解除位置；数据管理不再保留第二个位置选择入口，
+只负责人工核对、同步和恢复。选择或迁移位置仍为零写入，旧目录不删除，恢复出的新项目继承恢复目录。
 
 ## 已完成基线：CREL 创作可靠性工程
 
