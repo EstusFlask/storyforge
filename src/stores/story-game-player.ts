@@ -10,7 +10,13 @@ import {
   readSimulationStateVersion,
   verifySimulationCheckpoint,
 } from '../lib/simulation/runtime'
-import { assertGameReleaseUnchanged, parseGameReleaseManifest, parseWorldReleaseSpeakerNames } from '../lib/text-game/releases'
+import {
+  assertGameReleaseUnchanged,
+  parseGameReleaseManifest,
+  parseWorldReleasePlayerCharacter,
+  parseWorldReleaseSpeakerNames,
+  type WorldReleasePlayerCharacter,
+} from '../lib/text-game/releases'
 import { assertInstanceBinding, createStoryGameInstance, readBoundInstances } from '../lib/world-engine/instances'
 import type {
   GameRelease,
@@ -27,6 +33,7 @@ export interface StoryGameLibraryItem {
   release: GameRelease
   manifest: GameReleaseManifestV1 | null
   speakerNames: Record<string, string>
+  playerCharacter: WorldReleasePlayerCharacter | null
   error: string
 }
 
@@ -43,7 +50,7 @@ interface StoryGamePlayerState {
   loading: boolean
   busy: boolean
   error: string
-  load(scope: WorkspaceScope, worldGroupId: number | null): Promise<void>
+  load(scope: WorkspaceScope, worldGroupId: number | null, openLibrary?: boolean): Promise<void>
   select(sessionId: number | null): Promise<void>
   start(gameReleaseId: number, title?: string): Promise<number>
   choose(choiceKey: string): Promise<void>
@@ -73,6 +80,7 @@ async function readLibrary(scope: WorkspaceScope): Promise<StoryGameLibraryItem[
         release,
         manifest: parseGameReleaseManifest(release.manifestJson),
         speakerNames: worldRelease ? parseWorldReleaseSpeakerNames(worldRelease.manifestJson) : {},
+        playerCharacter: worldRelease ? parseWorldReleasePlayerCharacter(worldRelease.manifestJson) : null,
         error: '',
       }
     } catch (error) {
@@ -80,6 +88,7 @@ async function readLibrary(scope: WorkspaceScope): Promise<StoryGameLibraryItem[
         release,
         manifest: null,
         speakerNames: {},
+        playerCharacter: null,
         error: error instanceof Error ? error.message : String(error),
       }
     }
@@ -144,10 +153,11 @@ export const useStoryGamePlayerStore = create<StoryGamePlayerState>((set, get) =
       .filter(session => session.kind === 'storygame'
         && (session.worldGroupId ?? null) === worldGroupId)
       .sort((left, right) => right.updatedAt - left.updatedAt)
-    const requested = selectedSessionId === undefined ? get().selectedSessionId : selectedSessionId
+    const explicitlySelected = selectedSessionId !== undefined
+    const requested = explicitlySelected ? selectedSessionId : get().selectedSessionId
     const nextSelected = requested != null && sessions.some(session => session.id === requested)
       ? requested
-      : sessions[0]?.id ?? null
+      : explicitlySelected ? null : sessions[0]?.id ?? null
     set({ releases, sessions, selectedSessionId: nextSelected })
     if (nextSelected != null) await refreshSelected()
     else set({
@@ -172,14 +182,14 @@ export const useStoryGamePlayerStore = create<StoryGamePlayerState>((set, get) =
     busy: false,
     error: '',
 
-    load: async (scope, worldGroupId) => {
+    load: async (scope, worldGroupId, openLibrary = false) => {
       const scopeChanged = get().scope?.projectId !== scope.projectId
         || get().scope?.worldId !== scope.worldId
         || get().scope?.workId !== scope.workId
         || get().worldGroupId !== worldGroupId
       set({ scope, worldGroupId, loading: true, error: '', ...(scopeChanged ? { selectedSessionId: null } : {}) })
       try {
-        await reload()
+        await reload(openLibrary ? null : undefined)
       } catch (error) {
         set({ error: error instanceof Error ? error.message : String(error) })
       } finally {
