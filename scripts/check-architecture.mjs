@@ -804,6 +804,37 @@ if (!agentRunTypeSource.includes("'evidence.artifact.recorded'")
   violations.push('[㉑唯一结算] exact evidence 必须从同一 Run ledger 进入现有 Memory Settlement/Index')
 }
 
+// ── ㉒ CTXG-1 Gateway 合同必须扩展 CONTEXT_SOURCES，而非新建第四注册表 ──
+const registryTypeSource = read('src/lib/registry/types.ts')
+const gatewayContractSource = read('src/lib/context-gateway/contracts.ts')
+if (!registryTypeSource.includes('resources?: ContextResourceProviderV1')) {
+  violations.push('[㉒Provider 挂载] ContextResourceProvider 必须作为 CONTEXT_SOURCES 条目扩展点')
+}
+for (const contract of [
+  'ContextAccessPolicyV1', 'ContextResourceDescriptorV1', 'ContextResourceProviderV1',
+  'ContextSourceRefV1', 'ContextSufficiencyReportV1', 'RetrievalTraceV1',
+  'ContextPacketV1', 'AgentRunArtifactV1', 'ContextGatewayVersionV1',
+]) {
+  if (!registryTypeSource.includes(`interface ${contract}`)) violations.push(`[㉒Gateway 合同] registry/types 缺少 ${contract}`)
+}
+if (!gatewayContractSource.includes("from '../registry/project-tables'")
+  || !gatewayContractSource.includes('REGISTRY_BY_NAME.get(ref.table)')
+  || /const\s+(?:SOURCE|TABLE|OWNER)_REGISTRY/.test(gatewayContractSource)) {
+  violations.push('[㉒SourceRef owner] SourceRef 表与 owner 必须从 PROJECT_TABLES 派生，不得有平行注册表')
+}
+for (const token of [
+  'listMetadata', 'searchMetadata', 'readOriginal', 'metadata-body-leak',
+  'explicit-resource-key-only', 'providerSetHash', 'sufficiencyObligationsVersion',
+  'toolSchemaHash', 'normalizationVersion',
+]) {
+  if (!`${registryTypeSource}\n${gatewayContractSource}`.includes(token)) {
+    violations.push(`[㉒Gateway 边界] Gateway 类型/实现缺少 ${token}`)
+  }
+}
+if (!assembleContextSource.includes("from '../context-gateway/contracts'")) {
+  violations.push('[㉒唯一入口] Gateway 合同必须由现有 assembleContext 边界导出')
+}
+
 // ── 报告 ──
 if (violations.length) {
   console.error('[architecture] ❌ 发现反模式违规(违反 CLAUDE.md 三注册表铁律):\n')

@@ -17,6 +17,22 @@ import { db } from '../db/schema'
 import { assertRecordInScope, resolveReadScope } from '../world-engine/scope'
 import { maybeInjectHarnessFaultV1 } from '../agent/dev-fault-injection'
 
+// CTXG contracts share the existing assembleContext/CONTEXT_SOURCES boundary.
+// Re-exporting keeps callers away from a parallel context entrypoint.
+export {
+  assertContextReadPermissionV1,
+  assertContextResourceDescriptorV1,
+  assertContextSourceRefV1,
+  assertResourcePageV1,
+  createAgentRunArtifactWireV1,
+  createContextGatewayContractSnapshotV1,
+  createContextPacketV1,
+  createContextSufficiencyReportV1,
+  createRetrievalTraceV1,
+  filterContextResourcePageV1,
+  parseContextGatewayContractSnapshotV1,
+} from '../context-gateway/contracts'
+
 /** 拿不到模型时的保守默认输入预算(原固定 24K 偏紧,放宽避免内部提前裁) */
 const FALLBACK_INPUT_BUDGET = 48_000
 const LAYERS_BY_TRIM_PRIORITY: ContextLayer[] = ['L3', 'L2', 'L1']

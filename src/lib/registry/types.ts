@@ -12,6 +12,7 @@ import type { InspirationResultMode } from '../types/inspiration-workspace'
 import type { RagSelectionTraceCollector } from '../types/rag-library'
 import type { WorkspaceScope } from '../types/world-ownership'
 import type {
+  ExactRunArtifactKindV1,
   WorkspaceDocumentCodecV1,
   WorkspaceDocumentEditPolicyV1,
 } from '../types/memory-engineering'
@@ -524,6 +525,274 @@ export interface AssembleContextInput {
   continuitySnapshot?: PreparedContinuityContext
 }
 
+export type ContextResourceKind =
+  | 'workspace'
+  | 'world'
+  | 'worldview-field'
+  | 'story-core-field'
+  | 'character'
+  | 'character-relation'
+  | 'story-arc'
+  | 'storyline-progress'
+  | 'outline-node'
+  | 'detailed-outline'
+  | 'chapter'
+  | 'foreshadow'
+  | 'location'
+  | 'codex-entry'
+  | 'world-link'
+  | 'fact'
+  | 'reference'
+  | 'narrative-blueprint'
+
+export type ContextResourceDepthV1 = 'index' | 'summary' | 'focused' | 'full' | 'original'
+export type ContextResourceAuthorityV1 =
+  | 'author-canon'
+  | 'adopted-canon'
+  | 'confirmed-evidence'
+  | 'derived-summary'
+  | 'candidate'
+
+export interface ContextSourceRefV1 {
+  table: string
+  recordId: number | string
+  field: string
+  revision: number | string
+  contentHash: string
+  anchor?: { start: number; end: number; quoteHash: string }
+}
+
+export interface ContextResourceRelationV1 {
+  kind: 'parent' | 'child' | 'same-entity' | 'appears-in' | 'depends-on' | 'world-link' | 'temporal-neighbor'
+  targetResourceKey: string
+  direction: 'outgoing' | 'incoming' | 'undirected'
+}
+
+export interface ContextTimeRangeV1 {
+  start?: number | string
+  end?: number | string
+  throughChapterId?: number
+}
+
+export interface ContextResourceDescriptorV1 {
+  version: 1
+  resourceKey: string
+  sourceKey: string
+  kind: ContextResourceKind
+  title: string
+  shortSummary: string
+  authority: ContextResourceAuthorityV1
+  scope: {
+    projectId: number
+    worldId?: number
+    workId?: number
+    worldGroupId?: number | null
+    chapterId?: number
+  }
+  relations: ContextResourceRelationV1[]
+  timeRange?: ContextTimeRangeV1
+  sourceRefs: ContextSourceRefV1[]
+  tokenEstimate: Partial<Record<ContextResourceDepthV1, number>>
+  availableDepths: ContextResourceDepthV1[]
+  priority: 'normal' | 'pinned' | 'must-read'
+}
+
+export interface FrozenResourceScopeV1 {
+  projectId: number
+  worldId?: number
+  workId?: number
+  worldGroupId?: number | null
+}
+
+export interface ResourceListInputV1 {
+  scope: FrozenResourceScopeV1
+  kinds?: ContextResourceKind[]
+  cursor?: string
+  limit: number
+}
+
+export interface ResourceSearchInputV1 extends ResourceListInputV1 {
+  query: string
+}
+
+export interface ResourcePageV1 {
+  version: 1
+  items: ContextResourceDescriptorV1[]
+  nextCursor: string | null
+  scopeFingerprint: string
+}
+
+export interface ResourceReadInputV1 {
+  scope: FrozenResourceScopeV1
+  resourceKey: string
+  depth: Exclude<ContextResourceDepthV1, 'original'>
+  maxTokens: number
+}
+
+export interface OriginalEvidenceReadInputV1 {
+  scope: FrozenResourceScopeV1
+  resourceKey: string
+  sourceRef: ContextSourceRefV1
+  maxTokens: number
+}
+
+export interface ContextResourceReadV1 {
+  version: 1
+  descriptor: ContextResourceDescriptorV1
+  depth: Exclude<ContextResourceDepthV1, 'original'>
+  content: string
+  contentHash: string
+  tokenCount: number
+  sourceRefs: ContextSourceRefV1[]
+}
+
+export interface OriginalEvidenceReadV1 {
+  version: 1
+  descriptor: ContextResourceDescriptorV1
+  sourceRef: ContextSourceRefV1
+  content: string
+  contentHash: string
+  tokenCount: number
+}
+
+export interface ContextResourceProviderV1 {
+  version: 'context-resource-provider-v1'
+  providerId: string
+  providerVersion: string
+  normalizationVersion: string
+  kinds: readonly ContextResourceKind[]
+  listMetadata(input: ResourceListInputV1): Promise<ResourcePageV1>
+  searchMetadata(input: ResourceSearchInputV1): Promise<ResourcePageV1>
+  read(input: ResourceReadInputV1): Promise<ContextResourceReadV1>
+  readOriginal(input: OriginalEvidenceReadInputV1): Promise<OriginalEvidenceReadV1>
+  fingerprint(scope: FrozenResourceScopeV1): Promise<string>
+}
+
+export interface ContextAccessPolicyV1 {
+  version: 'context-access-policy-v1'
+  policyId: string
+  mandatorySourceKeys: string[]
+  allowedSourceKeys: string[]
+  allowedResourceKinds: ContextResourceKind[]
+  allowedDepths: ContextResourceDepthV1[]
+  selectorPolicyId: string
+  maxReadCalls: number
+  maxRetrievedTokens: number
+  perKindMinimumTokens?: Partial<Record<ContextResourceKind, number>>
+  allowOriginalRead: boolean
+  candidateAccess: 'forbidden' | 'explicit-resource-key-only'
+}
+
+export interface ContextSufficiencyObligationV1 {
+  id: string
+  kind: 'mandatory-source' | 'resource-kind' | 'entity' | 'time-boundary' | 'conflict-check'
+  required: boolean
+  status: 'satisfied' | 'missing' | 'conflicted' | 'not-applicable'
+  evidenceResourceKeys: string[]
+  reasonCode: string
+}
+
+export interface ContextSufficiencyReportV1 {
+  version: 'context-sufficiency-v1'
+  obligations: ContextSufficiencyObligationV1[]
+  assumptions: string[]
+  additionalRead: 'forbidden' | 'not-needed' | 'needed'
+  reportHash: string
+}
+
+export interface RetrievalDecisionV1 {
+  resourceKey: string
+  sourceKey: string
+  reason: string
+  depth: ContextResourceDepthV1
+  revision: number | string
+  contentHash: string
+  sourceRefs: ContextSourceRefV1[]
+  tokenCount: number
+}
+
+export interface RetrievalOmissionV1 {
+  resourceKey: string
+  sourceKey: string
+  reasonCode: string
+  tokenEstimate: number
+}
+
+export interface RetrievalQueryTraceV1 {
+  query: string
+  sourceKeys: string[]
+  resultResourceKeys: string[]
+  resultFingerprint: string
+}
+
+export interface RetrievalTraceV1 {
+  version: 1
+  catalogVersion: string
+  selectorPolicyId: string
+  mandatory: RetrievalDecisionV1[]
+  autoSelected: RetrievalDecisionV1[]
+  agentReads: RetrievalDecisionV1[]
+  omitted: RetrievalOmissionV1[]
+  queries: RetrievalQueryTraceV1[]
+  totalTokens: number
+  fallbackUsed: boolean
+  traceHash: string
+}
+
+export interface ContextPacketV1 {
+  version: 'context-packet-v1'
+  scopeFingerprint: string
+  gatewayVersionHash: string
+  policyHash: string
+  sufficiencyReportHash: string
+  retrievalTraceHash: string
+  content: string
+  contentHash: string
+  tokenCount: number
+  sourceRefs: ContextSourceRefV1[]
+  packetHash: string
+}
+
+/** CTXG physical persistence is introduced in CTXG-2; this is its frozen wire contract. */
+export interface AgentRunArtifactV1 {
+  version: 'agent-run-artifact-v1'
+  artifactKind: ExactRunArtifactKindV1
+  projectId: number
+  scopeFingerprint: string
+  contentHash: string
+  byteSize: number
+  encoding: 'utf-8' | 'gzip-utf-8'
+  content: string | Uint8Array
+  createdAt: number
+}
+
+export interface ContextGatewayVersionV1 {
+  version: 'context-gateway-version-v1'
+  gatewayVersion: string
+  selectorVersion: string
+  descriptorContractVersion: 'context-resource-descriptor-v1'
+  providerSetHash: string
+  sufficiencyObligationsVersion: string
+  toolSchemaHash: string
+  normalizationVersion: string
+  versionHash: string
+}
+
+export interface ContextGatewayContractSnapshotV1 {
+  version: 1
+  policy: ContextAccessPolicyV1
+  policyHash: string
+  providers: Array<{
+    sourceKey: string
+    providerId: string
+    providerVersion: string
+    normalizationVersion: string
+    kinds: ContextResourceKind[]
+  }>
+  gateway: ContextGatewayVersionV1
+  snapshotHash: string
+}
+
 export interface ContextSource {
   key: string
   label: string
@@ -544,6 +813,8 @@ export interface ContextSource {
   /** 规划尚未创建正文 Chapter 时，允许用 outlineNodeId 作为规范章序边界。 */
   acceptsOutlineNodeAsChapterBoundary?: boolean
   enabled?: (input: AssembleContextInput) => boolean | Promise<boolean>
+  /** CTXG resource navigation extension. It is the only Provider registration point. */
+  resources?: ContextResourceProviderV1
   read: (input: AssembleContextInput) => Promise<string>
 }
 
