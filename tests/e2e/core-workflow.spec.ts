@@ -475,8 +475,9 @@ test('可见资料库精确选择字段，节点冻结权重与实际召回', as
   await expect(page.getByRole('heading', { name: '资料与检索库', exact: true })).toBeVisible()
   await page.getByText('世界观主世界观', { exact: true }).click()
   await expect(page.getByText('潮汐退去后，第一座浮空城从海床升起。', { exact: true })).toBeVisible()
-  await page.getByRole('spinbutton', { name: '默认权重' }).fill('2.5')
-  await expect(page.getByRole('spinbutton', { name: '默认权重' })).toHaveValue('2.5')
+  const worldviewResource = page.getByRole('group').filter({ hasText: '世界观主世界观' })
+  await worldviewResource.getByRole('spinbutton', { name: '默认权重' }).fill('2.5')
+  await expect(worldviewResource.getByRole('spinbutton', { name: '默认权重' })).toHaveValue('2.5')
 
   await sidebarButton(page, '节点模式').click()
   await page.getByRole('button', { name: '创建空白节点图', exact: true }).click()

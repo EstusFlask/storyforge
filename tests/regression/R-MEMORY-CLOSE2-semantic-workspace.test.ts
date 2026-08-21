@@ -13,6 +13,7 @@ import {
 import { buildWorkspaceImpactPlanV1 } from '../../src/lib/memory/workspace-impact'
 import { createContextManifestV1, createContextManifestV2FromV1 } from '../../src/lib/agent/run/context-manifest'
 import { ensureWorkspaceOwnership } from '../../src/lib/world-engine/ownership'
+import { stampNewRecord } from '../../src/lib/world-engine/scope'
 
 function notFound(): DOMException {
   return new DOMException('not found', 'NotFoundError')
@@ -123,18 +124,19 @@ async function seedTwoWorks() {
     createdAt: now,
     updatedAt: now,
   }) as number
-  const addChapter = async (workId: number, title: string) => {
-    const outlineNodeId = await db.outlineNodes.add({
-      projectId, workId, parentId: null, type: 'chapter', title, summary: '', order: 0,
+  const addChapter = async (scope: { projectId: number; worldId: number; workId: number }, title: string) => {
+    const outlineNodeId = await db.outlineNodes.add(stampNewRecord(scope, 'outlineNodes', {
+      projectId, workId: scope.workId, parentId: null, type: 'chapter', title, summary: '', order: 0,
       createdAt: now, updatedAt: now,
-    } as any) as number
-    return db.chapters.add({
-      projectId, workId, outlineNodeId, title, content: `<p>${title}正文</p>`,
+    }, { owner: 'work' }) as any) as number
+    return db.chapters.add(stampNewRecord(scope, 'chapters', {
+      projectId, workId: scope.workId, outlineNodeId, title, content: `<p>${title}正文</p>`,
       wordCount: 5, status: 'draft', order: 0, notes: '', createdAt: now, updatedAt: now,
-    } as any) as Promise<number>
+    }, { owner: 'work' }) as any) as Promise<number>
   }
-  const firstChapterId = await addChapter(first.scope.workId, '第一作品第一章')
-  const secondChapterId = await addChapter(secondWorkId, '第二作品第一章')
+  const secondScope = { projectId, worldId: secondWorldId, workId: secondWorkId }
+  const firstChapterId = await addChapter(first.scope, '第一作品第一章')
+  const secondChapterId = await addChapter(secondScope, '第二作品第一章')
 
   const storyCore = (workId: number, suffix: string) => ({
     projectId, workId,
@@ -164,10 +166,10 @@ async function seedTwoWorks() {
     createdAt: now,
     updatedAt: now,
   })
-  const firstStoryId = await db.storyCores.add(storyCore(first.scope.workId, '甲') as any) as number
-  const secondStoryId = await db.storyCores.add(storyCore(secondWorkId, '乙') as any) as number
-  const firstRulesId = await db.creativeRules.add(rules(first.scope.workId, '甲') as any) as number
-  const secondRulesId = await db.creativeRules.add(rules(secondWorkId, '乙') as any) as number
+  const firstStoryId = await db.storyCores.add(stampNewRecord(first.scope, 'storyCores', storyCore(first.scope.workId, '甲'), { owner: 'work' }) as any) as number
+  const secondStoryId = await db.storyCores.add(stampNewRecord(secondScope, 'storyCores', storyCore(secondWorkId, '乙'), { owner: 'work' }) as any) as number
+  const firstRulesId = await db.creativeRules.add(stampNewRecord(first.scope, 'creativeRules', rules(first.scope.workId, '甲'), { owner: 'work' }) as any) as number
+  const secondRulesId = await db.creativeRules.add(stampNewRecord(secondScope, 'creativeRules', rules(secondWorkId, '乙'), { owner: 'work' }) as any) as number
   return {
     projectId,
     firstScope: first.scope,

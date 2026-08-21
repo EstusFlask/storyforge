@@ -1131,6 +1131,34 @@ if (!contextGatewayIndexSource.includes("from './provider-cache'")
   violations.push('[㉙公开入口] 缓存诊断与长篇候选规划必须从唯一 Context Gateway headless 边界导出')
 }
 
+// ── ㉚ GATE-P1A shadow read 只能观察，不得形成第二条生产/写入路径 ──
+const contextShadowReadSource = read('src/lib/context-gateway/shadow-read.ts')
+for (const token of [
+  'compareContextGatewayShadowReadV1', "rollout !== 'shadow'", 'assembleContext({',
+  'executeContextGatewayV1({', 'additionalReadsEnabled: false',
+  'additionalPlanningModelCalls !== 0', 'additionalToolCalls !== 0',
+  'startedEpoch !== contextGatewayCacheEpochV1()', 'reportHash',
+]) {
+  if (!contextShadowReadSource.includes(token)) violations.push(`[㉚shadow 总门] 缺少 ${token}`)
+}
+if (/\bdb\.|from ['"]\.\.\/db\//.test(contextShadowReadSource)
+  || /recordContextGateway|finalizeContextGateway|adopt\(|persistCandidate|createAgentRun/.test(contextShadowReadSource)) {
+  violations.push('[㉚shadow 零副作用] shadow compare 不得直接访问 DB、写 Run/Artifact、持久化候选或采纳')
+}
+if (!agentSkillSource.includes("id: 'world-origin.worldview-field'")
+  || !/id:\s*'world-origin\.worldview-field'[\s\S]*?rollout:\s*'shadow'/.test(agentSkillSource)) {
+  violations.push('[㉚未切生产] Phase 1A 总门期间第一个业务 Skill 必须仍处于 shadow')
+}
+if (!contextGatewayIndexSource.includes("from './shadow-read'")) {
+  violations.push('[㉚公开入口] shadow compare 必须从唯一 Context Gateway headless 边界导出')
+}
+const workspacePageSource = read('src/pages/WorkspacePage.tsx')
+if (!workspacePageSource.includes('await flushPendingEditsV1()')
+  || !workspacePageSource.includes('onSelect={selectModule}')
+  || !workspacePageSource.includes('已阻止切换页面')) {
+  violations.push('[㉚切页保存屏障] 工作区侧栏必须在卸载当前编辑器前 flush，保存失败不得继续切页')
+}
+
 // ── 报告 ──
 if (violations.length) {
   console.error('[architecture] ❌ 发现反模式违规(违反 CLAUDE.md 三注册表铁律):\n')

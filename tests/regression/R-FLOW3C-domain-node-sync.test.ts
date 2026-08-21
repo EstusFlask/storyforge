@@ -38,21 +38,22 @@ describe('FLOW-3C · Canon 绑定概览与下游失效', () => {
     await db.delete()
     await db.open()
     await db.projects.put(project)
-    await db.worldviews.put({
+    const scope = await resolveScopeLike(project.id!)
+    await db.worldviews.put(stampNewRecord(scope, 'worldviews', {
       projectId: project.id!,
       worldGroupId: null,
       worldOrigin: '潮汐退去后，第一座城从海床升起。',
       mountainsRivers: '北境河流汇入黑潮海。',
       createdAt: 1,
       updatedAt: 1,
-    } as any)
-    await db.storyCores.put({
+    }, { owner: 'world' }) as any)
+    await db.storyCores.put(stampNewRecord(scope, 'storyCores', {
       projectId: project.id!,
       logline: '一名测潮者寻找沉没城市。',
       concept: '海床上的城市会在退潮时醒来。',
       createdAt: 1,
       updatedAt: 1,
-    } as any)
+    }, { owner: 'work' }) as any)
   })
 
   afterEach(() => db.close())
@@ -111,7 +112,8 @@ describe('FLOW-3C · Canon 绑定概览与下游失效', () => {
       outputs: structuredClone(template.outputs),
     }
     const graph: AuthoringNodeGraph = { ...emptyAuthoringGraph(), nodes: [origin] }
-    const flowId = await db.nodeFlows.add({
+    const scope = await resolveScopeLike(project.id!)
+    const flowId = await db.nodeFlows.add(stampNewRecord(scope, 'nodeFlows', {
       projectId: project.id!,
       worldGroupId: null,
       name: 'Canon 冲突保护',
@@ -119,7 +121,7 @@ describe('FLOW-3C · Canon 绑定概览与下游失效', () => {
       graphJson: JSON.stringify(graph),
       createdAt: Date.now(),
       updatedAt: Date.now(),
-    }) as number
+    }, { owner: 'work' })) as number
     const flow = (await db.nodeFlows.get(flowId)) as NodeFlow
 
     const outcome = await runAuthoringGraph({ flow })

@@ -290,6 +290,11 @@ function rowTitle(spec: ResourceSpec, row: ResourceRow): string {
     const value = row[key]
     if (typeof value === 'string' && value.trim()) return value.trim()
   }
+  // Singleton worldview rows intentionally have no author-facing name. Preserve
+  // the established library label instead of rendering the source label twice.
+  if (spec.name === 'worldviews') {
+    return row.worldGroupId == null ? '主世界观' : '当前世界观'
+  }
   return spec.resourceIdentity.label
 }
 

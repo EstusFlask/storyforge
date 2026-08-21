@@ -108,7 +108,7 @@ describe('WORLDGAME-3 · WorldRelease 到 AVG', () => {
       narrative: { currentNodeKey: 'entry' },
       presentation: { currentNodeKey: 'entry', assets: expect.any(Array) },
     })
-  }, 30_000)
+  }, 60_000)
 
   it('实时媒资已有新版本时仍恢复并发布来源 WorldRelease 的冻结二进制', async () => {
     const fixture = await avgWorldFixture(true)

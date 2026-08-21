@@ -235,7 +235,7 @@ AI 输出经 `adopt({ target, data })` 写回,只有这里登记的字段可写(
 | `agent.orchestrator` | `src/lib/agent/orchestrator.ts:696` |
 | `agent.orchestrator.replan` | `src/lib/agent/orchestrator.ts:783` |
 | `agent.readonly` | `src/lib/agent/client-adapter.ts:118` |
-| `canon.setting.extract` | `src/lib/agent/run/constitution-extraction-durable.ts:509` |
+| `canon.setting.extract` | `src/lib/agent/run/constitution-extraction-durable.ts:508` |
 | `chapter.content` | `src/lib/generation/chapter-generation-node.ts:23` |
 | `chapter.continue` | `src/lib/generation/chapter-generation-node.ts:26` |
 | `chapter.continuity` | `src/lib/node-authoring/domain-execution.ts:552`<br/>`src/lib/node-authoring/domain-execution.ts:616` |
@@ -271,7 +271,7 @@ AI 输出经 `adopt({ target, data })` 写回,只有这里登记的字段可写(
 | `scene.verify` | `src/components/scene/SceneVerifyPanel.tsx:81` |
 | `story.timeline` | `src/lib/agent/run/impact-story-timeline-regeneration-durable.ts:670`<br/>`src/lib/agent/run/story-timeline-extraction-durable.ts:758` |
 | `style.learn` | `src/lib/agent/run/style-learning-durable.ts:493` |
-| `world-group.expand` | `src/lib/agent/run/worldview-expand-durable.ts:475` |
+| `world-group.expand` | `src/lib/agent/run/worldview-expand-durable.ts:476` |
 | `world-group.suggest` | `src/lib/agent/run/world-suggest-durable.ts:614` |
 
 ### 动态 category 调用
@@ -348,4 +348,4 @@ AI 输出经 `adopt({ target, data })` 写回,只有这里登记的字段可写(
 
 ---
 
-生成时间基准:commit `59c5e638`
+生成时间基准:commit `52fa227f`

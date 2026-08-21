@@ -161,6 +161,7 @@ function worldGroupSnapshot(group: WorldGroup & { id: number }): WorldGroupSnaps
 
 const WORLDVIEW_META_FIELDS = new Set([
   'id', 'projectId', 'worldId', 'workId', 'worldGroupId', 'createdAt', 'updatedAt',
+  'ragDocumentId',
   'embedding', 'embeddingModel', 'embeddingUpdatedAt',
 ])
 

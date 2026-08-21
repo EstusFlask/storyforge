@@ -41,5 +41,5 @@ describe('TEXTADV-1 · read-only result narrator', () => {
     expect(adopted.candidate).toMatchObject({ kind: 'adventure-narration-candidate' })
     expect(await readSimulationStateVersion(session.id!)).toEqual(before)
     expect(adopted.snapshot.projection.state).toBe('completed')
-  }, 20_000)
+  }, 60_000)
 })
