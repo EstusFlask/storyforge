@@ -28,6 +28,8 @@ export interface AgentContextEvidence {
   omitted: string[]
   trimmed: string[]
   sourceEvidence?: AssembleContextSourceEvidence[]
+  /** Semantic input-policy sources proven through a Gateway packet's SourceRefs. */
+  inputStateSourceKeys?: string[]
   inputState?: AgentContextInputStateEvidenceV1
   estimatedInputTokens: number
   inputBudgetTokens: number

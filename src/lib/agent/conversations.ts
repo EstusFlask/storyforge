@@ -25,6 +25,7 @@ import {
   contextManifestHashForStepAttemptV1,
   createMasterCandidateStepReceiptV1,
 } from './run/master-step-verification'
+import { computeMasterCandidateHashV1 } from './run/master-candidate-hash'
 
 export async function getOrCreateAgentConversation(input: {
   projectId: number
@@ -187,10 +188,10 @@ export async function updateAgentEventCandidate(
       semanticReview: _staleSemanticReview,
       ...withoutHash
     } = payload
-    const candidateHash = await hashCanonicalValue({
-      draft: content,
-      payload: withoutHash,
-    })
+    const candidateHash = await computeMasterCandidateHashV1(
+      withoutHash as unknown as MasterCandidatePayload,
+      content,
+    )
     const revisedPayload = { ...withoutHash, candidateHash }
     const nextPayload = JSON.stringify(revisedPayload)
     await db.transaction(

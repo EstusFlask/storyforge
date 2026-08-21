@@ -45,7 +45,7 @@ function toSkillDefinitionV2(skill: AgentSkillDefinitionV1): AgentSkillDefinitio
     ...skill,
     version: 2,
     sourceDefinitionVersion: 1,
-    resolvedToolSourceKeys: resolveAgentSkillContextSourceKeysV1(skill)
+    resolvedToolSourceKeys: resolveAgentSkillContextSourceKeysV1(skill, { includeGatewayProviders: true })
       .filter(sourceKey => !directSources.has(sourceKey)),
   }
 }
@@ -136,7 +136,8 @@ export async function createAgentSkillExecutionBindingV2(
   const activations = normalizeActivations(skill, input.optionalContextActivations ?? [])
   const activated = new Set(activations.map(item => item.sourceKey))
   const contextSourceKeys = [
-    ...resolveAgentSkillContextSourceKeysV1(skill),
+    ...definition.resolvedToolSourceKeys,
+    ...skill.contextSourceKeys,
     ...skill.optionalContextSourceKeys.filter(sourceKey => activated.has(sourceKey)),
   ]
   const writeTargets = normalizeWriteTargets(skill, input.writeTargets ?? [])
@@ -177,18 +178,24 @@ function parseDefinitionJsonV2(binding: AgentSkillExecutionBindingV2): AgentSkil
 function assertFrozenGatewayPolicyV1(definition: AgentSkillDefinitionV2): void {
   const gateway = definition.contextGateway
   if (gateway == null) return
-  const exact = [
+  const required = [
     'version', 'rollout', 'providerSourceKeys', 'allowedResourceKinds', 'allowedDepths',
     'maxReadCalls', 'maxRetrievedTokens', 'maxPlanningSteps', 'maxPlanningModelTokens',
     'allowOriginalRead', 'additionalReadToolNames',
   ]
-  if (Object.keys(gateway).length !== exact.length
-    || Object.keys(gateway).some(key => !exact.includes(key))
+  const allowed = [...required, 'requiredWriteTargets']
+  if (required.some(key => !Object.prototype.hasOwnProperty.call(gateway, key))
+    || Object.keys(gateway).some(key => !allowed.includes(key))
     || gateway.version !== 1
     || !['shadow', 'required'].includes(gateway.rollout)
     || typeof gateway.allowOriginalRead !== 'boolean') {
     failV2(`${definition.id} 的冻结 Context Gateway policy 结构无效`)
   }
+  if (gateway.requiredWriteTargets !== undefined && (
+    !Array.isArray(gateway.requiredWriteTargets)
+    || gateway.requiredWriteTargets.some(value => typeof value !== 'string' || !value)
+    || new Set(gateway.requiredWriteTargets).size !== gateway.requiredWriteTargets.length
+  )) failV2(`${definition.id} 的冻结 Context Gateway requiredWriteTargets 无效`)
   for (const [label, values] of [
     ['providerSourceKeys', gateway.providerSourceKeys],
     ['allowedResourceKinds', gateway.allowedResourceKinds],

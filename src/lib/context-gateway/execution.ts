@@ -47,6 +47,7 @@ import {
   assertAgentSkillContextGatewayPolicyV1,
   contextGatewayAdditionalReadToolNamesForSkillV1,
   createContextAccessPolicyFromSkillV1,
+  isContextGatewayRequiredForWriteTargetV1,
 } from './skill-policy'
 
 const CATALOG_PAGE_SIZE = 50
@@ -554,6 +555,7 @@ export async function executeContextGatewayV1(
 
 export async function assertContextGatewayCandidateAdoptableV1(input: {
   skill: AgentSkillDefinitionV1
+  writeTarget?: string
   scope: WorkspaceScope
   worldGroupId?: number | null
   runId: number
@@ -562,8 +564,9 @@ export async function assertContextGatewayCandidateAdoptableV1(input: {
   candidateHash: string
   contextManifestHash?: string
 }): Promise<{ mode: 'legacy-or-shadow' } | { mode: 'required'; manifestHash: string; freshnessHash: string }> {
-  const gateway = input.skill.contextGateway
-  if (!gateway || gateway.rollout !== 'required') return { mode: 'legacy-or-shadow' }
+  if (!isContextGatewayRequiredForWriteTargetV1(input.skill, input.writeTarget)) {
+    return { mode: 'legacy-or-shadow' }
+  }
   if (!input.contextManifestHash) fail('candidate-manifest-required', `Skill ${input.skill.id} 的候选缺少 ContextManifestV3`)
   const verified = await verifyContextGatewayCandidateEvidenceV1({
     scope: input.scope,

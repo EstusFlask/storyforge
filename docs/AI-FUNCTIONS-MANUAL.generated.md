@@ -232,8 +232,8 @@ AI 输出经 `adopt({ target, data })` 写回,只有这里登记的字段可写(
 
 | category | 触发文件 |
 |---|---|
-| `agent.orchestrator` | `src/lib/agent/orchestrator.ts:696` |
-| `agent.orchestrator.replan` | `src/lib/agent/orchestrator.ts:783` |
+| `agent.orchestrator` | `src/lib/agent/orchestrator.ts:714` |
+| `agent.orchestrator.replan` | `src/lib/agent/orchestrator.ts:801` |
 | `agent.readonly` | `src/lib/agent/client-adapter.ts:118` |
 | `canon.setting.extract` | `src/lib/agent/run/constitution-extraction-durable.ts:508` |
 | `chapter.content` | `src/lib/generation/chapter-generation-node.ts:23` |
@@ -298,7 +298,7 @@ AI 输出经 `adopt({ target, data })` 写回,只有这里登记的字段可写(
 - `src/lib/agent/storyline-progress-copilot.ts:375 · chat`
 - `src/lib/agent/world-game-copilot.ts:295 · chat`
 - `src/lib/agent/world-origin-copilot.ts:255 · chat`
-- `src/lib/agent/worldview-field-copilot.ts:658 · chat`
+- `src/lib/agent/worldview-field-copilot.ts:820 · chat`
 - `src/lib/character-interaction/harness.ts:396 · chat`
 - `src/lib/evals/agent-harness/story-arc-main-path-browser.ts:97 · chat`
 - `src/lib/evals/creative-reliability/browser.ts:88 · chat`
@@ -348,4 +348,4 @@ AI 输出经 `adopt({ target, data })` 写回,只有这里登记的字段可写(
 
 ---
 
-生成时间基准:commit `52fa227f`
+生成时间基准:commit `b7edc0c7`

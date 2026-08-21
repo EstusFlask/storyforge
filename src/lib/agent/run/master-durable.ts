@@ -96,7 +96,10 @@ import {
 } from '../master-candidate-semantic-review'
 import { STORY_CORE_FIELDS } from '../story-core-copilot'
 import { CREATIVE_RULES_FIELDS } from '../creative-rules-copilot'
-import { WORLDVIEW_AGENT_FIELDS } from '../worldview-field-copilot'
+import {
+  WORLDVIEW_AGENT_FIELDS,
+  resolveWorldviewAgentFieldV1,
+} from '../worldview-field-copilot'
 import { MAX_INSPIRATION_FRAGMENTS } from '../../inspiration/workspace'
 import { parseCharacterRevisionTaskInputV1 } from '../character-revision-copilot'
 import { parseWorkspaceContentRevisionV1 } from '../../authoring/content-revision'
@@ -106,6 +109,21 @@ import {
   parsePromptExecutionOptionsV1,
   type GovernedPromptModuleKeyV1,
 } from '../prompt-execution'
+import {
+  computeMasterCandidateHashV1,
+  isMasterCandidateContextGatewayRequiredV1,
+} from './master-candidate-hash'
+import {
+  finalizeContextGatewayAttemptEvidenceV1,
+  recordContextGatewayPreflightEvidenceV1,
+  type ContextGatewayPreflightEvidenceV1,
+} from '../../context-gateway/attempt-evidence'
+import {
+  createContextManifestFromAssemblyV1,
+  createContextManifestV2FromV1,
+} from './context-manifest'
+import { isContextGatewayRequiredForWriteTargetV1 } from '../../context-gateway/skill-policy'
+import type { ContextManifestV2 } from '../../types/agent-run'
 
 export const MASTER_AGENT_PLAN_CHECKPOINT_KIND_V1 = 'master-agent-plan'
 export const MASTER_AGENT_PLAN_CHECKPOINT_VERSION_V1 = 1 as const
@@ -567,6 +585,7 @@ function sourceKeysForPlan(plan: MasterAgentPlan): string[] {
     return resolveAgentSkillContextSourceKeysV1(skill, {
       includeOptional: (task.agentId === 'prose' && task.perspectiveCharacterId != null)
         || (task.skillId === 'character.supplement' && task.characterSupplementRequest?.useEvidence === true),
+      includeGatewayProviders: true,
     })
   }))]
 }
@@ -605,8 +624,17 @@ function semanticReviewTaskIdsForPlan(plan: MasterAgentPlan): string[] {
     .filter(task => (
       task.dependsOn.length === 0
       && (task.agentId === 'world-origin' || task.agentId === 'inspiration')
+      && requiredContextGatewayWriteTargetForTaskV1(task) == null
     ))
     .map(task => task.id)
+}
+
+function requiredContextGatewayWriteTargetForTaskV1(task: MasterAgentTask): string | undefined {
+  const skill = resolveAgentSkillV1(task.agentId, task.skillId)
+  const writeTarget = skill.executionMode === 'worldview-field'
+    ? `worldviews.${resolveWorldviewAgentFieldV1(task.instruction)}`
+    : undefined
+  return isContextGatewayRequiredForWriteTargetV1(skill, writeTarget) ? writeTarget : undefined
 }
 
 export function buildMasterAgentRunContractV1(input: {
@@ -1096,13 +1124,8 @@ export async function replanDurableMasterAgentRunV1(
   ))
 }
 
-function candidateHashInput(payload: MasterCandidatePayload, draft: string): unknown {
-  const { candidateHash: _candidateHash, ...withoutHash } = payload
-  return { draft, payload: withoutHash }
-}
-
 async function computeCandidateHash(payload: MasterCandidatePayload, draft: string): Promise<string> {
-  return hashCanonicalValue(candidateHashInput(payload, draft))
+  return computeMasterCandidateHashV1(payload, draft)
 }
 
 function parseCandidatePayload(value: unknown, label: string): MasterCandidatePayload {
@@ -1841,7 +1864,71 @@ export async function runDurableMasterAgentPlanV1(
 
   const liveCandidates = new Map<string, MasterAgentDurableCandidateV1>()
   const activeTasks = new Map<string, MasterAgentTask>()
+  const gatewayAttempts = new Map<string, {
+    preflight: ContextGatewayPreflightEvidenceV1
+    baseManifest: ContextManifestV2
+  }>()
+  let gatewayPreflightQueue: Promise<void> = Promise.resolve()
   let previousBudget = restored.latestBudget
+  const recordGatewayPrepared = async (
+    task: MasterAgentTask,
+    prepared: Parameters<NonNullable<MasterAgentExecutionTrace['contextGatewayPrepared']>>[1],
+  ): Promise<void> => {
+    const writeTarget = requiredContextGatewayWriteTargetForTaskV1(task)
+    if (!writeTarget) fail(`主 Agent 任务 ${task.id} 未获 required Gateway canary 权限`)
+    if (!activeTasks.has(task.id)) fail(`主 Agent Gateway preflight 收到未启动任务 ${task.id}`)
+    const stepId = taskStepId(task.id)
+    const step = snapshot.projection.steps[stepId]
+    if (!step || step.status !== 'running') fail(`主 Agent Gateway preflight 步骤 ${stepId} 未运行`)
+    if (gatewayAttempts.has(task.id)) fail(`主 Agent Gateway preflight ${task.id} 不得重复记录`)
+    const skill = resolveAgentSkillV1(task.agentId, task.skillId)
+    const v1 = await createContextManifestFromAssemblyV1({
+      runId: snapshot.run.id,
+      stepId,
+      attempt: step.attempt,
+      projectId: input.scope.projectId,
+      worldGroupId: input.worldGroupId,
+      declaredSourceKeys: skill.contextGateway!.providerSourceKeys,
+      assembled: prepared.assembled,
+      readerVersion: 'context-gateway-execution-v1',
+    })
+    const baseManifest = await createContextManifestV2FromV1({ manifest: v1, scope: input.scope })
+    const recorded = await recordContextGatewayPreflightEvidenceV1({
+      scope: input.scope,
+      runId: snapshot.run.id,
+      stepId,
+      attempt: step.attempt,
+      contextPacket: prepared.execution.contextPacket,
+      selector: prepared.execution.selector,
+      renderedRequest: prepared.renderedRequest,
+      sourceSnapshots: prepared.execution.sourceSnapshots,
+      toolTranscript: prepared.execution.toolTranscript,
+      expectedLastSequence: snapshot.projection.lastSequence,
+      now: now(),
+    })
+    snapshot = recorded.snapshot
+    snapshot = await appendAgentRunEventV1({
+      scope: input.scope,
+      runId: snapshot.run.id,
+      type: 'model.requested',
+      payload: {
+        stepId,
+        attempt: step.attempt,
+        bindingHash: await hashCanonicalValue({
+          plan,
+          task,
+          runId: snapshot.run.id,
+          contractHash: snapshot.run.contractHash,
+          writeTarget,
+          preflightHash: recorded.evidence.preflightHash,
+        }),
+      },
+      expectedLastSequence: snapshot.projection.lastSequence,
+      now: now(),
+    })
+    gatewayAttempts.set(task.id, { preflight: recorded.evidence, baseManifest })
+    await notify(input.onDurableBoundary, 'model.requested', snapshot)
+  }
   const trace: MasterAgentExecutionTrace = {
     async taskStarted(task) {
       activeTasks.set(task.id, task)
@@ -1921,24 +2008,31 @@ export async function runDurableMasterAgentPlanV1(
           }
         }
       }
-      snapshot = await appendAgentRunEventV1({
-        scope: input.scope,
-        runId: snapshot.run.id,
-        type: 'model.requested',
-        payload: {
-          stepId,
-          attempt,
-          bindingHash: await hashCanonicalValue({
-            plan,
-            task,
-            runId: snapshot.run.id,
-            contractHash: snapshot.run.contractHash,
-          }),
-        },
-        expectedLastSequence: snapshot.projection.lastSequence,
-        now: now(),
-      })
-      await notify(input.onDurableBoundary, 'model.requested', snapshot)
+      if (!requiredContextGatewayWriteTargetForTaskV1(task)) {
+        snapshot = await appendAgentRunEventV1({
+          scope: input.scope,
+          runId: snapshot.run.id,
+          type: 'model.requested',
+          payload: {
+            stepId,
+            attempt,
+            bindingHash: await hashCanonicalValue({
+              plan,
+              task,
+              runId: snapshot.run.id,
+              contractHash: snapshot.run.contractHash,
+            }),
+          },
+          expectedLastSequence: snapshot.projection.lastSequence,
+          now: now(),
+        })
+        await notify(input.onDurableBoundary, 'model.requested', snapshot)
+      }
+    },
+    async contextGatewayPrepared(task, prepared) {
+      const queued = gatewayPreflightQueue.then(() => recordGatewayPrepared(task, prepared))
+      gatewayPreflightQueue = queued.catch(() => undefined)
+      await queued
     },
     async candidateReady(task, candidate) {
       const stepId = taskStepId(task.id)
@@ -1947,8 +2041,8 @@ export async function runDurableMasterAgentPlanV1(
         fail(`主 Agent durable trace 候选身份与当前任务 ${task.id} 不一致`)
       }
       assertCandidateMatchesTaskSkill(task, candidate.payload, `主 Agent durable trace 候选 ${task.id}`)
+      const skill = resolveAgentSkillV1(task.agentId, task.skillId)
       if (candidate.payload.contextEvidence) {
-        const skill = resolveAgentSkillV1(task.agentId, task.skillId)
         validateAgentSkillContextEvidenceV1(skill, candidate.payload.contextEvidence)
         if (
           candidate.payload.contextSources.length !== candidate.payload.contextEvidence.included.length
@@ -2021,19 +2115,67 @@ export async function runDurableMasterAgentPlanV1(
       const draft = candidate.draft
       if (!draft || draft.length > MAX_CANDIDATE_CHARS) fail(`主 Agent 任务 ${task.id} 候选长度无效`)
       const outputHash = await hashCanonicalValue(candidate.runtimeOutput)
-      const contextManifestHash = payload.contextEvidence
-        ? await hashCanonicalValue({
-            version: 1,
-            runId: snapshot.run.id,
+      const gatewayRequired = isMasterCandidateContextGatewayRequiredV1(payload)
+      let contextManifestHash: string | null = null
+      if (gatewayRequired) {
+        const gatewayAttempt = gatewayAttempts.get(task.id)
+        const runtime = candidate.contextGatewayRuntime
+        if (!gatewayAttempt || !runtime) fail(`主 Agent 任务 ${task.id} 缺少 required Gateway exact evidence`)
+        payload.candidateHash = await computeCandidateHash(payload, draft)
+        snapshot = await appendAgentRunEventV1({
+          scope: input.scope,
+          runId: snapshot.run.id,
+          type: 'model.responded',
+          payload: {
             stepId,
             attempt: snapshot.projection.steps[stepId].attempt,
-            contextSources: payload.contextSources,
-            contextEvidence: payload.contextEvidence,
-          })
-        : null
-      if (contextManifestHash) payload.contextManifestHash = contextManifestHash
+            outputHash,
+          },
+          expectedLastSequence: snapshot.projection.lastSequence,
+          now: now(),
+        })
+        await notify(input.onDurableBoundary, 'model.responded', snapshot)
+        const finalized = await finalizeContextGatewayAttemptEvidenceV1({
+          scope: input.scope,
+          runId: snapshot.run.id,
+          stepId,
+          attempt: snapshot.projection.steps[stepId].attempt,
+          baseManifest: gatewayAttempt.baseManifest,
+          preflight: gatewayAttempt.preflight,
+          selector: runtime.execution.selector,
+          sufficiency: runtime.execution.sufficiency,
+          retrievalTrace: runtime.execution.retrievalTrace,
+          gatewayVersionHash: runtime.execution.contextPacket.gatewayVersionHash,
+          policyHash: runtime.execution.contextPacket.policyHash,
+          rawResponse: runtime.rawResponse,
+          candidateHash: payload.candidateHash,
+          expectedLastSequence: snapshot.projection.lastSequence,
+          now: now(),
+        })
+        snapshot = finalized.snapshot
+        contextManifestHash = finalized.manifest.manifestHash
+        payload.contextManifestHash = contextManifestHash
+        if (await computeCandidateHash(payload, draft) !== payload.candidateHash) {
+          fail(`主 Agent 任务 ${task.id} 的 Gateway 候选哈希形成循环或漂移`)
+        }
+      } else {
+        contextManifestHash = payload.contextEvidence
+          ? await hashCanonicalValue({
+              version: 1,
+              runId: snapshot.run.id,
+              stepId,
+              attempt: snapshot.projection.steps[stepId].attempt,
+              contextSources: payload.contextSources,
+              contextEvidence: payload.contextEvidence,
+            })
+          : null
+        if (contextManifestHash) payload.contextManifestHash = contextManifestHash
+      }
       const semanticRequired = snapshot.contract.candidateSemanticReviewPolicy
         ?.taskIds.includes(task.id) === true
+      if (gatewayRequired && semanticRequired) {
+        fail(`主 Agent 任务 ${task.id} 的 Gateway canary 尚未开放并行语义终验`)
+      }
       if (semanticRequired) {
         if (
           (task.agentId !== 'world-origin' && task.agentId !== 'inspiration')
@@ -2183,7 +2325,11 @@ export async function runDurableMasterAgentPlanV1(
       }
       const evidence = budgetEvidence(payload.teamBudgetEvidence, `主 Agent 任务 ${task.id} teamBudgetEvidence`)
       if (!budgetAtLeast(evidence, previousBudget)) fail(`主 Agent 任务 ${task.id} 团队预算证据倒退`)
-      payload.candidateHash = await computeCandidateHash(payload, draft)
+      const finalCandidateHash = await computeCandidateHash(payload, draft)
+      if (payload.candidateHash && payload.candidateHash !== finalCandidateHash) {
+        fail(`主 Agent 任务 ${task.id} 的候选在证据冻结后发生变化`)
+      }
+      payload.candidateHash = finalCandidateHash
       const stepReceipt = snapshot.contract.dependencyReceiptPolicy?.requiredForJoin
         ? await createMasterCandidateStepReceiptV1({
             payload,
@@ -2214,7 +2360,7 @@ export async function runDurableMasterAgentPlanV1(
             scope: input.scope,
           })
           let nextSnapshot = snapshot
-          if (payload.contextEvidence) {
+          if (payload.contextEvidence && !gatewayRequired) {
             nextSnapshot = await appendAgentRunEventV1({
               scope: input.scope,
               runId: snapshot.run.id,
@@ -2228,14 +2374,16 @@ export async function runDurableMasterAgentPlanV1(
               now: now(),
             })
           }
-          nextSnapshot = await appendAgentRunEventV1({
-            scope: input.scope,
-            runId: snapshot.run.id,
-            type: 'model.responded',
-            payload: { stepId, attempt: nextSnapshot.projection.steps[stepId].attempt, outputHash },
-            expectedLastSequence: nextSnapshot.projection.lastSequence,
-            now: now(),
-          })
+          if (!gatewayRequired) {
+            nextSnapshot = await appendAgentRunEventV1({
+              scope: input.scope,
+              runId: snapshot.run.id,
+              type: 'model.responded',
+              payload: { stepId, attempt: nextSnapshot.projection.steps[stepId].attempt, outputHash },
+              expectedLastSequence: nextSnapshot.projection.lastSequence,
+              now: now(),
+            })
+          }
           const prior = previousBudget
           nextSnapshot = await appendAgentRunEventV1({
             scope: input.scope,

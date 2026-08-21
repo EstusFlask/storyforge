@@ -69,6 +69,9 @@ import {
 } from '../world-game-copilot'
 import { assertWorkspaceContentRevisionFreshV1 } from '../../authoring/content-revision'
 import { maybeInjectHarnessFaultV1 } from '../dev-fault-injection'
+import { assertContextGatewayCandidateAdoptableV1 } from '../../context-gateway/execution'
+import { masterCandidateWriteTargetV1 } from './master-candidate-hash'
+import { resolveAgentSkillV1 } from '../skill-registry'
 
 export interface MasterAgentCandidateAdoptionRefV1 {
   scope: WorkspaceScope
@@ -144,6 +147,24 @@ async function assertRequiredSemanticReviewFresh(
   }
 }
 
+async function assertRequiredContextGatewayFresh(
+  input: MasterAgentCandidateAdoptionRefV1,
+  resolved: ResolvedMasterCandidateV1,
+): Promise<void> {
+  const payload = resolved.candidate.payload
+  await assertContextGatewayCandidateAdoptableV1({
+    skill: resolveAgentSkillV1(payload.agentId, payload.skillId),
+    writeTarget: masterCandidateWriteTargetV1(payload),
+    scope: input.scope,
+    worldGroupId: resolved.snapshot.run.worldGroupId ?? null,
+    runId: resolved.snapshot.run.id,
+    stepId: resolved.stepId,
+    attempt: resolved.snapshot.projection.steps[resolved.stepId].attempt,
+    candidateHash: payload.candidateHash!,
+    contextManifestHash: payload.contextManifestHash,
+  })
+}
+
 export async function beginMasterAgentCandidateAdoptionV1(
   input: MasterAgentCandidateAdoptionRefV1,
 ): Promise<ResolvedMasterCandidateV1> {
@@ -175,6 +196,7 @@ export async function beginMasterAgentCandidateAdoptionV1(
       throw new Error(`主 Agent 候选已过期：${error instanceof Error ? error.message : String(error)}`)
     }
   }
+  await assertRequiredContextGatewayFresh(input, resolved)
   await assertRequiredSemanticReviewFresh(resolved)
   await assertMasterCandidateDependenciesAdoptedV1(
     resolved.candidate.event,
@@ -267,6 +289,10 @@ export async function commitMasterAgentCandidateAdoptionV1(
     step.status !== 'running'
     || step.confirmation !== 'adopt'
   ) throw new Error('主 Agent durable 候选尚未进入可提交采纳状态')
+
+  // Confirmation and the business write are separate crash-recovery boundaries;
+  // re-check freshness immediately before the only Canon mutation.
+  await assertRequiredContextGatewayFresh(input, resolved)
 
   if (!startedFor(resolved.snapshot, resolved.stepId, resolved.candidate.payload.candidateHash!)) {
     await appendAgentRunEventV1({

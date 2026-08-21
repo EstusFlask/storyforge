@@ -23,6 +23,17 @@ export function assertAgentSkillContextGatewayPolicyV1(
   if (gateway.version !== 1 || !['shadow', 'required'].includes(gateway.rollout)) {
     fail(`Skill ${skill.id} 的 Gateway version/rollout 无效`)
   }
+  const registeredTargets = new Set(skill.writeTargets.flatMap(target => (
+    target.fields.map(field => `${target.table}.${field}`)
+  )))
+  if (
+    gateway.requiredWriteTargets !== undefined
+    && (
+      !Array.isArray(gateway.requiredWriteTargets)
+      || new Set(gateway.requiredWriteTargets).size !== gateway.requiredWriteTargets.length
+      || gateway.requiredWriteTargets.some(target => !registeredTargets.has(target))
+    )
+  ) fail(`Skill ${skill.id} 的 Gateway requiredWriteTargets 必须是已登记且不重复的写目标`)
   for (const sourceKey of gateway.providerSourceKeys) {
     if (!CONTEXT_SOURCE_BY_KEY.get(sourceKey)?.resources) fail(`Skill ${skill.id} 的 ${sourceKey} 未挂 Provider`)
   }
@@ -35,6 +46,16 @@ export function assertAgentSkillContextGatewayPolicyV1(
     }
   }
   return gateway
+}
+
+export function isContextGatewayRequiredForWriteTargetV1(
+  skill: AgentSkillDefinitionV1,
+  writeTarget?: string,
+): boolean {
+  const gateway = skill.contextGateway
+  if (!gateway) return false
+  if (gateway.rollout === 'required') return true
+  return writeTarget != null && gateway.requiredWriteTargets?.includes(writeTarget) === true
 }
 
 export function createContextAccessPolicyFromSkillV1(

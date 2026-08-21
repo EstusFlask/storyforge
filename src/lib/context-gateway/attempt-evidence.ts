@@ -585,13 +585,24 @@ export async function verifyContextGatewayCandidateEvidenceV1(input: {
   artifactBodies: Record<string, string>
 }> {
   const restored = await readContextGatewayManifestV3ForAttemptV1(input)
-  if (restored.manifest.candidate.candidateHash !== input.candidateHash) {
-    fail('candidate-link', 'candidateHash 与 ContextManifestV3 不一致')
-  }
+  const generatedCandidateHash = restored.manifest.candidate.candidateHash
   const candidateEvents = restored.snapshot.events.filter(event => event.type === 'candidate.persisted'
     && event.payload.stepId === input.stepId && event.payload.attempt === input.attempt
-    && event.payload.candidateHash === input.candidateHash)
+    && event.payload.candidateHash === generatedCandidateHash)
   if (candidateEvents.length !== 1) fail('candidate-event', '缺少唯一 candidate.persisted 证据')
+  let linkedCandidateHash = generatedCandidateHash
+  for (const event of restored.snapshot.events) {
+    if (event.type !== 'candidate.revised'
+      || event.payload.stepId !== input.stepId
+      || event.payload.attempt !== input.attempt) continue
+    if (event.payload.previousCandidateHash !== linkedCandidateHash) {
+      fail('candidate-revision-chain', '作者候选修订链出现分叉或断裂')
+    }
+    linkedCandidateHash = event.payload.candidateHash
+  }
+  if (linkedCandidateHash !== input.candidateHash) {
+    fail('candidate-link', '当前 candidateHash 未由 ContextManifestV3 绑定的生成候选连续修订而来')
+  }
   const manifestEventIndex = restored.snapshot.events.findIndex(event => event.type === 'context.assembled'
     && event.payload.stepId === input.stepId && event.payload.attempt === input.attempt)
   const candidateEventIndex = restored.snapshot.events.indexOf(candidateEvents[0])

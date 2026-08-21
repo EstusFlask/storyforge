@@ -113,6 +113,12 @@ export interface AgentSkillContextGatewayPolicyV1 {
   version: 1
   /** shadow is evidence-only; required makes V3 freshness an adoption precondition. */
   rollout: 'shadow' | 'required'
+  /**
+   * Optional canary boundary. When present, only these registered table.field
+   * write targets require the Gateway/V3 adoption gate; the remaining targets
+   * stay on the legacy path until their own phase gate passes.
+   */
+  requiredWriteTargets?: readonly string[]
   providerSourceKeys: readonly string[]
   allowedResourceKinds: readonly ContextResourceKind[]
   allowedDepths: readonly ContextResourceDepthV1[]
@@ -1217,6 +1223,7 @@ export const AGENT_SKILLS = [
     contextGateway: {
       version: 1,
       rollout: 'shadow',
+      requiredWriteTargets: ['worldviews.races'],
       providerSourceKeys: ['ragSelection'],
       allowedResourceKinds: [
         'world', 'worldview-field', 'story-core-field', 'character',
@@ -1257,10 +1264,11 @@ export const AGENT_SKILLS = [
         'itemDesign',
       ],
     }],
-    lastVerifiedAt: '2026-08-09',
+    lastVerifiedAt: '2026-08-22',
     regressionTests: [
       'R-HARNESS32-worldview-field-agent',
       'R-HARNESS32-worldview-panels-ui',
+      'R-RACE1-races-gateway-canary',
     ],
   },
   {
@@ -2538,13 +2546,14 @@ export const AGENT_SKILL_IDS: readonly AgentSkillId[] = AGENT_SKILLS.map(skill =
 
 export function resolveAgentSkillContextSourceKeysV1(
   skill: AgentSkillDefinitionV1,
-  options: { includeOptional?: boolean } = {},
+  options: { includeOptional?: boolean; includeGatewayProviders?: boolean } = {},
 ): string[] {
   const toolSources = skill.readToolNames.flatMap(name => AGENT_TOOL_BY_NAME.get(name)?.sourceKeys ?? [])
   return [...new Set([
     ...toolSources,
     ...skill.contextSourceKeys,
     ...(options.includeOptional ? skill.optionalContextSourceKeys : []),
+    ...(options.includeGatewayProviders ? skill.contextGateway?.providerSourceKeys ?? [] : []),
   ])]
 }
 
@@ -2611,7 +2620,10 @@ export function validateAgentSkillContextEvidenceV1(
   const included = assertUniqueStringArray(evidence.included, '上下文 included')
   const omitted = assertUniqueStringArray(evidence.omitted, '上下文 omitted')
   const trimmed = assertUniqueStringArray(evidence.trimmed, '上下文 trimmed')
-  const authorized = new Set(resolveAgentSkillContextSourceKeysV1(skill, { includeOptional: true }))
+  const authorized = new Set(resolveAgentSkillContextSourceKeysV1(skill, {
+    includeOptional: true,
+    includeGatewayProviders: true,
+  }))
   for (const key of [...included, ...omitted, ...trimmed]) {
     if (!authorized.has(key)) throw new Error(`Agent Skill ${skill.id} 上下文来源越权 ${key}`)
   }
@@ -2724,8 +2736,19 @@ export function validateAgentSkillContextEvidenceV1(
       || !AGENT_CONTEXT_INPUT_STATES.includes(evidence.inputState.state)
       || !AGENT_CONTEXT_INPUT_HANDLINGS.includes(evidence.inputState.handling)
     ) throw new Error(`Agent Skill ${skill.id} 输入状态证据无效`)
+    const inputStateSourceKeys = evidence.inputStateSourceKeys === undefined
+      ? undefined
+      : assertUniqueStringArray(evidence.inputStateSourceKeys, 'inputStateSourceKeys')
+    if (inputStateSourceKeys?.some(key => !skill.inputPolicy.sourceKeys.includes(key))) {
+      throw new Error(`Agent Skill ${skill.id} inputStateSourceKeys 含未登记输入来源`)
+    }
     const expected = resolveAgentSkillInputStateV1(skill, [{
       ...evidence,
+      ...(inputStateSourceKeys ? {
+        included: skill.inputPolicy.sourceKeys.filter(key => inputStateSourceKeys.includes(key)),
+        omitted: skill.inputPolicy.sourceKeys.filter(key => !inputStateSourceKeys.includes(key)),
+        trimmed: [],
+      } : {}),
       totalInputTokens: evidence.estimatedInputTokens,
       inputBudget: evidence.inputBudgetTokens,
     }])

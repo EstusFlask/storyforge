@@ -127,6 +127,8 @@ import { parseWorldGameNarrativeCandidateV1 } from '../text-game/agent-contract'
 import type {
   AgentContextEvidence,
 } from './context-policy'
+import type { AssembleContextResult } from '../registry/types'
+import type { ContextGatewayExecutionV1 } from '../context-gateway/execution'
 import type { AgentSkillExecutionBindingV1 } from '../types/agent-run'
 import { executeAgentTool } from './tool-registry'
 import { validateDomainCandidateCanon } from './canon-validator'
@@ -297,10 +299,26 @@ export interface ExecutedMasterCandidate {
   draft: string
   runtimeNode: GenerationNode<any, any, any>
   runtimeOutput: unknown
+  /** Ephemeral exact-evidence inputs; durable runner persists them before candidate storage. */
+  contextGatewayRuntime?: MasterContextGatewayRuntimeV1
+}
+
+export interface MasterContextGatewayPreparedV1 {
+  execution: ContextGatewayExecutionV1
+  assembled: AssembleContextResult
+  renderedRequest: unknown
+}
+
+export interface MasterContextGatewayRuntimeV1 extends MasterContextGatewayPreparedV1 {
+  rawResponse: unknown
 }
 
 export interface MasterAgentExecutionTrace {
   taskStarted?: (task: MasterAgentTask) => Promise<void>
+  contextGatewayPrepared?: (
+    task: MasterAgentTask,
+    prepared: MasterContextGatewayPreparedV1,
+  ) => Promise<void>
   candidateReady?: (task: MasterAgentTask, candidate: ExecutedMasterCandidate) => Promise<void>
 }
 
@@ -944,6 +962,13 @@ async function executeSequentialMasterAgentPlan(
             promptExecution: task.promptExecution,
             signal: input.signal,
           })
+          if (prepared.contextGatewayExecution) {
+            await input.executionTrace?.contextGatewayPrepared?.(task, {
+              execution: prepared.contextGatewayExecution,
+              assembled: prepared.input.assembled,
+              renderedRequest: prepared.prepared.messages,
+            })
+          }
           const result = await runBudgetedGenerationNode({
             node: prepared.node,
             prepared: prepared.prepared,
@@ -974,6 +999,14 @@ async function executeSequentialMasterAgentPlan(
             draft,
             runtimeNode: prepared.node,
             runtimeOutput: result.output,
+            ...(prepared.contextGatewayExecution ? {
+              contextGatewayRuntime: {
+                execution: prepared.contextGatewayExecution,
+                assembled: prepared.input.assembled,
+                renderedRequest: prepared.prepared.messages,
+                rawResponse: result.structuredOutputEvidence ?? result.output,
+              },
+            } : {}),
           })
           outputs.set(task.id, draft)
         } else if (skill.executionMode === 'story-core') {
@@ -1807,7 +1840,9 @@ async function executeFanOutMasterAgentPlan(
           budget,
           completedTaskOutputs,
           completedTaskAssumptions,
-          executionTrace: undefined,
+          executionTrace: input.executionTrace?.contextGatewayPrepared
+            ? { contextGatewayPrepared: input.executionTrace.contextGatewayPrepared }
+            : undefined,
           onTask: undefined,
         }, { requiredFutureModelCalls })
         const candidate = generated[0]
