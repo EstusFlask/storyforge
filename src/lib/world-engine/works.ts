@@ -1,10 +1,20 @@
 /** WORLD-2C C5 · Work creation and switching inside one World. */
 import { db } from '../db/schema'
-import type { Work, WorkspaceScope, World } from '../types/world-ownership'
+import type { NovelWorkflowProfile, Work, WorkKind, WorkspaceScope, World } from '../types/world-ownership'
 import type { Project, ProjectStatus } from '../types/project'
 import { ensureWorkspaceOwnership } from './ownership'
-import { assertRecordInScope, resolveScope } from './scope'
+import { assertRecordInScope, readOwnedRows, resolveScope, scopeTransactionTables } from './scope'
 import { generateWorkCode } from '../memory/identity'
+import {
+  assertShortNovelTargetWords,
+  effectiveNovelProfile,
+  effectiveWorkKind,
+  normalizeNewWorkClassification,
+  SHORT_NOVEL_MAX_WORDS,
+  SHORT_NOVEL_MIN_WORDS,
+} from './work-kind'
+import type { Chapter } from '../types/outline'
+import { canonicalManuscriptWordCount } from '../chapters/selectors'
 
 export interface CreateWorkInput {
   title: string
@@ -12,6 +22,44 @@ export interface CreateWorkInput {
   genres?: string[]
   status?: ProjectStatus
   targetWordCount?: number
+  kind?: WorkKind
+  novelProfile?: NovelWorkflowProfile | null
+}
+
+export function buildWorkRecord(input: {
+  projectId: number
+  worldId: number
+  fallback: Pick<Work, 'genres' | 'targetWordCount' | 'writingStyleId' | 'methodologyId'>
+  create: CreateWorkInput
+  now: number
+}): Work {
+  const title = input.create.title.trim()
+  if (!title) throw new Error('[works] 作品名称不能为空')
+  const targetWordCount = input.create.targetWordCount ?? input.fallback.targetWordCount
+  const classification = normalizeNewWorkClassification({
+    kind: input.create.kind,
+    novelProfile: input.create.novelProfile,
+    targetWordCount,
+  })
+  const status = input.create.status ?? 'drafting'
+  if (classification.novelProfile === 'short' && status === 'completed') {
+    throw new Error('[works] 空白短篇不能在创建时标记为已完成')
+  }
+  return {
+    projectId: input.projectId,
+    worldId: input.worldId,
+    code: generateWorkCode(),
+    ...classification,
+    title,
+    description: input.create.description?.trim() ?? '',
+    genres: input.create.genres?.length ? [...input.create.genres] : [...input.fallback.genres],
+    status,
+    targetWordCount,
+    writingStyleId: input.fallback.writingStyleId,
+    methodologyId: input.fallback.methodologyId,
+    createdAt: input.now,
+    updatedAt: input.now,
+  }
 }
 
 const WORK_MIRROR_FIELDS = [
@@ -99,23 +147,14 @@ export async function listWorldWorks(projectId: number, worldId?: number): Promi
 
 export async function createWorldWork(projectId: number, input: CreateWorkInput): Promise<Work> {
   const ownership = await ensureWorkspaceOwnership(projectId)
-  const title = input.title.trim()
-  if (!title) throw new Error('[works] 作品名称不能为空')
   const ts = Date.now()
-  const row: Work = {
+  const row = buildWorkRecord({
     projectId,
     worldId: ownership.scope.worldId,
-    code: generateWorkCode(),
-    title,
-    description: input.description?.trim() ?? '',
-    genres: input.genres?.length ? [...input.genres] : [...ownership.work.genres],
-    status: input.status ?? 'drafting',
-    targetWordCount: input.targetWordCount ?? ownership.work.targetWordCount,
-    writingStyleId: ownership.work.writingStyleId,
-    methodologyId: ownership.work.methodologyId,
-    createdAt: ts,
-    updatedAt: ts,
-  }
+    fallback: ownership.work,
+    create: input,
+    now: ts,
+  })
   const id = await db.works.add(row) as number
   return { ...row, id }
 }
@@ -134,9 +173,72 @@ export async function switchActiveWork(projectId: number, workId: number): Promi
   })
 }
 
+export async function readCanonicalWorkManuscriptWordCount(scope: WorkspaceScope): Promise<number> {
+  const chapters = await readOwnedRows<Chapter>(scope, 'chapters', { owner: 'work' })
+  return canonicalManuscriptWordCount(chapters)
+}
+
+export async function switchNovelProfile(input: {
+  projectId: number
+  workId: number
+  profile: NovelWorkflowProfile
+  targetWordCount?: number
+}): Promise<Work> {
+  return db.transaction('rw', scopeTransactionTables(db.chapters), async () => {
+    const [project, work] = await Promise.all([
+      db.projects.get(input.projectId),
+      db.works.get(input.workId),
+    ])
+    if (!project || !work || work.projectId !== input.projectId) {
+      throw new Error('[works] Work 不属于当前工作区')
+    }
+    if (effectiveWorkKind(work) !== 'novel') throw new Error('[works] 只有小说 Work 可以切换短篇/长篇 Profile')
+    const world = await db.worlds.get(work.worldId)
+    if (!world || world.projectId !== input.projectId) throw new Error('[works] Work 的 World 根无效')
+
+    const targetWordCount = input.targetWordCount ?? work.targetWordCount
+    let currentWordCount = work.currentWordCount ?? 0
+    if (input.profile === 'short') {
+      assertShortNovelTargetWords(targetWordCount)
+      currentWordCount = await readCanonicalWorkManuscriptWordCount({
+        projectId: input.projectId,
+        worldId: work.worldId,
+        workId: work.id!,
+      })
+      if (currentWordCount > SHORT_NOVEL_MAX_WORDS) {
+        throw new Error(`[works] 正文已有 ${currentWordCount} 字，超过短篇上限 ${SHORT_NOVEL_MAX_WORDS} 字`)
+      }
+    }
+
+    const updatedAt = Date.now()
+    const nextWork: Work = {
+      ...work,
+      kind: 'novel',
+      novelProfile: input.profile,
+      targetWordCount,
+      currentWordCount,
+      updatedAt,
+    }
+    await db.works.update(work.id!, {
+      kind: nextWork.kind,
+      novelProfile: nextWork.novelProfile,
+      targetWordCount,
+      currentWordCount,
+      updatedAt,
+    })
+    if (project.activeWorkId === work.id) {
+      await db.projects.update(project.id!, {
+        ...projectCompatibilityMirror(world, nextWork),
+        updatedAt,
+      })
+    }
+    return nextWork
+  })
+}
+
 export async function updateProjectAndActiveWork(projectId: number, data: Partial<Project>): Promise<void> {
   const ownership = await ensureWorkspaceOwnership(projectId)
-  await db.transaction('rw', db.projects, db.worlds, db.works, async () => {
+  await db.transaction('rw', scopeTransactionTables(db.chapters), async () => {
     const [project, world, work] = await Promise.all([
       db.projects.get(projectId),
       db.worlds.get(ownership.scope.worldId),
@@ -158,6 +260,22 @@ export async function updateProjectAndActiveWork(projectId: number, data: Partia
         const workField = field as keyof Work
         ;(workPatch as Record<string, unknown>)[workField] = data[field]
       }
+    }
+
+    const kind = effectiveWorkKind(work)
+    const profile = effectiveNovelProfile(work)
+    const requestedTarget = workPatch.targetWordCount ?? work.targetWordCount
+    if (kind === 'novel' && profile === 'short' && 'targetWordCount' in workPatch) {
+      assertShortNovelTargetWords(requestedTarget)
+    }
+    if (data.status === 'completed' && kind === 'novel' && profile === 'short') {
+      const actualWordCount = await readCanonicalWorkManuscriptWordCount(ownership.scope)
+      if (actualWordCount < SHORT_NOVEL_MIN_WORDS || actualWordCount > SHORT_NOVEL_MAX_WORDS) {
+        throw new Error(
+          `[works] 短篇实际正文须为 ${SHORT_NOVEL_MIN_WORDS}～${SHORT_NOVEL_MAX_WORDS} 字；当前 ${actualWordCount} 字`,
+        )
+      }
+      workPatch.currentWordCount = actualWordCount
     }
     const updatedAt = Date.now()
     const nextWork = { ...work, ...workPatch, updatedAt }

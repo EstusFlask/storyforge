@@ -38,6 +38,8 @@ const EMPTY_FORM = {
   status: 'drafting' as ProjectStatus,
   description: '',
   targetWordCount: 500000,
+  novelProfile: 'long' as 'short' | 'long',
+  preferredChapterCount: '' as number | '',
 }
 
 // 取书名首字作为大字标识
@@ -102,7 +104,13 @@ export default function HomePage() {
         status: form.status,
         description: form.description,
         targetWordCount: form.targetWordCount,
-      } as CreateProjectInput)
+      } as CreateProjectInput, {
+        kind: 'novel',
+        novelProfile: form.novelProfile,
+        preferredChapterCount: form.novelProfile === 'short' && form.preferredChapterCount !== ''
+          ? form.preferredChapterCount
+          : undefined,
+      })
       let storageBound = true
       if (projectFolder) {
         try {
@@ -397,6 +405,31 @@ export default function HomePage() {
                 />
               </div>
 
+              <div>
+                <label className="block text-xs text-text-secondary mb-1.5">作品类型</label>
+                <div className="grid grid-cols-2 gap-2">
+                  {([
+                    { value: 'short', label: '短篇小说', detail: '5,000～25,000 字' },
+                    { value: 'long', label: '长篇小说', detail: '保留原有完整流程' },
+                  ] as const).map(option => (
+                    <button
+                      key={option.value}
+                      type="button"
+                      onClick={() => setForm(current => ({
+                        ...current,
+                        novelProfile: option.value,
+                        targetWordCount: option.value === 'short' ? 10_000 : 500_000,
+                        status: current.status === 'completed' && option.value === 'short' ? 'drafting' : current.status,
+                      }))}
+                      className={`rounded-lg border p-3 text-left transition-colors ${form.novelProfile === option.value ? 'border-accent bg-accent/10' : 'border-border hover:border-border-hover'}`}
+                    >
+                      <strong className="block text-sm text-text-primary">{option.label}</strong>
+                      <span className="text-[11px] text-text-muted">{option.detail}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
               <ProjectStorageFolderField
                 value={projectFolder}
                 onChange={setProjectFolder}
@@ -495,17 +528,34 @@ export default function HomePage() {
               {/* 目标字数 */}
               <div>
                 <label className="block text-xs text-text-secondary mb-1.5">
-                  目标字数：{(form.targetWordCount / 10000).toFixed(0)} 万字
+                  目标字数：{form.novelProfile === 'short' ? `${form.targetWordCount.toLocaleString()} 字` : `${(form.targetWordCount / 10000).toFixed(0)} 万字`}
                 </label>
-                <input
-                  type="range" min={100000} max={5000000} step={100000}
-                  value={form.targetWordCount}
-                  onChange={e => setForm({ ...form, targetWordCount: Number(e.target.value) })}
-                  className="w-full accent-accent"
-                />
-                <div className="flex justify-between text-[10px] text-text-muted mt-0.5">
-                  <span>10万</span><span>100万</span><span>300万</span>
-                </div>
+                {form.novelProfile === 'short' ? <>
+                  <input
+                    type="number" min={5000} max={25000} step={500}
+                    value={form.targetWordCount}
+                    onChange={e => setForm({ ...form, targetWordCount: Number(e.target.value) })}
+                    className="w-full rounded-lg border border-border bg-bg-base px-3 py-2 text-sm text-text-primary focus:border-accent focus:outline-none"
+                  />
+                  <label className="mt-3 block text-xs text-text-secondary">建议章节数（可空，留空自动推导）</label>
+                  <input
+                    type="number" min={1} step={1}
+                    value={form.preferredChapterCount}
+                    onChange={e => setForm({ ...form, preferredChapterCount: e.target.value === '' ? '' : Number(e.target.value) })}
+                    placeholder="自动"
+                    className="mt-1 w-full rounded-lg border border-border bg-bg-base px-3 py-2 text-sm text-text-primary focus:border-accent focus:outline-none"
+                  />
+                </> : <>
+                  <input
+                    type="range" min={100000} max={5000000} step={100000}
+                    value={form.targetWordCount}
+                    onChange={e => setForm({ ...form, targetWordCount: Number(e.target.value) })}
+                    className="w-full accent-accent"
+                  />
+                  <div className="flex justify-between text-[10px] text-text-muted mt-0.5">
+                    <span>10万</span><span>100万</span><span>300万</span>
+                  </div>
+                </>}
               </div>
             </div>
 

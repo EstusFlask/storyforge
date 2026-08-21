@@ -1,5 +1,5 @@
 import { useState, type ComponentType, type ReactElement } from 'react'
-import { ArrowLeft, ChevronLeft, ChevronRight, ChevronDown, Settings } from 'lucide-react'
+import { ArrowLeft, ChevronLeft, ChevronRight, ChevronDown, ListTree, Settings } from 'lucide-react'
 import { APP_BUILD_ID } from '../../lib/version'
 import {
   MODULE_CONTENT_TYPE_DEFINITIONS, NAV_TREE, getBranchChain,
@@ -20,6 +20,8 @@ interface SidebarProps {
   onToggleCollapse: () => void
   /** 需要隐藏的模块 ID 集合（如多世界关闭时隐藏 world-overview） */
   hiddenModules?: Set<SidebarModule>
+  /** Short-profile steps folded by default, but always recoverable here. */
+  secondaryModules?: Set<SidebarModule>
 }
 
 /** legacy → new 别名映射（路由层兼容） */
@@ -35,9 +37,11 @@ function normalize(m: SidebarModule): SidebarModule {
 }
 
 export default function Sidebar({
-  active, onSelect, onBack, projectName, collapsed, onToggleCollapse, hiddenModules,
+  active, onSelect, onBack, projectName, collapsed, onToggleCollapse, hiddenModules, secondaryModules,
 }: SidebarProps) {
   const normActive = normalize(active)
+  const [showSecondary, setShowSecondary] = useState(false)
+  const foldedModules = !showSecondary && !secondaryModules?.has(normActive) ? secondaryModules : undefined
 
   // 默认展开 active 所在的 branch + 全部 branch（首次打开）
   const [expanded, setExpanded] = useState<Set<string>>(() => {
@@ -81,6 +85,16 @@ export default function Sidebar({
 
       {/* 导航 */}
       <nav className="flex-1 py-1.5 overflow-y-auto overflow-x-hidden">
+        {!collapsed && secondaryModules && secondaryModules.size > 0 && (
+          <button
+            type="button"
+            onClick={() => setShowSecondary(value => !value)}
+            className="mx-2 mb-1 flex w-[calc(100%-1rem)] items-center gap-2 rounded border border-border px-2 py-1.5 text-xs text-text-secondary hover:bg-bg-hover"
+          >
+            <ListTree className="h-3.5 w-3.5" />
+            <span>{showSecondary ? '收起进阶步骤' : '显示全部步骤'}</span>
+          </button>
+        )}
         {NAV_TREE.map(section => (
           <div key={section.sectionId} className="mb-1">
             {/* section 标题 — 当 section 本身就是个单叶子（如「提示词库」），用按钮代替标题，避免重复 */}
@@ -115,6 +129,7 @@ export default function Sidebar({
               onSelect,
               onToggle: toggle,
               hiddenModules,
+              foldedModules,
             }))}
           </div>
         ))}
@@ -161,11 +176,12 @@ interface RenderArgs {
   onSelect: (m: SidebarModule) => void
   onToggle: (branchId: string) => void
   hiddenModules?: Set<SidebarModule>
+  foldedModules?: Set<SidebarModule>
 }
 
 function renderNode(args: RenderArgs): ReactElement | null {
-  const { node, depth, collapsed, expanded, normActive, onSelect, onToggle, hiddenModules } = args
-  if (node.kind === 'leaf' && hiddenModules?.has(node.id)) return null
+  const { node, depth, collapsed, expanded, normActive, onSelect, onToggle, hiddenModules, foldedModules } = args
+  if (node.kind === 'leaf' && (hiddenModules?.has(node.id) || foldedModules?.has(node.id))) return null
   if (node.kind === 'leaf') {
     return (
       <NavLeafButton

@@ -85,6 +85,7 @@ type HomeWorldGroupExportRef = {
  *   2 — 补全全部项目数据（2026-05-27）
  *   3 — 多世界系统（2026-06-02，Phase 25.4）
  *   4 — World/Work owner 便携影子 ID（WORLD-2C C4）
+ *   5 — Work kind / novelProfile（NOVEL-PROFILE-1）
  */
 export interface ProjectExportData {
   version: number

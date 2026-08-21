@@ -219,10 +219,11 @@ AI 输出经 `adopt({ target, data })` 写回,只有这里登记的字段可写(
 | `cultivation-codex-reference-lifecycle` | `codexEntries` | `PROJECT_TABLES refs + cultivation DAG validator` | `src/lib/codex/references.ts`<br/>`src/lib/cultivation/lifecycle.ts`<br/>`src/lib/location/lifecycle.ts` | 2027-01-01 |
 | `cultivation-progress-lifecycle` | `cultivationProgress` | `ADOPTION_SCHEMAS + PROJECT_TABLES + cultivation DAG validator + canonical chapter sequence` | `src/lib/cultivation/progress.ts`<br/>`src/lib/cultivation/progress-lifecycle.ts` | 2027-01-01 |
 | `codex-category-scope-lifecycle` | `codexCategories` | `PROJECT_TABLES lifecycle` | `src/lib/registry/lifecycle.ts` | 2027-01-01 |
-| `workspace-root-lifecycle` | `projects` | `PROJECT_TABLES + workspace identity + import trust + world lifecycle` | `src/lib/export/registry-import.ts`<br/>`src/lib/memory/workspace-projection.ts`<br/>`src/lib/product/world-package.ts`<br/>`src/lib/world-engine/lifecycle.ts`<br/>`src/lib/world-engine/ownership.ts`<br/>`src/lib/world-engine/releases.ts`<br/>`src/lib/world-engine/works.ts` | 2027-08-01 |
-| `world-root-lifecycle` | `worlds` | `PROJECT_TABLES refs + world package trust + world release lifecycle` | `src/lib/product/world-package.ts`<br/>`src/lib/world-engine/lifecycle.ts`<br/>`src/lib/world-engine/ownership.ts`<br/>`src/lib/world-engine/releases.ts` | 2027-08-01 |
-| `work-root-lifecycle` | `works` | `PROJECT_TABLES refs + WorkspaceScope + stable work code + narrative lifecycle` | `src/lib/memory/workspace-projection.ts`<br/>`src/lib/text-game/authoring.ts`<br/>`src/lib/avg/authoring.ts`<br/>`src/lib/world-engine/lifecycle.ts`<br/>`src/lib/world-engine/ownership.ts`<br/>`src/lib/world-engine/works.ts` | 2027-08-01 |
-| `chapter-delete-lifecycle` | `chapters` | `PROJECT_TABLES refs + chapter deletion impact policy` | `src/lib/chapters/lifecycle.ts` | 2027-08-01 |
+| `workspace-root-lifecycle` | `projects` | `PROJECT_TABLES + workspace identity + import trust + world lifecycle` | `src/lib/export/registry-import.ts`<br/>`src/lib/memory/workspace-projection.ts`<br/>`src/lib/product/world-package.ts`<br/>`src/lib/world-engine/lifecycle.ts`<br/>`src/lib/world-engine/ownership.ts`<br/>`src/lib/world-engine/releases.ts`<br/>`src/lib/world-engine/works.ts`<br/>`src/lib/world-engine/create-workspace.ts` | 2027-08-01 |
+| `world-root-lifecycle` | `worlds` | `PROJECT_TABLES refs + world package trust + world release lifecycle` | `src/lib/product/world-package.ts`<br/>`src/lib/world-engine/lifecycle.ts`<br/>`src/lib/world-engine/ownership.ts`<br/>`src/lib/world-engine/releases.ts`<br/>`src/lib/world-engine/create-workspace.ts` | 2027-08-01 |
+| `work-root-lifecycle` | `works` | `PROJECT_TABLES refs + WorkspaceScope + stable work code + narrative lifecycle` | `src/lib/memory/workspace-projection.ts`<br/>`src/lib/text-game/authoring.ts`<br/>`src/lib/avg/authoring.ts`<br/>`src/lib/world-engine/lifecycle.ts`<br/>`src/lib/world-engine/ownership.ts`<br/>`src/lib/world-engine/works.ts`<br/>`src/lib/world-engine/create-workspace.ts` | 2027-08-01 |
+| `short-novel-outline-skeleton-lifecycle` | `outlineNodes` | `PROJECT_TABLES tree refs + WorkspaceScope + SHORT_NOVEL_WORKFLOW_OVERRIDES` | `src/lib/world-engine/create-workspace.ts` | 2027-08-01 |
+| `chapter-delete-lifecycle` | `chapters` | `PROJECT_TABLES refs + WorkspaceScope + chapter deletion impact policy + short skeleton policy` | `src/lib/chapters/lifecycle.ts`<br/>`src/lib/world-engine/create-workspace.ts` | 2027-08-01 |
 | `chapter-emotion-delete-lifecycle` | `emotionBeatCards` | `PROJECT_TABLES chapter refs` | `src/lib/chapters/lifecycle.ts` | 2027-08-01 |
 
 ## 四、AI 调用点（消耗统计 category · 在哪触发)
@@ -315,4 +316,4 @@ AI 输出经 `adopt({ target, data })` 写回,只有这里登记的字段可写(
 
 ---
 
-生成时间基准:commit `a023cf3`
+生成时间基准:commit `2c9ad713`

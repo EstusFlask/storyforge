@@ -81,6 +81,11 @@ import {
   completeImpactManualCorrectionV1,
 } from '../lib/agent/run/impact-manual-correction-durable'
 import { executeImpactPostCorrectionReplanV1 } from '../lib/agent/run/impact-post-correction-replan-durable'
+import { useActiveWork } from '../hooks/useActiveWork'
+import WorkKindBadge from '../components/work/WorkKindBadge'
+import { effectiveNovelProfile, effectiveWorkKind, SHORT_NOVEL_DEFAULT_WORDS } from '../lib/world-engine/work-kind'
+import { switchNovelProfile } from '../lib/world-engine/works'
+import { secondaryNovelWorkflowModules } from '../lib/novel/workflow'
 
 export default function WorkspacePage() {
   const { projectId } = useParams()
@@ -102,6 +107,8 @@ export default function WorkspacePage() {
   const [impactHandoffTarget, setImpactHandoffTarget] = useState<CurrentImpactHandoffTargetV2 | null>(null)
   const [impactCorrectionStatus, setImpactCorrectionStatus] = useState<'idle' | 'pending' | 'verifying' | 'completed'>('idle')
   const [impactCorrectionError, setImpactCorrectionError] = useState<string | null>(null)
+  const [profileSwitching, setProfileSwitching] = useState(false)
+  const [profileSwitchError, setProfileSwitchError] = useState('')
   const activeWorldGroupId = useWorldGroupStore(state => state.activeGroupId)
   const worldGroups = useWorldGroupStore(state => state.groups)
 
@@ -110,6 +117,7 @@ export default function WorkspacePage() {
     if (!currentProjectId) return null
     return projects.find(p => p.id === currentProjectId) || null
   }, [projects, currentProjectId])
+  const activeWork = useActiveWork(project)
 
   // 侧栏隐藏模块（多世界关闭时隐藏世界总览）。必须在所有提前 return 之前调用，
   // 否则 hook 数量在不同渲染间不一致，会报 "Rendered more hooks than..."
@@ -118,6 +126,11 @@ export default function WorkspacePage() {
     if (!project?.enableMultiWorld) hidden.add('world-overview')
     return hidden
   }, [project?.enableMultiWorld])
+  const secondaryModules = useMemo(() => (
+    activeWork && effectiveWorkKind(activeWork) === 'novel' && effectiveNovelProfile(activeWork) === 'short'
+      ? secondaryNovelWorkflowModules('short')
+      : undefined
+  ), [activeWork])
 
   // 自动定时备份（每 5 分钟本地快照）
   useAutoBackup(project?.id ?? null)
@@ -235,6 +248,29 @@ export default function WorkspacePage() {
   const handleOpenChapter = (nodeId: number) => {
     setEditorNodeId(nodeId)
     setActiveModule('chapters-list')
+  }
+
+  const handleProfileSwitch = async () => {
+    if (!project.id || !activeWork?.id || effectiveWorkKind(activeWork) !== 'novel' || profileSwitching) return
+    const next = effectiveNovelProfile(activeWork) === 'short' ? 'long' : 'short'
+    setProfileSwitching(true)
+    setProfileSwitchError('')
+    try {
+      await switchNovelProfile({
+        projectId: project.id,
+        workId: activeWork.id,
+        profile: next,
+        targetWordCount: next === 'short'
+          ? (activeWork.targetWordCount >= 5_000 && activeWork.targetWordCount <= 25_000 ? activeWork.targetWordCount : SHORT_NOVEL_DEFAULT_WORDS)
+          : Math.max(activeWork.targetWordCount, 100_000),
+      })
+      await loadProject(project.id)
+      await useProjectStore.getState().loadProjects()
+    } catch (cause) {
+      setProfileSwitchError(cause instanceof Error ? cause.message : 'Profile 切换失败')
+    } finally {
+      setProfileSwitching(false)
+    }
   }
 
   const immersiveModules = new Set<SidebarModule>([
@@ -535,6 +571,7 @@ export default function WorkspacePage() {
         collapsed={sidebarCollapsed}
         onToggleCollapse={() => setSidebarCollapsed(v => !v)}
         hiddenModules={hiddenModules}
+        secondaryModules={secondaryModules}
       />
 
       {/* 主面板 */}
@@ -546,7 +583,21 @@ export default function WorkspacePage() {
         }`}
       >
         <div className="flex h-11 shrink-0 items-center justify-between gap-3 border-b border-border/70 bg-bg-surface/70 px-4">
-          <ContentTypeBadge contentType={getModuleContentType(activeModule)} showDescription />
+          <div className="flex min-w-0 items-center gap-2">
+            <ContentTypeBadge contentType={getModuleContentType(activeModule)} showDescription />
+            {activeWork && <WorkKindBadge work={activeWork} />}
+            {activeWork && effectiveWorkKind(activeWork) === 'novel' && (
+              <button
+                type="button"
+                onClick={() => void handleProfileSwitch()}
+                disabled={profileSwitching}
+                className="rounded border border-border px-2 py-1 text-[11px] text-text-secondary hover:bg-bg-hover disabled:opacity-50"
+              >
+                {profileSwitching ? '切换中…' : effectiveNovelProfile(activeWork) === 'short' ? '扩写为长篇' : '切换为短篇'}
+              </button>
+            )}
+            {profileSwitchError && <span className="max-w-72 truncate text-[11px] text-red-600" title={profileSwitchError}>{profileSwitchError}</span>}
+          </div>
           <div className="flex items-center gap-1">
             <button
               onClick={() => {

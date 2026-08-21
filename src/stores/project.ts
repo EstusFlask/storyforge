@@ -5,14 +5,13 @@ import { migrateGenre } from '../lib/types'
 import { requireBackupBefore } from '../lib/safety/require-backup-before'
 import { cascadeDeleteProject } from '../lib/registry/lifecycle'
 import {
-  generateWorldCode,
   hasShareableWorldIdentity,
   withWorldIdentity,
 } from '../lib/product/world-identity'
 import { ensureWorkspaceOwnership } from '../lib/world-engine/ownership'
 import { updateProjectAndActiveWork } from '../lib/world-engine/works'
-import { generateWorkspaceUid } from '../lib/memory/identity'
 import { clearProjectFolderHandle } from '../lib/storage/folder-handle-store'
+import { createWorkspace, type CreateWorkspaceOptions } from '../lib/world-engine/create-workspace'
 
 async function ensureWorldIdentity(project: Project): Promise<Project> {
   if (hasShareableWorldIdentity(project)) return project
@@ -40,7 +39,7 @@ interface ProjectStore {
 
   loadProjects: () => Promise<void>
   loadProject: (id: number) => Promise<Project | undefined>
-  createProject: (data: CreateProjectInput) => Promise<number>
+  createProject: (data: CreateProjectInput, options?: CreateWorkspaceOptions) => Promise<number>
   updateProject: (id: number, data: Partial<Project>) => Promise<void>
   deleteProject: (id: number) => Promise<void>
   setCurrentProject: (id: number | null) => void
@@ -74,21 +73,10 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
     return project
   },
 
-  createProject: async (data: CreateProjectInput) => {
-    const now = Date.now()
-    const id = await db.projects.add({
-      ...data,
-      genres: data.genres ?? [],
-      status: data.status ?? 'drafting',
-      workspaceUid: data.workspaceUid ?? generateWorkspaceUid(),
-      worldCode: data.worldCode ?? generateWorldCode(),
-      worldVersion: data.worldVersion ?? 1,
-      createdAt: now,
-      updatedAt: now,
-    } as Project)
-    await ensureWorkspaceOwnership(id as number)
+  createProject: async (data: CreateProjectInput, options?: CreateWorkspaceOptions) => {
+    const created = await createWorkspace(data, options)
     await get().loadProjects()
-    return id as number
+    return created.scope.projectId
   },
 
   updateProject: async (id: number, data: Partial<Project>) => {

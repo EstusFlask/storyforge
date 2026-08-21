@@ -1,5 +1,8 @@
 import type { CommunityWorldOrigin, ProjectStatus } from './project'
 
+export type WorkKind = 'novel' | 'screenplay' | 'comic'
+export type NovelWorkflowProfile = 'short' | 'long'
+
 /** WORLD-2C: a stable world root inside one local workspace. */
 export interface World {
   id?: number
@@ -20,6 +23,10 @@ export interface Work {
   worldId: number
   /** MEMORY-1: immutable portable identity; titles and local numeric ids may change. */
   code?: string
+  /** Missing on legacy rows, which always resolve to novel. */
+  kind?: WorkKind
+  /** Only meaningful for novel works. Missing legacy novel rows resolve to long. */
+  novelProfile?: NovelWorkflowProfile | null
   title: string
   description: string
   genres: string[]

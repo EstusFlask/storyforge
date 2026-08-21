@@ -3,6 +3,7 @@ import { AUTHORING_NODE_BY_ID, defaultConfigForTemplate } from './catalog'
 import { buildAuthoringCreationChainGraph } from './creation-chain'
 import type { AuthoringEdge, AuthoringNodeGraph, AuthoringNodeInstance } from './contracts'
 import { autoLayoutAuthoringGraph } from './productivity'
+import { deriveShortNovelStructure, SHORT_NOVEL_DEFAULT_WORDS } from '../world-engine/work-kind'
 
 export const AUTHORING_OFFICIAL_TEMPLATE_IDS = [
   'world-foundation',
@@ -205,8 +206,16 @@ export const AUTHORING_OFFICIAL_TEMPLATES: readonly AuthoringOfficialTemplate[] 
   {
     id: 'short-novel',
     name: '短篇小说',
-    description: '一卷三章的紧凑创作链，保留同一套确认写回边界。',
-    build: () => configureCreationChain({ chapterCount: 3, volumeCount: 1, wordCount: 1800, namePrefix: 'short' }),
+    description: '按作品目标动态生成单卷创作链，保留同一套确认写回边界。',
+    build: () => {
+      const structure = deriveShortNovelStructure(SHORT_NOVEL_DEFAULT_WORDS)
+      return configureCreationChain({
+        chapterCount: structure.chapterCount,
+        volumeCount: structure.volumeCount,
+        wordCount: structure.targetWordsPerChapter,
+        namePrefix: 'short',
+      })
+    },
   },
   {
     id: 'character-driven',
@@ -232,8 +241,23 @@ export const AUTHORING_OFFICIAL_TEMPLATE_BY_ID = new Map(
   AUTHORING_OFFICIAL_TEMPLATES.map(template => [template.id, template] as const),
 )
 
-export function buildOfficialAuthoringTemplate(id: AuthoringOfficialTemplateId): AuthoringNodeGraph {
+export function buildOfficialAuthoringTemplate(
+  id: AuthoringOfficialTemplateId,
+  options: { targetWordCount?: number; preferredChapterCount?: number } = {},
+): AuthoringNodeGraph {
   const template = AUTHORING_OFFICIAL_TEMPLATE_BY_ID.get(id)
   if (!template) throw new Error(`未知官方节点模板：${id}`)
+  if (id === 'short-novel') {
+    const structure = deriveShortNovelStructure(
+      options.targetWordCount ?? SHORT_NOVEL_DEFAULT_WORDS,
+      options.preferredChapterCount,
+    )
+    return configureCreationChain({
+      chapterCount: structure.chapterCount,
+      volumeCount: structure.volumeCount,
+      wordCount: structure.targetWordsPerChapter,
+      namePrefix: 'short',
+    })
+  }
   return template.build()
 }

@@ -70,8 +70,8 @@ async function buildPortableReleaseProject(input: {
 }> {
   const snapshot = await deriveStrictExportProjectSnapshot(input.scope.projectId)
   const backup = snapshot.data
-  if (backup.version !== 4 || !backup.ownership || !backup.worlds || !backup.works) {
-    throw new Error('[release] 世界发布必须基于严格 v4 便携快照')
+  if (backup.version < 4 || !backup.ownership || !backup.worlds || !backup.works) {
+    throw new Error('[release] 世界发布必须基于 v4+ 严格便携快照')
   }
   const worldExportId = snapshot.exportIds.get('worlds')?.get(input.scope.worldId)
   const workExportId = snapshot.exportIds.get('works')?.get(input.scope.workId)

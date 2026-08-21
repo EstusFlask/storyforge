@@ -19,9 +19,10 @@ import { redactAuthoringSecrets } from '../node-authoring/contracts'
 import { ensureWorkspaceOwnership } from '../world-engine/ownership'
 import { portableizeAgentRunLedgerExportV1 } from '../agent/run/ledger-portability'
 
-/** 当前导出格式版本(与手写版保持一致) */
+/** 旧 fixture 等价导出版本；仅供兼容测试和无 ownership 的空项目使用。 */
 const EXPORT_VERSION = 3
-export const STRICT_EXPORT_VERSION = 4
+/** v5 adds Work kind/novelProfile while retaining the portable-owner v4 contract. */
+export const STRICT_EXPORT_VERSION = 5
 
 export interface StrictProjectExportSnapshot {
   data: ProjectExportData

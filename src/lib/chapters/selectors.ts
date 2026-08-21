@@ -1,17 +1,17 @@
 import type { Chapter } from '../types'
 import { countWords, htmlToPlainText } from '../utils/html'
 
-function contentWordCount(chapter: Chapter): number {
+export function chapterContentWordCount(chapter: Chapter): number {
   const plain = htmlToPlainText(chapter.content || '').trim()
   return countWords(plain)
 }
 
 function effectiveWordCount(chapter: Chapter): number {
-  return Math.max(chapter.wordCount || 0, contentWordCount(chapter))
+  return Math.max(chapter.wordCount || 0, chapterContentWordCount(chapter))
 }
 
 function hasBodyContent(chapter: Chapter): boolean {
-  return contentWordCount(chapter) > 0
+  return chapterContentWordCount(chapter) > 0
 }
 
 function compareChapterCandidates(a: Chapter, b: Chapter): number {
@@ -55,4 +55,14 @@ export function buildBestChapterByOutlineMap(chapters: Chapter[]): Map<number, C
     if (best) result.set(outlineNodeId, best)
   }
   return result
+}
+
+/**
+ * Recompute the real manuscript size from canonical chapter bodies.
+ * Cached Chapter.wordCount values are deliberately ignored here because they
+ * can drift and must never decide short-novel profile or completion gates.
+ */
+export function canonicalManuscriptWordCount(chapters: Chapter[]): number {
+  return [...buildBestChapterByOutlineMap(chapters).values()]
+    .reduce((sum, chapter) => sum + chapterContentWordCount(chapter), 0)
 }

@@ -31,8 +31,10 @@ import {
   isWorkspaceUid,
   isWorkCode,
 } from '../memory/identity'
+import { assertStoredWorkClassification } from '../world-engine/work-kind'
 
-const STRICT_EXPORT_VERSION = 4
+const PORTABLE_OWNER_VERSION = 4
+const WORK_CLASSIFICATION_VERSION = 5
 
 function strictOwnerShadow(spec: TableSpec, row: Record<string, any>): {
   kind: 'world' | 'work' | 'instance'
@@ -71,7 +73,7 @@ function strictOwnerShadow(spec: TableSpec, row: Record<string, any>): {
 }
 
 function validateStrictOwnership(data: ProjectExportData): void {
-  if (data.version !== STRICT_EXPORT_VERSION) return
+  if (data.version < PORTABLE_OWNER_VERSION) return
   const value = data as unknown as Record<string, any>
   if (!Array.isArray(value.worlds) || !value.worlds.length || !Array.isArray(value.works) || !value.works.length) {
     throw new Error('[deriveImport] v4 备份缺少 World/Work 根')
@@ -86,6 +88,15 @@ function validateStrictOwnership(data: ProjectExportData): void {
   const ownership = value.ownership
   if (!ownership || !worldIds.has(ownership.worldExportId) || !workIds.has(ownership.workExportId)) {
     throw new Error('[deriveImport] v4 active owner 指针缺失或越界')
+  }
+  if (data.version >= WORK_CLASSIFICATION_VERSION) {
+    for (const row of value.works as Array<Record<string, unknown>>) {
+      try {
+        assertStoredWorkClassification(row as any)
+      } catch (error) {
+        throw new Error(`[deriveImport] v5 Work 分类非法：${error instanceof Error ? error.message : String(error)}`)
+      }
+    }
   }
   for (const spec of PROJECT_TABLES) {
     if (!spec.exportable || spec.name === 'projects' || spec.name === 'worlds' || spec.name === 'works') continue
@@ -108,7 +119,7 @@ function restoreStrictOwner(
   obj: Record<string, any>,
   newIdMaps: Map<string, Map<number, number>>,
 ): void {
-  if (dataVersion !== STRICT_EXPORT_VERSION) return
+  if (dataVersion < PORTABLE_OWNER_VERSION) return
   const shadow = strictOwnerShadow(spec, obj)
   delete obj._worldOwnerExportId
   delete obj._workOwnerExportId
@@ -485,7 +496,7 @@ export async function deriveImportProjectJSON(data: ProjectExportData): Promise<
   // v1-v3 had no portable owner shadows. Upgrade only after the import
   // transaction commits; the ownership service performs its own preflight and
   // atomic stamping without guessing external IDs.
-  if (data.version < STRICT_EXPORT_VERSION) await ensureWorkspaceOwnership(importedProjectId)
+  if (data.version < PORTABLE_OWNER_VERSION) await ensureWorkspaceOwnership(importedProjectId)
   return importedProjectId
 }
 
