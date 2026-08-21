@@ -64,6 +64,7 @@ import type {
   OpenWorldModule,
   AdaptationProject,
   AdaptationSourceUnit,
+  ScreenplayScene,
 } from '../types'
 import type { TemporalFact } from '../types/temporal-fact'
 
@@ -89,6 +90,7 @@ type HomeWorldGroupExportRef = {
  *   4 — World/Work owner 便携影子 ID（WORLD-2C C4）
  *   5 — Work kind / novelProfile（NOVEL-PROFILE-1）
  *   6 — 改编根与不可变来源清单（ADAPT-CORE-1A）
+ *   7 — 结构化正规剧本场景（SCREEN-1A）
  */
 export interface ProjectExportData {
   version: number
@@ -135,6 +137,16 @@ export interface ProjectExportData {
       _adaptationProjectExportId: number
       _sourceOutlineExportId?: number | null
       _sourceChapterExportId?: number | null
+    }
+  )[]
+  screenplayScenes?: (
+    Omit<ScreenplayScene, 'id' | 'projectId' | 'workId' | 'adaptationProjectId' | 'sourceUnitIds'>
+    & {
+      _exportId: number
+      _workExportId: number
+      _adaptationProjectExportId: number
+      _sourceUnitExportIds?: number[]
+      _blockCharacterExportIds?: Array<number | null>
     }
   )[]
   workCharacterBindings?: (

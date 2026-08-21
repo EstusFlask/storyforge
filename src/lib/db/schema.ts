@@ -85,6 +85,7 @@ import type {
   OpenWorldModule,
   AdaptationProject,
   AdaptationSourceUnit,
+  ScreenplayScene,
 } from '../types'
 import type { AIUsageEntry } from '../ai/usage-log'
 import type { TemporalFact } from '../types/temporal-fact'
@@ -239,6 +240,7 @@ class StoryForgeDB extends Dexie {
   openWorldModules!: Table<OpenWorldModule, number>
   adaptationProjects!: Table<AdaptationProject, number>
   adaptationSourceUnits!: Table<AdaptationSourceUnit, number>
+  screenplayScenes!: Table<ScreenplayScene, number>
 
   constructor() {
     super('storyforge')
@@ -646,8 +648,13 @@ class StoryForgeDB extends Dexie {
     // v63 / ADAPT-CORE-1A: target Work root plus immutable, versioned source
     // manifests. The upgrade only creates empty stores and never scans novels.
     this.version(63).stores({
-      adaptationProjects: '++id, projectId, worldId, &workId, sourceWorkId, sourceOutlineRootId, sourceStartNodeId, sourceEndNodeId, sourceStartChapterId, sourceEndChapterId, medium, status, updatedAt',
+      adaptationProjects: '++id, projectId, worldId, &workId, sourceWorkId, sourceOutlineRootId, sourceStartChapterId, sourceEndChapterId, medium, status, updatedAt',
       adaptationSourceUnits: '++id, projectId, workId, adaptationProjectId, &[adaptationProjectId+manifestVersion+sourceUnitKey], [adaptationProjectId+manifestVersion], sourceOutlineNodeId, sourceChapterId, order',
+    })
+
+    // v64 / SCREEN-1A: structured screenplay scenes and ordered blocks.
+    this.version(64).stores({
+      screenplayScenes: '++id, projectId, workId, adaptationProjectId, &[adaptationProjectId+stableKey], &[adaptationProjectId+episodeNumber+sceneNumber], [adaptationProjectId+episodeNumber], order, status, updatedAt',
     })
   }
 }

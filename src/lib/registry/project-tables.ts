@@ -100,6 +100,7 @@ const PROJECT_TABLE_REGISTRATIONS: ProjectTableRegistration[] = [
     domainOwner: { allowed: ['work'], legacyDefault: 'work', locator: { kind: 'field', owner: 'work', field: 'workId' } },
     refs: [
       { kind: 'simple', field: 'id', target: 'adaptationSourceUnits[adaptationProjectId]', onDelete: 'cascade' },
+      { kind: 'simple', field: 'id', target: 'screenplayScenes[adaptationProjectId]', onDelete: 'cascade' },
     ],
     exportRemap: [
       { field: 'worldId', remapVia: 'worlds', exportAs: '_worldExportId', onUnmapped: 'require' },
@@ -127,6 +128,23 @@ const PROJECT_TABLE_REGISTRATIONS: ProjectTableRegistration[] = [
     ],
     defaults: { summary: '', wordCount: 0, sourceUpdatedAt: null },
     note: 'ADAPT-CORE-1 追加式不可变来源清单；不复制全文，稳定 key 和 hash 跨备份保留' },
+
+  { table: db.screenplayScenes, name: 'screenplayScenes', owner: 'project', exportable: true, exportIdField: true,
+    domainOwner: { allowed: ['work'], legacyDefault: 'work', locator: { kind: 'field', owner: 'work', field: 'workId' } },
+    refs: [
+      { kind: 'array', field: 'sourceUnitIds', itemTarget: 'adaptationSourceUnits', onDelete: 'removeItem' },
+      { kind: 'json', field: 'blocks', jsonPath: '$[].characterId', target: 'characters[id]', onDelete: 'remap' },
+    ],
+    exportRemap: [
+      { field: 'workId', remapVia: 'works', exportAs: '_workExportId', onUnmapped: 'require' },
+      { field: 'adaptationProjectId', remapVia: 'adaptationProjects', exportAs: '_adaptationProjectExportId', onUnmapped: 'require' },
+    ],
+    exportRefRemap: [
+      { field: 'sourceUnitIds', remapVia: 'adaptationSourceUnits', kind: 'id-array', exportAs: '_sourceUnitExportIds' },
+      { field: 'blocks', remapVia: 'characters', kind: 'object-array-id', exportAs: '_blockCharacterExportIds', itemField: 'characterId' },
+    ],
+    defaults: { summary: '', sourceUnitIds: [], blocks: [], status: 'card', revision: 1 },
+    note: 'SCREEN-1 结构化正规剧本场景；块级角色和不可变来源证据统一重映射' },
 
   { table: db.workCharacterBindings, name: 'workCharacterBindings', owner: 'project', exportable: true,
     communityShare: 'world', releaseSection: 'characters',
@@ -593,8 +611,10 @@ const PROJECT_TABLE_REGISTRATIONS: ProjectTableRegistration[] = [
     exportRefRemap: [{
       field: 'arcs',
       remapVia: 'characters',
-      kind: 'character-plan-arcs',
+      kind: 'object-array-id',
       exportAs: '_arcCharacterIndexes',
+      itemField: 'characterId',
+      storage: 'json-string',
     }],
     defaults: {
       arcs: '[]',

@@ -79,7 +79,7 @@
 
 ## 二、上下文源清单（CONTEXT_SOURCES · AI 读什么）
 
-共 73 个上下文源。assembleContext({ sourceKeys }) 按 key 装配。
+共 74 个上下文源。assembleContext({ sourceKeys }) 按 key 装配。
 
 | key | 标签 | 作用域 | 层级 | 预算(token) |
 |---|---|---|---|---|
@@ -87,6 +87,7 @@
 | `adaptation.sourceContent` | 改编来源正文 | project | L0 | 24000 |
 | `adaptation.currentBrief` | 已确认改编 Brief | project | L0 | 4000 |
 | `adaptation.currentPlan` | 已确认改编计划 | project | L0 | 6000 |
+| `screenplay.currentScenes` | 当前剧本场景 | project | L0 | 16000 |
 | `worldGameAuthoring` | 冻结世界游戏创作包 | project | L1 | 12000 |
 | `avgAuthoring` | AVG 作者演出素材 | project | L2 | 4000 |
 | `adventureRuntime` | 文字冒险玩家视角 | runtime | L0 | 8000 |
@@ -192,6 +193,7 @@ AI 输出经 `adopt({ target, data })` 写回,只有这里登记的字段可写(
 | `referenceAnalysisRuns` | `activatedAt` `analysisSummary` `completedAt` `completedChunks` `depth` `error` `expectedChunks` `fileHash` `mergedCharacters` `progress` `referenceId` `rightsConfirmed` `rightsDeclaredAt` `rightsNote` `sourceFilename` `sourceKind` `status` `totalChars` `usageScope` `version` |
 | `referenceChunkAnalysis` | `analysisRunId` `characterCraft` `chunkIndex` `climaxDesign` `conflictEscalation` `dailyLife` `dialogueTechnique` `emotionalBeats` `endOffset` `foreshadowing` `historicalContext` `label` `languageCustoms` `materialCulture` `narrativeStyle` `openingTechnique` `otherTechniques` `pacingControl` `plotStructure` `proseStyle` `rawExcerpt` `referenceId` `socialInstitutions` `startOffset` `worldBuilding` |
 | `references` | `analysisDepth` `analysisError` `analysisProgress` `analysisStatus` `analysisSummary` `fileHash` `genre` `importSessionId` `mergedCharacters` `totalChars` |
+| `screenplayScenes` | `blocks` `estimatedSeconds` `intExt` `location` `planSectionKey` `sourceUnitIds` `summary` `timeOfDay` |
 | `stateCards` | `category` `entityName` `fields` `lastChapterId` |
 | `storyArcs` | `description` `name` `stages` `type` |
 | `storyCores` | `centralConflict` `concept` `logline` `mainPlot` `plotPattern` `subPlots` `theme` |
@@ -229,6 +231,7 @@ AI 输出经 `adopt({ target, data })` 写回,只有这里登记的字段可写(
 | `work-root-lifecycle` | `works` | `PROJECT_TABLES refs + WorkspaceScope + stable work code + narrative lifecycle` | `src/lib/memory/workspace-projection.ts`<br/>`src/lib/text-game/authoring.ts`<br/>`src/lib/avg/authoring.ts`<br/>`src/lib/world-engine/lifecycle.ts`<br/>`src/lib/world-engine/ownership.ts`<br/>`src/lib/world-engine/works.ts`<br/>`src/lib/world-engine/create-workspace.ts`<br/>`src/lib/adaptation/source-manifest.ts` | 2027-08-01 |
 | `adaptation-root-lifecycle` | `adaptationProjects` | `PROJECT_TABLES + ADOPTION_SCHEMAS + adaptation state machine + source manifest CAS` | `src/lib/adaptation/source-manifest.ts` | 2027-08-01 |
 | `adaptation-source-manifest-lifecycle` | `adaptationSourceUnits` | `PROJECT_TABLES + immutable source manifest policy + canonical chapter sequence` | `src/lib/adaptation/source-manifest.ts` | 2027-08-01 |
+| `screenplay-scene-lifecycle` | `screenplayScenes` | `PROJECT_TABLES + FIELD_REGISTRY + ADOPTION_SCHEMAS + screenplay block validator + adaptation freshness CAS` | `src/lib/screenplay/service.ts`<br/>`src/lib/screenplay/adoption.ts` | 2027-08-01 |
 | `short-novel-outline-skeleton-lifecycle` | `outlineNodes` | `PROJECT_TABLES tree refs + WorkspaceScope + SHORT_NOVEL_WORKFLOW_OVERRIDES` | `src/lib/world-engine/create-workspace.ts` | 2027-08-01 |
 | `chapter-delete-lifecycle` | `chapters` | `PROJECT_TABLES refs + WorkspaceScope + chapter deletion impact policy + short skeleton policy` | `src/lib/chapters/lifecycle.ts`<br/>`src/lib/world-engine/create-workspace.ts` | 2027-08-01 |
 | `chapter-emotion-delete-lifecycle` | `emotionBeatCards` | `PROJECT_TABLES chapter refs` | `src/lib/chapters/lifecycle.ts` | 2027-08-01 |
@@ -236,7 +239,7 @@ AI 输出经 `adopt({ target, data })` 写回,只有这里登记的字段可写(
 ## 四、AI 调用点（消耗统计 category · 在哪触发)
 
 共 47 个 category。
-未分类调用: 0 个。动态 category 调用: 30 个。
+未分类调用: 0 个。动态 category 调用: 31 个。
 
 | category | 触发文件 |
 |---|---|
@@ -304,6 +307,7 @@ AI 输出经 `adopt({ target, data })` 写回,只有这里登记的字段可写(
 - `src/lib/agent/outline-copilot.ts:760 · chat`
 - `src/lib/agent/prose-copilot.ts:665 · chat`
 - `src/lib/agent/prose-copilot.ts:930 · chat`
+- `src/lib/agent/run/adaptation-durable.ts:367 · chat`
 - `src/lib/agent/run/history-agent-durable.ts:514 · chat`
 - `src/lib/agent/run/reference-derived-durable.ts:506 · chat`
 - `src/lib/agent/story-arc-copilot.ts:1272 · chat`
@@ -323,4 +327,4 @@ AI 输出经 `adopt({ target, data })` 写回,只有这里登记的字段可写(
 
 ---
 
-生成时间基准:commit `2f5a3b5a`
+生成时间基准:commit `e5983af5`

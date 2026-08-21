@@ -140,6 +140,17 @@ export const FIELD_REGISTRY: FieldSpec[] = [
   object('adaptationProjects', 'plan'),
   object('adaptationProjects', 'visualBible'),
 
+  // SCREEN-1: model-facing scene content only. Stable identity, owner,
+  // revision, status and source review version remain system-owned.
+  text('screenplayScenes', 'planSectionKey'),
+  enumeration('screenplayScenes', 'intExt', ['INT', 'EXT', 'INT_EXT']),
+  text('screenplayScenes', 'location'),
+  text('screenplayScenes', 'timeOfDay'),
+  longtext('screenplayScenes', 'summary'),
+  num('screenplayScenes', 'estimatedSeconds'),
+  arr('screenplayScenes', 'sourceUnitIds'),
+  arr('screenplayScenes', 'blocks'),
+
   // HARNESS-68: AI may propose new World-owned worldGroups only through the
   // registered collection adoption boundary. Owner IDs and timestamps are stamped.
   text('worldGroups', 'name', ['世界名称']),

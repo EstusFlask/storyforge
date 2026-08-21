@@ -55,6 +55,7 @@ const TextOpenWorldPlayer = lazy(() => import('../components/text-game/TextOpenW
 const TextOpenWorldWorkbench = lazy(() => import('../components/text-game/TextOpenWorldWorkbench'))
 const OutlinePanel = lazy(() => import('../components/outline/OutlinePanel'))
 const ChaptersListPanel = lazy(() => import('../components/editor/ChaptersListPanel'))
+const ScreenplayStudio = lazy(() => import('../components/screenplay/ScreenplayStudio'))
 
 type TabId = 'home' | 'worlds' | 'novel' | 'nodes' | 'ttrpg' | 'chat' | 'game'
 type Accent = 'ochre' | 'teal' | 'blue' | 'violet' | 'rust'
@@ -271,7 +272,10 @@ function NovelPage({ project, world, onOpenWorldPicker, onCreate }: { project?: 
       setProfileBusy(false)
     }
   }
-  if (!isNovel && activeWork) return <><PageHeading eyebrow="AUTHORING / WORKS" title="作品创作" description="当前作品使用独立的媒介工作台。" action={<WorkKindBadge work={activeWork} />} /><BindingBanner world={world} onChange={onOpenWorldPicker} /><section className="sf-product-empty"><BookOpenText className="h-8 w-8" /><h2>正在准备媒介工作台</h2><p>小说模块不会读取或写入这个非小说 Work。</p></section></>
+  if (!isNovel && activeWork) {
+    const scope = scopeForProject(project)
+    return <><PageHeading eyebrow="AUTHORING / WORKS" title={effectiveWorkKind(activeWork) === 'screenplay' ? '正规剧本工作台' : '漫画工作台'} description="派生作品拥有独立结构、来源证据和导出链；不会修改源小说。" action={<WorkKindBadge work={activeWork} />} /><BindingBanner world={world} onChange={onOpenWorldPicker} />{scope && effectiveWorkKind(activeWork) === 'screenplay' ? <Suspense fallback={<FeaturePanelFallback />}><ScreenplayStudio scope={scope} /></Suspense> : <section className="sf-product-empty"><BookOpenText className="h-8 w-8" /><h2>正在准备漫画工作台</h2><p>小说模块不会读取或写入这个非小说 Work。</p></section>}</>
+  }
   return <><PageHeading eyebrow="AUTHORING / STEP BY STEP" title={profile === 'short' ? '短篇小说创作' : '长篇小说创作'} description={profile === 'short' ? '从现有分步骤长篇流程中裁剪出紧凑主路径，正文与大纲仍使用同一份 Canon。' : '以世界引擎为基础，继续使用原有完整的分步骤小说创作流程。'} action={<div className="flex items-center gap-2">{activeWork && <WorkKindBadge work={activeWork} />}<Button onClick={() => void changeProfile(profile === 'short' ? 'long' : 'short')} disabled={profileBusy}>{profileBusy ? '切换中…' : profile === 'short' ? '扩写为长篇' : '切换为短篇'}</Button><Button variant="primary" icon={ArrowRight} onClick={() => setView('chapters')}>打开正文</Button></div>} />{profileError && <p className="mb-3 text-sm text-red-600" role="alert">{profileError}</p>}<BindingBanner world={world} onChange={onOpenWorldPicker} /><div className="sf-subnav"><button className={view === 'outline' ? 'active' : ''} onClick={() => setView('outline')}><BookOpenText className="h-4 w-4" />卷纲与章纲</button><button className={view === 'chapters' ? 'active' : ''} onClick={() => setView('chapters')}><BookOpenText className="h-4 w-4" />章节与正文</button><span className="sf-subnav-spacer" /><span className="sf-subnav-note">{project.name}</span></div><section className="sf-product-panel sf-novel-panel"><Suspense fallback={<FeaturePanelFallback />}>{view === 'outline' ? <OutlinePanel project={project} onOpenChapter={id => { setNodeId(id); setView('chapters') }} /> : <ChaptersListPanel project={project} initialNodeId={nodeId} />}</Suspense></section></>
 }
 

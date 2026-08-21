@@ -161,6 +161,18 @@ async function readAdaptationPlanContext(input: AssembleContextInput): Promise<s
   return `【已确认改编计划｜manifest v${root.planSourceManifestVersion}】\n${JSON.stringify(root.plan)}`
 }
 
+async function readScreenplayCurrentScenesContext(input: AssembleContextInput): Promise<string> {
+  const root = await requireTargetAdaptation(input)
+  if (root.medium !== 'screenplay' || !input.screenplaySceneIds?.length) return ''
+  const scenes = await db.screenplayScenes.bulkGet(input.screenplaySceneIds)
+  if (scenes.some(scene => !scene || scene.adaptationProjectId !== root.id || scene.workId !== root.workId)) throw new Error('[screenplay-context] 场景选择越界')
+  return ['【当前剧本场景】', ...(scenes as NonNullable<typeof scenes[number]>[]).map(scene => [
+    `--- ${scene.stableKey}｜第 ${scene.episodeNumber} 集第 ${scene.sceneNumber} 场｜${scene.intExt} ${scene.location} - ${scene.timeOfDay}｜${scene.status}｜${scene.estimatedSeconds}s ---`,
+    `目的：${scene.summary}`,
+    ...scene.blocks.map(block => block.type === 'character' ? `${block.type}｜${block.name}${block.extension ? ` (${block.extension})` : ''}` : `${block.type}｜${block.text}`),
+  ].join('\n'))].join('\n\n')
+}
+
 async function readSimulationStateForContext(sessionId: number) {
   const { readSimulationState } = await import('../simulation/runtime')
   return readSimulationState(sessionId)
@@ -1219,6 +1231,18 @@ export const CONTEXT_SOURCES: ContextSource[] = [
     protectedFromTrim: true,
     requiresAdaptationProjectId: true,
     read: readAdaptationPlanContext,
+  },
+  {
+    key: 'screenplay.currentScenes',
+    label: '当前剧本场景',
+    scope: 'project',
+    layer: 'L0',
+    ownerFrom: 'work',
+    budgetTokens: 16_000,
+    protectedFromTrim: true,
+    requiresAdaptationProjectId: true,
+    requiresScreenplayScenes: true,
+    read: readScreenplayCurrentScenesContext,
   },
   {
     key: 'worldGameAuthoring',

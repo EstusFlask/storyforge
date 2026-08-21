@@ -43,6 +43,16 @@ const ADOPTION_SCHEMAS_RAW: CollectionAdoptionSpec[] = [
     ownerFrom: 'work',
   },
   {
+    target: 'screenplayScenes',
+    identity: { kind: 'composite', fields: ['adaptationProjectId', 'stableKey'] },
+    duplicatePolicy: 'update',
+    required: ['adaptationProjectId', 'stableKey', 'planSectionKey', 'intExt', 'location', 'timeOfDay', 'summary', 'estimatedSeconds', 'sourceUnitIds', 'blocks'],
+    autoStamps: ['projectId', 'workId', 'createdAt', 'updatedAt'],
+    ownerFrom: 'work',
+    fkChecks: [{ field: 'adaptationProjectId', target: 'adaptationProjects' }],
+    arrayMemberChecks: [{ field: 'sourceUnitIds', itemTarget: 'adaptationSourceUnits' }],
+  },
+  {
     target: 'storyCores',
     identity: 'id',
     recordOnly: true,
@@ -536,6 +546,14 @@ export const ADOPTION_EXTENSIONS: readonly AdoptionExtensionSpec[] = Object.free
     entrypoints: ['src/lib/adaptation/source-manifest.ts'],
     policyRegistry: 'PROJECT_TABLES + immutable source manifest policy + canonical chapter sequence',
     reason: '来源单元是创建或显式同步时原子追加的不可变证据，不是可由模型逐行采纳的内容表。',
+    reviewAfter: '2027-08-01',
+  },
+  {
+    id: 'screenplay-scene-lifecycle',
+    target: 'screenplayScenes',
+    entrypoints: ['src/lib/screenplay/service.ts', 'src/lib/screenplay/adoption.ts'],
+    policyRegistry: 'PROJECT_TABLES + FIELD_REGISTRY + ADOPTION_SCHEMAS + screenplay block validator + adaptation freshness CAS',
+    reason: '剧本场景的创建、排序、拆分、锁定和删除需要跨场景唯一约束、来源版本与块级引用校验；AI 批次仍须经同一 validator 原子采纳。',
     reviewAfter: '2027-08-01',
   },
   {

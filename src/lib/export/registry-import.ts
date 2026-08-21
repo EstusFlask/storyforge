@@ -18,10 +18,6 @@ import { migrateStateCardsToTemporalFactCandidates } from '../migrations/state-c
 import type { TableSpec } from '../registry/types'
 import type { ProjectExportData } from './json-export'
 import { normalizeCharacterAxes } from '../character/character-axes'
-import {
-  parseCharacterDrivenPlanArcs,
-  stringifyCharacterDrivenPlanArcs,
-} from '../types/character-driven-plan'
 import { ensureWorkspaceOwnership } from '../world-engine/ownership'
 import { rebindPortableAgentRunContractV1 } from '../agent/run/contract-portability'
 import { finalizeImportedAgentRunLedgersV1 } from '../agent/run/ledger-portability'
@@ -33,11 +29,13 @@ import {
 } from '../memory/identity'
 import { assertStoredWorkClassification } from '../world-engine/work-kind'
 import { assertAdaptationProjectInvariant } from '../adaptation/contracts'
-import type { AdaptationProject, Work } from '../types'
+import { validateScreenplayBlocksV1 } from '../screenplay/contracts'
+import type { AdaptationProject, ScreenplayBlock, Work } from '../types'
 
 const PORTABLE_OWNER_VERSION = 4
 const WORK_CLASSIFICATION_VERSION = 5
 const ADAPTATION_VERSION = 6
+const SCREENPLAY_VERSION = 7
 
 function strictOwnerShadow(spec: TableSpec, row: Record<string, any>): {
   kind: 'world' | 'work' | 'instance'
@@ -102,6 +100,7 @@ function validateStrictOwnership(data: ProjectExportData): void {
     }
   }
   if (data.version >= ADAPTATION_VERSION) validateAdaptationBackup(value)
+  if (data.version >= SCREENPLAY_VERSION) validateScreenplayBackup(value)
   for (const spec of PROJECT_TABLES) {
     if (!spec.exportable || spec.name === 'projects' || spec.name === 'worlds' || spec.name === 'works') continue
     const rows = value[spec.name]
@@ -169,6 +168,50 @@ function validateAdaptationBackup(value: Record<string, any>): void {
   for (const [rootId, root] of roots) {
     const activeUnits = (value.adaptationSourceUnits as Record<string, any>[]).filter(row => row._adaptationProjectExportId === rootId && row.manifestVersion === root.activeSourceManifestVersion)
     if (activeUnits.filter(row => row.sourceKind === 'work').length !== 1) throw new Error('[deriveImport] v6 活动 manifest 必须恰有一个 work 单元')
+  }
+}
+
+function validateScreenplayBackup(value: Record<string, any>): void {
+  if (!Array.isArray(value.screenplayScenes)) throw new Error('[deriveImport] v7 备份缺少 screenplayScenes')
+  const roots = new Map<number, Record<string, any>>((value.adaptationProjects ?? []).map((row: Record<string, any>) => [row._exportId, row]))
+  const units = new Map<number, Record<string, any>>((value.adaptationSourceUnits ?? []).map((row: Record<string, any>) => [row._exportId, row]))
+  const characterCount = Array.isArray(value.characters) ? value.characters.length : 0
+  const ids = new Set<number>()
+  const stable = new Set<string>()
+  const episodeNumbers = new Set<string>()
+  const orders = new Set<string>()
+  for (const row of value.screenplayScenes as Record<string, any>[]) {
+    const root = roots.get(row._adaptationProjectExportId)
+    if (!root || root.medium !== 'screenplay' || row._workExportId !== root._workExportId) throw new Error('[deriveImport] v7 剧本场景 owner 或媒介越界')
+    if (!Number.isInteger(row._exportId) || ids.has(row._exportId)) throw new Error('[deriveImport] v7 剧本场景便携 ID 重复或无效')
+    ids.add(row._exportId)
+    const stableIdentity = `${row._adaptationProjectExportId}:${row.stableKey}`
+    if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$/.test(row.stableKey) || stable.has(stableIdentity)) throw new Error('[deriveImport] v7 剧本场景 stableKey 非法或重复')
+    stable.add(stableIdentity)
+    if (!Number.isInteger(row.episodeNumber) || row.episodeNumber < 1 || !Number.isInteger(row.sceneNumber) || row.sceneNumber < 1 || !Number.isInteger(row.order) || row.order < 0) throw new Error('[deriveImport] v7 剧本场景编号非法')
+    const numberIdentity = `${row._adaptationProjectExportId}:${row.episodeNumber}:${row.sceneNumber}`
+    const orderIdentity = `${row._adaptationProjectExportId}:${row.order}`
+    if (episodeNumbers.has(numberIdentity) || orders.has(orderIdentity)) throw new Error('[deriveImport] v7 剧本场景编号或顺序重复')
+    episodeNumbers.add(numberIdentity); orders.add(orderIdentity)
+    const spec = root.targetSpec as AdaptationProject['targetSpec']
+    if (spec.format === 'film' && row.episodeNumber !== 1) throw new Error('[deriveImport] v7 电影场景集号必须为 1')
+    if ('episodeCount' in spec && spec.episodeCount != null && row.episodeNumber > spec.episodeCount) throw new Error('[deriveImport] v7 剧本场景集号越界')
+    if (!['INT', 'EXT', 'INT_EXT'].includes(row.intExt) || typeof row.location !== 'string' || !row.location.trim() || typeof row.timeOfDay !== 'string' || !row.timeOfDay.trim()) throw new Error('[deriveImport] v7 剧本场景标题非法')
+    if (!Number.isFinite(row.estimatedSeconds) || row.estimatedSeconds <= 0 || !Number.isInteger(row.sourceReviewManifestVersion) || row.sourceReviewManifestVersion < 1) throw new Error('[deriveImport] v7 剧本时长或来源版本非法')
+    if (!Array.isArray(row._sourceUnitExportIds) || !row._sourceUnitExportIds.length || new Set(row._sourceUnitExportIds).size !== row._sourceUnitExportIds.length) throw new Error('[deriveImport] v7 剧本来源证据非法')
+    for (const unitId of row._sourceUnitExportIds) {
+      const unit = units.get(unitId)
+      if (!unit || unit._adaptationProjectExportId !== row._adaptationProjectExportId || unit.manifestVersion !== row.sourceReviewManifestVersion) throw new Error('[deriveImport] v7 剧本来源单元越界')
+    }
+    if (!Array.isArray(row.blocks) || !validateScreenplayBlocksV1(row.blocks as ScreenplayBlock[]).valid) throw new Error('[deriveImport] v7 剧本块非法')
+    if (!Array.isArray(row._blockCharacterExportIds) || row._blockCharacterExportIds.length !== row.blocks.length) throw new Error('[deriveImport] v7 剧本角色影子映射非法')
+    row._blockCharacterExportIds.forEach((id: unknown, index: number) => {
+      if (id != null && (!Number.isInteger(id) || (id as number) < 0 || (id as number) >= characterCount)) throw new Error('[deriveImport] v7 剧本角色引用越界')
+      const block = row.blocks[index]
+      if (block?.characterId != null) throw new Error('[deriveImport] v7 剧本块泄露本地角色 ID')
+    })
+    const section = root.plan?.sections?.find((item: Record<string, unknown>) => item.stableKey === row.planSectionKey)
+    if (!section || root.planSourceManifestVersion !== root.activeSourceManifestVersion) throw new Error('[deriveImport] v7 剧本场景计划引用无效')
   }
 }
 
@@ -501,12 +544,14 @@ export async function deriveImportProjectJSON(data: ProjectExportData): Promise<
               ? remapPortableIdArray(portableRefs, refMap, rr.storage === 'json-string')
               : rr.kind === 'scene-character-ids'
                 ? await remapSceneCharacterIndexes((db as any)[spec.name], pending.newId, rr.field, portableRefs, refMap)
-                : await remapCharacterPlanArcIndexes(
+                : await remapObjectArrayIdIndexes(
                   (db as any)[spec.name],
                   pending.newId,
                   rr.field,
                   portableRefs,
                   refMap,
+                  rr.itemField,
+                  rr.storage === 'json-string',
                 )
             if (patch !== undefined) {
               await (db as any)[spec.name].update(pending.newId, { [rr.field]: patch })
@@ -587,21 +632,30 @@ async function remapSceneCharacterIndexes(
   })
 }
 
-async function remapCharacterPlanArcIndexes(
+async function remapObjectArrayIdIndexes(
   table: any,
   rowId: number,
   field: string,
   portableRefs: unknown,
   idMap: Map<number, number>,
-): Promise<string | undefined> {
+  itemField: string,
+  stringify: boolean,
+): Promise<Array<Record<string, unknown>> | string | undefined> {
   if (!Array.isArray(portableRefs)) return undefined
   const row = await table.get(rowId)
-  const arcs = parseCharacterDrivenPlanArcs(row?.[field])
-  return stringifyCharacterDrivenPlanArcs(arcs.map((arc, index) => {
+  let parsed: unknown = row?.[field]
+  if (typeof parsed === 'string') {
+    try { parsed = JSON.parse(parsed) } catch { return undefined }
+  }
+  if (!Array.isArray(parsed)) return undefined
+  const items = parsed.map((item, index) => {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) return item
     const exportIndex = portableRefs[index]
+    if (!(itemField in item) && exportIndex == null) return item
     return {
-      ...arc,
-      characterId: typeof exportIndex === 'number' ? (idMap.get(exportIndex) ?? null) : null,
+      ...(item as Record<string, unknown>),
+      [itemField]: typeof exportIndex === 'number' ? (idMap.get(exportIndex) ?? null) : null,
     }
-  }))
+  })
+  return stringify ? JSON.stringify(items) : items as Array<Record<string, unknown>>
 }

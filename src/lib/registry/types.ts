@@ -206,11 +206,13 @@ export type ExportRefRemap = {
   kind: 'scene-character-ids'
   exportAs: string
 } | {
-  /** CharacterDrivenPlan.arcs JSON 内逐项 characterId 的便携影子数组。 */
+  /** Object-array field containing one optional numeric reference per item. */
   field: string
   remapVia: string
-  kind: 'character-plan-arcs'
+  kind: 'object-array-id'
   exportAs: string
+  itemField: string
+  storage?: 'array' | 'json-string'
 }
 
 /**
@@ -516,6 +518,8 @@ export interface AssembleContextInput {
   adaptationSourceManifestVersion?: number
   /** Explicit source-unit capability list for adaptation.sourceContent. */
   adaptationSourceUnitKeys?: string[]
+  /** SCREEN-1: explicit target scene capability list for review/revision Runs. */
+  screenplaySceneIds?: number[]
   /** AGENT-1: 本地确定性项目搜索；只由 searchResults 上下文源消费。 */
   searchQuery?: string
   /** AGENT-1: 搜索最多返回 10 条短摘。 */
@@ -549,6 +553,7 @@ export interface ContextSource {
   requiresChapterId?: boolean
   requiresAdaptationProjectId?: boolean
   requiresAdaptationSourceUnits?: boolean
+  requiresScreenplayScenes?: boolean
   /** 规划尚未创建正文 Chapter 时，允许用 outlineNodeId 作为规范章序边界。 */
   acceptsOutlineNodeAsChapterBoundary?: boolean
   enabled?: (input: AssembleContextInput) => boolean | Promise<boolean>

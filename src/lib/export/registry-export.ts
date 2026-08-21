@@ -12,7 +12,6 @@ import Dexie from 'dexie'
 import { db } from '../db/schema'
 import { PROJECT_TABLES, REGISTRY_BY_NAME } from '../registry/project-tables'
 import { remapWorldPortalTargets } from '../utils/world-portals'
-import { parseCharacterDrivenPlanArcs } from '../types/character-driven-plan'
 import type { TableSpec } from '../registry/types'
 import type { ProjectExportData } from './json-export'
 import { redactAuthoringSecrets } from '../node-authoring/contracts'
@@ -22,7 +21,7 @@ import { portableizeAgentRunLedgerExportV1 } from '../agent/run/ledger-portabili
 /** 旧 fixture 等价导出版本；仅供兼容测试和无 ownership 的空项目使用。 */
 const EXPORT_VERSION = 3
 /** v6 adds governed adaptation roots/source manifests atop v4 portable owners and v5 Work classification. */
-export const STRICT_EXPORT_VERSION = 6
+export const STRICT_EXPORT_VERSION = 7
 
 export interface StrictProjectExportSnapshot {
   data: ProjectExportData
@@ -89,11 +88,17 @@ function toExportRow(
           ? scene.characterIds.map((id: unknown) => typeof id === 'number' ? map?.get(id) : undefined).filter((id: unknown): id is number => typeof id === 'number')
           : [])
         : []
-    } else if (rr.kind === 'character-plan-arcs') {
+    } else if (rr.kind === 'object-array-id') {
       const map = idMaps.get(rr.remapVia)
-      obj[rr.exportAs] = parseCharacterDrivenPlanArcs(obj[rr.field]).map(arc =>
-        arc.characterId == null ? null : (map?.get(arc.characterId) ?? null),
-      )
+      const items = parseObjectArray(obj[rr.field])
+      obj[rr.exportAs] = items.map(item => {
+        const id = item[rr.itemField]
+        return typeof id === 'number' ? (map?.get(id) ?? null) : null
+      })
+      if (strictOwners) {
+        const sanitized = items.map(item => rr.itemField in item ? { ...item, [rr.itemField]: null } : item)
+        obj[rr.field] = rr.storage === 'json-string' ? JSON.stringify(sanitized) : sanitized
+      }
     }
   }
 
@@ -138,6 +143,16 @@ function toExportRow(
   return spec.name === 'nodeFlows' || spec.name === 'nodeRuns'
     ? redactAuthoringSecrets(obj)
     : obj
+}
+
+function parseObjectArray(value: unknown): Array<Record<string, unknown>> {
+  let parsed = value
+  if (typeof value === 'string') {
+    try { parsed = JSON.parse(value) } catch { return [] }
+  }
+  return Array.isArray(parsed)
+    ? parsed.filter((item): item is Record<string, unknown> => !!item && typeof item === 'object' && !Array.isArray(item))
+    : []
 }
 
 function parseIdArray(value: unknown): number[] {

@@ -10,6 +10,7 @@ export const REQUIRED_TABLES = [
   'adventureModules',
   'adaptationProjects',
   'adaptationSourceUnits',
+  'screenplayScenes',
   'avgMediaAssets',
   'avgMediaBlobs',
   'avgPresentationModules',

@@ -114,7 +114,7 @@ describe('NOVEL-PROFILE-1 / SHORT-1 · Work 分类与短篇边界', () => {
       novelProfile: 'short',
     })
     const backup = await exportProjectJSON(created.scope.projectId)
-    expect(backup.version).toBe(6)
+    expect(backup.version).toBe(7)
     expect(backup.works?.[0]).toMatchObject({ kind: 'novel', novelProfile: 'short' })
 
     const importedId = await importProjectJSON(structuredClone(backup))

@@ -6,7 +6,7 @@
  */
 import { PROJECT_TABLES } from '../registry/project-tables'
 
-export const CURRENT_BACKUP_VERSION = 6
+export const CURRENT_BACKUP_VERSION = 7
 
 export interface BackupTrustReport {
   valid: boolean
@@ -80,6 +80,9 @@ export function inspectProjectBackup(input: unknown): BackupTrustReport {
     for (const tableName of ['adaptationProjects', 'adaptationSourceUnits']) {
       if (!Array.isArray(input[tableName])) errors.push(`v${version} 备份缺少必需表「${tableName}」。`)
     }
+  }
+  if (version != null && version >= 7 && !Array.isArray(input.screenplayScenes)) {
+    errors.push(`v${version} 备份缺少必需表「screenplayScenes」。`)
   }
 
   if (missingTables.length > 0) {
