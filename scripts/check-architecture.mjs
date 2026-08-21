@@ -921,6 +921,57 @@ if (/\.(?:add|put|update|delete|bulkPut|bulkDelete|clear)\s*\(/.test(canonProvid
   violations.push('[㉔Provider 只读] Canon Provider 不得写任何数据库表')
 }
 
+// ── ㉕ CTXG-4 四个 Gateway 工具必须复用唯一 Tool Registry 与统一 Runner ──
+const agentToolRegistrySource = read('src/lib/agent/tool-registry.ts')
+const gatewayToolsSource = read('src/lib/agent/context-gateway-tools.ts')
+const gatewaySessionSource = read('src/lib/context-gateway/tool-session.ts')
+const agentRunnerSource = read('src/lib/agent/runner.ts')
+const agentExecutionBindingSource = read('src/lib/agent/execution-binding.ts')
+for (const toolName of [
+  'list_context_catalog', 'search_context', 'read_context_resource', 'read_original_evidence',
+]) {
+  if (!gatewayToolsSource.includes(`name: '${toolName}'`)) {
+    violations.push(`[㉕Gateway 工具] 缺少唯一 Tool Registry 定义 ${toolName}`)
+  }
+}
+if (!agentToolRegistrySource.includes('...CONTEXT_GATEWAY_READ_TOOLS_V1')
+  || !agentToolRegistrySource.includes('AGENT_TOOL_BY_NAME')
+  || !agentToolRegistrySource.includes('executeAgentTool')) {
+  violations.push('[㉕唯一工具入口] Gateway 工具必须并入 AGENT_READ_TOOLS/AGENT_TOOL_BY_NAME/executeAgentTool')
+}
+if (!agentRunnerSource.includes('await executeAgentTool(call.name, input.context, call.arguments)')
+  || !agentRunnerSource.includes('maxToolCalls')
+  || !agentRunnerSource.includes('maxToolResultTokens')
+  || !agentRunnerSource.includes('loop_detected')) {
+  violations.push('[㉕统一 Runner] Gateway 工具必须复用既有调用数、结果 token 与循环预算')
+}
+for (const token of [
+  'normalizeContextAccessPolicyV1', 'claimContextGatewayReadCallV1',
+  'assertContextGatewayTokenRequestV1', 'settleContextGatewayTokensV1',
+  'issueContextSourceRefCapabilitiesV1', 'resolveContextSourceRefCapabilityV1',
+]) {
+  if (!`${gatewaySessionSource}\n${gatewayToolsSource}`.includes(token)) {
+    violations.push(`[㉕Gateway 权限] Gateway session/tool 缺少 ${token}`)
+  }
+}
+if (!gatewayToolsSource.includes("CONTEXT_SOURCES\n  .filter(source => source.resources != null)")
+  || /const\s+GATEWAY_SOURCE_KEYS\s*=\s*\[/.test(gatewayToolsSource)) {
+  violations.push('[㉕Provider 来源] Gateway 工具 source keys 必须从 CONTEXT_SOURCES.resources 派生')
+}
+if (!gatewayToolsSource.includes('sourceRefCount: descriptor.sourceRefs.length')
+  || !gatewayToolsSource.includes('sourceRefCapabilities: issued')
+  || !gatewayToolsSource.includes('sourceRefEvidence')
+  || !gatewayToolsSource.includes("sourceRef: { type: 'string'")) {
+  violations.push('[㉕SourceRef 能力] 目录不得暴露本地主键；原文工具只能接受 session 签发的 opaque capability')
+}
+if (/\bdb\./.test(gatewayToolsSource)) {
+  violations.push('[㉕工具只读] Context Gateway tool adapter 不得直接访问或写数据库')
+}
+if (!agentExecutionBindingSource.includes("AGENT_TOOL_SCHEMA_VERSION_V1 = 'agent-read-tools-v3'")
+  || !agentExecutionBindingSource.includes('verifyAgentToolSchemaBindingV1')) {
+  violations.push('[㉕工具版本] 四个工具必须升级并冻结 Agent tool schema version/hash')
+}
+
 // ── 报告 ──
 if (violations.length) {
   console.error('[architecture] ❌ 发现反模式违规(违反 CLAUDE.md 三注册表铁律):\n')

@@ -626,6 +626,12 @@ export interface ResourceListInputV1 {
 
 export interface ResourceSearchInputV1 extends ResourceListInputV1 {
   query: string
+  /** Resource keys matched against the descriptor itself or one-hop relations. */
+  entityKeys?: string[]
+  /** Story-arc resource keys matched independently from general entity filters. */
+  storyArcKeys?: string[]
+  /** Deterministic metadata range filter; it never scans resource bodies. */
+  timeRange?: ContextTimeRangeV1
 }
 
 export interface ResourcePageV1 {

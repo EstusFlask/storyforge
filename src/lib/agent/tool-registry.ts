@@ -4,6 +4,7 @@ import { assembleContext } from '../registry/assemble-context'
 import { CONTEXT_SOURCE_BY_KEY } from '../registry/context-sources'
 import type { AssembleContextInput } from '../registry/types'
 import { AGENT_SEARCH_KINDS } from './read-sources'
+import { CONTEXT_GATEWAY_READ_TOOLS_V1 } from './context-gateway-tools'
 import type {
   AgentToolDefinition,
   AgentToolExecutionContext,
@@ -454,7 +455,7 @@ async function executeReadTool(
   }
 }
 
-export const AGENT_READ_TOOLS: readonly AgentToolDefinition[] = READ_TOOL_SPECS.map(spec => {
+const LEGACY_AGENT_READ_TOOLS: readonly AgentToolDefinition[] = READ_TOOL_SPECS.map(spec => {
   for (const sourceKey of spec.sourceKeys) {
     if (!CONTEXT_SOURCE_BY_KEY.has(sourceKey)) {
       throw new Error(`Agent 工具 ${spec.name} 引用了未注册上下文源：${sourceKey}`)
@@ -470,6 +471,22 @@ export const AGENT_READ_TOOLS: readonly AgentToolDefinition[] = READ_TOOL_SPECS.
     execute: (context, args) => executeReadTool(spec, context, args),
   }
 })
+
+export const AGENT_READ_TOOLS: readonly AgentToolDefinition[] = [
+  ...LEGACY_AGENT_READ_TOOLS,
+  ...CONTEXT_GATEWAY_READ_TOOLS_V1,
+]
+
+const toolNames = new Set<string>()
+for (const tool of AGENT_READ_TOOLS) {
+  if (toolNames.has(tool.name)) throw new Error(`Agent 只读工具重复登记：${tool.name}`)
+  toolNames.add(tool.name)
+  for (const sourceKey of tool.sourceKeys) {
+    if (!CONTEXT_SOURCE_BY_KEY.has(sourceKey)) {
+      throw new Error(`Agent 工具 ${tool.name} 引用了未注册上下文源：${sourceKey}`)
+    }
+  }
+}
 
 /** Maximum context capability exposed by the generic read-only runner. */
 export const AGENT_READ_CONTEXT_SOURCE_KEYS: readonly string[] = [...new Set(

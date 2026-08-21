@@ -749,6 +749,68 @@ function decodeCursor(value: string | undefined): CatalogCursorV1 | null {
   }
 }
 
+function normalizedResourceKeys(values: readonly string[] | undefined, label: string): string[] {
+  if (!values) return []
+  if (values.length > 50 || values.some(value => typeof value !== 'string' || !value.trim())) {
+    fail('filter', `${label} 必须是最多 50 个非空 resource key`)
+  }
+  return [...new Set(values.map(value => value.trim()))].sort()
+}
+
+function compareBoundary(left: number | string, right: number | string): number {
+  if (typeof left === 'number' && typeof right === 'number') return left - right
+  return String(left).localeCompare(String(right), 'zh-CN', { numeric: true })
+}
+
+function matchesTimeRange(
+  descriptor: ContextResourceDescriptorV1,
+  requested: ContextTimeRangeV1 | undefined,
+): boolean {
+  if (!requested) return true
+  const actual = descriptor.timeRange
+  if (!actual) return false
+  if (requested.throughChapterId != null) {
+    const actualChapter = actual.throughChapterId ?? descriptor.scope.chapterId
+    if (actualChapter == null || actualChapter > requested.throughChapterId) return false
+  }
+  if (requested.start != null && actual.end != null && compareBoundary(actual.end, requested.start) < 0) return false
+  if (requested.end != null && actual.start != null && compareBoundary(actual.start, requested.end) > 0) return false
+  return true
+}
+
+function assertTimeRangeFilter(value: ContextTimeRangeV1 | undefined): void {
+  if (!value) return
+  const unknown = Object.keys(value).filter(key => !['start', 'end', 'throughChapterId'].includes(key))
+  if (unknown.length) fail('filter', `timeRange 含未知字段: ${unknown.join(',')}`)
+  for (const key of ['start', 'end'] as const) {
+    const boundary = value[key]
+    if (boundary != null && (typeof boundary !== 'string' && typeof boundary !== 'number')) {
+      fail('filter', `timeRange.${key} 必须是字符串或数字`)
+    }
+    if (typeof boundary === 'number' && !Number.isFinite(boundary)) fail('filter', `timeRange.${key} 必须是有限数值`)
+    if (typeof boundary === 'string' && !boundary.trim()) fail('filter', `timeRange.${key} 不得为空`)
+  }
+  if (value.throughChapterId != null
+    && (!Number.isSafeInteger(value.throughChapterId) || value.throughChapterId < 1)) {
+    fail('filter', 'timeRange.throughChapterId 必须是正整数')
+  }
+  if (value.start == null && value.end == null && value.throughChapterId == null) {
+    fail('filter', 'timeRange 至少需要 start/end/throughChapterId 之一')
+  }
+}
+
+function matchesResourceKeys(
+  descriptor: ContextResourceDescriptorV1,
+  requested: readonly string[],
+): boolean {
+  if (!requested.length) return true
+  const available = new Set([
+    descriptor.resourceKey,
+    ...descriptor.relations.map(relation => relation.targetResourceKey),
+  ])
+  return requested.some(key => available.has(key))
+}
+
 async function primaryKeys(spec: ResourceSpec, projectId: number): Promise<number[]> {
   const keys = await spec.table.where('projectId').equals(projectId).primaryKeys()
   return keys.filter((key): key is number => typeof key === 'number').sort((left, right) => left - right)
@@ -764,7 +826,13 @@ async function catalogPage(input: ResourceListInputV1 | ResourceSearchInputV1): 
   if (requestedKinds.some(kind => !CANON_RESOURCE_KINDS_V1.includes(kind))) fail('kind', '请求包含 Provider 未登记的 kind')
   const query = 'query' in input ? input.query.trim().toLocaleLowerCase('zh-CN') : ''
   if ('query' in input && !query) fail('query', '搜索 query 不得为空')
-  const requestHash = await hashCanonicalValue({ version: 1, scopeFingerprint, requestedKinds, query })
+  const entityKeys = 'query' in input ? normalizedResourceKeys(input.entityKeys, 'entityKeys') : []
+  const storyArcKeys = 'query' in input ? normalizedResourceKeys(input.storyArcKeys, 'storyArcKeys') : []
+  const timeRange = 'query' in input ? input.timeRange : undefined
+  assertTimeRangeFilter(timeRange)
+  const requestHash = await hashCanonicalValue({
+    version: 1, scopeFingerprint, requestedKinds, query, entityKeys, storyArcKeys, timeRange: timeRange ?? null,
+  })
   const cursor = decodeCursor(input.cursor)
   if (cursor && (cursor.requestHash !== requestHash || cursor.scopeFingerprint !== scopeFingerprint)) {
     fail('cursor-scope', '目录 cursor 不属于当前 scope/filter/query')
@@ -788,6 +856,9 @@ async function catalogPage(input: ResourceListInputV1 | ResourceSearchInputV1): 
         const searchable = `${projected.descriptor.resourceKey}\n${projected.descriptor.title}\n${projected.descriptor.shortSummary}`
           .toLocaleLowerCase('zh-CN')
         if (query && !searchable.includes(query)) continue
+        if (!matchesResourceKeys(projected.descriptor, entityKeys)
+          || !matchesResourceKeys(projected.descriptor, storyArcKeys)
+          || !matchesTimeRange(projected.descriptor, timeRange)) continue
         found.push({ projected, tableIndex, recordId, itemIndex })
         if (found.length > input.limit) break outer
       }

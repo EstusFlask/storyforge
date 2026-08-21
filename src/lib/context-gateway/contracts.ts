@@ -187,8 +187,22 @@ function providerSnapshot(sources: readonly ContextSource[]) {
   return providers
 }
 
-function normalizePolicy(policy: ContextAccessPolicyV1, sources: readonly ContextSource[]): ContextAccessPolicyV1 {
+export function normalizeContextAccessPolicyV1(
+  policy: ContextAccessPolicyV1,
+  sources: readonly ContextSource[],
+): ContextAccessPolicyV1 {
+  assertExactKeys(policy, [
+    'version', 'policyId', 'mandatorySourceKeys', 'allowedSourceKeys', 'allowedResourceKinds',
+    'allowedDepths', 'selectorPolicyId', 'maxReadCalls', 'maxRetrievedTokens',
+    'perKindMinimumTokens', 'allowOriginalRead', 'candidateAccess',
+  ], 'ContextAccessPolicyV1')
   if (policy.version !== 'context-access-policy-v1') fail('unsupported-policy', '只支持 ContextAccessPolicyV1')
+  if (policy.allowOriginalRead !== true && policy.allowOriginalRead !== false) {
+    fail('invalid-policy', 'allowOriginalRead 必须是 boolean')
+  }
+  if (policy.candidateAccess !== 'forbidden' && policy.candidateAccess !== 'explicit-resource-key-only') {
+    fail('invalid-policy', 'candidateAccess 非法')
+  }
   const sourceByKey = new Map(sources.map(source => [source.key, source]))
   const allowedSourceKeys = uniqueSorted(policy.allowedSourceKeys, 'allowedSourceKeys')
   const mandatorySourceKeys = uniqueSorted(policy.mandatorySourceKeys, 'mandatorySourceKeys')
@@ -208,10 +222,18 @@ function normalizePolicy(policy: ContextAccessPolicyV1, sources: readonly Contex
   const allowedDepths = uniqueSorted(policy.allowedDepths, 'allowedDepths')
   for (const depth of allowedDepths) if (!DEPTHS.includes(depth)) fail('unregistered-depth', `Policy depth 非法: ${depth}`)
   if (allowedDepths.includes('original') && !policy.allowOriginalRead) fail('original-forbidden', '禁止 original read 时不得声明 original depth')
-  if (!policy.policyId || !policy.selectorPolicyId) fail('invalid-policy', 'Policy id/selector version 不得为空')
+  if (!policy.policyId.trim() || !policy.selectorPolicyId.trim()) fail('invalid-policy', 'Policy id/selector version 不得为空')
   if (!Number.isSafeInteger(policy.maxReadCalls) || policy.maxReadCalls < 0
     || !Number.isSafeInteger(policy.maxRetrievedTokens) || policy.maxRetrievedTokens < 0) {
     fail('invalid-budget', 'Gateway read/token budget 非法')
+  }
+  if (policy.perKindMinimumTokens) {
+    for (const [kind, tokens] of Object.entries(policy.perKindMinimumTokens)) {
+      if (!KINDS.includes(kind as ContextResourceKind)
+        || !Number.isSafeInteger(tokens) || tokens! < 0 || tokens! > policy.maxRetrievedTokens) {
+        fail('invalid-budget', `perKindMinimumTokens.${kind} 非法`)
+      }
+    }
   }
   return {
     ...policy,
@@ -358,7 +380,7 @@ export async function createContextGatewayContractSnapshotV1(input: {
   normalizationVersion: string
 }): Promise<ContextGatewayContractSnapshotV1> {
   requireHash(input.toolSchemaHash, 'toolSchemaHash')
-  const policy = normalizePolicy(input.policy, input.sources)
+  const policy = normalizeContextAccessPolicyV1(input.policy, input.sources)
   const policyHash = await hashCanonicalValue(policy)
   const providers = providerSnapshot(input.sources)
   const providerSetHash = await hashCanonicalValue(providers)
