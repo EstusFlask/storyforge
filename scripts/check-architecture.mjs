@@ -118,6 +118,7 @@ for (const dir of UI_DIRS) {
 // ── ④ AI 调用必须带 category meta ──
 const AI_META_FORWARDERS = new Set([
   'src/hooks/useAIStream.ts',
+  'src/lib/agent/formal-ai-entry.ts',
   'src/lib/import/chat-with-abort.ts',
   'src/lib/reference-analysis/pipeline.ts',
 ])
@@ -165,6 +166,7 @@ for (const dir of ['src/components', 'src/hooks', 'src/lib']) {
         const lineEnd = src.indexOf('\n', call.start)
         const lineText = src.slice(lineStart, lineEnd < 0 ? src.length : lineEnd).trim()
         if (lineText.startsWith('//') || lineText.startsWith('*')) continue
+        if (file === 'src/lib/agent/formal-ai-entry.ts') continue
         if (AI_META_FORWARDERS.has(file) && /\bmeta\b/.test(call.text)) continue
         if (file === 'src/lib/ai/client.ts') continue
         if (!/\bcategory\s*:/.test(call.text)) {
@@ -659,6 +661,49 @@ if (!masterDurableSource.includes('parsePromptExecutionOptionsV1')
   || !masterDurableSource.includes('parsePromptExecutionEvidenceV1')
   || !masterDurableSource.includes('parameterValuesHash: task.promptExecution.parameterValuesHash')) {
   violations.push('[⑱durable Prompt] durable 计划、Run Contract 和候选恢复必须验证 Prompt 绑定')
+}
+
+// ── ⑲ WEH-0H 正式 AI 入口必须由机器绑定与集中执行器授权 ──
+const formalEntryRegistrySource = read('src/lib/agent/ai-entry-registry.json')
+const formalEntrySource = read('src/lib/agent/formal-ai-entry.ts')
+const useAIStreamSource = read('src/hooks/useAIStream.ts')
+const formalEntryCheckSource = read('scripts/check-ai-entry-registry.mjs')
+const detailedOutlineDurableSource = read('src/lib/agent/run/detailed-outline-generation-durable.ts')
+if (!/"version":\s*2/.test(formalEntryRegistrySource)
+  || !/"bindingVersion":\s*1/.test(formalEntryRegistrySource)
+  || /"calls":\s*\d+/.test(formalEntryRegistrySource)
+  || /"status":\s*"(?:governed|auxiliary|migration)"/.test(formalEntryRegistrySource)) {
+  violations.push('[⑲入口唯一事实源] AI 入口注册表不得退回文件调用次数和人工 status 说明')
+}
+for (const token of [
+  'parseFormalAIEntryRegistryV1',
+  'assertFormalAIEntryCallV1',
+  'executeRegisteredAIEntryV1',
+  'streamRegisteredAIEntryV1',
+  'AGENT_SKILL_BY_ID',
+]) {
+  if (!formalEntrySource.includes(token)) violations.push(`[⑲集中执行器] formal-ai-entry.ts 缺少 ${token}`)
+}
+if (!useAIStreamSource.includes('meta: FormalAICallMetaV1')
+  || !useAIStreamSource.includes('streamRegisteredAIEntryV1(messages, config, meta')) {
+  violations.push('[⑲流式入口] useAIStream.start 必须要求 entryId 并进入集中执行器')
+}
+for (const token of ['memberSelfTest', 'aliasSelfTest', 'wrapperSelfTest', 'namespaceSelfTest']) {
+  if (!formalEntryCheckSource.includes(token)) violations.push(`[⑲旁路守卫] AI 入口 checker 缺少 ${token}`)
+}
+if (!detailedOutlineDurableSource.includes('freezeFormalAIEntryBindingV1(detailedOutlineFormalEntryIdV1(input.operation))')
+  || !detailedOutlineDurableSource.includes('assertFormalAIEntrySnapshotIntegrityV1(formalEntry)')
+  || !detailedOutlineDurableSource.includes("binding.adoptionTargets.includes('detailedOutlines')")) {
+  violations.push('[⑲Run/Manifest/候选/采纳链接] 细纲正式入口必须把 entry snapshot 冻结进 Run 并在 Manifest 开始前验证 Skill 与采纳目标')
+}
+for (const dir of UI_DIRS) {
+  for (const file of walk(dir)) {
+    const source = read(file)
+    if (/from\s+['"][^'"]*lib\/ai\/client['"][\s\S]{0,160}\b(?:chat|streamChat)\b/.test(source)
+      && !file.endsWith('.test.ts')) {
+      violations.push(`[⑲UI 直连] ${file}: UI 不得导入底层 chat/streamChat，必须进入 FormalAIEntry 集中执行器`)
+    }
+  }
 }
 
 // ── 报告 ──

@@ -25,7 +25,7 @@ describe('PIPELINE-3 · 既有工作流节点兼容', () => {
     expect(start).toHaveBeenCalledWith(
       [{ role: 'user', content: '上一步已确认产物' }],
       undefined,
-      { category: 'story.core', projectId: 3 },
+      { formalEntryId: 'prompt.workflow.step', category: 'story.core', projectId: 3 },
     )
     expect(result.output).toBe('步骤产物')
     expect(result.adopted).toBe(false)

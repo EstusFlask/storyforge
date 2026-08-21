@@ -76,9 +76,10 @@ describe('MEMORY-8 · Harness settlement and ContextManifestV2', () => {
   afterEach(async () => { db.close() })
 
   it('keeps every formal UI model entry governed while auxiliary entries remain explicitly non-Canon', () => {
-    expect(aiEntryRegistry.entries.every(entry => ['governed', 'auxiliary'].includes(entry.status))).toBe(true)
-    expect(aiEntryRegistry.entries.filter(entry => entry.status === 'governed')
-      .every(entry => ['durable-run', 'generation-node', 'simulation-runtime'].includes(entry.mechanism))).toBe(true)
+    expect(aiEntryRegistry.entries.filter(entry => entry.entryKind === 'formal')
+      .every(entry => ['durable-run', 'generation-node', 'simulation-runtime'].includes(entry.executionBoundary))).toBe(true)
+    expect(aiEntryRegistry.entries.filter(entry => entry.entryKind !== 'formal')
+      .every(entry => entry.adoptAllowed === false && !('adoptionTargets' in entry))).toBe(true)
   })
 
   it('derives accepted memory references from one durable ledger and exposes disk dirty until sync', async () => {

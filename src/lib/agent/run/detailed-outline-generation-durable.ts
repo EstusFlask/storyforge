@@ -1,6 +1,6 @@
 import { db } from '../../db/schema'
 import type { AgentConversation, AgentEvent, WorkspaceScope } from '../../types'
-import type { ContextManifestV1 } from '../../types/agent-run'
+import type { AgentRunFormalAIEntryBindingV1, ContextManifestV1 } from '../../types/agent-run'
 import {
   appendAgentEvent,
   getOrCreateAgentConversation,
@@ -40,6 +40,10 @@ import {
   parseWorkspaceContentRevisionV1,
   type WorkspaceContentRevisionVectorV1,
 } from '../../authoring/content-revision'
+import {
+  assertFormalAIEntrySnapshotIntegrityV1,
+  freezeFormalAIEntryBindingV1,
+} from '../formal-ai-entry'
 
 export const DETAILED_OUTLINE_GENERATION_STEP_ID_V1 = 'detailed-outline.generate'
 export const DETAILED_OUTLINE_GENERATION_CONVERSATION_PURPOSE_V1 = 'detailed-outline-generation'
@@ -53,6 +57,10 @@ export const DETAILED_OUTLINE_GENERATION_CANDIDATE_TYPE_V1 = 'detailed-outline-g
 export const DETAILED_OUTLINE_GENERATION_SOURCE_KEYS_V1 = OUTLINE_DETAIL_CONTEXT_SOURCE_KEYS
 
 export type DetailedOutlineGenerationOperationV1 = 'scenes' | 'enhanced'
+
+export function detailedOutlineFormalEntryIdV1(operation: DetailedOutlineGenerationOperationV1): string {
+  return operation === 'scenes' ? 'outline.detail.scene' : 'outline.detail.enhance'
+}
 
 export interface DetailedOutlineGenerationCandidateV1 {
   version: 1
@@ -120,6 +128,7 @@ export function buildDetailedOutlineGenerationRunContractV1(input: {
   worldGroupId: number | null
   outlineNodeId: number
   operation: DetailedOutlineGenerationOperationV1
+  formalEntry?: AgentRunFormalAIEntryBindingV1
 }) {
   const skill = getAgentSkillV1('outline.details', 'outline')
   return {
@@ -143,6 +152,7 @@ export function buildDetailedOutlineGenerationRunContractV1(input: {
     executionBindings: [{
       stepId: DETAILED_OUTLINE_GENERATION_STEP_ID_V1,
       ...createAgentSkillExecutionBindingV1(skill),
+      ...(input.formalEntry ? { formalEntry: input.formalEntry } : {}),
     }],
     budget: {
       maxModelCalls: 1,
@@ -188,7 +198,7 @@ export function assertDetailedOutlineGenerationExecutionBindingV1(
   if (binding?.stepId !== DETAILED_OUTLINE_GENERATION_STEP_ID_V1) {
     throw new Error('细纲生成 RunContract execution binding 步骤无效。')
   }
-  const { stepId: _stepId, ...skillBinding } = binding
+  const { stepId: _stepId, formalEntry: _formalEntry, ...skillBinding } = binding
   if (skillBinding.version !== 1) throw new Error('细纲生成当前只接受 V1 Skill 执行绑定。')
   assertAgentSkillExecutionBindingV1(
     skillBinding,
@@ -203,6 +213,7 @@ export async function createDetailedOutlineGenerationDurableRunV1(input: {
   outlineNodeId: number
   operation: DetailedOutlineGenerationOperationV1
 }): Promise<AgentRunSnapshotV1> {
+  const formalEntry = await freezeFormalAIEntryBindingV1(detailedOutlineFormalEntryIdV1(input.operation))
   const conversation = await getOrCreateAgentConversation({
     projectId: input.scope.projectId,
     worldGroupId: input.worldGroupId,
@@ -219,6 +230,7 @@ export async function createDetailedOutlineGenerationDurableRunV1(input: {
       worldGroupId: input.worldGroupId,
       outlineNodeId: input.outlineNodeId,
       operation: input.operation,
+      formalEntry,
     }),
   })
 }
@@ -250,6 +262,15 @@ export async function beginDetailedOutlineGenerationStepV1(input: {
 }): Promise<AgentRunSnapshotV1> {
   const { snapshot, contextManifest } = input
   assertDetailedOutlineGenerationExecutionBindingV1(snapshot)
+  const formalEntry = snapshot.contract.executionBindings?.[0]?.formalEntry
+  if (!formalEntry) throw new Error('细纲生成 RunContract 缺少 FormalAIEntry snapshot。')
+  const binding = await assertFormalAIEntrySnapshotIntegrityV1(formalEntry)
+  if (binding.entryId !== detailedOutlineFormalEntryIdV1(input.binding.operation)
+    || binding.skillId !== 'outline.details'
+    || !binding.adoptAllowed
+    || !binding.adoptionTargets.includes('detailedOutlines')) {
+    throw new Error('细纲生成 FormalAIEntry 与 operation/Skill/采纳目标不匹配。')
+  }
   if (contextManifest.runId !== snapshot.run.id
     || contextManifest.stepId !== DETAILED_OUTLINE_GENERATION_STEP_ID_V1) {
     throw new Error('细纲生成 Context Manifest 与 durable run 不匹配。')

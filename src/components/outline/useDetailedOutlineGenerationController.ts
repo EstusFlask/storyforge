@@ -262,10 +262,13 @@ export function useDetailedOutlineGenerationController(
     let output = ''
     const startedAt = Date.now()
     try {
-      output = await target.start(messages, undefined, {
-        category: operation === 'scenes' ? 'detail.scene' : 'detail.enhance',
-        projectId,
-      })
+      output = operation === 'scenes'
+        ? await target.start(messages, undefined, {
+          formalEntryId: 'outline.detail.scene', category: 'detail.scene', projectId,
+        })
+        : await target.start(messages, undefined, {
+          formalEntryId: 'outline.detail.enhance', category: 'detail.enhance', projectId,
+        })
       if (!output.trim()) throw new Error('模型没有返回可用的细纲内容。')
       snapshot = await recordDetailedOutlineGenerationModelOutputV1({ scope, snapshot, output })
     } catch (error) {

@@ -10,6 +10,7 @@
  *   ③ CONTEXT_SOURCES 上下文源       (src/lib/registry/context-sources.ts) — key/label/scope/layer
  *   ④ FIELD_REGISTRY 可写字段        (src/lib/registry/field-registry.ts) — target/field/aliases
  *   ⑤ AI 调用点 category             (src/components, src/lib) — category + 文件位置
+ *   ⑥ FormalAIEntryBindingV1          (src/lib/agent/ai-entry-registry.json)
  *
  * 用 TypeScript AST 解析声明性事实，不执行应用代码/IndexedDB，CI 友好。
  *
@@ -237,6 +238,7 @@ function extractAiCalls() {
             const lineEnd = src.indexOf('\n', call.start)
             const lineText = src.slice(lineStart, lineEnd < 0 ? src.length : lineEnd).trim()
             if (lineText.startsWith('//') || lineText.startsWith('*')) continue
+            if (rel === 'src/lib/agent/formal-ai-entry.ts') continue
             if (AI_META_FORWARDERS.has(rel) && /\bmeta\b/.test(call.text)) continue
             if (rel === 'src/lib/ai/client.ts') continue
             const line = src.slice(0, call.start).split('\n').length
@@ -259,6 +261,14 @@ function extractAiCalls() {
   return { byCategory: out, uncategorized, dynamic }
 }
 
+function extractFormalAIEntries() {
+  const registry = JSON.parse(read('src/lib/agent/ai-entry-registry.json'))
+  if (registry.version !== 2 || registry.bindingVersion !== 1 || !Array.isArray(registry.entries)) {
+    throw new Error('Formal AI entry registry 版本无效')
+  }
+  return registry.entries
+}
+
 function buildMarkdown() {
   const keys = extractModuleKeys()
   const seeds = extractSeeds()
@@ -267,6 +277,7 @@ function buildMarkdown() {
   const adoptionExtensions = extractAdoptionExtensions()
   const aiCallScan = extractAiCalls()
   const aiCalls = aiCallScan.byCategory
+  const formalEntries = extractFormalAIEntries()
   const seedsByKey = new Map(keys.map(key => [key, seeds.filter(seed => seed.key === key)]))
 
   const lines = []
@@ -354,6 +365,23 @@ function buildMarkdown() {
     lines.push('### 未分类调用（必须修复）')
     lines.push('')
     for (const item of aiCallScan.uncategorized.sort()) lines.push(`- \`${item}\``)
+  }
+  lines.push('')
+
+  // 五、正式 AI 入口机器绑定
+  lines.push('## 五、正式 AI 入口（FormalAIEntryBindingV1）')
+  lines.push('')
+  lines.push(`共 ${formalEntries.length} 个操作级绑定。运行时按 entryId 校验 category 和 Skill；采纳权限不由文字说明决定。`)
+  lines.push('')
+  lines.push('| entryId | Skill | category | 边界 | 候选 | 采纳目标 | 调用方 |')
+  lines.push('|---|---|---|---|---|---|---|')
+  for (const entry of formalEntries) {
+    const categories = entry.categories.map(item => `\`${item}\``).join('<br/>')
+    const targets = entry.adoptAllowed
+      ? entry.adoptionTargets.map(item => `\`${item}\``).join('<br/>')
+      : '禁止'
+    const callers = entry.allowedCallers.map(item => `\`${item}\``).join('<br/>')
+    lines.push(`| \`${entry.entryId}\` | \`${entry.skillId}\` | ${categories} | ${entry.entryKind} / ${entry.executionBoundary} | \`${entry.candidateKind}\` | ${targets} | ${callers} |`)
   }
   lines.push('')
 

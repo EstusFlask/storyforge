@@ -26,7 +26,8 @@ import { runChapterMemoryTask } from '../../lib/ai/chapter-memory/run-chapter-me
 import { prepareContinuityContext } from '../../lib/ai/chapter-memory/continuity-context'
 import { isPlanReconciliationCurrent } from '../../lib/ai/chapter-memory/plan-reconciliation'
 import { findNextCanonicalChapter, findPreviousCanonicalChapter } from '../../lib/ai/chapter-memory/canonical-chapter-sequence'
-import { chat, resolveRequestConfig } from '../../lib/ai/client'
+import { resolveRequestConfig } from '../../lib/ai/client'
+import { executeRegisteredAIEntryV1 } from '../../lib/agent/formal-ai-entry'
 import { getAIConfigRequiredMessage, isAIConfigReady } from '../../lib/ai/config-readiness'
 import { db } from '../../lib/db/schema'
 import { buildGenreConstraintContext } from '../../lib/ai/genre-metadata'
@@ -1092,7 +1093,7 @@ export default function ChapterEditor({ project, outlineNodeId }: Props) {
         chapterId,
         chapterTitle,
         chapterContent: chapter.content,
-        call: messages => chat(messages, aiConfig, {
+        call: messages => executeRegisteredAIEntryV1('prose.chapter.memory', messages, aiConfig, {
           category: 'chapter.memory',
           projectId: project.id!,
         }),
@@ -1627,7 +1628,9 @@ export default function ChapterEditor({ project, outlineNodeId }: Props) {
     if (!selected) return
     const messages = buildPolishPrompt(selected, customInstruction || '优化文笔，使表达更生动')
     ai.setOperation('polish')
-    ai.start(messages, undefined, { category: 'chapter.polish', projectId: project.id! })
+    ai.start(messages, undefined, {
+      formalEntryId: 'prose.selection.polish', category: 'chapter.polish', projectId: project.id!,
+    })
   }
 
   const handleExpand = () => {
@@ -1635,7 +1638,9 @@ export default function ChapterEditor({ project, outlineNodeId }: Props) {
     if (!selected) return
     const messages = buildExpandPrompt(selected, customInstruction.trim() || undefined)
     ai.setOperation('expand')
-    ai.start(messages, undefined, { category: 'chapter.expand', projectId: project.id! })
+    ai.start(messages, undefined, {
+      formalEntryId: 'prose.selection.expand', category: 'chapter.expand', projectId: project.id!,
+    })
   }
 
   const handleDeAI = async () => {
@@ -1655,7 +1660,9 @@ export default function ChapterEditor({ project, outlineNodeId }: Props) {
     if (!ok) return
     const messages = buildDeAIPrompt(target)
     ai.setOperation(isFull ? 'deai-full' : 'deai')
-    ai.start(messages, undefined, { category: 'chapter.deai', projectId: project.id! })
+    ai.start(messages, undefined, {
+      formalEntryId: 'prose.selection.deai', category: 'chapter.deai', projectId: project.id!,
+    })
   }
 
   // G8：按审校报告让 AI 改全文 —— 走和「生成正文」相同的预览→采纳/关闭流程
@@ -1670,7 +1677,9 @@ export default function ChapterEditor({ project, outlineNodeId }: Props) {
     reviseReportRef.current = report
     const messages = buildReviewRevisePrompt(plainText, report, worldCtx, charCtx)
     ai.setOperation('revise-full')
-    ai.start(messages, undefined, { category: 'review.revise', projectId: project.id! })
+    ai.start(messages, undefined, {
+      formalEntryId: 'prose.chapter.revise', category: 'review.revise', projectId: project.id!,
+    })
   }
 
   const handleRunChapterOrganization = async (force = false) => {
@@ -1780,7 +1789,7 @@ export default function ChapterEditor({ project, outlineNodeId }: Props) {
         // 正文已在专用区完整提供；这里只追加其它登记来源，避免正文重复消耗 tokens。
         contextSnapshot: organizationContextSnapshot,
         budget,
-        call: messages => chat(messages, aiConfig, {
+        call: messages => executeRegisteredAIEntryV1('prose.chapter.organize', messages, aiConfig, {
           category: 'chapter.organize',
           projectId: project.id!,
           configOverrides: { maxTokens: 8_000 },
@@ -2444,6 +2453,7 @@ export default function ChapterEditor({ project, outlineNodeId }: Props) {
         projectId: project.id!,
         ...task,
         call: messages => memoryAI.start(messages, undefined, {
+          formalEntryId: 'prose.chapter.memory',
           category: 'chapter.memory',
           projectId: project.id!,
         }),
@@ -2665,7 +2675,7 @@ export default function ChapterEditor({ project, outlineNodeId }: Props) {
         foreshadows: useForeshadowStore.getState().foreshadows,
         contextSnapshot: organizationContextSnapshot,
         budget,
-        call: messages => chat(messages, aiConfig, {
+        call: messages => executeRegisteredAIEntryV1('prose.chapter.organize', messages, aiConfig, {
           category: 'chapter.organize',
           projectId: project.id!,
           configOverrides: { maxTokens: 8_000 },

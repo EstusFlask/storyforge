@@ -194,7 +194,9 @@ describe('AUDIT-6 · 大纲生成 controller', () => {
     expect(assembleContext).toHaveBeenCalledOnce()
     expect(ai.setOperation).toHaveBeenCalledWith('outline.chapter:batch:1')
     expect(ai.start).toHaveBeenCalledOnce()
-    expect(ai.start.mock.calls[0][2]).toEqual({ category: 'outline.chapter', projectId: 1 })
+    expect(ai.start.mock.calls[0][2]).toEqual({
+      formalEntryId: 'outline.chapter.generate', category: 'outline.chapter', projectId: 1,
+    })
     expect(controller.pendingRequest).toBeNull()
   })
 

@@ -404,7 +404,9 @@ export default function SimulationRuntimePanel(props: {
       targetEntityKey: selectedNpc.entityKey,
       targetName: selectedNpc.name,
       runtimeContext: runtimeContext.text,
-    }), undefined, { category: 'simulation.npc-evolution', projectId: props.project.id! })
+    }), undefined, {
+      formalEntryId: 'simulation.npc.evolution', category: 'simulation.npc-evolution', projectId: props.project.id!,
+    })
     if (!draft.trim()) return
     const candidate = parseNpcEvolutionCandidate({
       draft,
@@ -431,7 +433,9 @@ export default function SimulationRuntimePanel(props: {
       actorName: selectedTtrpgActor.name,
       action: ttrpgAction,
       runtimeContext: runtimeContext.text,
-    }), undefined, { category: 'simulation.ttrpg-gm', projectId: props.project.id! })
+    }), undefined, {
+      formalEntryId: 'simulation.ttrpg.gm', category: 'simulation.ttrpg-gm', projectId: props.project.id!,
+    })
     if (!draft.trim()) return
     setTtrpgCandidate(parseTtrpgTurnCandidate({
       draft,
@@ -456,7 +460,9 @@ export default function SimulationRuntimePanel(props: {
     const draft = await encounterAI.start(buildTtrpgEncounterPrompt({
       runtimeContext: runtimeContext.text,
       participantKeys: ttrpgParticipantKeys,
-    }), undefined, { category: 'simulation.ttrpg-encounter', projectId: props.project.id! })
+    }), undefined, {
+      formalEntryId: 'simulation.ttrpg.encounter', category: 'simulation.ttrpg-encounter', projectId: props.project.id!,
+    })
     if (!draft.trim()) return
     setTtrpgEncounterCandidate(parseTtrpgEncounterCandidate({
       draft,

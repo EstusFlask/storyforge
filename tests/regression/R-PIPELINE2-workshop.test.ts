@@ -167,6 +167,7 @@ describe('PIPELINE-2 · 五阶段章纲工坊', () => {
     )
 
     expect(start.mock.calls[0][2]).toEqual({
+      formalEntryId: 'outline.workshop.quality',
       category: 'review.outline-workshop',
       projectId: 1,
     })

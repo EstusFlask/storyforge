@@ -386,6 +386,7 @@ describe.sequential('R-HARNESS66 · 世界地图 durable 配置候选与定点�
     expect(panel).toContain('generateWorldMapConfigCandidateV1')
     expect(panel).toContain('adoptWorldMapConfigCandidateV1')
     const registry = JSON.parse(readFileSync('src/lib/agent/ai-entry-registry.json', 'utf8'))
-    expect(registry.entries.some((entry: any) => entry.file.endsWith('WorldMapPanel.tsx'))).toBe(false)
+    expect(registry.entries.some((entry: any) => entry.allowedCallers
+      ?.some((file: string) => file.endsWith('WorldMapPanel.tsx')))).toBe(false)
   })
 })

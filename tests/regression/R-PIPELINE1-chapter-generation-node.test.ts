@@ -23,6 +23,7 @@ describe('PIPELINE-1 · 正文生成节点', () => {
     await runGenerationNode(node, prepareGenerationNode(node, messages))
 
     expect(start).toHaveBeenCalledWith(messages, undefined, {
+      formalEntryId: 'prose.chapter.generate',
       category: 'chapter.content',
       projectId: 17,
     })

@@ -331,6 +331,7 @@ describe.sequential('R-HARNESS65 · 正文局部编辑 durable 候选与精确�
     expect(toolbar).toContain('generateSelectionEditCandidateV1')
     expect(toolbar).toContain('adoptSelectionEditCandidateV1')
     const registry = JSON.parse(readFileSync(resolve(process.cwd(), 'src/lib/agent/ai-entry-registry.json'), 'utf8'))
-    expect(registry.entries.some((entry: any) => entry.file.endsWith('FloatingToolbar.tsx'))).toBe(false)
+    expect(registry.entries.some((entry: any) => entry.allowedCallers
+      ?.some((file: string) => file.endsWith('FloatingToolbar.tsx')))).toBe(false)
   })
 })

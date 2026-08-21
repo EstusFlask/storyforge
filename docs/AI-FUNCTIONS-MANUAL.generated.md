@@ -227,7 +227,7 @@ AI 输出经 `adopt({ target, data })` 写回,只有这里登记的字段可写(
 
 ## 四、AI 调用点（消耗统计 category · 在哪触发)
 
-共 47 个 category。
+共 41 个 category。
 未分类调用: 0 个。动态 category 调用: 30 个。
 
 | category | 触发文件 |
@@ -237,52 +237,46 @@ AI 输出经 `adopt({ target, data })` 写回,只有这里登记的字段可写(
 | `agent.readonly` | `src/lib/agent/client-adapter.ts:116` |
 | `canon.setting.extract` | `src/lib/agent/run/constitution-extraction-durable.ts:509` |
 | `chapter.content` | `src/lib/generation/chapter-generation-node.ts:23` |
-| `chapter.continue` | `src/lib/generation/chapter-generation-node.ts:24` |
+| `chapter.continue` | `src/lib/generation/chapter-generation-node.ts:26` |
 | `chapter.continuity` | `src/lib/node-authoring/domain-execution.ts:552`<br/>`src/lib/node-authoring/domain-execution.ts:616` |
-| `chapter.deai` | `src/components/editor/ChapterEditor.tsx:1658` |
-| `chapter.expand` | `src/components/editor/ChapterEditor.tsx:1638` |
-| `chapter.memory` | `src/components/editor/ChapterEditor.tsx:1095` |
-| `chapter.organize` | `src/components/editor/ChapterEditor.tsx:1783`<br/>`src/components/editor/ChapterEditor.tsx:2668` |
-| `chapter.polish` | `src/components/editor/ChapterEditor.tsx:1630` |
+| `chapter.deai` | `src/components/editor/ChapterEditor.tsx:1663` |
+| `chapter.expand` | `src/components/editor/ChapterEditor.tsx:1641` |
+| `chapter.polish` | `src/components/editor/ChapterEditor.tsx:1631` |
 | `chapter.toolbar` | `src/lib/agent/run/selection-edit-durable.ts:567` |
 | `codex.extract` | `src/lib/agent/run/codex-extraction-durable.ts:627` |
 | `cultivation.progress` | `src/lib/agent/run/cultivation-progress-extraction-durable.ts:558` |
 | `detail.chapter-planning` | `src/lib/node-authoring/domain-execution.ts:371` |
 | `detail.scene` | `src/lib/ai/batch-detail-runner.ts:193` |
 | `emotion.beat` | `src/lib/agent/run/emotion-beat-durable.ts:396` |
-| `eval.h17.compression` | `src/components/settings/HarnessEvalPanel.tsx:120` |
-| `eval.h17.generation` | `src/components/settings/HarnessEvalPanel.tsx:121` |
-| `eval.h4.verifier` | `src/components/settings/HarnessEvalPanel.tsx:150`<br/>`src/components/settings/HarnessEvalPanel.tsx:189` |
 | `foreshadow.suggest` | `src/lib/agent/run/foreshadow-suggestions-durable.ts:569` |
 | `geography.concept-map` | `src/components/geography/GeographyPanel.tsx:127` |
 | `geography.world-map` | `src/lib/agent/run/world-map-config-durable.ts:362` |
 | `inventory.extract` | `src/lib/agent/run/inventory-extraction-durable.ts:943` |
 | `location.extract` | `src/lib/agent/run/location-extraction-durable.ts:618` |
 | `node.creation` | `src/lib/node-authoring/executor.ts:362`<br/>`src/lib/node-flow/executor.ts:207` |
-| `outline.chapter` | `src/lib/ai/batch-outline-runner.ts:198`<br/>`src/lib/outline/generation-node.ts:59` |
+| `outline.chapter` | `src/lib/ai/batch-outline-runner.ts:198`<br/>`src/lib/outline/generation-node.ts:60` |
 | `outline.impact-regenerate` | `src/lib/agent/run/impact-outline-regeneration-durable.ts:652` |
 | `outline.volume` | `src/lib/outline/generation-node.ts:55` |
-| `outline.workshop.collision` | `src/lib/outline/workshop.ts:448` |
-| `outline.workshop.motivation` | `src/lib/outline/workshop.ts:445` |
+| `outline.workshop.collision` | `src/lib/outline/workshop.ts:452` |
+| `outline.workshop.motivation` | `src/lib/outline/workshop.ts:447` |
 | `outline.workshop.scan` | `src/lib/outline/workshop.ts:442` |
-| `outline.workshop.scenes` | `src/lib/outline/workshop.ts:453` |
+| `outline.workshop.scenes` | `src/lib/outline/workshop.ts:461` |
 | `prompt.examples` | `src/components/settings/prompt/PromptExamplesEditor.tsx:108` |
 | `relation.extract` | `src/lib/agent/run/character-relationship-durable.ts:286` |
-| `review.anti-ai` | `src/components/editor/ReviewPanel.tsx:107` |
-| `review.outline-workshop` | `src/lib/outline/workshop.ts:451` |
+| `review.anti-ai` | `src/components/editor/ReviewPanel.tsx:109` |
+| `review.outline-workshop` | `src/lib/outline/workshop.ts:457` |
 | `review.quality` | `src/components/editor/ReviewPanel.tsx:99` |
-| `review.readability` | `src/components/editor/ReviewPanel.tsx:116` |
-| `review.revise` | `src/components/editor/ChapterEditor.tsx:1673` |
+| `review.readability` | `src/components/editor/ReviewPanel.tsx:120` |
+| `review.revise` | `src/components/editor/ChapterEditor.tsx:1680` |
 | `scene.verify` | `src/components/scene/SceneVerifyPanel.tsx:81` |
 | `story.timeline` | `src/lib/agent/run/impact-story-timeline-regeneration-durable.ts:670`<br/>`src/lib/agent/run/story-timeline-extraction-durable.ts:758` |
-| `style.calibrate` | `src/components/style/StyleCalibrationPanel.tsx:63` |
 | `style.learn` | `src/lib/agent/run/style-learning-durable.ts:493` |
 | `world-group.expand` | `src/lib/agent/run/worldview-expand-durable.ts:475` |
 | `world-group.suggest` | `src/lib/agent/run/world-suggest-durable.ts:614` |
 
 ### 动态 category 调用
 
-- `src/components/editor/ReviewPanel.tsx:141 · ai.start`
+- `src/components/editor/ReviewPanel.tsx:147 · ai.start`
 - `src/lib/adventure/harness.ts:245 · chat`
 - `src/lib/agent/character-copilot.ts:510 · chat`
 - `src/lib/agent/character-driven-copilot.ts:504 · chat`
@@ -313,6 +307,45 @@ AI 输出经 `adopt({ target, data })` 写回,只有这里登记的字段可写(
 - `src/lib/node-authoring/executor.ts:416 · chat`
 - `src/lib/open-world/harness.ts:139 · chat`
 
+## 五、正式 AI 入口（FormalAIEntryBindingV1）
+
+共 32 个操作级绑定。运行时按 entryId 校验 category 和 Skill；采纳权限不由文字说明决定。
+
+| entryId | Skill | category | 边界 | 候选 | 采纳目标 | 调用方 |
+|---|---|---|---|---|---|---|
+| `prose.chapter.generate` | `prose.generate` | `chapter.content` | formal / durable-run | `chapter-draft` | `chapters` | `src/lib/generation/chapter-generation-node.ts` |
+| `prose.chapter.continue` | `prose.continue` | `chapter.continue` | formal / durable-run | `chapter-continuation-draft` | `chapters` | `src/lib/generation/chapter-generation-node.ts` |
+| `prose.selection.polish` | `prose.selection-edit` | `chapter.polish` | auxiliary / authoring-draft | `selection-polish-preview` | 禁止 | `src/components/editor/ChapterEditor.tsx` |
+| `prose.selection.expand` | `prose.selection-edit` | `chapter.expand` | auxiliary / authoring-draft | `selection-expand-preview` | 禁止 | `src/components/editor/ChapterEditor.tsx` |
+| `prose.selection.deai` | `prose.selection-edit` | `chapter.deai` | auxiliary / authoring-draft | `selection-rewrite-preview` | 禁止 | `src/components/editor/ChapterEditor.tsx` |
+| `prose.chapter.revise` | `prose.revise` | `review.revise` | auxiliary / authoring-draft | `chapter-revision-preview` | 禁止 | `src/components/editor/ChapterEditor.tsx` |
+| `prose.chapter.memory` | `prose.memory` | `chapter.memory` | formal / durable-run | `chapter-memory-candidate` | `chapters` | `src/components/editor/ChapterEditor.tsx` |
+| `prose.chapter.organize` | `prose.organize` | `chapter.organize` | formal / durable-run | `chapter-organization-candidate` | `stateCards`<br/>`temporalFacts`<br/>`itemLedger`<br/>`storyTimelineEvents`<br/>`characterRelations`<br/>`foreshadows` | `src/components/editor/ChapterEditor.tsx` |
+| `prose.review.quality` | `prose.review` | `review.quality` | auxiliary / read-only | `quality-review-report` | 禁止 | `src/components/editor/ReviewPanel.tsx` |
+| `prose.review.anti-ai` | `prose.review` | `review.anti-ai` | auxiliary / read-only | `anti-ai-review-report` | 禁止 | `src/components/editor/ReviewPanel.tsx` |
+| `prose.review.readability` | `prose.review` | `review.readability` | auxiliary / read-only | `readability-review-report` | 禁止 | `src/components/editor/ReviewPanel.tsx` |
+| `prose.review.consistency` | `prose.review` | `review.consistency.fast`<br/>`review.consistency.deep` | auxiliary / durable-run | `consistency-audit-report` | 禁止 | `src/components/editor/ReviewPanel.tsx` |
+| `world.map.concept` | `world-origin.map-config` | `geography.concept-map` | auxiliary / authoring-draft | `concept-map-svg` | 禁止 | `src/components/geography/GeographyPanel.tsx` |
+| `outline.workshop.scan` | `outline.chapters` | `outline.workshop.scan` | formal / generation-node | `outline-workshop-scan` | 禁止 | `src/lib/outline/workshop.ts` |
+| `outline.workshop.motivation` | `outline.chapters` | `outline.workshop.motivation` | formal / generation-node | `outline-workshop-motivation` | 禁止 | `src/lib/outline/workshop.ts` |
+| `outline.workshop.collision` | `outline.chapters` | `outline.workshop.collision` | formal / generation-node | `outline-workshop-collision` | 禁止 | `src/lib/outline/workshop.ts` |
+| `outline.workshop.quality` | `prose.review` | `review.outline-workshop` | auxiliary / read-only | `outline-workshop-quality-report` | 禁止 | `src/lib/outline/workshop.ts` |
+| `outline.workshop.scenes` | `outline.chapters` | `outline.workshop.scenes` | formal / generation-node | `outline-workshop-scenes` | `outlineNodes` | `src/lib/outline/workshop.ts` |
+| `outline.volume.generate` | `outline.volumes` | `outline.volume` | formal / durable-run | `volume-outline-candidate` | `outlineNodes` | `src/lib/outline/generation-node.ts` |
+| `outline.chapter.generate` | `outline.chapters` | `outline.chapter` | formal / durable-run | `chapter-outline-candidate` | `outlineNodes` | `src/lib/outline/generation-node.ts` |
+| `outline.detail.scene` | `outline.details` | `detail.scene` | formal / durable-run | `detailed-outline-candidate` | `detailedOutlines` | `src/components/outline/useDetailedOutlineGenerationController.ts` |
+| `outline.detail.enhance` | `outline.details` | `detail.enhance` | formal / durable-run | `detailed-outline-enhancement` | `detailedOutlines` | `src/components/outline/useDetailedOutlineGenerationController.ts` |
+| `world.scene.verify` | `world-origin.review` | `scene.verify` | auxiliary / read-only | `scene-verification-report` | 禁止 | `src/components/scene/SceneVerifyPanel.tsx` |
+| `eval.context-compression` | `prose.review` | `eval.h17.compression`<br/>`eval.h17.generation` | evaluation / eval-only | `context-compression-eval-artifact` | 禁止 | `src/components/settings/HarnessEvalPanel.tsx` |
+| `eval.long-consistency.verifier` | `prose.review` | `eval.h4.verifier` | evaluation / eval-only | `long-consistency-verdict` | 禁止 | `src/components/settings/HarnessEvalPanel.tsx` |
+| `eval.long-consistency.adjudicator` | `prose.review` | `eval.h4.verifier` | evaluation / eval-only | `consistency-subtype-adjudication` | 禁止 | `src/components/settings/HarnessEvalPanel.tsx` |
+| `prompt.examples.generate` | `inspiration.review` | `prompt.examples` | auxiliary / authoring-draft | `prompt-example-draft` | 禁止 | `src/components/settings/prompt/PromptExamplesEditor.tsx` |
+| `prompt.workflow.step` | `inspiration.review` | `*` | experimental / experimental | `prompt-workflow-step-draft` | 禁止 | `src/lib/generation/workflow-generation-node.ts` |
+| `simulation.npc.evolution` | `character.interaction-memory-curator` | `simulation.npc-evolution` | formal / simulation-runtime | `npc-evolution-candidate` | 禁止 | `src/components/simulation/SimulationRuntimePanel.tsx` |
+| `simulation.ttrpg.gm` | `prose.interaction-scene-director` | `simulation.ttrpg-gm` | formal / simulation-runtime | `ttrpg-turn-candidate` | 禁止 | `src/components/simulation/SimulationRuntimePanel.tsx` |
+| `simulation.ttrpg.encounter` | `prose.interaction-scene-director` | `simulation.ttrpg-encounter` | formal / simulation-runtime | `ttrpg-encounter-candidate` | 禁止 | `src/components/simulation/SimulationRuntimePanel.tsx` |
+| `style.calibration.preview` | `prose.style-learn` | `style.calibrate` | auxiliary / authoring-draft | `style-calibration-preview` | 禁止 | `src/components/style/StyleCalibrationPanel.tsx` |
+
 ---
 
-生成时间基准:commit `19b6bc9`
+生成时间基准:commit `73f535a`

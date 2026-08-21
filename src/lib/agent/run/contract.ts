@@ -161,8 +161,9 @@ function readExecutionBinding(value: unknown, path: string): AgentRunStepExecuti
     'toolSchemaVersion',
     'toolSchemaHash',
     'promptExecution',
+    'formalEntry',
   ] as const
-  assertExactKeys(record, keys, keys.filter(key => key !== 'promptExecution'), path)
+  assertExactKeys(record, keys, keys.filter(key => key !== 'promptExecution' && key !== 'formalEntry'), path)
   if (record.version !== 1 || record.skillVersion !== 1) {
     failSchema('unsupported_version', path, '仅支持 execution binding v1 / Skill v1')
   }
@@ -192,6 +193,19 @@ function readExecutionBinding(value: unknown, path: string): AgentRunStepExecuti
       overridesHash: readHash(prompt.overridesHash, `${path}.promptExecution.overridesHash`),
     }
   }
+  let formalEntry: AgentRunStepExecutionBindingV1['formalEntry']
+  if (record.formalEntry !== undefined) {
+    const entry = readRecord(record.formalEntry, `${path}.formalEntry`)
+    const entryKeys = ['version', 'entryId', 'bindingJson', 'bindingHash'] as const
+    assertExactKeys(entry, entryKeys, entryKeys, `${path}.formalEntry`)
+    if (entry.version !== 1) failSchema('unsupported_version', `${path}.formalEntry.version`, '仅支持 v1')
+    formalEntry = {
+      version: 1,
+      entryId: readString(entry.entryId, `${path}.formalEntry.entryId`, { max: 160 }),
+      bindingJson: readString(entry.bindingJson, `${path}.formalEntry.bindingJson`, { max: 100_000 }),
+      bindingHash: readHash(entry.bindingHash, `${path}.formalEntry.bindingHash`),
+    }
+  }
   return {
     stepId: readString(record.stepId, `${path}.stepId`, { max: 160 }),
     version: 1,
@@ -201,6 +215,7 @@ function readExecutionBinding(value: unknown, path: string): AgentRunStepExecuti
     toolSchemaVersion: readString(record.toolSchemaVersion, `${path}.toolSchemaVersion`, { max: 160 }),
     toolSchemaHash: readHash(record.toolSchemaHash, `${path}.toolSchemaHash`),
     ...(promptExecution ? { promptExecution } : {}),
+    ...(formalEntry ? { formalEntry } : {}),
   }
 }
 
@@ -221,8 +236,9 @@ function readExecutionBindingV2(value: unknown, path: string): AgentRunStepExecu
     'optionalContextActivations',
     'writeTargets',
     'maxOutputTokens',
+    'formalEntry',
   ] as const
-  assertExactKeys(record, keys, keys, path)
+  assertExactKeys(record, keys, keys.filter(key => key !== 'formalEntry'), path)
   if (record.version !== 2 || record.skillVersion !== 2) {
     failSchema('unsupported_version', path, '仅支持 execution binding v2 / Skill snapshot v2')
   }
@@ -270,6 +286,18 @@ function readExecutionBindingV2(value: unknown, path: string): AgentRunStepExecu
     writeTargets.map(item => `${item.table}:${item.adoptionExtension ?? ''}`),
     `${path}.writeTargets`,
   )
+  const formalEntry = record.formalEntry === undefined
+    ? undefined
+    : readExecutionBinding({
+      stepId: record.stepId,
+      version: 1,
+      skillId: record.skillId,
+      skillVersion: 1,
+      promptVersion: record.promptVersion,
+      toolSchemaVersion: record.toolSchemaVersion,
+      toolSchemaHash: record.toolSchemaHash,
+      formalEntry: record.formalEntry,
+    }, `${path}.formalEntryCarrier`).formalEntry
   return {
     stepId: readString(record.stepId, `${path}.stepId`, { max: 160 }),
     version: 2,
@@ -285,6 +313,7 @@ function readExecutionBindingV2(value: unknown, path: string): AgentRunStepExecu
     optionalContextActivations,
     writeTargets,
     maxOutputTokens: readInteger(record.maxOutputTokens, `${path}.maxOutputTokens`, { min: 1 }),
+    ...(formalEntry ? { formalEntry } : {}),
   }
 }
 

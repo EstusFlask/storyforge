@@ -371,6 +371,7 @@ describe.sequential('R-HARNESS67 · 世界组七字段扩写 durable 候选与�
     expect(panel).toContain('generateWorldviewExpandCandidateV1')
     expect(panel).toContain('adoptWorldviewExpandCandidateV1')
     const registry = JSON.parse(readFileSync('src/lib/agent/ai-entry-registry.json', 'utf8'))
-    expect(registry.entries.some((entry: any) => entry.file.endsWith('WorldGroupDetail.tsx'))).toBe(false)
+    expect(registry.entries.some((entry: any) => entry.allowedCallers
+      ?.some((file: string) => file.endsWith('WorldGroupDetail.tsx')))).toBe(false)
   })
 })

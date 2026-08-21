@@ -52,9 +52,18 @@ export interface AgentRunPromptExecutionBindingV1 {
   overridesHash: string
 }
 
+/** Immutable snapshot of the operation-level FormalAIEntryBinding used by a run step. */
+export interface AgentRunFormalAIEntryBindingV1 {
+  version: 1
+  entryId: string
+  bindingJson: string
+  bindingHash: string
+}
+
 export interface AgentRunStepExecutionBindingV1 extends AgentSkillExecutionBindingV1 {
   stepId: string
   promptExecution?: AgentRunPromptExecutionBindingV1
+  formalEntry?: AgentRunFormalAIEntryBindingV1
 }
 
 export type AgentOptionalContextActivationReasonV2 =
@@ -92,6 +101,7 @@ export interface AgentSkillExecutionBindingV2 {
 
 export interface AgentRunStepExecutionBindingV2 extends AgentSkillExecutionBindingV2 {
   stepId: string
+  formalEntry?: AgentRunFormalAIEntryBindingV1
 }
 
 /** Durable provenance for a run created from another run's verified artifact. */

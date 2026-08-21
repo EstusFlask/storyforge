@@ -439,18 +439,28 @@ export function createOutlineWorkshopNode(input: {
   const { stage, projectId, chapterIdentity, ai, qualityGate } = input
   const run = (messages: ChatMessage[]) => {
     if (stage === 'scan') {
-      return ai.start(messages, undefined, { category: 'outline.workshop.scan', projectId })
+      return ai.start(messages, undefined, {
+        formalEntryId: 'outline.workshop.scan', category: 'outline.workshop.scan', projectId,
+      })
     }
     if (stage === 'motivation') {
-      return ai.start(messages, undefined, { category: 'outline.workshop.motivation', projectId })
+      return ai.start(messages, undefined, {
+        formalEntryId: 'outline.workshop.motivation', category: 'outline.workshop.motivation', projectId,
+      })
     }
     if (stage === 'collision') {
-      return ai.start(messages, undefined, { category: 'outline.workshop.collision', projectId })
+      return ai.start(messages, undefined, {
+        formalEntryId: 'outline.workshop.collision', category: 'outline.workshop.collision', projectId,
+      })
     }
     if (stage === 'quality') {
-      return ai.start(messages, undefined, { category: 'review.outline-workshop', projectId })
+      return ai.start(messages, undefined, {
+        formalEntryId: 'outline.workshop.quality', category: 'review.outline-workshop', projectId,
+      })
     }
-    return ai.start(messages, undefined, { category: 'outline.workshop.scenes', projectId })
+    return ai.start(messages, undefined, {
+      formalEntryId: 'outline.workshop.scenes', category: 'outline.workshop.scenes', projectId,
+    })
   }
   return {
     id: `outline.workshop.${stage}:${chapterIdentity}`,

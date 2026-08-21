@@ -53,10 +53,12 @@ export function createOutlineGenerationNode(input: {
     },
     run: messages => category === 'outline.volume'
       ? ai.start(messages, undefined, {
+        formalEntryId: 'outline.volume.generate',
         category: 'outline.volume',
         projectId: project.id!,
       })
       : ai.start(messages, undefined, {
+        formalEntryId: 'outline.chapter.generate',
         category: 'outline.chapter',
         projectId: project.id!,
       }),
