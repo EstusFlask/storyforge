@@ -6,6 +6,7 @@ import {
   getReferenceAnalysisRunChunks,
 } from '../lib/reference-analysis/lifecycle'
 import { assertRecordInScope, readOwnedRows, resolveScopeLike, stampNewRecord, type WorkspaceScopeLike } from '../lib/world-engine/scope'
+import { coordinatePendingEditV1 } from '../lib/authoring/pending-edit-coordinator'
 
 interface ReferenceStore {
   references: Reference[]
@@ -39,11 +40,19 @@ export const useReferenceStore = create<ReferenceStore>((set, get) => ({
   },
 
   updateReference: async (id: number, data: Partial<Reference>) => {
-    const current = get().references.find(r => r.id === id) ?? await db.references.get(id)
-    if (!current || !await assertRecordInScope(await resolveScopeLike(current.projectId), 'references', current, { owner: 'work' })) return
-    await db.references.update(id, { ...data, updatedAt: Date.now() })
-    const ref = await db.references.get(id)
-    if (ref) await get().loadAll(ref.projectId)
+    await coordinatePendingEditV1({
+      key: `reference:${id}`,
+      persist: async () => {
+        const initial = await db.references.get(id)
+        if (!initial) return
+        const scope = await resolveScopeLike(initial.projectId)
+        const current = await db.references.get(id)
+        if (!current || !await assertRecordInScope(scope, 'references', current, { owner: 'work' })) return
+        await db.references.update(id, { ...data, updatedAt: Date.now() })
+        const ref = await db.references.get(id)
+        if (ref) await get().loadAll(ref.projectId)
+      },
+    })
   },
 
   deleteReference: async (id: number) => {

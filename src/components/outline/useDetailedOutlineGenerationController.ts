@@ -49,6 +49,11 @@ import {
   type DetailedOutlineGenerationOperationV1,
 } from '../../lib/agent/run/detailed-outline-generation-durable'
 import type { DetailedOutline, WorkspaceScope } from '../../lib/types'
+import { flushPendingEditsV1 } from '../../lib/authoring/pending-edit-coordinator'
+import {
+  assertWorkspaceContentRevisionFreshV1,
+  captureWorkspaceContentRevisionV1,
+} from '../../lib/authoring/content-revision'
 
 interface PendingDetailedOutlineCandidate {
   candidate: DetailedOutlineGenerationCandidateV1
@@ -191,8 +196,11 @@ export function useDetailedOutlineGenerationController(
   const run = useCallback(async (operation: DetailedOutlineGenerationOperationV1) => {
     const outlineNodeId = selectedOutlineNodeId
     if (outlineNodeId == null || isRecovering || pendingCandidate) return
+    await flushPendingEditsV1()
     const scope = await resolveScopeLike(projectId)
+    const contentRevision = await captureWorkspaceContentRevisionV1({ scope, worldGroupId })
     const context = await buildDetailContext(outlineNodeId, scope)
+    await assertWorkspaceContentRevisionFreshV1(contentRevision, { scope, worldGroupId })
     const skill = getAgentSkillV1('outline.details', 'outline')
     const inputState = resolveAgentSkillInputStateV1(skill, [context.assembled])
     const guidance = buildAgentSkillInputGuidanceV1(skill, inputState)
@@ -293,6 +301,7 @@ export function useDetailedOutlineGenerationController(
       output,
       outputHash: await hashCanonicalValue(output),
       contextManifestHash: manifest.manifestHash,
+      contentRevision,
       ...(creativeArtifact ? { creativeArtifact, narrativeBrief } : {}),
       workspaceScope: scope,
       createdAt: Date.now(),
@@ -341,6 +350,7 @@ export function useDetailedOutlineGenerationController(
     let pending = pendingCandidate
     const outlineNodeId = selectedOutlineNodeId
     if (!pending || pending.candidate.operation !== operation || outlineNodeId == null) return false
+    await flushPendingEditsV1()
     if (pending.candidate.outlineNodeId !== outlineNodeId) {
       throw new Error('细纲候选已变化，请刷新后重新确认。')
     }

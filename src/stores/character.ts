@@ -6,6 +6,7 @@ import { normalizeCharacterAxes } from '../lib/character/character-axes'
 import { transactionTablesFor } from '../lib/registry/lifecycle'
 import { refreshSettingAssertionSourceStatus } from '../lib/fact-ledger/setting-assertions'
 import { assertRecordInScope, readOwnedRows, resolveReadScopeLike, resolveScopeLike, stampNewRecord, type WorkspaceScopeLike } from '../lib/world-engine/scope'
+import { coordinatePendingEditV1 } from '../lib/authoring/pending-edit-coordinator'
 
 // 注:势力(Faction)已于 C2 并入「势力」词条,旧 factions 表数据由
 // migrations/faction-to-codex 一次性迁移;本 store 不再管理势力。
@@ -51,28 +52,33 @@ export const useCharacterStore = create<CharacterStore>((set, get) => ({
   },
 
   updateCharacter: async (id, data) => {
-    const beforeMigration = get().characters.find(c => c.id === id) ?? await db.characters.get(id)
-    if (!beforeMigration) return
-    const scope = await resolveScopeLike(beforeMigration.projectId)
-    const current = await db.characters.get(id)
-    if (!current) return
-    if (!await assertRecordInScope(scope, 'characters', current, { owner: 'world' })) return
-    const patch = normalizeCharacterAxes(
-      data as Record<string, unknown>,
-      current as unknown as Record<string, unknown>,
-    ) as Partial<Character>
-    const updatedAt = now()
-    await db.characters.update(id, { ...patch, updatedAt })
-    await refreshSettingAssertionSourceStatus({
-      projectId: current.projectId,
-      table: 'characters',
-      recordId: id,
-      changedFields: Object.keys(patch),
-    })
-    set({
-      characters: get().characters.map(c =>
-        c.id === id ? { ...c, ...patch, updatedAt } : c
-      ),
+    await coordinatePendingEditV1({
+      key: `character:${id}`,
+      persist: async () => {
+        const initial = await db.characters.get(id)
+        if (!initial) return
+        const scope = await resolveScopeLike(initial.projectId)
+        const current = await db.characters.get(id)
+        if (!current) return
+        if (!await assertRecordInScope(scope, 'characters', current, { owner: 'world' })) return
+        const patch = normalizeCharacterAxes(
+          data as Record<string, unknown>,
+          current as unknown as Record<string, unknown>,
+        ) as Partial<Character>
+        const updatedAt = now()
+        await db.characters.update(id, { ...patch, updatedAt })
+        await refreshSettingAssertionSourceStatus({
+          projectId: current.projectId,
+          table: 'characters',
+          recordId: id,
+          changedFields: Object.keys(patch),
+        })
+        set({
+          characters: get().characters.map(c =>
+            c.id === id ? { ...c, ...patch, updatedAt } : c
+          ),
+        })
+      },
     })
   },
 

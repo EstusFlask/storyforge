@@ -476,6 +476,68 @@ if (!/正式大纲运行必须启用 durable Harness/.test(outlineHarnessSource)
   violations.push('[⑭formal durable] 大纲 Harness 必须在 formal 边界拒绝 shadow-only 降级')
 }
 
+// ── ⑮ WEH-0C 正式生成必须越过保存屏障并冻结 PROJECT_TABLES 派生修订向量 ──
+const pendingEditSource = read('src/lib/authoring/pending-edit-coordinator.ts')
+const contentRevisionSource = read('src/lib/authoring/content-revision.ts')
+const masterCopilotSource = read('src/components/agent/useMasterCopilot.ts')
+const detailedOutlineControllerSource = read('src/components/outline/useDetailedOutlineGenerationController.ts')
+const worldGroupSwitcherSource = read('src/components/world-group/WorldGroupSwitcher.tsx')
+if (!pendingEditSource.includes('registerPendingDraftFlusherV1')
+  || !pendingEditSource.includes('flushPendingEditsV1')
+  || !pendingEditSource.includes('while (pendingWrites.size)')) {
+  violations.push('[⑮保存屏障] PendingEditCoordinator 必须先冲刷 UI draft，再等待写队列静止')
+}
+for (const file of [
+  'src/stores/_factories.ts',
+  'src/stores/worldview.ts',
+  'src/stores/character.ts',
+  'src/stores/cultivation.ts',
+  'src/stores/outline.ts',
+  'src/stores/detailed-outline.ts',
+  'src/stores/chapter.ts',
+  'src/stores/reference.ts',
+]) {
+  if (!read(file).includes('coordinatePendingEditV1')) {
+    violations.push(`[⑮写入登记] ${file}: 行内编辑目标 store 必须同步登记保存 Promise`)
+  }
+}
+if (!contentRevisionSource.includes('return PROJECT_TABLES')
+  || !contentRevisionSource.includes('spec.workspaceProjection')
+  || !contentRevisionSource.includes('spec.worldDomains')) {
+  violations.push('[⑮修订来源] content revision 的表集合必须从 PROJECT_TABLES 元数据派生')
+}
+for (const [file, source] of [
+  ['src/components/agent/useMasterCopilot.ts', masterCopilotSource],
+  ['src/components/outline/useOutlineGenerationController.ts', outlineControllerSource],
+  ['src/components/outline/useOutlineBatchGeneration.ts', outlineBatchControllerSource],
+  ['src/components/outline/useDetailedOutlineGenerationController.ts', detailedOutlineControllerSource],
+]) {
+  if (!/flushPendingEditsV1\s*\(/.test(source)) {
+    violations.push(`[⑮生成前保存] ${file}: 正式生成入口缺少 PendingEditCoordinator flush`)
+  }
+}
+for (const [file, source] of [
+  ['src/components/outline/useOutlineGenerationController.ts', outlineControllerSource],
+  ['src/lib/ai/batch-outline-runner.ts', batchOutlineRunnerSource],
+  ['src/components/outline/useDetailedOutlineGenerationController.ts', detailedOutlineControllerSource],
+  ['src/components/editor/ChapterEditor.tsx', chapterEditorSource],
+]) {
+  if (!/captureWorkspaceContentRevisionV1\s*\(/.test(source)
+    || !/assertWorkspaceContentRevisionFreshV1\s*\(/.test(source)) {
+    violations.push(`[⑮内容冻结] ${file}: 上下文装配前后必须冻结并复核 content revision`)
+  }
+}
+if (!/flushPendingEditsV1\s*\([\s\S]*?setActiveGroup\s*\(/.test(worldGroupSwitcherSource)) {
+  violations.push('[⑮切世界保存] WorldGroupSwitcher 必须在切换作用域前完成保存屏障')
+}
+if (!/contentRevision:\s*input\.contentRevision/.test(outlineHarnessSource)) {
+  violations.push('[⑮候选证据] 大纲 durable candidate 必须持久化 content revision')
+}
+if (!/contentRevision:\s*input\.contentRevision/.test(chapterEditorSource)
+  || !/assertWorkspaceContentRevisionFreshV1\s*\(input\.candidate\.contentRevision/.test(proseDurableSource)) {
+  violations.push('[⑮正文候选证据] 正文 durable candidate 必须冻结并在采纳前复核 content revision')
+}
+
 // ── 报告 ──
 if (violations.length) {
   console.error('[architecture] ❌ 发现反模式违规(违反 CLAUDE.md 三注册表铁律):\n')

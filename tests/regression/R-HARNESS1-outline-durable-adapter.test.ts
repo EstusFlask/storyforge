@@ -401,6 +401,39 @@ describe.sequential('R-HARNESS1-outline-durable-adapter · 大纲双写接入', 
     expect(chapters.map(row => row.title)).toEqual(['作者并发新增章'])
   })
 
+  it('生成后任一上游 Canon 被作者修改时，content revision 在确认前阻断旧候选', async () => {
+    const fixture = await createWorkspace()
+    const { candidate } = await persistOutlineCandidate(
+      fixture,
+      { kind: 'chapters', volumeId: fixture.outlineNodeId },
+      '基于旧世界状态生成的章纲',
+    )
+    expect(candidate.contentRevision).toMatchObject({ version: 1 })
+    await db.projects.update(fixture.scope.projectId, {
+      description: '作者在生成后补充了新的故事约束',
+      updatedAt: Date.now(),
+    })
+
+    await expect(adoptOutlineGenerationCandidateV1({
+      candidate,
+      intent: {
+        version: 1,
+        kind: 'chapters',
+        destinationVolumeId: fixture.outlineNodeId,
+        items: [{ title: '不应落库的章节', summary: '旧上下文候选' }],
+        startingOrder: 0,
+        baseExistingTitles: [],
+      },
+    })).rejects.toThrow(/候选生成后项目内容已变化.*projects/)
+
+    const chapters = (await db.outlineNodes.where('projectId').equals(fixture.scope.projectId).toArray())
+      .filter(row => row.type === 'chapter')
+    expect(chapters).toHaveLength(0)
+    const staleRun = await readAgentRunV1(fixture.scope, candidate.runId)
+    expect(staleRun.projection.state).toBe('paused')
+    expect(staleRun.projection.steps[candidate.stepId]?.status).toBe('stale')
+  })
+
   it.each(RECOVERY_BATCH_STARTS)('模型返回后、UI 接管前第 %i 轮起连续 5 次刷新均恢复原候选', async batchStart => {
     for (const iteration of recoveryBatch(batchStart)) {
       const fixture = await createWorkspace()

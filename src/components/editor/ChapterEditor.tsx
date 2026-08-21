@@ -134,6 +134,12 @@ import { createContextManifestFromAssemblyV1 } from '../../lib/agent/run/context
 import { readAgentRunV1, type AgentRunSnapshotV1 } from '../../lib/agent/run/event-store'
 import { hashChapterText, normalizeChapterText } from '../../lib/ai/chapter-memory/text-normalization'
 import { hashCanonicalValue } from '../../lib/agent/run/hash'
+import { flushPendingEditsV1 } from '../../lib/authoring/pending-edit-coordinator'
+import {
+  assertWorkspaceContentRevisionFreshV1,
+  captureWorkspaceContentRevisionV1,
+  type WorkspaceContentRevisionVectorV1,
+} from '../../lib/authoring/content-revision'
 import {
   adoptImpactPatchCandidateV1,
   createImpactPatchCandidateV1,
@@ -238,6 +244,7 @@ interface PendingChapterGeneration {
   assembled: Awaited<ReturnType<typeof assembleContext>>
   generationBinding: AgentSkillExecutionBindingV2
   informationBoundary: InformationBoundaryManifestV1
+  contentRevision: WorkspaceContentRevisionVectorV1
 }
 
 interface Props {
@@ -1235,6 +1242,7 @@ export default function ChapterEditor({ project, outlineNodeId }: Props) {
     assembled?: Awaited<ReturnType<typeof assembleContext>>
     generationBinding: AgentSkillExecutionBindingV2
     informationBoundary: InformationBoundaryManifestV1
+    contentRevision: WorkspaceContentRevisionVectorV1
   }): Promise<void> => {
     if (!currentChapter?.id || !input.assembled) {
       throw new Error('正文生成缺少章节或受控上下文快照。')
@@ -1243,6 +1251,10 @@ export default function ChapterEditor({ project, outlineNodeId }: Props) {
     const chapterId = currentChapter.id
     const chapterTitle = outlineNode?.title || currentChapter.title || '未知章节'
     const scope = await resolveScopeLike(project.id!)
+    await assertWorkspaceContentRevisionFreshV1(input.contentRevision, {
+      scope,
+      worldGroupId: chapterWorldGroupId ?? null,
+    })
     const sourceChapter = await db.chapters.get(chapterId)
     if (!sourceChapter) throw new Error('正文生成开始前找不到章节。')
     const sourceTextHash = await hashChapterText(sourceChapter.content ?? '')
@@ -1335,6 +1347,7 @@ export default function ChapterEditor({ project, outlineNodeId }: Props) {
             worldGroupId: chapterWorldGroupId ?? null,
             operation: input.operation,
             sourceTextHash,
+            contentRevision: input.contentRevision,
             outputText,
             outputTextHash: await hashCanonicalValue(outputText),
             expectedContentHash: await hashChapterText(
@@ -1417,8 +1430,9 @@ export default function ChapterEditor({ project, outlineNodeId }: Props) {
     assembled?: Awaited<ReturnType<typeof assembleContext>>,
     generationBinding?: AgentSkillExecutionBindingV2,
     informationBoundary?: InformationBoundaryManifestV1,
+    contentRevision?: WorkspaceContentRevisionVectorV1,
   ) => {
-    if (!informationBoundary || !generationBinding) {
+    if (!informationBoundary || !generationBinding || !contentRevision) {
       setProseGenerationError('正文生成缺少 Skill 或信息边界快照，已阻止模型调用。')
       return
     }
@@ -1433,6 +1447,7 @@ export default function ChapterEditor({ project, outlineNodeId }: Props) {
       assembled,
       generationBinding,
       informationBoundary,
+      contentRevision,
     }).catch(error => {
       console.error('[ChapterEditor] 生成节点执行失败:', error)
     })
@@ -1447,6 +1462,7 @@ export default function ChapterEditor({ project, outlineNodeId }: Props) {
     assembled: Awaited<ReturnType<typeof assembleContext>>,
     generationBinding: AgentSkillExecutionBindingV2,
     informationBoundary: InformationBoundaryManifestV1,
+    contentRevision: WorkspaceContentRevisionVectorV1,
   ) => {
     const node = chapterGenerationNode(operation, category, informationBoundary)
     const prepared = prepareGenerationNode(node, messages)
@@ -1460,6 +1476,7 @@ export default function ChapterEditor({ project, outlineNodeId }: Props) {
         assembled,
         generationBinding,
         informationBoundary,
+        contentRevision,
       })
       return
     }
@@ -1473,14 +1490,26 @@ export default function ChapterEditor({ project, outlineNodeId }: Props) {
       assembled,
       generationBinding,
       informationBoundary,
+      contentRevision,
     )
   }
 
   const handleGenerate = async () => {
     if (!outlineNode) return
     setProseGenerationError('')
+    try {
+      await flushPendingEditsV1()
+    } catch (error) {
+      setProseGenerationError(error instanceof Error ? error.message : '作者编辑保存失败，已阻止正式生成。')
+      return
+    }
     await persistCurrentEditorContent()
     const backgroundMemoryIds = await prepareContinuityBeforeGeneration()
+    const scope = await resolveScopeLike(project.id!)
+    const contentRevision = await captureWorkspaceContentRevisionV1({
+      scope,
+      worldGroupId: chapterWorldGroupId ?? null,
+    })
     const {
       text: fullCtx,
       segments: assembledSegments,
@@ -1491,6 +1520,10 @@ export default function ChapterEditor({ project, outlineNodeId }: Props) {
       continuity,
       continuityBudgetTokens,
     } = await buildFullWorldCtx('generate', 'write')
+    await assertWorkspaceContentRevisionFreshV1(contentRevision, {
+      scope,
+      worldGroupId: chapterWorldGroupId ?? null,
+    })
     const informationBoundary = await buildChapterInformationBoundaryV1({
       scope: await resolveScopeLike(project.id!),
       chapterId: currentChapter?.id ?? null,
@@ -1528,14 +1561,26 @@ export default function ChapterEditor({ project, outlineNodeId }: Props) {
       assembled,
       generationBinding,
       informationBoundary,
+      contentRevision,
     )
   }
 
   const handleContinue = async () => {
     if (!plainText || !outlineNode) return
     setProseGenerationError('')
+    try {
+      await flushPendingEditsV1()
+    } catch (error) {
+      setProseGenerationError(error instanceof Error ? error.message : '作者编辑保存失败，已阻止正式续写。')
+      return
+    }
     await persistCurrentEditorContent()
     const backgroundMemoryIds = await prepareContinuityBeforeGeneration()
+    const scope = await resolveScopeLike(project.id!)
+    const contentRevision = await captureWorkspaceContentRevisionV1({
+      scope,
+      worldGroupId: chapterWorldGroupId ?? null,
+    })
     const {
       text: fullCtx,
       assembled,
@@ -1544,6 +1589,10 @@ export default function ChapterEditor({ project, outlineNodeId }: Props) {
       continuity,
       continuityBudgetTokens,
     } = await buildFullWorldCtx('continue', 'write')
+    await assertWorkspaceContentRevisionFreshV1(contentRevision, {
+      scope,
+      worldGroupId: chapterWorldGroupId ?? null,
+    })
     const informationBoundary = await buildChapterInformationBoundaryV1({
       scope: await resolveScopeLike(project.id!),
       chapterId: currentChapter?.id ?? null,
@@ -1569,6 +1618,7 @@ export default function ChapterEditor({ project, outlineNodeId }: Props) {
       assembled,
       generationBinding,
       informationBoundary,
+      contentRevision,
     )
   }
 
@@ -3305,6 +3355,7 @@ export default function ChapterEditor({ project, outlineNodeId }: Props) {
                 pending.assembled,
                 pending.generationBinding,
                 pending.informationBoundary,
+                pending.contentRevision,
               )
             }}
           />

@@ -25,6 +25,12 @@ import {
 } from '../world-engine/scope'
 import type { OutlineNode } from '../types'
 import {
+  assertWorkspaceContentRevisionFreshV1,
+  parseWorkspaceContentRevisionV1,
+  verifyWorkspaceContentRevisionV1,
+  type WorkspaceContentRevisionVectorV1,
+} from '../authoring/content-revision'
+import {
   adoptGeneratedOutlineItems,
   adoptGeneratedOutlineSummary,
   type GeneratedOutlineItem,
@@ -53,6 +59,8 @@ export interface OutlineGenerationCandidatePayloadV1 {
   operation: string
   candidateHash: string
   batch?: OutlineGenerationBatchRefV1
+  /** Absent on candidates created before WEH-0C. */
+  contentRevision?: WorkspaceContentRevisionVectorV1
 }
 
 export interface OutlineGenerationCandidateV1 extends OutlineGenerationCandidatePayloadV1 {
@@ -136,6 +144,7 @@ export async function persistOutlineGenerationCandidateV1(input: {
   durable: GenerationNodeDurableTraceV1
   output: string
   batch?: OutlineGenerationBatchRefV1
+  contentRevision?: WorkspaceContentRevisionVectorV1
 }): Promise<OutlineGenerationCandidateV1 | null> {
   if (!input.output.trim()) return null
   const batch = input.batch == null ? null : parseOutlineGenerationBatchRef(input.batch)
@@ -150,6 +159,7 @@ export async function persistOutlineGenerationCandidateV1(input: {
     operation,
     candidateHash,
     ...(batch ? { batch } : {}),
+    ...(input.contentRevision ? { contentRevision: input.contentRevision } : {}),
   }
   const candidateEvent = await input.durable.commitCandidate({
     output: input.output,
@@ -179,6 +189,14 @@ export async function persistOutlineGenerationCandidateV1(input: {
 function parseOutlineCandidatePayload(event: AgentEvent): OutlineGenerationCandidatePayloadV1 | null {
   const payload = parseAgentEventPayload<Partial<OutlineGenerationCandidatePayloadV1>>(event, {})
   const batch = parseOutlineGenerationBatchRef(payload.batch)
+  let contentRevision: WorkspaceContentRevisionVectorV1 | undefined
+  try {
+    contentRevision = payload.contentRevision === undefined
+      ? undefined
+      : parseWorkspaceContentRevisionV1(payload.contentRevision)
+  } catch {
+    return null
+  }
   if (
     payload.version !== 1
     || payload.type !== OUTLINE_GENERATION_CANDIDATE_PAYLOAD_TYPE
@@ -194,6 +212,7 @@ function parseOutlineCandidatePayload(event: AgentEvent): OutlineGenerationCandi
   return {
     ...payload,
     ...(batch ? { batch } : {}),
+    ...(contentRevision ? { contentRevision } : {}),
   } as OutlineGenerationCandidatePayloadV1
 }
 
@@ -743,9 +762,24 @@ export async function adoptOutlineGenerationCandidateV1(input: {
     if (input.faultInjector && !import.meta.env.PROD) await input.faultInjector(boundary)
   }
   await inject('before-confirmation')
+  const resolved = await resolveOutlineCandidate(input.candidate)
+  if (input.candidate.contentRevision) {
+    try {
+      await assertWorkspaceContentRevisionFreshV1(input.candidate.contentRevision, {
+        scope: resolved.scope,
+        worldGroupId: input.candidate.worldGroupId,
+      })
+    } catch (error) {
+      await staleOutlineGenerationCandidateV1(
+        input.candidate,
+        error instanceof Error ? error.message : 'content_revision_changed',
+      )
+      throw new Error(`大纲候选已过期：${error instanceof Error ? error.message : String(error)}`)
+    }
+  }
   await beginOutlineGenerationAdoptionV1(input.candidate, input.intent)
   await inject('after-intent')
-  const { scope } = await resolveOutlineCandidate(input.candidate)
+  const { scope } = resolved
   await inject('before-cas')
   await assertOutlineAdoptionPreWriteCas(scope, input.intent)
   await inject('after-cas')
@@ -964,6 +998,16 @@ export async function recoverPendingOutlineGenerationAdoptionsV1(
       } else {
         const intent = await adoptionIntentForSnapshot(scope, snapshot, candidate)
         if (!intent) throw new Error('已确认运行缺少哈希匹配的采纳计划')
+        if (candidate.contentRevision) {
+          const revision = await verifyWorkspaceContentRevisionV1(candidate.contentRevision, {
+            scope,
+            worldGroupId: candidate.worldGroupId,
+          })
+          const unsafeChanges = revision.changedTables.filter(table => table !== 'outlineNodes')
+          if (unsafeChanges.length) {
+            throw new Error(`恢复采纳时其它 Canon 已变化：${unsafeChanges.join('、')}`)
+          }
+        }
         await assertOutlineAdoptionRecoveryState(candidate, scope, intent.intent)
         const evidence = await executeOutlineAdoptionIntent(candidate, scope, intent.intent)
         await commitOutlineGenerationAdoptionV1(candidate, {

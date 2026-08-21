@@ -6,10 +6,13 @@ import { useState, useRef, useEffect } from 'react'
 import { ChevronDown } from 'lucide-react'
 import { useWorldGroupStore } from '../../stores/world-group'
 import { WORLD_GROUP_TYPE_LABELS } from '../../lib/types/world-group'
+import { flushPendingEditsV1 } from '../../lib/authoring/pending-edit-coordinator'
 
 export default function WorldGroupSwitcher() {
   const { groups, activeGroupId, setActiveGroup } = useWorldGroupStore()
   const [open, setOpen] = useState(false)
+  const [switching, setSwitching] = useState(false)
+  const [switchError, setSwitchError] = useState('')
   const ref = useRef<HTMLDivElement>(null)
 
   // 点击外部关闭
@@ -25,6 +28,24 @@ export default function WorldGroupSwitcher() {
   if (groups.length <= 1) return null
 
   const active = groups.find(g => g.id === activeGroupId)
+
+  const switchGroup = async (id: number) => {
+    if (switching || id === activeGroupId) {
+      setOpen(false)
+      return
+    }
+    setSwitching(true)
+    setSwitchError('')
+    try {
+      await flushPendingEditsV1()
+      setActiveGroup(id)
+      setOpen(false)
+    } catch (error) {
+      setSwitchError(error instanceof Error ? error.message : '当前编辑未能保存，已阻止切换世界。')
+    } finally {
+      setSwitching(false)
+    }
+  }
 
   return (
     <div className="relative" ref={ref}>
@@ -42,7 +63,8 @@ export default function WorldGroupSwitcher() {
           {groups.map(g => (
             <button
               key={g.id}
-              onClick={() => { setActiveGroup(g.id!); setOpen(false) }}
+              onClick={() => { void switchGroup(g.id!) }}
+              disabled={switching}
               className={`w-full flex items-center gap-2 px-3 py-2 text-left text-sm transition-colors ${
                 g.id === activeGroupId
                   ? 'bg-accent/10 text-accent'
@@ -59,6 +81,11 @@ export default function WorldGroupSwitcher() {
               )}
             </button>
           ))}
+          {switchError && (
+            <div className="border-t border-border px-3 py-2 text-[11px] text-red-500" role="alert">
+              {switchError}
+            </div>
+          )}
         </div>
       )}
     </div>

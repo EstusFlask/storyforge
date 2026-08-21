@@ -232,18 +232,18 @@ AI 输出经 `adopt({ target, data })` 写回,只有这里登记的字段可写(
 
 | category | 触发文件 |
 |---|---|
-| `agent.orchestrator` | `src/lib/agent/orchestrator.ts:617` |
-| `agent.orchestrator.replan` | `src/lib/agent/orchestrator.ts:704` |
+| `agent.orchestrator` | `src/lib/agent/orchestrator.ts:624` |
+| `agent.orchestrator.replan` | `src/lib/agent/orchestrator.ts:711` |
 | `agent.readonly` | `src/lib/agent/client-adapter.ts:116` |
 | `canon.setting.extract` | `src/lib/agent/run/constitution-extraction-durable.ts:509` |
 | `chapter.content` | `src/lib/generation/chapter-generation-node.ts:23` |
 | `chapter.continue` | `src/lib/generation/chapter-generation-node.ts:24` |
 | `chapter.continuity` | `src/lib/node-authoring/domain-execution.ts:552`<br/>`src/lib/node-authoring/domain-execution.ts:616` |
-| `chapter.deai` | `src/components/editor/ChapterEditor.tsx:1608` |
-| `chapter.expand` | `src/components/editor/ChapterEditor.tsx:1588` |
-| `chapter.memory` | `src/components/editor/ChapterEditor.tsx:1088` |
-| `chapter.organize` | `src/components/editor/ChapterEditor.tsx:1733`<br/>`src/components/editor/ChapterEditor.tsx:2618` |
-| `chapter.polish` | `src/components/editor/ChapterEditor.tsx:1580` |
+| `chapter.deai` | `src/components/editor/ChapterEditor.tsx:1658` |
+| `chapter.expand` | `src/components/editor/ChapterEditor.tsx:1638` |
+| `chapter.memory` | `src/components/editor/ChapterEditor.tsx:1095` |
+| `chapter.organize` | `src/components/editor/ChapterEditor.tsx:1783`<br/>`src/components/editor/ChapterEditor.tsx:2668` |
+| `chapter.polish` | `src/components/editor/ChapterEditor.tsx:1630` |
 | `chapter.toolbar` | `src/lib/agent/run/selection-edit-durable.ts:567` |
 | `codex.extract` | `src/lib/agent/run/codex-extraction-durable.ts:627` |
 | `cultivation.progress` | `src/lib/agent/run/cultivation-progress-extraction-durable.ts:558` |
@@ -259,7 +259,7 @@ AI 输出经 `adopt({ target, data })` 写回,只有这里登记的字段可写(
 | `inventory.extract` | `src/lib/agent/run/inventory-extraction-durable.ts:943` |
 | `location.extract` | `src/lib/agent/run/location-extraction-durable.ts:618` |
 | `node.creation` | `src/lib/node-authoring/executor.ts:362`<br/>`src/lib/node-flow/executor.ts:207` |
-| `outline.chapter` | `src/lib/ai/batch-outline-runner.ts:184`<br/>`src/lib/outline/generation-node.ts:59` |
+| `outline.chapter` | `src/lib/ai/batch-outline-runner.ts:198`<br/>`src/lib/outline/generation-node.ts:59` |
 | `outline.impact-regenerate` | `src/lib/agent/run/impact-outline-regeneration-durable.ts:652` |
 | `outline.volume` | `src/lib/outline/generation-node.ts:55` |
 | `outline.workshop.collision` | `src/lib/outline/workshop.ts:448` |
@@ -272,7 +272,7 @@ AI 输出经 `adopt({ target, data })` 写回,只有这里登记的字段可写(
 | `review.outline-workshop` | `src/lib/outline/workshop.ts:451` |
 | `review.quality` | `src/components/editor/ReviewPanel.tsx:99` |
 | `review.readability` | `src/components/editor/ReviewPanel.tsx:116` |
-| `review.revise` | `src/components/editor/ChapterEditor.tsx:1623` |
+| `review.revise` | `src/components/editor/ChapterEditor.tsx:1673` |
 | `scene.verify` | `src/components/scene/SceneVerifyPanel.tsx:81` |
 | `story.timeline` | `src/lib/agent/run/impact-story-timeline-regeneration-durable.ts:670`<br/>`src/lib/agent/run/story-timeline-extraction-durable.ts:758` |
 | `style.calibrate` | `src/components/style/StyleCalibrationPanel.tsx:63` |
@@ -315,4 +315,4 @@ AI 输出经 `adopt({ target, data })` 写回,只有这里登记的字段可写(
 
 ---
 
-生成时间基准:commit `616ad49`
+生成时间基准:commit `8913350`

@@ -21,6 +21,11 @@ import {
 } from '../agent/skill-registry'
 import { getOrCreateAgentConversation } from '../agent/conversations'
 import type { GenerationNodeShadowTrace } from '../generation/generation-node'
+import {
+  assertWorkspaceContentRevisionFreshV1,
+  captureWorkspaceContentRevisionV1,
+  type WorkspaceContentRevisionVectorV1,
+} from '../authoring/content-revision'
 import type { AssembleContextResult } from '../registry/types'
 import { resolveScope } from '../world-engine/scope'
 import type {
@@ -258,6 +263,7 @@ function composeOutlineTraces(input: {
   conversationId?: number
   request: OutlineGenerationRequest
   batch?: OutlineGenerationBatchRefV1
+  contentRevision?: WorkspaceContentRevisionVectorV1
   initializationError?: string
   executionBoundary: AgentExecutionBoundaryV1
   faultInjector?: (boundary: OutlineGenerationTraceFaultBoundaryV1) => void | Promise<void>
@@ -324,6 +330,7 @@ function composeOutlineTraces(input: {
           durable: input.durable,
           output,
           batch: input.batch,
+          contentRevision: input.contentRevision,
         })
       } catch (error) {
         diagnostics.push(error instanceof Error ? error.message : String(error))
@@ -366,6 +373,7 @@ function composeOutlineTraces(input: {
         durable: input.durable,
         output,
         batch: input.batch,
+        contentRevision: input.contentRevision,
       })
       return persistedCandidate
     },
@@ -396,6 +404,7 @@ export async function createOutlineGenerationTraceV1(input: {
   assembled: AssembleContextResult
   priorOutlineCandidateText?: string
   batch?: OutlineGenerationBatchRefV1
+  contentRevision?: WorkspaceContentRevisionVectorV1
   durable?: boolean
   executionBoundary?: AgentExecutionBoundaryV1
   /** Development/test-only deterministic interruption hook. */
@@ -426,6 +435,18 @@ export async function createOutlineGenerationTraceV1(input: {
       await input.faultInjector('trace-initialization')
     }
     scope = await resolveScope({ projectId: input.projectId })
+    const contentRevision = input.contentRevision ?? (executionBoundary === 'formal'
+      ? await captureWorkspaceContentRevisionV1({
+          scope,
+          worldGroupId: input.worldGroupId,
+        })
+      : undefined)
+    if (contentRevision) {
+      await assertWorkspaceContentRevisionFreshV1(contentRevision, {
+        scope,
+        worldGroupId: input.worldGroupId,
+      })
+    }
     const conversation = await getOrCreateAgentConversation({
       projectId: input.projectId,
       worldGroupId: input.worldGroupId,
@@ -461,6 +482,7 @@ export async function createOutlineGenerationTraceV1(input: {
       conversationId: conversation.id,
       request: input.request,
       batch: input.batch,
+      contentRevision,
       executionBoundary,
       faultInjector: input.faultInjector,
     })

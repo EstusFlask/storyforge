@@ -67,6 +67,7 @@ import {
   worldGameCandidateMatchesBusinessStateV1,
   type WorldGameCopilotSnapshotV1,
 } from '../world-game-copilot'
+import { assertWorkspaceContentRevisionFreshV1 } from '../../authoring/content-revision'
 
 export interface MasterAgentCandidateAdoptionRefV1 {
   scope: WorkspaceScope
@@ -146,6 +147,33 @@ export async function beginMasterAgentCandidateAdoptionV1(
   input: MasterAgentCandidateAdoptionRefV1,
 ): Promise<ResolvedMasterCandidateV1> {
   const resolved = await resolveCandidate(input)
+  if (resolved.candidate.payload.contentRevision) {
+    try {
+      await assertWorkspaceContentRevisionFreshV1(
+        resolved.candidate.payload.contentRevision,
+        {
+          scope: input.scope,
+          worldGroupId: resolved.snapshot.run.worldGroupId ?? null,
+        },
+      )
+    } catch (error) {
+      const step = resolved.snapshot.projection.steps[resolved.stepId]
+      if (step?.status === 'awaiting_confirmation') {
+        await appendAgentRunEventV1({
+          scope: input.scope,
+          runId: input.runId,
+          type: 'candidate.staled',
+          payload: {
+            stepId: resolved.stepId,
+            candidateHash: resolved.candidate.payload.candidateHash!,
+            reason: error instanceof Error ? error.message : 'content_revision_changed',
+          },
+          expectedLastSequence: resolved.snapshot.projection.lastSequence,
+        })
+      }
+      throw new Error(`主 Agent 候选已过期：${error instanceof Error ? error.message : String(error)}`)
+    }
+  }
   await assertRequiredSemanticReviewFresh(resolved)
   await assertMasterCandidateDependenciesAdoptedV1(
     resolved.candidate.event,

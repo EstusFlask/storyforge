@@ -2,10 +2,11 @@ import type { Character } from '../../lib/types'
 import { dimensionsByGroup, type CharacterDimensionKey, type CharacterDimensionSpec } from '../../lib/character/character-dimensions'
 import { CTextarea } from '../shared/CompositionInput'
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { registerPendingDraftFlusherV1 } from '../../lib/authoring/pending-edit-coordinator'
 
 interface Props {
   character: Character
-  onChange: (patch: Partial<Character>) => void
+  onChange: (patch: Partial<Character>) => void | Promise<void>
   /** 行内已显示、此处不重复的维度（如 NPC 行已有 简介/地点） */
   exclude?: CharacterDimensionKey[]
 }
@@ -13,7 +14,7 @@ interface Props {
 interface DimensionFieldProps {
   dimension: CharacterDimensionSpec
   value: string
-  onCommit: (value: string) => void
+  onCommit: (value: string) => void | Promise<void>
 }
 
 function CharacterDimensionField({ dimension, value, onCommit }: DimensionFieldProps) {
@@ -28,7 +29,7 @@ function CharacterDimensionField({ dimension, value, onCommit }: DimensionFieldP
     onCommitRef.current = onCommit
   }, [onCommit])
 
-  const flushDraft = useCallback(() => {
+  const flushDraft = useCallback((): void | Promise<void> => {
     if (timerRef.current) {
       clearTimeout(timerRef.current)
       timerRef.current = null
@@ -36,8 +37,10 @@ function CharacterDimensionField({ dimension, value, onCommit }: DimensionFieldP
     const next = draftRef.current
     if (!dirtyRef.current || next === lastSentRef.current) return
     lastSentRef.current = next
-    onCommitRef.current(next)
+    return onCommitRef.current(next)
   }, [])
+
+  useEffect(() => registerPendingDraftFlusherV1(flushDraft), [flushDraft])
 
   useEffect(() => {
     const external = String(value ?? '')

@@ -3,6 +3,7 @@ import { db } from '../lib/db/schema'
 import type { DetailedOutline } from '../lib/types'
 import { normalizeDetailedScenes } from '../lib/types/detailed-outline'
 import { assertRecordInScope, readOwnedRows, resolveScopeLike, stampNewRecord, type WorkspaceScopeLike } from '../lib/world-engine/scope'
+import { coordinatePendingEditV1 } from '../lib/authoring/pending-edit-coordinator'
 
 interface DetailedOutlineStore {
   detailedOutlines: DetailedOutline[]
@@ -57,14 +58,22 @@ export const useDetailedOutlineStore = create<DetailedOutlineStore>((set, get) =
   },
 
   save: async (id, patch) => {
-    const current = get().detailedOutlines.find(d => d.id === id) ?? await db.detailedOutlines.get(id)
-    if (!current || !await assertRecordInScope(await resolveScopeLike(current.projectId), 'detailedOutlines', current, { owner: 'work' })) return
-    const updated = { ...patch, updatedAt: now() }
-    await db.detailedOutlines.update(id, updated)
-    set({
-      detailedOutlines: get().detailedOutlines.map(d =>
-        d.id === id ? { ...d, ...updated } : d
-      ),
+    await coordinatePendingEditV1({
+      key: `detailed-outline:${id}`,
+      persist: async () => {
+        const initial = await db.detailedOutlines.get(id)
+        if (!initial) return
+        const scope = await resolveScopeLike(initial.projectId)
+        const current = await db.detailedOutlines.get(id)
+        if (!current || !await assertRecordInScope(scope, 'detailedOutlines', current, { owner: 'work' })) return
+        const updated = { ...patch, updatedAt: now() }
+        await db.detailedOutlines.update(id, updated)
+        set({
+          detailedOutlines: get().detailedOutlines.map(d =>
+            d.id === id ? { ...d, ...updated } : d
+          ),
+        })
+      },
     })
   },
 

@@ -43,6 +43,11 @@ import type {
   AgentSkillExecutionBindingV1,
   AgentSkillExecutionBindingV2,
 } from '../../types/agent-run'
+import {
+  assertWorkspaceContentRevisionFreshV1,
+  parseWorkspaceContentRevisionV1,
+  type WorkspaceContentRevisionVectorV1,
+} from '../../authoring/content-revision'
 
 export const PROSE_GENERATION_STEP_ID_V1 = 'prose-generation'
 export const PROSE_SEMANTIC_REVIEW_STEP_ID_V1 = 'prose-semantic-review'
@@ -107,6 +112,8 @@ export interface ProseGenerationCandidateV1 {
   operation: ProseGenerationOperationV1
   /** Hash of the chapter content at the moment the model request started. */
   sourceTextHash: string
+  /** Absent on candidates generated before WEH-0C. */
+  contentRevision?: WorkspaceContentRevisionVectorV1
   outputText: string
   outputTextHash: string
   /** Expected normalized chapter hash after this candidate is adopted. */
@@ -624,7 +631,7 @@ export async function failProseSemanticStepV1(input: {
 function isProseGenerationCandidate(value: unknown): value is ProseGenerationCandidateV1 {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false
   const candidate = value as Partial<ProseGenerationCandidateV1>
-  return candidate.version === 1
+  const valid = candidate.version === 1
     && candidate.type === PROSE_GENERATION_CANDIDATE_TYPE_V1
     && typeof candidate.projectId === 'number'
     && typeof candidate.chapterId === 'number'
@@ -647,6 +654,15 @@ function isProseGenerationCandidate(value: unknown): value is ProseGenerationCan
     ))
     && !!candidate.durable
     && candidate.durable.stepId === PROSE_GENERATION_STEP_ID_V1
+  if (!valid) return false
+  if (candidate.contentRevision !== undefined) {
+    try {
+      candidate.contentRevision = parseWorkspaceContentRevisionV1(candidate.contentRevision)
+    } catch {
+      return false
+    }
+  }
+  return true
 }
 
 export async function hashProseGenerationCandidateV1(
@@ -933,6 +949,21 @@ export async function commitProseGenerationAdoptionV1(input: {
   contentHtml: string
   wordCount: number
 }): Promise<{ snapshot: AgentRunSnapshotV1; receiptHash: string; receipt?: VerificationReceiptV1 }> {
+  if (input.candidate.contentRevision) {
+    try {
+      await assertWorkspaceContentRevisionFreshV1(input.candidate.contentRevision, {
+        scope: input.scope,
+        worldGroupId: input.candidate.worldGroupId,
+      })
+    } catch (error) {
+      await markProseGenerationStaleV1({
+        scope: input.scope,
+        runId: input.runId,
+        reason: error instanceof Error ? error.message : 'content_revision_changed',
+      })
+      throw new Error(`正文候选已过期：${error instanceof Error ? error.message : String(error)}`)
+    }
+  }
   if (!await isProseGenerationCandidateCurrentV1(input.candidate)) {
     await markProseGenerationStaleV1({
       scope: input.scope,

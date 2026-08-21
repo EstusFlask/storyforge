@@ -31,6 +31,7 @@ import { useAIConfigStore } from '../../stores/ai-config'
 import { revalidateStoryArcCreativeDraftV1 } from '../../lib/agent/story-arc-copilot'
 import { revalidateOutlineCreativeDraftV1 } from '../../lib/agent/outline-copilot'
 import { revalidateProseCreativeDraftV1 } from '../../lib/agent/prose-copilot'
+import { flushPendingEditsV1 } from '../../lib/authoring/pending-edit-coordinator'
 
 function errorMessage(error: unknown): string {
   if (error instanceof Error && error.message.trim()) return error.message
@@ -222,6 +223,7 @@ export function useMasterCopilot(input: {
     setError(null)
     if (requestOverride === undefined) setAuthorRequest('')
     try {
+      await flushPendingEditsV1()
       await appendAgentEvent({
         projectId: project.id!,
         conversationId,

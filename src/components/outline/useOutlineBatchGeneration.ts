@@ -18,6 +18,7 @@ import { decodeGenerationOperation } from '../../lib/outline/generation-request'
 import type { OutlineGenerationRequest } from '../../lib/outline/generation-request'
 import type { AssembleContextResult } from '../../lib/registry/types'
 import type { OutlineNode, Project } from '../../lib/types'
+import { flushPendingEditsV1 } from '../../lib/authoring/pending-edit-coordinator'
 
 interface Options {
   project: Project
@@ -115,6 +116,7 @@ export function useOutlineBatchGeneration({
     abortRef.current = controller
 
     try {
+      await flushPendingEditsV1()
       const generationResult = await runBatchOutlineGeneration({
         project,
         nodes,

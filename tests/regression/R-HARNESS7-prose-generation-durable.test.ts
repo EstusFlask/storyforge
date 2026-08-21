@@ -25,6 +25,7 @@ import { hashCanonicalValue } from '../../src/lib/agent/run/hash'
 import { hashChapterText, normalizeChapterText } from '../../src/lib/ai/chapter-memory/text-normalization'
 import type { WorkspaceScope } from '../../src/lib/types'
 import { buildChapterInformationBoundaryV1 } from '../../src/lib/agent/information-boundary'
+import { captureWorkspaceContentRevisionV1 } from '../../src/lib/authoring/content-revision'
 
 async function createWorkspace(label: string): Promise<{
   scope: WorkspaceScope
@@ -173,6 +174,10 @@ async function preparePending(
     worldGroupId: fixture.worldGroupId,
     operation,
     sourceTextHash,
+    contentRevision: await captureWorkspaceContentRevisionV1({
+      scope: fixture.scope,
+      worldGroupId: fixture.worldGroupId,
+    }),
     outputText,
     outputTextHash: await hashCanonicalValue(outputText),
     expectedContentHash: await hashChapterText(
@@ -290,6 +295,22 @@ describe.sequential('R-HARNESS7 · 正文生成 durable run', { timeout: 15_000 
     expect(snapshot.projection.state).toBe('paused')
     expect(snapshot.projection.steps[PROSE_GENERATION_STEP_ID_V1].status).toBe('stale')
     expect(snapshot.projection.terminalReceiptHash).toBeUndefined()
+  })
+
+  it('等待确认期间上游 Canon 变化会由 content revision 阻断，不只检查当前正文', async () => {
+    const pending = await preparePending('正文上游 stale')
+    await db.outlineNodes.update(pending.fixture.outlineNodeId, {
+      summary: '作者生成后改变了本章必须遵守的事件边界。',
+      updatedAt: Date.now(),
+    })
+    await expect(commitProseGenerationAdoptionV1({
+      scope: pending.fixture.scope,
+      runId: pending.candidate.durable.runId,
+      candidate: pending.candidate,
+      contentHtml: '<p>潮门在暮色中缓缓开启。</p>',
+      wordCount: 12,
+    })).rejects.toThrow(/项目内容已变化.*outlineNodes/)
+    expect((await db.chapters.get(pending.fixture.chapterId))?.content).toBe(pending.fixture.content)
   })
 
   it('作者确认的最终正文与候选不一致时先拒绝，不写入错误正文', async () => {

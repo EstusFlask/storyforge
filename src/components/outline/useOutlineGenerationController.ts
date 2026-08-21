@@ -36,6 +36,13 @@ import {
 } from '../../lib/outline/harness'
 import type { ChatMessage, OutlineNode, Project } from '../../lib/types'
 import type { AgentExecutionBoundaryV1 } from '../../lib/types'
+import { flushPendingEditsV1 } from '../../lib/authoring/pending-edit-coordinator'
+import {
+  assertWorkspaceContentRevisionFreshV1,
+  captureWorkspaceContentRevisionV1,
+  type WorkspaceContentRevisionVectorV1,
+} from '../../lib/authoring/content-revision'
+import { resolveScopeLike } from '../../lib/world-engine/scope'
 
 type GenerationAI = Pick<
   UseAIStreamReturn,
@@ -141,7 +148,14 @@ export function useOutlineGenerationController({
     contextSnapshot?: AssembleContextResult | null,
     preparedSnapshot?: PreparedGenerationNode | null,
     messageOverride?: ChatMessage[],
+    contentRevisionSnapshot?: WorkspaceContentRevisionVectorV1,
   ) => {
+    try {
+      await flushPendingEditsV1()
+    } catch (error) {
+      onError(error instanceof Error ? error.message : '作者编辑保存失败，已阻止正式生成。')
+      return
+    }
     const targetError = outlineGenerationTargetError(request, nodes, volumes)
     if (targetError) {
       ai.reset()
@@ -167,16 +181,27 @@ export function useOutlineGenerationController({
     let generationTrace: OutlineGenerationTraceV1 | undefined
     try {
       const targetVolume = findGenerationTargetVolume(request, nodes, volumes)
+      const targetWorldGroupId = targetVolume?.worldGroupId ?? null
+      const scope = await resolveScopeLike(project.id!)
+      const contentRevision = contentRevisionSnapshot ?? await captureWorkspaceContentRevisionV1({
+        scope,
+        worldGroupId: targetWorldGroupId,
+      })
       const assembled = contextSnapshot
-        ?? await assembleContext(request, targetVolume?.worldGroupId ?? null, targetVolume?.id)
+        ?? await assembleContext(request, targetWorldGroupId, targetVolume?.id)
+      await assertWorkspaceContentRevisionFreshV1(contentRevision, {
+        scope,
+        worldGroupId: targetWorldGroupId,
+      })
       const node = buildNode(request)
       const prepared = preparedSnapshot ?? prepareGenerationNode(node, assembled)
       generationTrace = await createOutlineGenerationTraceV1({
         projectId: project.id!,
-        worldGroupId: targetVolume?.worldGroupId ?? null,
+        worldGroupId: targetWorldGroupId,
         request,
         assembled,
         executionBoundary,
+        contentRevision,
       })
       const result = await runGenerationNode(node, prepared, {
         messages: messageOverride,
@@ -273,21 +298,32 @@ export function useOutlineGenerationController({
     clearPreview()
 
     try {
+      await flushPendingEditsV1()
       const targetVolume = findGenerationTargetVolume(request, nodes, volumes)
+      const targetWorldGroupId = targetVolume?.worldGroupId ?? null
+      const scope = await resolveScopeLike(project.id!)
+      const contentRevision = await captureWorkspaceContentRevisionV1({
+        scope,
+        worldGroupId: targetWorldGroupId,
+      })
       const assembled = await assembleContext(
         request,
-        targetVolume?.worldGroupId ?? null,
+        targetWorldGroupId,
         targetVolume?.id,
       )
+      await assertWorkspaceContentRevisionFreshV1(contentRevision, {
+        scope,
+        worldGroupId: targetWorldGroupId,
+      })
       if (contextRequestRef.current !== requestId) return
-      setPreparedContext({ operation, assembled })
+      setPreparedContext({ operation, assembled, contentRevision })
     } catch (error) {
       if (contextRequestRef.current !== requestId) return
       setContextError(error instanceof Error ? error.message : '未知错误')
     } finally {
       if (contextRequestRef.current === requestId) setContextLoading(false)
     }
-  }, [assembleContext, clearPreview, nodes, openPromptPanel, volumes])
+  }, [assembleContext, clearPreview, nodes, openPromptPanel, project.id, volumes])
 
   const cancel = useCallback(() => {
     contextRequestRef.current += 1
@@ -313,7 +349,13 @@ export function useOutlineGenerationController({
     const request = pendingRequest
     setPendingRequest(null)
     setPreparedContext(null)
-    await execute(request, contextSnapshot, preparedNodeResult.prepared)
+    await execute(
+      request,
+      contextSnapshot,
+      preparedNodeResult.prepared,
+      undefined,
+      preparedContext!.contentRevision,
+    )
   }, [
     contextError,
     contextLoading,
@@ -340,6 +382,7 @@ export function useOutlineGenerationController({
       contextSnapshot,
       preparedNodeResult.prepared,
       messages,
+      preparedContext!.contentRevision,
     )
   }, [
     execute,

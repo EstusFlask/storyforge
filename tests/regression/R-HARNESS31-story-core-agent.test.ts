@@ -405,4 +405,37 @@ describe.sequential('R-HARNESS31 · 故事核心 Agent Skill 与受治理采纳'
     expect(tampered.accepted).toBe(false)
     expect(tampered.codes).toContain('story-core-1:post-state-mismatch')
   })
+
+  it('真实 durable 主 Agent 候选冻结 content revision，上游变化后标旧且不写目标字段', async () => {
+    const { project, scope } = await createWorkspace()
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
+      choices: [{ message: { content: JSON.stringify(candidate()) } }],
+      usage: { prompt_tokens: 31, completion_tokens: 23, total_tokens: 54 },
+    }), { status: 200 })))
+    const conversation = await getOrCreateAgentConversation({
+      projectId: project.id!, scope, worldGroupId: null,
+    })
+    const run = await runDurableMasterAgentPlanV1({
+      scope,
+      worldGroupId: null,
+      conversationId: conversation.id!,
+      plan: plan(),
+      budget: new AgentTeamBudgetTracker('balanced'),
+    })
+    const restored = await restoreMasterAgentCandidatesV1({ scope, runId: run.runId })
+    const durableCandidate = restored.candidates[0]
+    expect(durableCandidate.payload.contentRevision).toMatchObject({ version: 1 })
+    const original = await db.storyCores.get(durableCandidate.payload.baseSnapshot.id)
+    await db.worldviews.toCollection().modify({ worldOrigin: '作者在候选生成后改写了世界起源。' })
+
+    await expect(commitMasterAgentCandidateAdoptionV1({
+      scope,
+      runId: run.runId,
+      candidateEventId: durableCandidate.event.id!,
+    })).rejects.toThrow('主 Agent 候选已过期')
+    expect((await db.storyCores.get(durableCandidate.payload.baseSnapshot.id))?.logline)
+      .toBe(original?.logline)
+    const stale = await restoreMasterAgentCandidatesV1({ scope, runId: run.runId })
+    expect(stale.snapshot.projection.steps['master:story-core-1']?.status).toBe('stale')
+  })
 })

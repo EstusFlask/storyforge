@@ -8,6 +8,22 @@ import { useOutlineGenerationController } from '../../src/components/outline/use
 import { OUTLINE_DURABLE_HARNESS_STORAGE_KEY } from '../../src/lib/outline/harness'
 import { resolveOutlineGenerationSourceKeysV2 } from '../../src/lib/outline/harness'
 
+const revisionMocks = vi.hoisted(() => ({
+  scope: { projectId: 1, worldId: 101, workId: 201 },
+  revision: { version: 1 as const, entries: [], vectorHash: 'a'.repeat(64) },
+}))
+
+vi.mock('../../src/lib/world-engine/scope', async importOriginal => ({
+  ...await importOriginal<typeof import('../../src/lib/world-engine/scope')>(),
+  resolveScope: vi.fn(async () => revisionMocks.scope),
+  resolveScopeLike: vi.fn(async () => revisionMocks.scope),
+}))
+vi.mock('../../src/lib/authoring/content-revision', async importOriginal => ({
+  ...await importOriginal<typeof import('../../src/lib/authoring/content-revision')>(),
+  captureWorkspaceContentRevisionV1: vi.fn(async () => revisionMocks.revision),
+  assertWorkspaceContentRevisionFreshV1: vi.fn(async () => undefined),
+}))
+
 globalThis.IS_REACT_ACT_ENVIRONMENT = true
 
 function node(id: number, type: OutlineNode['type'], parentId: number | null, title: string): OutlineNode {

@@ -97,6 +97,7 @@ import { CREATIVE_RULES_FIELDS } from '../creative-rules-copilot'
 import { WORLDVIEW_AGENT_FIELDS } from '../worldview-field-copilot'
 import { MAX_INSPIRATION_FRAGMENTS } from '../../inspiration/workspace'
 import { parseCharacterRevisionTaskInputV1 } from '../character-revision-copilot'
+import { parseWorkspaceContentRevisionV1 } from '../../authoring/content-revision'
 
 export const MASTER_AGENT_PLAN_CHECKPOINT_KIND_V1 = 'master-agent-plan'
 export const MASTER_AGENT_PLAN_CHECKPOINT_VERSION_V1 = 1 as const
@@ -1126,6 +1127,13 @@ function parseCandidatePayload(value: unknown, label: string): MasterCandidatePa
       payload.contextSources.length !== payload.contextEvidence.included.length
       || payload.contextSources.some((source, index) => source !== payload.contextEvidence!.included[index])
     ) fail(`${label} payload contextSources 与上下文证据不一致`)
+  }
+  if (payload.contentRevision !== undefined) {
+    try {
+      payload.contentRevision = parseWorkspaceContentRevisionV1(payload.contentRevision)
+    } catch (error) {
+      fail(`${label} payload contentRevision 无效：${error instanceof Error ? error.message : String(error)}`)
+    }
   }
   if (typeof payload.runId !== 'number' || !Number.isInteger(payload.runId) || payload.runId < 1) fail(`${label} payload runId 无效`)
   if (

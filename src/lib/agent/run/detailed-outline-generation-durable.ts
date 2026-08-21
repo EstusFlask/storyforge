@@ -35,6 +35,11 @@ import {
   type CreativeArtifactV1,
 } from '../creative-reliability'
 import { parseNarrativeBriefV1, type NarrativeBriefV1 } from '../narrative-brief'
+import {
+  assertWorkspaceContentRevisionFreshV1,
+  parseWorkspaceContentRevisionV1,
+  type WorkspaceContentRevisionVectorV1,
+} from '../../authoring/content-revision'
 
 export const DETAILED_OUTLINE_GENERATION_STEP_ID_V1 = 'detailed-outline.generate'
 export const DETAILED_OUTLINE_GENERATION_CONVERSATION_PURPOSE_V1 = 'detailed-outline-generation'
@@ -60,6 +65,8 @@ export interface DetailedOutlineGenerationCandidateV1 {
   output: string
   outputHash: string
   contextManifestHash: string
+  /** Absent on candidates generated before WEH-0C. */
+  contentRevision?: WorkspaceContentRevisionVectorV1
   /** Absent on candidates generated before CREL-8. */
   creativeArtifact?: CreativeArtifactV1
   /** Absent on candidates generated before CREL-8. */
@@ -96,6 +103,7 @@ export async function hashDetailedOutlineGenerationCandidateV1(
       sourceSummaryHash: candidate.sourceSummaryHash,
       outputHash: candidate.outputHash,
       contextManifestHash: candidate.contextManifestHash,
+      ...(candidate.contentRevision ? { contentRevision: candidate.contentRevision } : {}),
       ...(candidate.creativeArtifact ? { creativeArtifact: candidate.creativeArtifact } : {}),
       ...(candidate.narrativeBrief ? { narrativeBrief: candidate.narrativeBrief } : {}),
       workspaceScope: {
@@ -317,6 +325,13 @@ function isCandidate(value: unknown): value is DetailedOutlineGenerationCandidat
     && typeof candidate.durable.runId === 'number'
     && typeof candidate.durable.candidateHash === 'string'
   if (!baseValid) return false
+  if (candidate.contentRevision !== undefined) {
+    try {
+      candidate.contentRevision = parseWorkspaceContentRevisionV1(candidate.contentRevision)
+    } catch {
+      return false
+    }
+  }
   if ((candidate.creativeArtifact === undefined) !== (candidate.narrativeBrief === undefined)) return false
   if (candidate.creativeArtifact !== undefined) {
     try {
@@ -362,6 +377,7 @@ export async function persistDetailedOutlineGenerationCandidateV1(input: {
     sourceSummaryHash: input.candidate.sourceSummaryHash,
     outputHash: input.candidate.outputHash,
     contextManifestHash: input.candidate.contextManifestHash,
+    ...(input.candidate.contentRevision ? { contentRevision: input.candidate.contentRevision } : {}),
     ...(input.candidate.creativeArtifact
       ? { creativeArtifact: input.candidate.creativeArtifact }
       : {}),
@@ -431,6 +447,7 @@ export async function readLatestDetailedOutlineGenerationCandidateV1(input: {
         output: event.content,
         outputHash: raw.outputHash,
         contextManifestHash: raw.contextManifestHash,
+        contentRevision: raw.contentRevision,
         creativeArtifact: raw.creativeArtifact,
         narrativeBrief: raw.narrativeBrief,
         workspaceScope: raw.workspaceScope,
@@ -522,6 +539,25 @@ export async function commitDetailedOutlineGenerationAdoptionV1(input: {
   }
   if (await hashCanonicalValue(input.candidate.output) !== input.candidate.outputHash) {
     throw new Error('细纲候选输出 hash 校验失败，请重新生成。')
+  }
+  if (input.candidate.contentRevision) {
+    try {
+      await assertWorkspaceContentRevisionFreshV1(input.candidate.contentRevision, {
+        scope: input.scope,
+        worldGroupId: input.candidate.worldGroupId,
+      })
+    } catch (error) {
+      const stale = await readAgentRunV1(input.scope, input.runId)
+      const step = stale.projection.steps[DETAILED_OUTLINE_GENERATION_STEP_ID_V1]
+      if (step?.status === 'awaiting_confirmation') {
+        await append(input.scope, stale, 'candidate.staled', {
+          stepId: DETAILED_OUTLINE_GENERATION_STEP_ID_V1,
+          candidateHash: input.candidate.durable.candidateHash,
+          reason: error instanceof Error ? error.message : 'content_revision_changed',
+        })
+      }
+      throw new Error(`细纲候选已过期：${error instanceof Error ? error.message : String(error)}`)
+    }
   }
   if (
     input.candidate.creativeArtifact

@@ -160,6 +160,11 @@ import {
 import { createAgentSkillExecutionBindingV1 } from './execution-binding'
 import { hashCanonicalValue } from './run/hash'
 import { readAgentRunV1 } from './run/event-store'
+import {
+  assertWorkspaceContentRevisionFreshV1,
+  captureWorkspaceContentRevisionV1,
+  type WorkspaceContentRevisionVectorV1,
+} from '../authoring/content-revision'
 import type {
   MasterCandidateModelIdentityV1,
   MasterCandidateSemanticReviewArtifactV1,
@@ -228,6 +233,8 @@ export interface MasterCandidatePayload {
   label: string
   contextSources: string[]
   contextEvidence?: AgentContextEvidence
+  /** Absent on candidates created before WEH-0C. */
+  contentRevision?: WorkspaceContentRevisionVectorV1
   teamBudgetEvidence?: AgentTeamBudgetEvidence
   baseSnapshot: unknown
   mode?: InspirationResultMode
@@ -820,6 +827,10 @@ async function executeSequentialMasterAgentPlan(
     await input.executionTrace?.taskStarted?.(task)
     await input.onTask?.(task, 'running')
     try {
+      const contentRevision = await captureWorkspaceContentRevisionV1({
+        scope,
+        worldGroupId: input.worldGroupId,
+      })
       const dependencyBindings = await Promise.all(task.dependsOn.map(async taskId => {
         const output = outputs.get(taskId)
         if (!output?.trim()) throw new Error(`主 Agent 任务 ${task.id} 缺少依赖输出 ${taskId}。`)
@@ -1631,6 +1642,11 @@ async function executeSequentialMasterAgentPlan(
         }
       }
       const candidate = candidates[candidates.length - 1]
+      candidate.payload.contentRevision = contentRevision
+      await assertWorkspaceContentRevisionFreshV1(contentRevision, {
+        scope,
+        worldGroupId: input.worldGroupId,
+      })
       const candidateAssumptions = candidate.payload.creativeArtifact?.assumptions
         ?? candidate.payload.narrativeBrief?.assumptions
         ?? []
