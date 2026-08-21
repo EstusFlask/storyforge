@@ -26,6 +26,7 @@ export const AGENT_RUN_EVENT_TYPES_V1: readonly AgentRunEventTypeV1[] = [
   'step.succeeded',
   'step.failed',
   'context.assembled',
+  'evidence.artifact.recorded',
   'model.requested',
   'model.responded',
   'tool.called',
@@ -215,6 +216,45 @@ function parsePayload<T extends AgentRunEventTypeV1>(
         stepId: parsed.stepId,
         attempt: parsed.attempt,
         manifestHash: readHash(parsed.record.manifestHash, 'event.payload(context.assembled).manifestHash'),
+      }
+      break
+    }
+    case 'evidence.artifact.recorded': {
+      const record = payloadRecord(
+        value,
+        type,
+        ['artifactKind', 'contentHash', 'byteLength', 'stepId', 'attempt'],
+        ['artifactKind', 'contentHash', 'byteLength'],
+      )
+      const stepId = record.stepId === undefined
+        ? undefined
+        : readString(record.stepId, 'event.payload(evidence.artifact.recorded).stepId', { max: 160 })
+      const attempt = record.attempt === undefined
+        ? undefined
+        : readInteger(record.attempt, 'event.payload(evidence.artifact.recorded).attempt', { min: 1 })
+      if ((stepId === undefined) !== (attempt === undefined)) {
+        failSchema(
+          'invalid_value',
+          'event.payload(evidence.artifact.recorded)',
+          'stepId 与 attempt 必须同时出现或同时省略',
+        )
+      }
+      payload = {
+        artifactKind: readEnum(
+          record.artifactKind,
+          ['context-packet', 'source-snapshot', 'tool-result', 'rendered-request', 'raw-response'] as const,
+          'event.payload(evidence.artifact.recorded).artifactKind',
+        ),
+        contentHash: readHash(
+          record.contentHash,
+          'event.payload(evidence.artifact.recorded).contentHash',
+        ),
+        byteLength: readInteger(
+          record.byteLength,
+          'event.payload(evidence.artifact.recorded).byteLength',
+          { min: 0 },
+        ),
+        ...(stepId === undefined ? {} : { stepId, attempt }),
       }
       break
     }

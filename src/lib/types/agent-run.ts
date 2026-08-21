@@ -477,6 +477,7 @@ export type AgentRunEventTypeV1 =
   | 'step.succeeded'
   | 'step.failed'
   | 'context.assembled'
+  | 'evidence.artifact.recorded'
   | 'model.requested'
   | 'model.responded'
   | 'tool.called'
@@ -532,6 +533,13 @@ export interface AgentRunEventPayloadByTypeV1 {
     fingerprint?: string
   }
   'context.assembled': { stepId: string; attempt: number; manifestHash: string }
+  'evidence.artifact.recorded': {
+    artifactKind: import('./memory-engineering').ExactRunArtifactKindV1
+    contentHash: string
+    byteLength: number
+    stepId?: string
+    attempt?: number
+  }
   'model.requested': { stepId: string; attempt: number; bindingHash: string }
   'model.responded': { stepId: string; attempt: number; outputHash: string }
   'tool.called': { stepId: string; attempt: number; toolName: string; callHash: string }

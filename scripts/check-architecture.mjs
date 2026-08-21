@@ -763,6 +763,47 @@ for (const dir of UI_DIRS) {
   }
 }
 
+// ── ㉑ MEMINT-0 五层记忆边界必须复用既有 ledger/settlement ──
+const memoryPlaneSource = read('src/lib/memory/plane-contract.ts')
+const evidencePolicySource = read('src/lib/memory/evidence-policy.ts')
+const artifactRetentionSource = read('src/lib/memory/artifact-retention.ts')
+const workingContextSource = read('src/lib/memory/working-context.ts')
+const settlementCoreSource = read('src/lib/memory/settlement-core.ts')
+const agentRunTypeSource = read('src/lib/types/agent-run.ts')
+for (const plane of [
+  'canon-authority',
+  'derived-narrative-memory',
+  'execution-evidence',
+  'bounded-working-context',
+  'projection-recovery',
+]) {
+  if (!memoryPlaneSource.includes(`'${plane}'`)) violations.push(`[㉑记忆平面] 缺少 ${plane}`)
+}
+if (!memoryPlaneSource.includes('REGISTRY_BY_NAME')
+  || /new Map[\s\S]{0,80}(?:worldviews|chapters|characters)/.test(memoryPlaneSource)) {
+  violations.push('[㉑单一表注册表] 记忆平面只能校验 PROJECT_TABLES，不得复制 Canon 表清单')
+}
+for (const token of ['secret-material', 'hidden-reasoning', 'FORBIDDEN_KEY']) {
+  if (!evidencePolicySource.includes(token)) violations.push(`[㉑证据脱敏] evidence-policy 缺少 ${token}`)
+}
+if (!artifactRetentionSource.includes("mode: 'mark-and-sweep' | 'explicit-retention-prune'")
+  || !artifactRetentionSource.includes("state: 'evidence-pruned'")) {
+  violations.push('[㉑证据保留] exact artifact 必须具备活引用清扫和 evidence-pruned 回执')
+}
+for (const token of [
+  'baseCheckpointHash',
+  'tailFromSequence',
+  'originalPacketHash',
+  'replacementPacketHash',
+  'rawArtifactRefs',
+]) {
+  if (!workingContextSource.includes(token)) violations.push(`[㉑compaction replay] working-context 缺少 ${token}`)
+}
+if (!agentRunTypeSource.includes("'evidence.artifact.recorded'")
+  || !settlementCoreSource.includes("sourceKind: 'agent-run-artifact'")) {
+  violations.push('[㉑唯一结算] exact evidence 必须从同一 Run ledger 进入现有 Memory Settlement/Index')
+}
+
 // ── 报告 ──
 if (violations.length) {
   console.error('[architecture] ❌ 发现反模式违规(违反 CLAUDE.md 三注册表铁律):\n')

@@ -15,6 +15,18 @@ import {
   memoryRunExportIdV1,
 } from './settlement-core'
 
+// MEMINT-0 keeps exact evidence, retention and working-context replay behind
+// the existing settlement boundary instead of exposing a parallel memory API.
+export { planExactArtifactRetentionV1 } from './artifact-retention'
+export { assertExactRunArtifactBodySafeV1, ExactRunArtifactPolicyError } from './evidence-policy'
+export { assertMemoryPlaneContractV1, memoryPlaneForTableV1 } from './plane-contract'
+export {
+  createWorkingContextCompactionCheckpointV1,
+  parseWorkingContextCompactionCheckpointV1,
+  readWorkingContextReplayV1,
+  WorkingContextContractError,
+} from './working-context'
+
 async function workspaceDirtyForSettlement(projectId: number): Promise<boolean> {
   const binding = await db.workspaceDocuments
     .where('[projectId+tableName+recordId]')
