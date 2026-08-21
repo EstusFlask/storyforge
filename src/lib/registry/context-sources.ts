@@ -95,6 +95,71 @@ import type { AssembleContextInput } from './types'
 import { readOwnedRows, resolveScope, assertRecordInScope } from '../world-engine/scope'
 import type { WorkspaceScope } from '../types/world-ownership'
 import { parseWorldGameAuthoringRequestV1 } from '../text-game/agent-contract'
+import {
+  inspectAdaptationFreshness,
+  listActiveSourceUnits,
+  readAdaptationSourceContent,
+} from '../adaptation/source-manifest'
+import type { AdaptationProject } from '../types'
+
+async function requireTargetAdaptation(input: AssembleContextInput): Promise<AdaptationProject> {
+  if (input.adaptationProjectId == null || !input.scope) throw new Error('[adaptation-context] 缺少目标改编 selector')
+  const root = await db.adaptationProjects.get(input.adaptationProjectId)
+  if (!root
+    || root.projectId !== input.scope.projectId
+    || root.worldId !== input.scope.worldId
+    || root.workId !== input.scope.workId) {
+    throw new Error('[adaptation-context] 改编项目不属于当前目标 Work')
+  }
+  return root
+}
+
+async function readAdaptationSourceManifestContext(input: AssembleContextInput): Promise<string> {
+  const root = await requireTargetAdaptation(input)
+  const [units, freshness] = await Promise.all([
+    listActiveSourceUnits(root.id!),
+    inspectAdaptationFreshness(root.id!),
+  ])
+  return [
+    '【改编来源清单】',
+    `媒介：${root.medium}`,
+    `清单版本：v${root.activeSourceManifestVersion}`,
+    `清单哈希：${root.activeSourceManifestHash}`,
+    `来源覆盖：${root.sourceCoverage}`,
+    `来源状态：${freshness.status}`,
+    ...units.map(unit => `- ${unit.sourceUnitKey}｜${unit.sourceKind}｜${unit.label}｜顺序 ${unit.order}｜${unit.wordCount} 字｜hash ${unit.contentHash}｜摘要：${unit.summary}`),
+    ...(freshness.changes.length ? ['变化：', ...freshness.changes.map(change => `- ${change.kind}｜${change.sourceUnitKey}｜${change.label}`)] : []),
+  ].join('\n')
+}
+
+async function readAdaptationSourceContentContext(input: AssembleContextInput): Promise<string> {
+  const root = await requireTargetAdaptation(input)
+  const slice = await readAdaptationSourceContent({
+    targetScope: input.scope!,
+    adaptationProjectId: root.id!,
+    manifestVersion: input.adaptationSourceManifestVersion!,
+    sourceUnitKeys: input.adaptationSourceUnitKeys!,
+  })
+  return [
+    `【改编来源正文｜manifest v${slice.manifestVersion}｜${slice.sourceManifestHash}】`,
+    ...slice.units.map(unit => [
+      `--- ${unit.sourceUnitKey}｜${unit.sourceKind}｜${unit.label}｜hash ${unit.contentHash} ---`,
+      unit.content,
+    ].join('\n')),
+  ].join('\n\n')
+}
+
+async function readAdaptationBriefContext(input: AssembleContextInput): Promise<string> {
+  const root = await requireTargetAdaptation(input)
+  if (!root.brief || root.briefSourceManifestVersion !== root.activeSourceManifestVersion) return ''
+  return `【已确认改编 Brief｜manifest v${root.briefSourceManifestVersion}】\n${JSON.stringify(root.brief)}`
+}
+
+async function readAdaptationPlanContext(input: AssembleContextInput): Promise<string> {
+  const root = await requireTargetAdaptation(input)
+  if (!root.plan || root.planSourceManifestVersion !== root.activeSourceManifestVersion) return ''
+  return `【已确认改编计划｜manifest v${root.planSourceManifestVersion}】\n${JSON.stringify(root.plan)}`
+}
 
 async function readSimulationStateForContext(sessionId: number) {
   const { readSimulationState } = await import('../simulation/runtime')
@@ -1110,6 +1175,51 @@ async function readCharacterPassages(projectId: number, name?: string, worldGrou
 }
 
 export const CONTEXT_SOURCES: ContextSource[] = [
+  {
+    key: 'adaptation.sourceManifest',
+    label: '改编来源清单',
+    scope: 'project',
+    layer: 'L0',
+    ownerFrom: 'work',
+    budgetTokens: 6000,
+    protectedFromTrim: true,
+    requiresAdaptationProjectId: true,
+    read: readAdaptationSourceManifestContext,
+  },
+  {
+    key: 'adaptation.sourceContent',
+    label: '改编来源正文',
+    scope: 'project',
+    layer: 'L0',
+    ownerFrom: 'work',
+    budgetTokens: 24_000,
+    protectedFromTrim: true,
+    requiresAdaptationProjectId: true,
+    requiresAdaptationSourceUnits: true,
+    read: readAdaptationSourceContentContext,
+  },
+  {
+    key: 'adaptation.currentBrief',
+    label: '已确认改编 Brief',
+    scope: 'project',
+    layer: 'L0',
+    ownerFrom: 'work',
+    budgetTokens: 4000,
+    protectedFromTrim: true,
+    requiresAdaptationProjectId: true,
+    read: readAdaptationBriefContext,
+  },
+  {
+    key: 'adaptation.currentPlan',
+    label: '已确认改编计划',
+    scope: 'project',
+    layer: 'L0',
+    ownerFrom: 'work',
+    budgetTokens: 6000,
+    protectedFromTrim: true,
+    requiresAdaptationProjectId: true,
+    read: readAdaptationPlanContext,
+  },
   {
     key: 'worldGameAuthoring',
     label: '冻结世界游戏创作包',

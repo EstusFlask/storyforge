@@ -32,9 +32,12 @@ import {
   isWorkCode,
 } from '../memory/identity'
 import { assertStoredWorkClassification } from '../world-engine/work-kind'
+import { assertAdaptationProjectInvariant } from '../adaptation/contracts'
+import type { AdaptationProject, Work } from '../types'
 
 const PORTABLE_OWNER_VERSION = 4
 const WORK_CLASSIFICATION_VERSION = 5
+const ADAPTATION_VERSION = 6
 
 function strictOwnerShadow(spec: TableSpec, row: Record<string, any>): {
   kind: 'world' | 'work' | 'instance'
@@ -98,6 +101,7 @@ function validateStrictOwnership(data: ProjectExportData): void {
       }
     }
   }
+  if (data.version >= ADAPTATION_VERSION) validateAdaptationBackup(value)
   for (const spec of PROJECT_TABLES) {
     if (!spec.exportable || spec.name === 'projects' || spec.name === 'worlds' || spec.name === 'works') continue
     const rows = value[spec.name]
@@ -110,6 +114,61 @@ function validateStrictOwnership(data: ProjectExportData): void {
       const validIds = shadow.kind === 'world' ? worldIds : shadow.kind === 'work' ? workIds : instanceIds
       if (!validIds.has(shadow.exportId)) throw new Error(`[deriveImport] v4 owner 越界:${spec.name}`)
     }
+  }
+}
+
+function validateAdaptationBackup(value: Record<string, any>): void {
+  if (!Array.isArray(value.adaptationProjects) || !Array.isArray(value.adaptationSourceUnits)) {
+    throw new Error('[deriveImport] v6 备份缺少改编必需表')
+  }
+  const works = new Map<number, Record<string, any>>((value.works ?? []).map((row: Record<string, any>) => [row._exportId, row]))
+  const roots = new Map<number, Record<string, any>>()
+  for (const row of value.adaptationProjects as Record<string, any>[]) {
+    if (!Number.isInteger(row._exportId) || roots.has(row._exportId)) throw new Error('[deriveImport] v6 adaptationProject 便携 ID 重复或无效')
+    const target = works.get(row._workExportId)
+    const source = row._sourceWorkExportId == null ? null : works.get(row._sourceWorkExportId)
+    if (!target || (row._sourceWorkExportId != null && !source)) throw new Error('[deriveImport] v6 改编 Work 引用越界')
+    const root = {
+      ...row,
+      id: row._exportId,
+      projectId: 1,
+      worldId: row._worldExportId,
+      workId: row._workExportId,
+      sourceWorkId: row._sourceWorkExportId ?? null,
+      sourceOutlineRootId: row._sourceOutlineRootExportId ?? null,
+      sourceStartChapterId: row._sourceStartChapterExportId ?? null,
+      sourceEndChapterId: row._sourceEndChapterExportId ?? null,
+    } as AdaptationProject
+    const targetWork = { ...target, id: row._workExportId, projectId: 1, worldId: row._worldExportId } as Work
+    const sourceWork = source ? { ...source, id: row._sourceWorkExportId, projectId: 1, worldId: row._worldExportId } as Work : null
+    try {
+      assertAdaptationProjectInvariant(root, targetWork, sourceWork)
+    } catch (error) {
+      throw new Error(`[deriveImport] v6 改编根非法：${error instanceof Error ? error.message : String(error)}`)
+    }
+    roots.set(row._exportId, row)
+  }
+  const unique = new Set<string>()
+  for (const row of value.adaptationSourceUnits as Record<string, any>[]) {
+    if (!roots.has(row._adaptationProjectExportId)) throw new Error('[deriveImport] v6 来源单元 adaptation 引用越界')
+    if (!Number.isInteger(row.manifestVersion) || row.manifestVersion <= 0 || !Number.isInteger(row.order) || row.order < 0) throw new Error('[deriveImport] v6 来源单元版本或顺序非法')
+    if (!/^[a-f0-9]{64}$/i.test(row.contentHash) || typeof row.sourceUnitKey !== 'string' || !row.sourceUnitKey) throw new Error('[deriveImport] v6 来源单元 key/hash 非法')
+    const identity = `${row._adaptationProjectExportId}:${row.manifestVersion}:${row.sourceUnitKey}`
+    if (unique.has(identity)) throw new Error('[deriveImport] v6 来源单元 stable key 重复')
+    unique.add(identity)
+    if (row.sourceKind === 'work') {
+      if (row._sourceOutlineExportId != null || row._sourceChapterExportId != null) throw new Error('[deriveImport] v6 work 来源单元引用组合非法')
+    } else if (row.sourceKind === 'outline-node') {
+      if (row._sourceChapterExportId != null) throw new Error('[deriveImport] v6 outline 来源单元引用组合非法')
+    } else if (row.sourceKind === 'chapter') {
+      if (row._sourceOutlineExportId != null) throw new Error('[deriveImport] v6 chapter 来源单元引用组合非法')
+    } else {
+      throw new Error('[deriveImport] v6 来源单元 kind 非法')
+    }
+  }
+  for (const [rootId, root] of roots) {
+    const activeUnits = (value.adaptationSourceUnits as Record<string, any>[]).filter(row => row._adaptationProjectExportId === rootId && row.manifestVersion === root.activeSourceManifestVersion)
+    if (activeUnits.filter(row => row.sourceKind === 'work').length !== 1) throw new Error('[deriveImport] v6 活动 manifest 必须恰有一个 work 单元')
   }
 }
 

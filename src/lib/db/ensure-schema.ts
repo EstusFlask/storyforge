@@ -8,6 +8,8 @@ export const REQUIRED_TABLES = [
   'agentRunEvents',
   'agentRuns',
   'adventureModules',
+  'adaptationProjects',
+  'adaptationSourceUnits',
   'avgMediaAssets',
   'avgMediaBlobs',
   'avgPresentationModules',

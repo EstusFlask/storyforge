@@ -62,6 +62,8 @@ import type {
   AvgPresentationModule,
   NarrativeSimulationModule,
   OpenWorldModule,
+  AdaptationProject,
+  AdaptationSourceUnit,
 } from '../types'
 import type { TemporalFact } from '../types/temporal-fact'
 
@@ -86,6 +88,7 @@ type HomeWorldGroupExportRef = {
  *   3 — 多世界系统（2026-06-02，Phase 25.4）
  *   4 — World/Work owner 便携影子 ID（WORLD-2C C4）
  *   5 — Work kind / novelProfile（NOVEL-PROFILE-1）
+ *   6 — 改编根与不可变来源清单（ADAPT-CORE-1A）
  */
 export interface ProjectExportData {
   version: number
@@ -110,6 +113,28 @@ export interface ProjectExportData {
       _worldExportId: number
       _activeCharacterDrivenPlanExportId?: number | null
       _activeNarrativeModuleExportId?: number | null
+    }
+  )[]
+  adaptationProjects?: (
+    Omit<AdaptationProject, 'id' | 'projectId' | 'worldId' | 'workId' | 'sourceWorkId' | 'sourceOutlineRootId' | 'sourceStartChapterId' | 'sourceEndChapterId'>
+    & {
+      _exportId: number
+      _worldExportId: number
+      _workExportId: number
+      _sourceWorkExportId?: number | null
+      _sourceOutlineRootExportId?: number | null
+      _sourceStartChapterExportId?: number | null
+      _sourceEndChapterExportId?: number | null
+    }
+  )[]
+  adaptationSourceUnits?: (
+    Omit<AdaptationSourceUnit, 'id' | 'projectId' | 'workId' | 'adaptationProjectId' | 'sourceOutlineNodeId' | 'sourceChapterId'>
+    & {
+      _exportId: number
+      _workExportId: number
+      _adaptationProjectExportId: number
+      _sourceOutlineExportId?: number | null
+      _sourceChapterExportId?: number | null
     }
   )[]
   workCharacterBindings?: (

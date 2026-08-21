@@ -134,6 +134,12 @@ export const FIELD_REGISTRY: FieldSpec[] = [
   text('works', 'writingStyleId'),
   text('works', 'methodologyId'),
 
+  // ADAPT-CORE: only editable structured intent/plan fields are model-facing.
+  // IDs, hashes, versions, status, revision and timestamps stay system-owned.
+  object('adaptationProjects', 'brief'),
+  object('adaptationProjects', 'plan'),
+  object('adaptationProjects', 'visualBible'),
+
   // HARNESS-68: AI may propose new World-owned worldGroups only through the
   // registered collection adoption boundary. Owner IDs and timestamps are stamped.
   text('worldGroups', 'name', ['世界名称']),

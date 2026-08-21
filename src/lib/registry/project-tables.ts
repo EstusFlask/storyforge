@@ -84,6 +84,8 @@ const PROJECT_TABLE_REGISTRATIONS: ProjectTableRegistration[] = [
       { kind: 'simple', field: 'id', target: 'gameReleases[workId]', onDelete: 'cascade' },
       { kind: 'simple', field: 'id', target: 'simulationSessions[workId]', onDelete: 'cascade' },
       { kind: 'simple', field: 'id', target: 'agentRuns[workId]', onDelete: 'cascade' },
+      { kind: 'simple', field: 'id', target: 'adaptationProjects[workId]', onDelete: 'cascade' },
+      { kind: 'simple', field: 'id', target: 'adaptationProjects[sourceWorkId]', onDelete: 'setNull' },
     ],
     exportRemap: [
       { field: 'worldId', remapVia: 'worlds', exportAs: '_worldExportId', onUnmapped: 'require' },
@@ -93,6 +95,38 @@ const PROJECT_TABLE_REGISTRATIONS: ProjectTableRegistration[] = [
         exportAs: '_activeNarrativeModuleExportId' },
     ],
     note: 'WORLD-2C 显式作品根；同一 World 可包含多部隔离作品' },
+
+  { table: db.adaptationProjects, name: 'adaptationProjects', owner: 'project', exportable: true, exportIdField: true,
+    domainOwner: { allowed: ['work'], legacyDefault: 'work', locator: { kind: 'field', owner: 'work', field: 'workId' } },
+    refs: [
+      { kind: 'simple', field: 'id', target: 'adaptationSourceUnits[adaptationProjectId]', onDelete: 'cascade' },
+    ],
+    exportRemap: [
+      { field: 'worldId', remapVia: 'worlds', exportAs: '_worldExportId', onUnmapped: 'require' },
+      { field: 'workId', remapVia: 'works', exportAs: '_workExportId', onUnmapped: 'require' },
+      { field: 'sourceWorkId', remapVia: 'works', exportAs: '_sourceWorkExportId' },
+      { field: 'sourceOutlineRootId', remapVia: 'outlineNodes', exportAs: '_sourceOutlineRootExportId' },
+      { field: 'sourceStartChapterId', remapVia: 'chapters', exportAs: '_sourceStartChapterExportId' },
+      { field: 'sourceEndChapterId', remapVia: 'chapters', exportAs: '_sourceEndChapterExportId' },
+    ],
+    defaults: {
+      lineageMode: 'linked', status: 'source-frozen', sourceCoverage: 'outline-only',
+      brief: null, plan: null, activeSourceManifestVersion: 1,
+      briefSourceManifestVersion: null, planSourceManifestVersion: null,
+      visualBibleSourceManifestVersion: null, revision: 1,
+    },
+    note: 'ADAPT-CORE-1 改编公共根；唯一目标 Work 授权跨 Work 来源读取，Brief/Plan 为原生结构化对象' },
+
+  { table: db.adaptationSourceUnits, name: 'adaptationSourceUnits', owner: 'project', exportable: true, exportIdField: true,
+    domainOwner: { allowed: ['work'], legacyDefault: 'work', locator: { kind: 'parent', owner: 'work', table: 'adaptationProjects', field: 'adaptationProjectId' } },
+    exportRemap: [
+      { field: 'workId', remapVia: 'works', exportAs: '_workExportId', onUnmapped: 'require' },
+      { field: 'adaptationProjectId', remapVia: 'adaptationProjects', exportAs: '_adaptationProjectExportId', onUnmapped: 'require' },
+      { field: 'sourceOutlineNodeId', remapVia: 'outlineNodes', exportAs: '_sourceOutlineExportId' },
+      { field: 'sourceChapterId', remapVia: 'chapters', exportAs: '_sourceChapterExportId' },
+    ],
+    defaults: { summary: '', wordCount: 0, sourceUpdatedAt: null },
+    note: 'ADAPT-CORE-1 追加式不可变来源清单；不复制全文，稳定 key 和 hash 跨备份保留' },
 
   { table: db.workCharacterBindings, name: 'workCharacterBindings', owner: 'project', exportable: true,
     communityShare: 'world', releaseSection: 'characters',
@@ -284,6 +318,8 @@ const PROJECT_TABLE_REGISTRATIONS: ProjectTableRegistration[] = [
     refs: [
       { kind: 'simple', field: 'id', target: 'chapters[outlineNodeId]', onDelete: 'cascade' },
       { kind: 'simple', field: 'id', target: 'detailedOutlines[outlineNodeId]', onDelete: 'cascade' },
+      { kind: 'simple', field: 'id', target: 'adaptationProjects[sourceOutlineRootId]', onDelete: 'setNull' },
+      { kind: 'simple', field: 'id', target: 'adaptationSourceUnits[sourceOutlineNodeId]', onDelete: 'setNull' },
     ],
     exportRemap: [
       { field: 'parentId', remapVia: 'outlineNodes', selfTree: true, exportAs: '_parentExportId' },
@@ -300,6 +336,9 @@ const PROJECT_TABLE_REGISTRATIONS: ProjectTableRegistration[] = [
     selfIdPaths: ['continuityHandoff.chapterId', 'planReconciliation.chapterId'],
     refs: [
       { kind: 'simple', field: 'id', target: 'emotionBeatCards[chapterId]', onDelete: 'cascade' },
+      { kind: 'simple', field: 'id', target: 'adaptationProjects[sourceStartChapterId]', onDelete: 'setNull' },
+      { kind: 'simple', field: 'id', target: 'adaptationProjects[sourceEndChapterId]', onDelete: 'setNull' },
+      { kind: 'simple', field: 'id', target: 'adaptationSourceUnits[sourceChapterId]', onDelete: 'setNull' },
       // 软引用:itemLedger/storyTimelineEvents 的 chapterId 保留(独立产物,见 chapter store 注释)
     ],
     exportRemap: [

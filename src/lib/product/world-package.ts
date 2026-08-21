@@ -5,7 +5,7 @@ import { db } from '../db/schema'
 import { cascadeDeleteProject } from '../registry/lifecycle'
 import type { CommunityWorldLicense, Project, WorldReleaseManifestV2 } from '../types'
 import { generateWorldCode } from './world-identity'
-import { assertReleaseUnchanged } from '../world-engine/releases'
+import { assertReleaseUnchanged, stableJson } from '../world-engine/releases'
 import { resolveWorkspaceScope } from '../world-engine/ownership'
 
 export const WORLD_PACKAGE_FORMAT = 'storyforge.world-package'
@@ -149,6 +149,11 @@ function buildPortableProject(backup: ProjectExportData): ProjectExportData {
     version: backup.version,
     exportedAt: Date.now(),
     project: root,
+  }
+  // 世界包不携带私有作者数据，但仍必须满足它所声明备份版本的结构契约。
+  // 空表由 PROJECT_TABLES 派生，后续新增必需表时不会再次漏项。
+  for (const spec of PROJECT_TABLES) {
+    if (spec.exportable && spec.name !== 'projects') portable[spec.name] = []
   }
   if (backup.ownership) portable.ownership = cloneJson(backup.ownership)
   const backupRecord = backup as unknown as Record<string, unknown>
@@ -368,7 +373,10 @@ export async function inspectWorldPackage(input: unknown): Promise<WorldPackageT
       if (!v2Release || !v2Manifest || v2Manifest.schema !== WORLD_PACKAGE_FORMAT || v2Manifest.version !== 2) {
         errors.push('世界包 v2 缺少有效的冻结发布清单。')
       } else {
-        const releaseHash = await sha256(canonicalStringify(v2Manifest))
+        // Release hashes use the exact canonical serializer that froze the
+        // release. Package integrity has its own serializer, but the two must
+        // never be mixed as table-key growth can expose ordering differences.
+        const releaseHash = await sha256(stableJson(v2Manifest))
         if (releaseHash !== v2Release.contentHash || releaseHash !== (manifest as WorldPackageV2Manifest).releaseHash) {
           errors.push('世界包 v2 的发布哈希不一致。')
         }

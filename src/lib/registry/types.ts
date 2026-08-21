@@ -510,6 +510,12 @@ export interface AssembleContextInput {
   inspirationMode?: InspirationResultMode
   /** STORY-1: 角色驱动规划 Skill 明确冻结的方案；缺省时仍读取作者激活的下游参考方案。 */
   characterDrivenPlanId?: number
+  /** ADAPT-CORE-1: target-owned adaptation selector; never a caller supplied source Work ID. */
+  adaptationProjectId?: number
+  /** Exact immutable manifest version frozen by the current adaptation Run. */
+  adaptationSourceManifestVersion?: number
+  /** Explicit source-unit capability list for adaptation.sourceContent. */
+  adaptationSourceUnitKeys?: string[]
   /** AGENT-1: 本地确定性项目搜索；只由 searchResults 上下文源消费。 */
   searchQuery?: string
   /** AGENT-1: 搜索最多返回 10 条短摘。 */
@@ -541,6 +547,8 @@ export interface ContextSource {
   requiresSimulationSessionId?: boolean
   requiresOutlineNodeId?: boolean
   requiresChapterId?: boolean
+  requiresAdaptationProjectId?: boolean
+  requiresAdaptationSourceUnits?: boolean
   /** 规划尚未创建正文 Chapter 时，允许用 outlineNodeId 作为规范章序边界。 */
   acceptsOutlineNodeAsChapterBoundary?: boolean
   enabled?: (input: AssembleContextInput) => boolean | Promise<boolean>

@@ -293,6 +293,15 @@ async function assertContextAnchors(input: AssembleContextInput, selected: Conte
       throw new Error('[assembleContext] outlineNodeId 不属于当前 Work')
     }
   }
+  if (input.adaptationProjectId != null) {
+    const root = await db.adaptationProjects.get(input.adaptationProjectId)
+    if (!root
+      || root.projectId !== input.scope.projectId
+      || root.worldId !== input.scope.worldId
+      || root.workId !== input.scope.workId) {
+      throw new Error('[assembleContext] adaptationProjectId 不属于当前目标 Work')
+    }
+  }
   // Runtime readers omit foreign sessions themselves and surface only same-scope
   // snapshot-integrity failures, preserving a fail-closed read contract.
 }
@@ -313,6 +322,12 @@ function requirementsMet(source: ContextSource, input: AssembleContextInput): bo
     && input.chapterId == null
     && !(source.acceptsOutlineNodeAsChapterBoundary && input.outlineNodeId != null)
   ) return false
+  if (source.requiresAdaptationProjectId && input.adaptationProjectId == null) return false
+  if (source.requiresAdaptationSourceUnits && (
+    input.adaptationProjectId == null
+    || input.adaptationSourceManifestVersion == null
+    || !input.adaptationSourceUnitKeys?.length
+  )) return false
   return true
 }
 

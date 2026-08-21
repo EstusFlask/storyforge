@@ -83,6 +83,8 @@ import type {
   AvgPresentationModule,
   NarrativeSimulationModule,
   OpenWorldModule,
+  AdaptationProject,
+  AdaptationSourceUnit,
 } from '../types'
 import type { AIUsageEntry } from '../ai/usage-log'
 import type { TemporalFact } from '../types/temporal-fact'
@@ -235,6 +237,8 @@ class StoryForgeDB extends Dexie {
   avgPresentationModules!: Table<AvgPresentationModule, number>
   narrativeSimulationModules!: Table<NarrativeSimulationModule, number>
   openWorldModules!: Table<OpenWorldModule, number>
+  adaptationProjects!: Table<AdaptationProject, number>
+  adaptationSourceUnits!: Table<AdaptationSourceUnit, number>
 
   constructor() {
     super('storyforge')
@@ -637,6 +641,13 @@ class StoryForgeDB extends Dexie {
           run.simulationSessionId = null
         }
       })
+    })
+
+    // v63 / ADAPT-CORE-1A: target Work root plus immutable, versioned source
+    // manifests. The upgrade only creates empty stores and never scans novels.
+    this.version(63).stores({
+      adaptationProjects: '++id, projectId, worldId, &workId, sourceWorkId, sourceOutlineRootId, sourceStartNodeId, sourceEndNodeId, sourceStartChapterId, sourceEndChapterId, medium, status, updatedAt',
+      adaptationSourceUnits: '++id, projectId, workId, adaptationProjectId, &[adaptationProjectId+manifestVersion+sourceUnitKey], [adaptationProjectId+manifestVersion], sourceOutlineNodeId, sourceChapterId, order',
     })
   }
 }

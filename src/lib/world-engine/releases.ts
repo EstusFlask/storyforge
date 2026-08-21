@@ -33,7 +33,7 @@ export function worldReleaseSectionTables(section: WorldReleaseSection): string[
     .map(spec => spec.name)
 }
 
-function stableJson(value: unknown): string {
+export function stableJson(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(stableJson).join(',')}]`
   if (value && typeof value === 'object') {
     const entries = Object.entries(value as Record<string, unknown>)
@@ -118,6 +118,11 @@ async function buildPortableReleaseProject(input: {
     project,
     worlds: [clone(worldRoot)],
     works: [{ ...clone(workRoot), _activeCharacterDrivenPlanExportId: null }],
+  }
+  // 冻结发布只填充被选择的共享表，但其便携项目仍须是当前版本的完整
+  // 备份形状；私有和未选择表保持空数组。
+  for (const spec of PROJECT_TABLES) {
+    if (spec.exportable && spec.name !== 'projects' && !(spec.name in portable)) portable[spec.name] = []
   }
   const source = backup as unknown as Record<string, unknown>
   for (const tableName of input.requestedTables) {
