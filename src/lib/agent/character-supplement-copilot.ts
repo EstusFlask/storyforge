@@ -35,6 +35,7 @@ import {
   resolveAgentSkillV1,
   type AgentSkillId,
 } from './skill-registry'
+import { parseStructuredOutputV1 } from './structured-output-pipeline'
 
 const MAX_CANDIDATE_CHARS = 240_000
 const MAX_FIELD_CHARS = 20_000
@@ -137,19 +138,6 @@ function requiredText(value: unknown, label: string, max = MAX_FIELD_CHARS): str
   return trimmed
 }
 
-function parseJsonObject(raw: string, label: string): Record<string, unknown> {
-  const trimmed = raw.trim()
-  if (!trimmed || trimmed.length > MAX_CANDIDATE_CHARS) throw new Error(`${label} 为空或过长。`)
-  const fenced = /^```(?:json)?\s*([\s\S]*?)\s*```$/i.exec(trimmed)
-  const source = fenced?.[1] ?? trimmed
-  try {
-    return record(JSON.parse(source), label)
-  } catch (error) {
-    if (error instanceof Error && error.message.startsWith(label)) throw error
-    throw new Error(`${label} 不是有效 JSON 对象。`)
-  }
-}
-
 export function parseCharacterSupplementTaskInputV1(value: unknown): CharacterSupplementTaskInputV1 {
   const source = record(value, '角色补全任务输入')
   exactKeys(source, ['characterId', 'dimensions', 'useEvidence'], ['characterId', 'dimensions', 'useEvidence'], '角色补全任务输入')
@@ -176,16 +164,31 @@ export function parseCharacterSupplementCandidateDraftV1(
   request: CharacterSupplementTaskInputV1,
 ): CharacterSupplementCandidateV1 {
   const parsedRequest = parseCharacterSupplementTaskInputV1(request)
-  const root = parseJsonObject(raw, '角色补全候选')
-  exactKeys(root, ['version', 'patch'], ['version', 'patch'], '角色补全候选')
-  if (root.version !== 1) throw new Error('角色补全候选版本不受支持。')
-  const patchSource = record(root.patch, '角色补全候选 patch')
-  exactKeys(patchSource, parsedRequest.dimensions, parsedRequest.dimensions, '角色补全候选 patch')
-  const patch: Partial<Record<CharacterDimensionKey, string>> = {}
-  for (const dimension of parsedRequest.dimensions) {
-    patch[dimension] = requiredText(patchSource[dimension], `角色补全候选 patch.${dimension}`)
-  }
-  return { version: 1, patch }
+  return parseStructuredOutputV1({
+    raw,
+    contract: {
+      version: 1,
+      schemaId: 'character-supplement-candidate.v1',
+      target: `character:${parsedRequest.characterId}:dimensions:${parsedRequest.dimensions.join(',')}`,
+      root: 'object',
+      maxChars: MAX_CANDIDATE_CHARS,
+      allowedRootFields: ['version', 'patch'],
+      requiredRootFields: ['version', 'patch'],
+      unknownRootFieldMessage: '角色补全候选包含不允许的字段。',
+    },
+    parse: value => {
+      const root = record(value, '角色补全候选')
+      exactKeys(root, ['version', 'patch'], ['version', 'patch'], '角色补全候选')
+      if (root.version !== 1) throw new Error('角色补全候选版本不受支持。')
+      const patchSource = record(root.patch, '角色补全候选 patch')
+      exactKeys(patchSource, parsedRequest.dimensions, parsedRequest.dimensions, '角色补全候选 patch')
+      const patch: Partial<Record<CharacterDimensionKey, string>> = {}
+      for (const dimension of parsedRequest.dimensions) {
+        patch[dimension] = requiredText(patchSource[dimension], `角色补全候选 patch.${dimension}`)
+      }
+      return { version: 1, patch }
+    },
+  })
 }
 
 export function serializeCharacterSupplementCandidateV1(

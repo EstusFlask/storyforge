@@ -38,6 +38,7 @@ import {
   resolveAgentSkillV1,
   type AgentSkillId,
 } from './skill-registry'
+import { parseStructuredOutputV1 } from './structured-output-pipeline'
 
 export const WORLDVIEW_AGENT_FIELDS = [
   'worldOrigin',
@@ -294,23 +295,6 @@ export function resolveWorldviewFieldModeV1(request: string): FieldGenerationMod
   return 'expand'
 }
 
-function parseJsonObject(draft: string): Record<string, unknown> {
-  const input = draft.trim()
-  if (!input) throw new Error('世界基座候选为空。')
-  if (input.length > 40_000) throw new Error('世界基座候选超过 40000 字符。')
-  const fenced = /^```(?:json)?\s*([\s\S]*?)```\s*$/i.exec(input)
-  let parsed: unknown
-  try {
-    parsed = JSON.parse(fenced?.[1]?.trim() ?? input)
-  } catch {
-    throw new Error('世界基座候选不是有效的严格 JSON 对象。')
-  }
-  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-    throw new Error('世界基座候选必须是 JSON 对象。')
-  }
-  return parsed as Record<string, unknown>
-}
-
 function exactKeys(source: Record<string, unknown>, expected: readonly string[], label: string): void {
   const actual = Object.keys(source).sort()
   const wanted = [...expected].sort()
@@ -320,48 +304,64 @@ function exactKeys(source: Record<string, unknown>, expected: readonly string[],
 }
 
 export function parseWorldviewFieldCandidateDraft(draft: string): WorldviewFieldCopilotCandidate {
-  const source = parseJsonObject(draft)
-  exactKeys(source, ['field', 'value'], '世界基座候选')
-  if (!WORLDVIEW_AGENT_FIELDS.includes(source.field as WorldviewAgentField)) {
-    throw new Error('世界基座候选 field 不在允许范围。')
-  }
-  const field = source.field as WorldviewAgentField
-  if (field === 'divineDesign') {
-    if (!source.value || typeof source.value !== 'object' || Array.isArray(source.value)) {
-      throw new Error('神明与信仰候选 value 必须是对象。')
-    }
-    const value = source.value as Record<string, unknown>
-    exactKeys(value, ['hasDivinity', 'divineRank', 'divineNames', 'divineRules'], '神明与信仰候选 value')
-    if (typeof value.hasDivinity !== 'boolean') throw new Error('神明与信仰 hasDivinity 必须是布尔值。')
-    const divineRank = value.divineRank
-    const divineNames = value.divineNames
-    const divineRules = value.divineRules
-    for (const [key, candidate] of Object.entries({ divineRank, divineNames, divineRules })) {
-      if (typeof candidate !== 'string' || candidate.length > 20_000) {
-        throw new Error(`神明与信仰 ${key} 必须是 0-20000 字符的文本。`)
+  return parseStructuredOutputV1({
+    raw: draft,
+    contract: {
+      version: 1,
+      schemaId: 'worldview-field-candidate.v1',
+      target: 'worldviews.field',
+      root: 'object',
+      maxChars: 40_000,
+      allowedRootFields: ['field', 'value'],
+      requiredRootFields: ['field', 'value'],
+      unknownRootFieldMessage: '世界基座候选只能包含 field、value。',
+      missingRootFieldMessage: '世界基座候选只能包含 field、value。',
+    },
+    parse: value => {
+      const source = value as Record<string, unknown>
+      exactKeys(source, ['field', 'value'], '世界基座候选')
+      if (!WORLDVIEW_AGENT_FIELDS.includes(source.field as WorldviewAgentField)) {
+        throw new Error('世界基座候选 field 不在允许范围。')
       }
-    }
-    if (typeof divineRank !== 'string' || typeof divineNames !== 'string' || typeof divineRules !== 'string') {
-      throw new Error('神明与信仰文本字段无效。')
-    }
-    return {
-      field,
-      value: {
-        hasDivinity: value.hasDivinity,
-        divineRank: divineRank.trim(),
-        divineNames: divineNames.trim(),
-        divineRules: divineRules.trim(),
-      },
-    }
-  }
-  if (typeof source.value !== 'string' || source.value.trim().length < 2) {
-    throw new Error(`世界基座候选 ${field}.value 至少需要 2 个字符。`)
-  }
-  const value = source.value.trim()
-  if (value.length > FIELD_MAX_CHARS[field]) {
-    throw new Error(`世界基座候选 ${field}.value 超过 ${FIELD_MAX_CHARS[field]} 字符。`)
-  }
-  return { field, value }
+      const field = source.field as WorldviewAgentField
+      if (field === 'divineDesign') {
+        if (!source.value || typeof source.value !== 'object' || Array.isArray(source.value)) {
+          throw new Error('神明与信仰候选 value 必须是对象。')
+        }
+        const divine = source.value as Record<string, unknown>
+        exactKeys(divine, ['hasDivinity', 'divineRank', 'divineNames', 'divineRules'], '神明与信仰候选 value')
+        if (typeof divine.hasDivinity !== 'boolean') throw new Error('神明与信仰 hasDivinity 必须是布尔值。')
+        const divineRank = divine.divineRank
+        const divineNames = divine.divineNames
+        const divineRules = divine.divineRules
+        for (const [key, candidate] of Object.entries({ divineRank, divineNames, divineRules })) {
+          if (typeof candidate !== 'string' || candidate.length > 20_000) {
+            throw new Error(`神明与信仰 ${key} 必须是 0-20000 字符的文本。`)
+          }
+        }
+        if (typeof divineRank !== 'string' || typeof divineNames !== 'string' || typeof divineRules !== 'string') {
+          throw new Error('神明与信仰文本字段无效。')
+        }
+        return {
+          field,
+          value: {
+            hasDivinity: divine.hasDivinity,
+            divineRank: divineRank.trim(),
+            divineNames: divineNames.trim(),
+            divineRules: divineRules.trim(),
+          },
+        }
+      }
+      if (typeof source.value !== 'string' || source.value.trim().length < 2) {
+        throw new Error(`世界基座候选 ${field}.value 至少需要 2 个字符。`)
+      }
+      const fieldValue = source.value.trim()
+      if (fieldValue.length > FIELD_MAX_CHARS[field]) {
+        throw new Error(`世界基座候选 ${field}.value 超过 ${FIELD_MAX_CHARS[field]} 字符。`)
+      }
+      return { field, value: fieldValue }
+    },
+  })
 }
 
 function sameValue(left: WorldviewFieldValue, right: WorldviewFieldValue): boolean {

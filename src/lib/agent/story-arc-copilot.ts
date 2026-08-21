@@ -51,6 +51,7 @@ import {
   type CreativeQualityModeV1,
 } from './creative-reliability'
 import { normalizeCreativeJsonEnvelopeV1 } from './creative-json-normalizer'
+import { parseStructuredOutputV1 } from './structured-output-pipeline'
 import {
   buildNarrativeBriefV1,
   formatNarrativeBriefForPromptV1,
@@ -198,24 +199,6 @@ export function resolveStoryArcRequestKindV1(request: string): StoryArcRequestKi
   return 'main'
 }
 
-function parseStrictJsonArray(draft: string): unknown[] {
-  const input = draft.trim()
-  if (!input) throw new Error('故事线候选为空。')
-  if (input.length > MAX_CANDIDATE_CHARS) {
-    throw new Error(`故事线候选超过 ${MAX_CANDIDATE_CHARS} 字符。`)
-  }
-  const fenced = /^```(?:json)?\s*([\s\S]*?)```\s*$/i.exec(input)
-  const source = fenced?.[1]?.trim() ?? input
-  let parsed: unknown
-  try {
-    parsed = JSON.parse(source)
-  } catch {
-    throw new Error('故事线候选不是有效的严格 JSON 数组。')
-  }
-  if (!Array.isArray(parsed)) throw new Error('故事线候选必须是 JSON 数组。')
-  return parsed
-}
-
 function assertString(
   value: unknown,
   label: string,
@@ -303,8 +286,7 @@ function parseStage(value: unknown, arcIndex: number, stageIndex: number): Story
   }
 }
 
-export function parseStoryArcCandidateDraft(draft: string): StoryArcCopilotCandidate[] {
-  const rows = parseStrictJsonArray(draft)
+function parseStoryArcCandidateRowsV1(rows: unknown[]): StoryArcCopilotCandidate[] {
   if (rows.length < 1 || rows.length > MAX_ARCS) {
     throw new Error(`故事线候选数量必须在 1-${MAX_ARCS} 之间。`)
   }
@@ -342,49 +324,73 @@ export function parseStoryArcCandidateDraft(draft: string): StoryArcCopilotCandi
   return candidates
 }
 
+export function parseStoryArcCandidateDraft(draft: string): StoryArcCopilotCandidate[] {
+  return parseStructuredOutputV1({
+    raw: draft,
+    contract: {
+      version: 1,
+      schemaId: 'story-arc-candidate.v1',
+      target: 'storyArcs.batch',
+      root: 'array',
+      maxChars: MAX_CANDIDATE_CHARS,
+    },
+    parse: value => parseStoryArcCandidateRowsV1(value as unknown[]),
+  })
+}
+
 /**
  * Production model transport v2. Editable/persisted candidates intentionally
  * remain a bare JSON array, while model output uses an exact object envelope so
  * providers with JSON-object mode can enforce a compatible top-level value.
  */
 export function parseStoryArcModelResponseV2(raw: string): StoryArcCopilotCandidate[] {
-  if (!raw.trim()) throw new Error('故事线模型响应为空。')
-  if (raw.length > MAX_CANDIDATE_CHARS) {
-    throw new Error(`故事线模型响应超过 ${MAX_CANDIDATE_CHARS} 字符。`)
-  }
-  const normalized = normalizeCreativeJsonEnvelopeV1(raw)
-  if (!normalized.value) throw new Error(normalized.issues[0]?.message ?? '故事线模型响应无效。')
-  const source = normalized.value
-  assertExactKeys(source, ['storyArcs'], ['assumptions'], '故事线模型响应')
-  if (!Array.isArray(source.storyArcs)) {
-    throw new Error('故事线模型响应.storyArcs 必须是 JSON 数组。')
-  }
-  if (source.assumptions !== undefined) parseStoryArcAssumptionTextsV1(source.assumptions, true)
-  return parseStoryArcCandidateDraft(JSON.stringify(source.storyArcs))
+  return parseStructuredOutputV1({
+    raw,
+    contract: {
+      version: 1,
+      schemaId: 'story-arc-model-response.v2',
+      target: 'storyArcs.batch',
+      root: 'object',
+      maxChars: MAX_CANDIDATE_CHARS,
+      allowedRootFields: ['storyArcs', 'assumptions'],
+      requiredRootFields: ['storyArcs'],
+      unknownRootFieldMessage: '故事线模型响应包含不允许的字段。',
+    },
+    parse: value => {
+      const source = value as Record<string, unknown>
+      assertExactKeys(source, ['storyArcs'], ['assumptions'], '故事线模型响应')
+      if (!Array.isArray(source.storyArcs)) {
+        throw new Error('故事线模型响应.storyArcs 必须是 JSON 数组。')
+      }
+      if (source.assumptions !== undefined) parseStoryArcAssumptionTextsV1(source.assumptions, true)
+      return parseStoryArcCandidateRowsV1(source.storyArcs)
+    },
+  })
 }
 
 /** Strict pre-CREL parser used only by the local rollback path. */
 export function parseStoryArcModelResponseLegacyV1(raw: string): StoryArcCopilotCandidate[] {
-  const input = raw.trim()
-  if (!input) throw new Error('故事线模型响应为空。')
-  if (input.length > MAX_CANDIDATE_CHARS) {
-    throw new Error(`故事线模型响应超过 ${MAX_CANDIDATE_CHARS} 字符。`)
-  }
-  let parsed: unknown
-  try {
-    parsed = JSON.parse(input)
-  } catch {
-    throw new Error('故事线模型响应不是有效的严格 JSON 对象。')
-  }
-  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-    throw new Error('故事线模型响应必须是 JSON 对象。')
-  }
-  const source = parsed as Record<string, unknown>
-  assertExactKeys(source, ['storyArcs'], [], '故事线模型响应')
-  if (!Array.isArray(source.storyArcs)) {
-    throw new Error('故事线模型响应.storyArcs 必须是 JSON 数组。')
-  }
-  return parseStoryArcCandidateDraft(JSON.stringify(source.storyArcs))
+  return parseStructuredOutputV1({
+    raw,
+    contract: {
+      version: 1,
+      schemaId: 'story-arc-model-response.v1',
+      target: 'storyArcs.batch',
+      root: 'object',
+      maxChars: MAX_CANDIDATE_CHARS,
+      allowedRootFields: ['storyArcs'],
+      requiredRootFields: ['storyArcs'],
+      unknownRootFieldMessage: '故事线模型响应包含不允许的字段。',
+    },
+    parse: value => {
+      const source = value as Record<string, unknown>
+      assertExactKeys(source, ['storyArcs'], [], '故事线模型响应')
+      if (!Array.isArray(source.storyArcs)) {
+        throw new Error('故事线模型响应.storyArcs 必须是 JSON 数组。')
+      }
+      return parseStoryArcCandidateRowsV1(source.storyArcs)
+    },
+  })
 }
 
 function candidateIssues(

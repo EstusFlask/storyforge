@@ -42,6 +42,7 @@ import {
   resolveAgentSkillV1,
   type AgentSkillId,
 } from './skill-registry'
+import { parseStructuredOutputV1 } from './structured-output-pipeline'
 import { hashCanonicalValue } from './run/hash'
 import type { MasterCandidateModelIdentityV1 } from './master-candidate-semantic-review'
 import { htmlToPlainText } from '../utils/html'
@@ -159,45 +160,43 @@ function parseCandidateDraft(
   draft: string,
   input: Pick<StorylineProgressCopilotInputV1, 'chapterContent' | 'snapshot'>,
 ): StorylineAnalysisCandidates {
-  const text = draft.trim()
-  if (!text || text.length > 120_000) throw new Error('故事线进度候选为空或超过 120000 字符。')
-  const fenced = /^```(?:json)?\s*([\s\S]*?)```\s*$/i.exec(text)
-  let parsed: unknown
-  try {
-    parsed = JSON.parse(fenced?.[1]?.trim() ?? text)
-  } catch {
-    throw new Error('故事线进度候选必须是严格 JSON 对象。')
-  }
-  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-    throw new Error('故事线进度候选必须是对象。')
-  }
-  const source = parsed as Record<string, unknown>
-  const keys = Object.keys(source).sort()
-  if (keys.length !== 3 || keys[0] !== 'crossings' || keys[1] !== 'newArcs' || keys[2] !== 'progress') {
-    throw new Error('故事线进度候选只能包含 progress、crossings、newArcs。')
-  }
-  if (!Array.isArray(source.progress) || !Array.isArray(source.crossings) || !Array.isArray(source.newArcs)) {
-    throw new Error('故事线进度候选的三个字段都必须是数组。')
-  }
-  const wire = {
-    ...source,
-    progress: source.progress.map(item => normalizeEvidenceField(item)),
-    crossings: source.crossings.map(item => normalizeEvidenceField(item)),
-    newArcs: source.newArcs.map(item => normalizeEvidenceField(item)),
-  }
-  const normalized = parseStorylineProgressResult({
-    raw: JSON.stringify(wire),
-    chapterContent: input.chapterContent,
-    arcs: input.snapshot.arcs,
+  return parseStructuredOutputV1({
+    raw: draft,
+    contract: {
+      version: 1,
+      schemaId: 'storyline-progress-analysis.v1',
+      target: `chapter:${input.snapshot.chapterId}:storyline-progress`,
+      root: 'object',
+      maxChars: 120_000,
+      allowedRootFields: ['progress', 'crossings', 'newArcs'],
+      requiredRootFields: ['progress', 'crossings', 'newArcs'],
+    },
+    parse: value => {
+      const source = value as Record<string, unknown>
+      if (!Array.isArray(source.progress) || !Array.isArray(source.crossings) || !Array.isArray(source.newArcs)) {
+        throw new Error('故事线进度候选的三个字段都必须是数组。')
+      }
+      const wire = {
+        ...source,
+        progress: source.progress.map(item => normalizeEvidenceField(item)),
+        crossings: source.crossings.map(item => normalizeEvidenceField(item)),
+        newArcs: source.newArcs.map(item => normalizeEvidenceField(item)),
+      }
+      const normalized = parseStorylineProgressResult({
+        raw: JSON.stringify(wire),
+        chapterContent: input.chapterContent,
+        arcs: input.snapshot.arcs,
+      })
+      if (
+        source.progress.length + source.crossings.length + source.newArcs.length > 0
+        && normalized.progress.length + normalized.crossings.length + normalized.newArcs.length === 0
+      ) throw new Error('候选没有通过故事线闭集或正文逐字证据校验。')
+      if (normalized.progress.length + normalized.crossings.length + normalized.newArcs.length === 0) {
+        throw new Error('本章没有足够证据映射到故事线。')
+      }
+      return normalized
+    },
   })
-  if (
-    source.progress.length + source.crossings.length + source.newArcs.length > 0
-    && normalized.progress.length + normalized.crossings.length + normalized.newArcs.length === 0
-  ) throw new Error('候选没有通过故事线闭集或正文逐字证据校验。')
-  if (normalized.progress.length + normalized.crossings.length + normalized.newArcs.length === 0) {
-    throw new Error('本章没有足够证据映射到故事线。')
-  }
-  return normalized
 }
 
 function normalizeEvidenceField(value: unknown): unknown {
@@ -406,17 +405,29 @@ export function createStorylineProgressCopilotNodeV1(
 }
 
 export function parseStorylineProgressCandidateDraftV1(draft: string): StorylineAnalysisCandidates {
-  const source = JSON.parse(draft) as unknown
-  if (!source || typeof source !== 'object' || Array.isArray(source)) throw new Error('故事线进度候选必须是对象。')
-  const raw = source as Record<string, unknown>
-  if (!Array.isArray(raw.progress) || !Array.isArray(raw.crossings) || !Array.isArray(raw.newArcs)) {
-    throw new Error('故事线进度候选缺少三个数组字段。')
-  }
-  return {
-    progress: raw.progress.map(normalizeRestoredEvidenceRow) as StorylineAnalysisCandidates['progress'],
-    crossings: raw.crossings.map(normalizeRestoredEvidenceRow) as StorylineAnalysisCandidates['crossings'],
-    newArcs: raw.newArcs.map(normalizeRestoredEvidenceRow) as StorylineAnalysisCandidates['newArcs'],
-  }
+  return parseStructuredOutputV1({
+    raw: draft,
+    contract: {
+      version: 1,
+      schemaId: 'storyline-progress-candidate.v1',
+      target: 'storyline-progress:restored-candidate',
+      root: 'object',
+      maxChars: 120_000,
+      allowedRootFields: ['progress', 'crossings', 'newArcs'],
+      requiredRootFields: ['progress', 'crossings', 'newArcs'],
+    },
+    parse: value => {
+      const raw = value as Record<string, unknown>
+      if (!Array.isArray(raw.progress) || !Array.isArray(raw.crossings) || !Array.isArray(raw.newArcs)) {
+        throw new Error('故事线进度候选缺少三个数组字段。')
+      }
+      return {
+        progress: raw.progress.map(normalizeRestoredEvidenceRow) as StorylineAnalysisCandidates['progress'],
+        crossings: raw.crossings.map(normalizeRestoredEvidenceRow) as StorylineAnalysisCandidates['crossings'],
+        newArcs: raw.newArcs.map(normalizeRestoredEvidenceRow) as StorylineAnalysisCandidates['newArcs'],
+      }
+    },
+  })
 }
 
 function normalizeRestoredEvidenceRow(value: unknown): unknown {

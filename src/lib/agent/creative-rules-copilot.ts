@@ -39,6 +39,7 @@ import {
   resolveAgentSkillV1,
   type AgentSkillId,
 } from './skill-registry'
+import { parseStructuredOutputV1 } from './structured-output-pipeline'
 
 export const CREATIVE_RULES_FIELDS = [
   'writingStyle',
@@ -180,43 +181,38 @@ export function resolveCreativeRulesFieldV1(request: string): CreativeRulesField
   return matched
 }
 
-function parseJsonObject(draft: string): Record<string, unknown> {
-  const input = draft.trim()
-  if (!input) throw new Error('创作规则候选为空。')
-  if (input.length > 25_000) throw new Error('创作规则候选超过 25000 字符。')
-  const fenced = /^```(?:json)?\s*([\s\S]*?)```\s*$/i.exec(input)
-  let parsed: unknown
-  try {
-    parsed = JSON.parse(fenced?.[1]?.trim() ?? input)
-  } catch {
-    throw new Error('创作规则候选不是有效的严格 JSON 对象。')
-  }
-  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-    throw new Error('创作规则候选必须是 JSON 对象。')
-  }
-  return parsed as Record<string, unknown>
-}
-
 export function parseCreativeRulesCandidateDraftV1(
   draft: string,
 ): CreativeRulesCopilotCandidateV1 {
-  const source = parseJsonObject(draft)
-  const keys = Object.keys(source).sort()
-  if (keys.length !== 2 || keys[0] !== 'field' || keys[1] !== 'value') {
-    throw new Error('创作规则候选只能包含 field 和 value。')
-  }
-  if (!CREATIVE_RULES_FIELDS.includes(source.field as CreativeRulesField)) {
-    throw new Error('创作规则候选 field 不在允许范围。')
-  }
-  const field = source.field as CreativeRulesField
-  if (typeof source.value !== 'string' || source.value.trim().length < 2) {
-    throw new Error(`创作规则候选 ${field}.value 至少需要 2 个字符。`)
-  }
-  const value = source.value.trim()
-  if (value.length > FIELD_MAX_CHARS[field]) {
-    throw new Error(`创作规则候选 ${field}.value 超过 ${FIELD_MAX_CHARS[field]} 字符。`)
-  }
-  return { field, value }
+  return parseStructuredOutputV1({
+    raw: draft,
+    contract: {
+      version: 1,
+      schemaId: 'creative-rules-candidate.v1',
+      target: 'creativeRules.field',
+      root: 'object',
+      maxChars: 25_000,
+      allowedRootFields: ['field', 'value'],
+      requiredRootFields: ['field', 'value'],
+      unknownRootFieldMessage: '创作规则候选只能包含 field 和 value。',
+      missingRootFieldMessage: '创作规则候选只能包含 field 和 value。',
+    },
+    parse: value => {
+      const source = value as Record<string, unknown>
+      if (!CREATIVE_RULES_FIELDS.includes(source.field as CreativeRulesField)) {
+        throw new Error('创作规则候选 field 不在允许范围。')
+      }
+      const field = source.field as CreativeRulesField
+      if (typeof source.value !== 'string' || source.value.trim().length < 2) {
+        throw new Error(`创作规则候选 ${field}.value 至少需要 2 个字符。`)
+      }
+      const fieldValue = source.value.trim()
+      if (fieldValue.length > FIELD_MAX_CHARS[field]) {
+        throw new Error(`创作规则候选 ${field}.value 超过 ${FIELD_MAX_CHARS[field]} 字符。`)
+      }
+      return { field, value: fieldValue }
+    },
+  })
 }
 
 function candidateIssues(

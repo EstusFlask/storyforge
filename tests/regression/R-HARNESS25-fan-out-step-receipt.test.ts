@@ -352,13 +352,13 @@ describe.sequential('R-HARNESS25 · fan-out 步骤回执与 fresh join', { timeo
       onDurableBoundary: boundary => { runId = boundary.runId },
     }, {
       execute: ((options: any) => executeFixture(options, { 'inspiration-1': '{}' })) as any,
-    })).rejects.toThrow('空壳候选')
+    })).rejects.toThrow('缺少字段 worldview')
 
     const snapshot = await readAgentRunV1(fixture.scope, runId)
     expect(snapshot.projection.state).toBe('paused')
     expect(snapshot.projection.steps['master:inspiration-1']).toMatchObject({
       status: 'failed',
-      failureCode: 'deterministic_verification_failed',
+      failureCode: 'structured_output_blocked',
     })
     expect((await db.agentEvents.toArray()).filter(event => event.kind === 'candidate'))
       .toHaveLength(1)

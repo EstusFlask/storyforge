@@ -10,6 +10,7 @@ import {
 import { createCreativeIssueV1 } from './creative-execution'
 import type { NarrativeBriefV1 } from './narrative-brief'
 import { hashCanonicalValue } from './run/hash'
+import { parseStructuredOutputV1 } from './structured-output-pipeline'
 
 const VALID_PACES: readonly ScenePace[] = ['slow', 'medium', 'fast', 'climax']
 const VALID_EMOTION_ARCS: readonly EmotionArc[] = ['rising', 'falling', 'flat', 'wave', 'climax']
@@ -98,21 +99,6 @@ function stringList(value: unknown, label: string): string[] {
   return items
 }
 
-function parseJsonObject(raw: string): Record<string, unknown> {
-  const trimmed = raw.trim()
-  if (!trimmed) fail('输出为空')
-  if (trimmed.length > 100_000) fail('输出超过 100000 字符')
-  const fenced = /^```(?:json)?\s*([\s\S]*?)```\s*$/i.exec(trimmed)
-  let value: unknown
-  try {
-    value = JSON.parse(fenced?.[1]?.trim() ?? trimmed)
-  } catch {
-    fail('输出不是严格 JSON 对象')
-  }
-  if (!value || typeof value !== 'object' || Array.isArray(value)) fail('顶层必须是 JSON 对象')
-  return value as Record<string, unknown>
-}
-
 function parseScenes(value: unknown): DetailedOutlineCopilotDraftV1['scenes'] {
   if (!Array.isArray(value)) fail('scenes 必须是数组')
   if (value.length < 1 || value.length > 12) fail('scenes 数量必须在 1 到 12 之间')
@@ -152,36 +138,48 @@ export function parseDetailedOutlineCopilotDraftV1(
   raw: string,
   operation: DetailedOutlineCopilotOperationV1,
 ): DetailedOutlineCopilotDraftV1 {
-  const value = parseJsonObject(raw)
-  if (operation === 'scenes') {
-    exactKeys(value, ['scenes'], ['scenes'], '场景拆分候选')
-    return { scenes: parseScenes(value.scenes) }
-  }
-  exactKeys(
-    value,
-    ENHANCED_KEYS,
-    [
-      'openingHook',
-      'endingCliffhanger',
-      'sceneLocation',
-      'emotionArc',
-      'appearingCharacterIds',
-      'foreshadowIds',
-      'scenes',
-    ],
-    '增强细纲候选',
-  )
-  if (!VALID_EMOTION_ARCS.includes(value.emotionArc as EmotionArc)) fail('emotionArc 不在允许范围')
-  return {
-    openingHook: text(value.openingHook, 'openingHook'),
-    endingCliffhanger: text(value.endingCliffhanger, 'endingCliffhanger'),
-    sceneLocation: text(value.sceneLocation, 'sceneLocation'),
-    emotionArc: value.emotionArc as EmotionArc,
-    appearingCharacterIds: integerIds(value.appearingCharacterIds, 'appearingCharacterIds'),
-    foreshadowIds: integerIds(value.foreshadowIds, 'foreshadowIds'),
-    prohibitions: value.prohibitions === undefined ? [] : stringList(value.prohibitions, 'prohibitions'),
-    scenes: parseScenes(value.scenes),
-  }
+  const required = operation === 'scenes'
+    ? ['scenes']
+    : [
+        'openingHook',
+        'endingCliffhanger',
+        'sceneLocation',
+        'emotionArc',
+        'appearingCharacterIds',
+        'foreshadowIds',
+        'scenes',
+      ]
+  return parseStructuredOutputV1({
+    raw,
+    contract: {
+      version: 1,
+      schemaId: `detailed-outline-${operation}-candidate.v1`,
+      target: operation === 'scenes' ? 'detailedOutlines.scenes' : 'detailedOutlines.enhanced',
+      root: 'object',
+      maxChars: 100_000,
+      allowedRootFields: operation === 'scenes' ? ['scenes'] : [...ENHANCED_KEYS],
+      requiredRootFields: required,
+    },
+    parse: parsed => {
+      const value = parsed as Record<string, unknown>
+      if (operation === 'scenes') {
+        exactKeys(value, ['scenes'], ['scenes'], '场景拆分候选')
+        return { scenes: parseScenes(value.scenes) }
+      }
+      exactKeys(value, ENHANCED_KEYS, required, '增强细纲候选')
+      if (!VALID_EMOTION_ARCS.includes(value.emotionArc as EmotionArc)) fail('emotionArc 不在允许范围')
+      return {
+        openingHook: text(value.openingHook, 'openingHook'),
+        endingCliffhanger: text(value.endingCliffhanger, 'endingCliffhanger'),
+        sceneLocation: text(value.sceneLocation, 'sceneLocation'),
+        emotionArc: value.emotionArc as EmotionArc,
+        appearingCharacterIds: integerIds(value.appearingCharacterIds, 'appearingCharacterIds'),
+        foreshadowIds: integerIds(value.foreshadowIds, 'foreshadowIds'),
+        prohibitions: value.prohibitions === undefined ? [] : stringList(value.prohibitions, 'prohibitions'),
+        scenes: parseScenes(value.scenes),
+      }
+    },
+  })
 }
 
 function detailedOutlineArtifactBodyV1(input: {

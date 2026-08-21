@@ -1,10 +1,5 @@
-import JSON5 from 'json5'
 import { useAIConfigStore } from '../../stores/ai-config'
 import { chat, resolveRequestConfig, type ChatResult } from '../ai/client'
-import {
-  parseChapterOutlineOutput,
-  parseVolumeOutlineOutput,
-} from '../ai/parse-outline-output'
 import { db } from '../db/schema'
 import type {
   GenerationGateIssue,
@@ -53,6 +48,7 @@ import {
   type AgentSkillExecutionModeV1,
   type AgentSkillId,
 } from './skill-registry'
+import { parseStructuredOutputV1 } from './structured-output-pipeline'
 import {
   buildNarrativeBriefV1,
   formatNarrativeBriefForPromptV1,
@@ -234,56 +230,46 @@ function chooseTargetVolume(request: string, volumes: OutlineNode[]): OutlineNod
   return explicitlyNamed ?? volumes[volumes.length - 1] ?? null
 }
 
-function parseStrictArray(draft: string): unknown[] {
-  const input = draft.trim()
-  if (!input) throw new Error('大纲候选为空。')
-  if (input.length > MAX_CANDIDATE_CHARS) {
-    throw new Error(`大纲候选超过 ${MAX_CANDIDATE_CHARS} 字符。`)
-  }
-  const fenced = /^```(?:json)?\s*([\s\S]*?)```\s*$/i.exec(input)
-  const candidate = fenced?.[1]?.trim() ?? input
-  let parsed: unknown
-  try {
-    parsed = JSON.parse(candidate)
-  } catch {
-    try {
-      parsed = JSON5.parse(candidate)
-    } catch {
-      throw new Error('大纲候选不是有效的 JSON 数组。')
-    }
-  }
-  if (!Array.isArray(parsed)) throw new Error('大纲候选必须是 JSON 数组。')
-  return parsed
-}
-
 export function parseOutlineCandidateDraft(draft: string): GeneratedOutlineItem[] {
-  const rows = parseStrictArray(draft)
-  if (!rows.length) throw new Error('大纲候选至少需要一项。')
-  if (rows.length > MAX_ITEMS) throw new Error(`单次大纲候选不能超过 ${MAX_ITEMS} 项。`)
-  const result = rows.map((row, index) => {
-    if (!row || typeof row !== 'object' || Array.isArray(row)) {
-      throw new Error(`大纲候选第 ${index + 1} 项必须是对象。`)
-    }
-    const source = row as Record<string, unknown>
-    const unknown = Object.keys(source).filter(key => key !== 'title' && key !== 'summary')
-    if (unknown.length) {
-      throw new Error(`大纲候选第 ${index + 1} 项包含不允许的字段：${unknown.join('、')}。`)
-    }
-    if (typeof source.title !== 'string' || !source.title.trim()) {
-      throw new Error(`大纲候选第 ${index + 1} 项缺少 title。`)
-    }
-    if (typeof source.summary !== 'string' || !source.summary.trim()) {
-      throw new Error(`大纲候选第 ${index + 1} 项缺少 summary。`)
-    }
-    const title = source.title.trim()
-    const summary = source.summary.trim()
-    if (title.length > MAX_TITLE_CHARS) throw new Error(`大纲候选标题“${title.slice(0, 20)}”过长。`)
-    if (summary.length > MAX_SUMMARY_CHARS) throw new Error(`大纲候选“${title}”的摘要过长。`)
-    return { title, summary }
+  return parseStructuredOutputV1({
+    raw: draft,
+    contract: {
+      version: 1,
+      schemaId: 'outline-candidate.v1',
+      target: 'outlineNodes.batch',
+      root: 'array',
+      maxChars: MAX_CANDIDATE_CHARS,
+    },
+    parse: value => {
+      const rows = value as unknown[]
+      if (!rows.length) throw new Error('大纲候选至少需要一项。')
+      if (rows.length > MAX_ITEMS) throw new Error(`单次大纲候选不能超过 ${MAX_ITEMS} 项。`)
+      const result = rows.map((row, index) => {
+        if (!row || typeof row !== 'object' || Array.isArray(row)) {
+          throw new Error(`大纲候选第 ${index + 1} 项必须是对象。`)
+        }
+        const source = row as Record<string, unknown>
+        const unknown = Object.keys(source).filter(key => key !== 'title' && key !== 'summary')
+        if (unknown.length) {
+          throw new Error(`大纲候选第 ${index + 1} 项包含不允许的字段：${unknown.join('、')}。`)
+        }
+        if (typeof source.title !== 'string' || !source.title.trim()) {
+          throw new Error(`大纲候选第 ${index + 1} 项缺少 title。`)
+        }
+        if (typeof source.summary !== 'string' || !source.summary.trim()) {
+          throw new Error(`大纲候选第 ${index + 1} 项缺少 summary。`)
+        }
+        const title = source.title.trim()
+        const summary = source.summary.trim()
+        if (title.length > MAX_TITLE_CHARS) throw new Error(`大纲候选标题“${title.slice(0, 20)}”过长。`)
+        if (summary.length > MAX_SUMMARY_CHARS) throw new Error(`大纲候选“${title}”的摘要过长。`)
+        return { title, summary }
+      })
+      const titles = result.map(item => normalizeTitle(item.title))
+      if (new Set(titles).size !== titles.length) throw new Error('大纲候选包含重复标题。')
+      return result
+    },
   })
-  const titles = result.map(item => normalizeTitle(item.title))
-  if (new Set(titles).size !== titles.length) throw new Error('大纲候选包含重复标题。')
-  return result
 }
 
 function candidateIssues(
@@ -573,10 +559,7 @@ function parseOutlineCreativeOutcomeV1(
     }
   }
   try {
-    const parsed = prepared.mode === 'volumes'
-      ? parseVolumeOutlineOutput(raw)
-      : parseChapterOutlineOutput(raw)
-    const output = parseOutlineCandidateDraft(JSON.stringify(parsed))
+    const output = parseOutlineCandidateDraft(raw)
     const gateIssues = candidateIssues(output, prepared.snapshot)
     const issues = gateIssues.map(item => createCreativeIssueV1({
       code: item.code,
@@ -776,10 +759,7 @@ export function createOutlineCopilotNode(
     assembleInput: buildOutlineMessages,
     run: async messages => {
       const raw = await runAI(messages)
-      const parsed = input.mode === 'volumes'
-        ? parseVolumeOutlineOutput(raw)
-        : parseChapterOutlineOutput(raw)
-      return parseOutlineCandidateDraft(JSON.stringify(parsed))
+      return parseOutlineCandidateDraft(raw)
     },
     gate: output => {
       const issues = candidateIssues(output, input.snapshot)

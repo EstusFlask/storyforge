@@ -44,6 +44,7 @@ import {
   type AgentSkillId,
 } from './skill-registry'
 import { executeAgentTool } from './tool-registry'
+import { parseStructuredOutputV1 } from './structured-output-pipeline'
 
 interface CharacterDrivenArcIdentityV1 {
   label: string
@@ -138,25 +139,7 @@ function assertExactKeys(value: Record<string, unknown>, required: readonly stri
   if (unknown.length) throw new Error(`${label} 包含不允许的字段：${unknown.join('、')}。`)
 }
 
-function parseStrictArray(draft: string): unknown[] {
-  const input = draft.trim()
-  if (!input) throw new Error('角色驱动候选为空。')
-  if (input.length > MAX_CANDIDATE_CHARS) {
-    throw new Error(`角色驱动候选超过 ${MAX_CANDIDATE_CHARS} 字符。`)
-  }
-  const fenced = /^```(?:json)?\s*([\s\S]*?)```\s*$/i.exec(input)
-  let parsed: unknown
-  try {
-    parsed = JSON.parse(fenced?.[1]?.trim() ?? input)
-  } catch {
-    throw new Error('角色驱动候选不是有效的严格 JSON 数组。')
-  }
-  if (!Array.isArray(parsed)) throw new Error('角色驱动候选必须是 JSON 数组。')
-  return parsed
-}
-
-export function parseCharacterDrivenCandidateDraftV1(draft: string): CharacterDrivenPlotVolume[] {
-  const rows = parseStrictArray(draft)
+function parseCharacterDrivenRowsV1(rows: unknown[]): CharacterDrivenPlotVolume[] {
   if (rows.length < 1 || rows.length > MAX_VOLUMES) {
     throw new Error(`角色驱动候选卷数必须在 1-${MAX_VOLUMES} 之间。`)
   }
@@ -217,6 +200,20 @@ export function parseCharacterDrivenCandidateDraftV1(draft: string): CharacterDr
   const volumeTitles = volumes.map(volume => normalizeIdentity(volume.volumeTitle))
   if (new Set(volumeTitles).size !== volumeTitles.length) throw new Error('角色驱动候选包含重复卷标题。')
   return volumes
+}
+
+export function parseCharacterDrivenCandidateDraftV1(draft: string): CharacterDrivenPlotVolume[] {
+  return parseStructuredOutputV1({
+    raw: draft,
+    contract: {
+      version: 1,
+      schemaId: 'character-driven-candidate.v1',
+      target: 'characterDrivenPlans.volumes',
+      root: 'array',
+      maxChars: MAX_CANDIDATE_CHARS,
+    },
+    parse: value => parseCharacterDrivenRowsV1(value as unknown[]),
+  })
 }
 
 function candidateIssues(

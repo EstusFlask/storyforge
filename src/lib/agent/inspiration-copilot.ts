@@ -49,6 +49,7 @@ import {
   type AgentSkillId,
 } from './skill-registry'
 import type { MasterCandidateModelIdentityV1 } from './master-candidate-semantic-review'
+import { parseStructuredOutputV1 } from './structured-output-pipeline'
 import {
   isLegacyReadScope,
   readOwnedRows,
@@ -184,14 +185,26 @@ export function parseInspirationCandidateDraft(
   draft: string,
   mode: InspirationResultMode,
 ): InspirationCopilotResult {
-  const trimmed = draft.trim()
-  if (!trimmed) throw new Error('灵感反推候选为空。')
-  if (trimmed.length > MAX_INSPIRATION_RESULT_CHARS) {
-    throw new Error(`灵感反推候选超过 ${MAX_INSPIRATION_RESULT_CHARS} 字符。`)
-  }
-  const parsed = parseResult(trimmed, mode)
-  if (!parsed) throw new Error('候选不是有效的灵感反推 JSON 结构。')
-  return parsed
+  const fields = mode === 'multiworld'
+    ? ['storyCore', 'worlds', 'characters']
+    : ['worldview', 'storyCore', 'characters']
+  return parseStructuredOutputV1({
+    raw: draft,
+    contract: {
+      version: 1,
+      schemaId: `inspiration-reverse-${mode}.v1`,
+      target: mode === 'multiworld' ? 'worldGroups+storyCores+characters' : 'worldviews+storyCores+characters',
+      root: 'object',
+      maxChars: MAX_INSPIRATION_RESULT_CHARS,
+      allowedRootFields: fields,
+      requiredRootFields: fields,
+    },
+    parse: value => {
+      const parsed = parseResult(JSON.stringify(value), mode)
+      if (!parsed) throw new Error('候选不是有效的灵感反推 JSON 结构。')
+      return parsed
+    },
+  })
 }
 
 /**
@@ -350,9 +363,7 @@ export function createInspirationCopilotNode(
           current.authorRequest,
         ),
     run: async messages => {
-      const parsed = parseResult(await runAI(messages), input.mode)
-      if (!parsed) throw new Error('Agnes 返回内容无法解析为灵感反推结构。')
-      return parsed
+      return parseInspirationCandidateDraft(await runAI(messages), input.mode)
     },
     gate: output => {
       const issues: GenerationGateIssue[] = []

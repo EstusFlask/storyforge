@@ -232,8 +232,8 @@ AI 输出经 `adopt({ target, data })` 写回,只有这里登记的字段可写(
 
 | category | 触发文件 |
 |---|---|
-| `agent.orchestrator` | `src/lib/agent/orchestrator.ts:624` |
-| `agent.orchestrator.replan` | `src/lib/agent/orchestrator.ts:711` |
+| `agent.orchestrator` | `src/lib/agent/orchestrator.ts:627` |
+| `agent.orchestrator.replan` | `src/lib/agent/orchestrator.ts:714` |
 | `agent.readonly` | `src/lib/agent/client-adapter.ts:116` |
 | `canon.setting.extract` | `src/lib/agent/run/constitution-extraction-durable.ts:509` |
 | `chapter.content` | `src/lib/generation/chapter-generation-node.ts:23` |
@@ -284,24 +284,24 @@ AI 输出经 `adopt({ target, data })` 写回,只有这里登记的字段可写(
 
 - `src/components/editor/ReviewPanel.tsx:141 · ai.start`
 - `src/lib/adventure/harness.ts:245 · chat`
-- `src/lib/agent/character-copilot.ts:475 · chat`
-- `src/lib/agent/character-driven-copilot.ts:507 · chat`
-- `src/lib/agent/character-revision-copilot.ts:704 · chat`
-- `src/lib/agent/character-supplement-copilot.ts:528 · chat`
+- `src/lib/agent/character-copilot.ts:460 · chat`
+- `src/lib/agent/character-driven-copilot.ts:504 · chat`
+- `src/lib/agent/character-revision-copilot.ts:728 · chat`
+- `src/lib/agent/character-supplement-copilot.ts:531 · chat`
 - `src/lib/agent/context-compression.ts:333 · chat`
-- `src/lib/agent/creative-rules-copilot.ts:443 · chat`
-- `src/lib/agent/inspiration-copilot.ts:328 · chat`
+- `src/lib/agent/creative-rules-copilot.ts:439 · chat`
+- `src/lib/agent/inspiration-copilot.ts:341 · chat`
 - `src/lib/agent/master-candidate-semantic-review.ts:601 · chat`
-- `src/lib/agent/outline-copilot.ts:508 · chat`
-- `src/lib/agent/outline-copilot.ts:760 · chat`
+- `src/lib/agent/outline-copilot.ts:494 · chat`
+- `src/lib/agent/outline-copilot.ts:743 · chat`
 - `src/lib/agent/prose-copilot.ts:665 · chat`
 - `src/lib/agent/prose-copilot.ts:930 · chat`
 - `src/lib/agent/run/history-agent-durable.ts:514 · chat`
 - `src/lib/agent/run/reference-derived-durable.ts:506 · chat`
-- `src/lib/agent/story-arc-copilot.ts:1272 · chat`
-- `src/lib/agent/story-arc-copilot.ts:1319 · chat`
-- `src/lib/agent/story-core-copilot.ts:458 · chat`
-- `src/lib/agent/storyline-progress-copilot.ts:376 · chat`
+- `src/lib/agent/story-arc-copilot.ts:1278 · chat`
+- `src/lib/agent/story-arc-copilot.ts:1325 · chat`
+- `src/lib/agent/story-core-copilot.ts:454 · chat`
+- `src/lib/agent/storyline-progress-copilot.ts:375 · chat`
 - `src/lib/agent/world-game-copilot.ts:295 · chat`
 - `src/lib/agent/world-origin-copilot.ts:255 · chat`
 - `src/lib/agent/worldview-field-copilot.ts:603 · chat`
@@ -315,4 +315,4 @@ AI 输出经 `adopt({ target, data })` 写回,只有这里登记的字段可写(
 
 ---
 
-生成时间基准:commit `8913350`
+生成时间基准:commit `4d9807f`

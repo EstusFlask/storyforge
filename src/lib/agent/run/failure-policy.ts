@@ -5,6 +5,10 @@ import type {
   AnyAgentRunEventV1,
 } from '../../types/agent-run'
 import { AgentTeamBudgetExceededError } from '../team-budget'
+import {
+  StructuredOutputPipelineErrorV1,
+  StructuredOutputRepairFailedErrorV1,
+} from '../structured-output-pipeline'
 import { hashCanonicalValue } from './hash'
 
 export interface AgentRunFailureEvidenceV1 {
@@ -27,6 +31,25 @@ function normalizedMessage(error: unknown): string {
 function decision(error: unknown): Omit<AgentRunFailureEvidenceV1, 'fingerprint'> {
   if (error instanceof AgentTeamBudgetExceededError) {
     return { code: 'team_budget_exhausted', retryable: false, category: 'budget', action: 'fail' }
+  }
+  if (error instanceof StructuredOutputRepairFailedErrorV1) {
+    return {
+      code: 'structured_output_repair_exhausted',
+      retryable: false,
+      category: 'deterministic',
+      action: 'pause-for-author',
+    }
+  }
+  if (error instanceof StructuredOutputPipelineErrorV1) {
+    if (error.evidence.issues.some(issue => issue.category === 'stale')) {
+      return { code: 'stale_input', retryable: false, category: 'stale-input', action: 'replan' }
+    }
+    return {
+      code: 'structured_output_blocked',
+      retryable: false,
+      category: 'deterministic',
+      action: 'pause-for-author',
+    }
   }
   if (error instanceof Error && error.name === 'MasterCandidateSemanticReviewBlockedError') {
     return {

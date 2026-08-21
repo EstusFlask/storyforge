@@ -40,10 +40,43 @@ import {
   queueCandidateDraftV1,
 } from '../../lib/agent/candidate-draft-coordinator'
 import type { CreativeArtifactV1 } from '../../lib/agent/creative-reliability'
+import {
+  StructuredOutputPipelineErrorV1,
+  StructuredOutputRepairFailedErrorV1,
+} from '../../lib/agent/structured-output-pipeline'
 
 function errorMessage(error: unknown): string {
   if (error instanceof Error && error.message.trim()) return error.message
   return '操作失败，请稍后重试。'
+}
+
+function structuredOutputFailurePayload(error: unknown): unknown {
+  if (error instanceof StructuredOutputRepairFailedErrorV1) {
+    return {
+      version: 1,
+      errorClass: 'structured-output-repair-failed',
+      status: error.runEvidence.status,
+      adoptable: false,
+      structuredOutputEvidence: error.runEvidence,
+    }
+  }
+  if (error instanceof StructuredOutputPipelineErrorV1) {
+    return {
+      version: 1,
+      errorClass: 'structured-output-blocked',
+      status: error.evidence.status,
+      adoptable: false,
+      structuredOutputEvidence: {
+        version: 1,
+        schemaId: error.evidence.schemaId,
+        target: error.evidence.target,
+        status: error.evidence.status,
+        attempts: [{ callIndex: 1, purpose: 'generate', evidence: error.evidence }],
+        repair: null,
+      },
+    }
+  }
+  return undefined
 }
 
 const MASTER_COPILOT_SYNC_EVENT = 'storyforge:master-copilot-sync-v1'
@@ -411,6 +444,7 @@ export function useMasterCopilot(input: {
           conversationId,
           kind: 'error',
           content: message,
+          payload: structuredOutputFailurePayload(error),
           scope: workspaceScope,
         })
         await appendAgentEvent({

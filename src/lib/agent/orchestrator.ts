@@ -180,6 +180,7 @@ import {
   type NarrativeBriefV1,
 } from './narrative-brief'
 import type { InformationBoundaryManifestV1 } from './information-boundary'
+import type { StructuredOutputRunEvidenceV1 } from './structured-output-pipeline'
 
 export { DOMAIN_AGENT_IDS }
 export type { DomainAgentId }
@@ -266,6 +267,8 @@ export interface MasterCandidatePayload {
   semanticReview?: MasterCandidateSemanticReviewArtifactV1
   /** Present on candidates governed by the bounded creative-reliability policy. */
   creativeArtifact?: CreativeArtifactV1
+  /** Absent on candidates created before WEH-0E or on free-text outputs. */
+  structuredOutputEvidence?: StructuredOutputRunEvidenceV1
   /** Per-run narrative drive derived only from already assembled registered sources. */
   narrativeBrief?: NarrativeBriefV1
   /** Prose-only immutable knowledge boundary used for local author revalidation. */
@@ -895,6 +898,7 @@ async function executeSequentialMasterAgentPlan(
               dependsOnTaskIds: task.dependsOn,
               dependencyBindings,
               generator: prepared.modelIdentity,
+              structuredOutputEvidence: result.structuredOutputEvidence,
             },
             draft,
             runtimeNode: prepared.node,
@@ -938,6 +942,7 @@ async function executeSequentialMasterAgentPlan(
               dependsOnTaskIds: task.dependsOn,
               dependencyBindings,
               generator: prepared.modelIdentity,
+              structuredOutputEvidence: result.structuredOutputEvidence,
             },
             draft,
             runtimeNode: prepared.node,
@@ -981,6 +986,7 @@ async function executeSequentialMasterAgentPlan(
               dependsOnTaskIds: task.dependsOn,
               dependencyBindings,
               generator: prepared.modelIdentity,
+              structuredOutputEvidence: result.structuredOutputEvidence,
             },
             draft,
             runtimeNode: prepared.node,
@@ -1028,6 +1034,7 @@ async function executeSequentialMasterAgentPlan(
               dependsOnTaskIds: task.dependsOn,
               dependencyBindings,
               generator: prepared.modelIdentity,
+              structuredOutputEvidence: result.structuredOutputEvidence,
             },
             draft,
             runtimeNode: prepared.node,
@@ -1117,6 +1124,7 @@ async function executeSequentialMasterAgentPlan(
               characterSupplementRequest: task.characterSupplementRequest,
               dependsOnTaskIds: task.dependsOn,
               dependencyBindings,
+              structuredOutputEvidence: result.structuredOutputEvidence,
             },
             draft,
             runtimeNode: prepared.node,
@@ -1158,6 +1166,7 @@ async function executeSequentialMasterAgentPlan(
               workspaceScope: scope,
               dependsOnTaskIds: task.dependsOn,
               dependencyBindings,
+              structuredOutputEvidence: result.structuredOutputEvidence,
             },
             draft,
             runtimeNode: prepared.node,
@@ -1220,6 +1229,7 @@ async function executeSequentialMasterAgentPlan(
             dependsOnTaskIds: task.dependsOn,
             dependencyBindings,
             generator: prepared.modelIdentity,
+            structuredOutputEvidence: result.structuredOutputEvidence,
           },
           draft,
           runtimeNode: prepared.node,
@@ -1260,6 +1270,7 @@ async function executeSequentialMasterAgentPlan(
               dependsOnTaskIds: task.dependsOn,
               dependencyBindings,
               generator: prepared.modelIdentity,
+              structuredOutputEvidence: result.structuredOutputEvidence,
             },
             draft,
             runtimeNode: prepared.node,
@@ -1305,6 +1316,7 @@ async function executeSequentialMasterAgentPlan(
               characterRevisionRequest: task.characterRevisionRequest,
               dependsOnTaskIds: task.dependsOn,
               dependencyBindings,
+              structuredOutputEvidence: result.structuredOutputEvidence,
             },
             draft,
             runtimeNode: prepared.node,
@@ -1356,6 +1368,7 @@ async function executeSequentialMasterAgentPlan(
               characterDrivenPlanId: prepared.snapshot.planId,
               dependsOnTaskIds: task.dependsOn,
               dependencyBindings,
+              structuredOutputEvidence: result.structuredOutputEvidence,
             },
             draft,
             runtimeNode: prepared.node,
@@ -1443,6 +1456,7 @@ async function executeSequentialMasterAgentPlan(
                 storyArcKind: prepared.kind,
                 dependsOnTaskIds: task.dependsOn,
                 dependencyBindings,
+                structuredOutputEvidence: result.structuredOutputEvidence,
               },
               draft,
               runtimeNode: prepared.node,
@@ -1535,6 +1549,7 @@ async function executeSequentialMasterAgentPlan(
                 outlineParentId: prepared.parentVolumeId,
                 dependsOnTaskIds: task.dependsOn,
                 dependencyBindings,
+                structuredOutputEvidence: result.structuredOutputEvidence,
               },
               draft,
               runtimeNode: prepared.node,

@@ -53,6 +53,7 @@ import {
   resolveAgentSkillV1,
   type AgentSkillId,
 } from './skill-registry'
+import { parseStructuredOutputV1 } from './structured-output-pipeline'
 
 const CHANGE_TYPES = ['add-character', 'revise-arc', 'revise-ending', 'remove-or-demote'] as const
 const STRATEGIES = ['light', 'balanced', 'deep'] as const
@@ -212,19 +213,6 @@ export function parseCharacterRevisionTaskInputV1(value: unknown): CharacterRevi
   }
 }
 
-function parseJsonObject(draft: string, label: string): Record<string, unknown> {
-  const input = draft.trim()
-  if (!input) throw new Error(`${label}为空。`)
-  if (input.length > MAX_CANDIDATE_CHARS) throw new Error(`${label}超过 ${MAX_CANDIDATE_CHARS} 字符。`)
-  const fenced = /^```(?:json)?\s*([\s\S]*?)```\s*$/i.exec(input)
-  try {
-    return record(JSON.parse(fenced?.[1]?.trim() ?? input), label)
-  } catch (error) {
-    if (error instanceof SyntaxError) throw new Error(`${label}不是有效的严格 JSON 对象。`)
-    throw error
-  }
-}
-
 function assertPlanShape(root: Record<string, unknown>): void {
   exactKeys(root, [
     'changeSummary',
@@ -311,11 +299,32 @@ export function parseCharacterRevisionPlanDraftV1(
   snapshot: CharacterRevisionSnapshot,
   request: CharacterRevisionTaskInputV1,
 ): CharacterRevisionPlan {
-  const root = parseJsonObject(draft, '角色重规划候选')
-  assertPlanShape(root)
-  const parsed = parseCharacterRevisionOutput(JSON.stringify(root), snapshot, request)
-  if (!parsed || parsed.options.length !== 3) throw new Error('角色重规划候选无法解析为三档安全方案。')
-  return parsed
+  return parseStructuredOutputV1({
+    raw: draft,
+    contract: {
+      version: 1,
+      schemaId: 'character-revision-plan.v1',
+      target: `character-revision:${request.characterId ?? request.characterName ?? 'unresolved'}`,
+      root: 'object',
+      maxChars: MAX_CANDIDATE_CHARS,
+      allowedRootFields: [
+        'changeSummary', 'scopeSummary', 'affectedWrittenChapters', 'immutableFacts',
+        'conflicts', 'foreshadowSuggestions', 'mainPlotSuggestion', 'options', 'warnings',
+      ],
+      requiredRootFields: [
+        'changeSummary', 'scopeSummary', 'affectedWrittenChapters', 'immutableFacts',
+        'conflicts', 'foreshadowSuggestions', 'mainPlotSuggestion', 'options', 'warnings',
+      ],
+      unknownRootFieldMessage: '角色重规划候选包含不允许的字段。',
+    },
+    parse: value => {
+      const root = record(value, '角色重规划候选')
+      assertPlanShape(root)
+      const parsed = parseCharacterRevisionOutput(JSON.stringify(root), snapshot, request)
+      if (!parsed || parsed.options.length !== 3) throw new Error('角色重规划候选无法解析为三档安全方案。')
+      return parsed
+    },
+  })
 }
 
 export function serializeCharacterRevisionCandidateV1(candidate: CharacterRevisionCandidateV1): string {
@@ -347,23 +356,38 @@ export function parseCharacterRevisionCandidateDraftV1(
   draft: string,
   snapshot: CharacterRevisionCopilotSnapshotV1,
 ): CharacterRevisionCandidateV1 {
-  const root = parseJsonObject(draft, '角色重规划持久候选')
-  exactKeys(root, ['version', 'plan', 'decision'], '角色重规划持久候选')
-  if (root.version !== 1) throw new Error('角色重规划持久候选版本不受支持。')
-  const plan = parseCharacterRevisionPlanDraftV1(JSON.stringify(root.plan), snapshot.revision, snapshot.request)
-  if (root.decision === null) return { version: 1, plan, decision: null }
-  const decision = record(root.decision, '角色重规划作者选择')
-  exactKeys(decision, ['optionId', 'outlineNodeIds'], '角色重规划作者选择')
-  const optionId = text(decision.optionId, '角色重规划作者选择.optionId', 120)
-  const option = plan.options.find(item => item.id === optionId)
-  if (!option) throw new Error('角色重规划作者选择引用了未知方案。')
-  const allowed = new Set(option.patches.map(patch => patch.outlineNodeId))
-  const outlineNodeIds = [...new Set(array(decision.outlineNodeIds, '角色重规划作者选择.outlineNodeIds', 100).map(
-    (item, index) => integer(item, `角色重规划作者选择.outlineNodeIds[${index}]`, 1, Number.MAX_SAFE_INTEGER),
-  ))]
-  if (!outlineNodeIds.length) throw new Error('角色重规划作者选择至少需要一个可应用 patch。')
-  if (outlineNodeIds.some(id => !allowed.has(id))) throw new Error('角色重规划作者选择包含当前方案之外的 patch。')
-  return { version: 1, plan, decision: { optionId, outlineNodeIds } }
+  return parseStructuredOutputV1({
+    raw: draft,
+    contract: {
+      version: 1,
+      schemaId: 'character-revision-candidate.v1',
+      target: `character-revision:${snapshot.request.characterId ?? snapshot.request.characterName ?? 'unresolved'}`,
+      root: 'object',
+      maxChars: MAX_CANDIDATE_CHARS,
+      allowedRootFields: ['version', 'plan', 'decision'],
+      requiredRootFields: ['version', 'plan', 'decision'],
+      unknownRootFieldMessage: '角色重规划持久候选包含不允许的字段。',
+    },
+    parse: value => {
+      const root = record(value, '角色重规划持久候选')
+      exactKeys(root, ['version', 'plan', 'decision'], '角色重规划持久候选')
+      if (root.version !== 1) throw new Error('角色重规划持久候选版本不受支持。')
+      const plan = parseCharacterRevisionPlanDraftV1(JSON.stringify(root.plan), snapshot.revision, snapshot.request)
+      if (root.decision === null) return { version: 1, plan, decision: null }
+      const decision = record(root.decision, '角色重规划作者选择')
+      exactKeys(decision, ['optionId', 'outlineNodeIds'], '角色重规划作者选择')
+      const optionId = text(decision.optionId, '角色重规划作者选择.optionId', 120)
+      const option = plan.options.find(item => item.id === optionId)
+      if (!option) throw new Error('角色重规划作者选择引用了未知方案。')
+      const allowed = new Set(option.patches.map(patch => patch.outlineNodeId))
+      const outlineNodeIds = [...new Set(array(decision.outlineNodeIds, '角色重规划作者选择.outlineNodeIds', 100).map(
+        (item, index) => integer(item, `角色重规划作者选择.outlineNodeIds[${index}]`, 1, Number.MAX_SAFE_INTEGER),
+      ))]
+      if (!outlineNodeIds.length) throw new Error('角色重规划作者选择至少需要一个可应用 patch。')
+      if (outlineNodeIds.some(id => !allowed.has(id))) throw new Error('角色重规划作者选择包含当前方案之外的 patch。')
+      return { version: 1, plan, decision: { optionId, outlineNodeIds } }
+    },
+  })
 }
 
 export function decideCharacterRevisionCandidateV1(

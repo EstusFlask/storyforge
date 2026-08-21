@@ -25,6 +25,7 @@ import {
 import { parseCharacterSupplementTaskInputV1 } from '../character-supplement-copilot'
 import type { AgentTeamBudgetEvidence } from '../team-budget'
 import { parseCreativeArtifactV1 } from '../creative-reliability'
+import { parseStructuredOutputRunEvidenceV1 } from '../structured-output-pipeline'
 import { parseNarrativeBriefV1 } from '../narrative-brief'
 import { parseInformationBoundaryManifestV1 } from '../information-boundary'
 import {
@@ -1104,6 +1105,9 @@ function parseCandidatePayload(value: unknown, label: string): MasterCandidatePa
   }
   if (payload.creativeArtifact !== undefined) {
     payload.creativeArtifact = parseCreativeArtifactV1(payload.creativeArtifact)
+  }
+  if (payload.structuredOutputEvidence !== undefined) {
+    payload.structuredOutputEvidence = parseStructuredOutputRunEvidenceV1(payload.structuredOutputEvidence)
   }
   if (payload.narrativeBrief !== undefined) {
     payload.narrativeBrief = parseNarrativeBriefV1(payload.narrativeBrief)

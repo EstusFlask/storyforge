@@ -561,6 +561,60 @@ if (!/revalidateCreativeArtifact[\s\S]*?parseCreativeArtifactV1\(payload\.creati
   violations.push('[⑯候选当前载荷] 候选语义证据必须基于事务读取到的当前 payload 重算，不得使用 UI 闭包旧版本')
 }
 
+// ── ⑰ WEH-0E 正式结构化输出必须共用严格管线和唯一 repair 额度 ──
+const structuredOutputSource = read('src/lib/agent/structured-output-pipeline.ts')
+const teamExecutionSource = read('src/lib/agent/team-execution.ts')
+const orchestratorSource = read('src/lib/agent/orchestrator.ts')
+const masterDurableSource = read('src/lib/agent/run/master-durable.ts')
+const failurePolicySource = read('src/lib/agent/run/failure-policy.ts')
+for (const file of [
+  'src/lib/agent/worldview-field-copilot.ts',
+  'src/lib/agent/story-core-copilot.ts',
+  'src/lib/agent/creative-rules-copilot.ts',
+  'src/lib/agent/character-copilot.ts',
+  'src/lib/agent/character-driven-copilot.ts',
+  'src/lib/agent/character-supplement-copilot.ts',
+  'src/lib/agent/character-revision-copilot.ts',
+  'src/lib/agent/storyline-progress-copilot.ts',
+  'src/lib/agent/detailed-outline-copilot.ts',
+  'src/lib/agent/inspiration-copilot.ts',
+  'src/lib/agent/outline-copilot.ts',
+  'src/lib/agent/story-arc-copilot.ts',
+  'src/lib/text-game/agent-contract.ts',
+]) {
+  const source = read(file)
+  if (!source.includes('parseStructuredOutputV1')) {
+    violations.push(`[⑰结构化管线] ${file}: 正式候选 parser 必须接入 StructuredOutputPipelineV1`)
+  }
+  if (/import\s+JSON5\s+from/.test(source)) {
+    violations.push(`[⑰禁止猜测解析] ${file}: 正式结构化输出不得接受 JSON5`)
+  }
+}
+if (!structuredOutputSource.includes('structured-output-ambiguous-root')
+  || !structuredOutputSource.includes('apply-registered-field-alias')
+  || !structuredOutputSource.includes('StructuredOutputRepairFailedErrorV1')) {
+  violations.push('[⑰确定性修复] StructuredOutputPipeline 必须拒绝竞争根、登记 alias 并保存 repair 失败证据')
+}
+if ((teamExecutionSource.match(/claimCanonRetry\(retryIssues\)/g) ?? []).length !== 1
+  || !teamExecutionSource.includes("purpose: 'repair'")
+  || !teamExecutionSource.includes('buildStructuredOutputRepairMessagesV1')) {
+  violations.push('[⑰唯一 repair] 结构/schema/target 必须共用一次 Canon retry，repair 不得重新装配完整上下文')
+}
+if (!orchestratorSource.includes('structuredOutputEvidence: result.structuredOutputEvidence')
+  || !masterDurableSource.includes('parseStructuredOutputRunEvidenceV1')) {
+  violations.push('[⑰证据生命周期] 成功或修复后的结构化证据必须随 candidate/run 持久化并严格恢复')
+}
+if (!masterCopilotSource.includes('error instanceof StructuredOutputRepairFailedErrorV1')
+  || !masterCopilotSource.includes("errorClass: 'structured-output-repair-failed'")
+  || !masterCopilotSource.includes('adoptable: false')) {
+  violations.push('[⑰失败留证] 唯一 repair 失败必须保存 raw attempts 并明确不可采纳')
+}
+if (!failurePolicySource.includes('error instanceof StructuredOutputRepairFailedErrorV1')
+  || !failurePolicySource.includes("code: 'structured_output_repair_exhausted'")
+  || !/structured_output_repair_exhausted[\s\S]*?retryable:\s*false/.test(failurePolicySource)) {
+  violations.push('[⑰失败重放] repair 额度耗尽后 durable Run 必须暂停，禁止按普通 protocol error 重跑整步')
+}
+
 // ── 报告 ──
 if (violations.length) {
   console.error('[architecture] ❌ 发现反模式违规(违反 CLAUDE.md 三注册表铁律):\n')

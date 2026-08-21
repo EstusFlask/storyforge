@@ -298,9 +298,9 @@ describe.sequential('R-HARNESS30 · 故事线 Agent Skill 与受治理采纳', (
     expect(candidates[0].payload.creativeArtifact).toBeUndefined()
     expect(candidates[0].payload.narrativeBrief).toBeUndefined()
     expect(parseStoryArcCandidateDraft(candidates[0].draft)).toEqual([mainArc()])
-    expect(() => parseStoryArcModelResponseLegacyV1(
+    expect(parseStoryArcModelResponseLegacyV1(
       `\`\`\`json\n${JSON.stringify({ storyArcs: [mainArc()] })}\n\`\`\``,
-    )).toThrow('严格 JSON 对象')
+    )).toEqual([mainArc()])
   })
 
   it('上游临时假设通过独立元数据进入后续任务且不改变依赖草稿哈希', async () => {
@@ -437,7 +437,7 @@ describe.sequential('R-HARNESS30 · 故事线 Agent Skill 与受治理采纳', (
     }))).toEqual([mainArc()])
     expect(parseStoryArcCandidateDraft(JSON.stringify([mainArc()]))).toEqual([mainArc()])
     expect(() => parseStoryArcModelResponseV2(JSON.stringify([mainArc()])))
-      .toThrow('单个 JSON 对象')
+      .toThrow('根必须是 JSON 对象')
     expect(() => parseStoryArcModelResponseV2(JSON.stringify({ storyArcs: [mainArc()], projectId: 7 })))
       .toThrow('不允许的字段')
     expect(() => parseStoryArcModelResponseV2(JSON.stringify({

@@ -1,4 +1,3 @@
-import JSON5 from 'json5'
 import { useAIConfigStore } from '../../stores/ai-config'
 import { buildCharacterPrompt } from '../ai/adapters/character-adapter'
 import { chat, resolveRequestConfig } from '../ai/client'
@@ -54,6 +53,7 @@ import {
   resolveAgentSkillV1,
   type AgentSkillId,
 } from './skill-registry'
+import { parseStructuredOutputV1 } from './structured-output-pipeline'
 
 export const MAX_CHARACTER_CANDIDATE_CHARS = 40_000
 const MAX_CHARACTER_NAME_CHARS = 80
@@ -173,36 +173,6 @@ function assertAuthorRequest(value: string): string {
   return request
 }
 
-function parseJsonObject(draft: string): Record<string, unknown> {
-  const input = draft.trim()
-  if (!input) throw new Error('角色候选为空。')
-  if (input.length > MAX_CHARACTER_CANDIDATE_CHARS) {
-    throw new Error(`角色候选超过 ${MAX_CHARACTER_CANDIDATE_CHARS} 字符。`)
-  }
-  const fullFence = /```(?:json)?\s*([\s\S]*?)```/i.exec(input)
-  const candidate = fullFence?.[1]?.trim() ?? input
-  const start = candidate.indexOf('{')
-  const end = candidate.lastIndexOf('}')
-  if (start < 0 || end < start) throw new Error('角色候选不是完整的 JSON 对象。')
-  const json = candidate.slice(start, end + 1)
-  const trailing = candidate.slice(end + 1).trim()
-  if (trailing) throw new Error('角色候选 JSON 后包含额外文本。')
-  let parsed: unknown
-  try {
-    parsed = JSON.parse(json)
-  } catch {
-    try {
-      parsed = JSON5.parse(json)
-    } catch {
-      throw new Error('角色候选不是有效的 JSON 对象。')
-    }
-  }
-  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-    throw new Error('角色候选必须是单个 JSON 对象。')
-  }
-  return parsed as Record<string, unknown>
-}
-
 function stringField(
   source: Record<string, unknown>,
   field: string,
@@ -220,46 +190,61 @@ function stringField(
 }
 
 export function parseCharacterCandidateDraft(draft: string): CharacterCopilotCandidate {
-  const source = parseJsonObject(draft)
-  const unknown = Object.keys(source).filter(field => !CANDIDATE_FIELD_SET.has(field))
-  if (unknown.length) throw new Error(`角色候选包含不允许的字段：${unknown.join('、')}。`)
+  return parseStructuredOutputV1({
+    raw: draft,
+    contract: {
+      version: 1,
+      schemaId: 'character-candidate.v1',
+      target: 'characters.add',
+      root: 'object',
+      maxChars: MAX_CHARACTER_CANDIDATE_CHARS,
+      allowedRootFields: [...CANDIDATE_FIELDS],
+      requiredRootFields: ['name', 'roleWeight', 'moralAxis', 'orderAxis', 'shortDescription'],
+      unknownRootFieldMessage: '角色候选包含不允许的字段。',
+    },
+    parse: value => {
+      const source = value as Record<string, unknown>
+      const unknown = Object.keys(source).filter(field => !CANDIDATE_FIELD_SET.has(field))
+      if (unknown.length) throw new Error(`角色候选包含不允许的字段：${unknown.join('、')}。`)
 
-  const roleWeight = source.roleWeight
-  const moralAxis = source.moralAxis
-  const orderAxis = source.orderAxis
-  if (!ROLE_WEIGHTS.includes(roleWeight as CharacterRoleWeight)) {
-    throw new Error('roleWeight 只能是 main / secondary / npc / extra。')
-  }
-  if (!MORAL_AXES.includes(moralAxis as CharacterMoralAxis)) {
-    throw new Error('moralAxis 只能是 good / neutral / evil。')
-  }
-  if (!ORDER_AXES.includes(orderAxis as CharacterOrderAxis)) {
-    throw new Error('orderAxis 只能是 lawful / neutral / chaotic。')
-  }
+      const roleWeight = source.roleWeight
+      const moralAxis = source.moralAxis
+      const orderAxis = source.orderAxis
+      if (!ROLE_WEIGHTS.includes(roleWeight as CharacterRoleWeight)) {
+        throw new Error('roleWeight 只能是 main / secondary / npc / extra。')
+      }
+      if (!MORAL_AXES.includes(moralAxis as CharacterMoralAxis)) {
+        throw new Error('moralAxis 只能是 good / neutral / evil。')
+      }
+      if (!ORDER_AXES.includes(orderAxis as CharacterOrderAxis)) {
+        throw new Error('orderAxis 只能是 lawful / neutral / chaotic。')
+      }
 
-  const dimensions = Object.fromEntries(
-    CHARACTER_DIMENSIONS.map(dimension => [
-      dimension.key,
-      stringField(source, dimension.key, {
-        required: dimension.key === 'shortDescription',
-        max: dimension.key === 'shortDescription'
-          ? MAX_CHARACTER_SUMMARY_CHARS
-          : MAX_CHARACTER_FIELD_CHARS,
-      }),
-    ]),
-  ) as Record<CharacterDimensionKey, string>
-  const result: CharacterCopilotCandidate = {
-    name: stringField(source, 'name', { required: true, max: MAX_CHARACTER_NAME_CHARS }),
-    roleWeight: roleWeight as CharacterRoleWeight,
-    moralAxis: moralAxis as CharacterMoralAxis,
-    orderAxis: orderAxis as CharacterOrderAxis,
-    relationships: stringField(source, 'relationships'),
-    ...dimensions,
-  }
-  if (JSON.stringify(result).length > MAX_CHARACTER_CANDIDATE_CHARS) {
-    throw new Error(`角色候选超过 ${MAX_CHARACTER_CANDIDATE_CHARS} 字符。`)
-  }
-  return result
+      const dimensions = Object.fromEntries(
+        CHARACTER_DIMENSIONS.map(dimension => [
+          dimension.key,
+          stringField(source, dimension.key, {
+            required: dimension.key === 'shortDescription',
+            max: dimension.key === 'shortDescription'
+              ? MAX_CHARACTER_SUMMARY_CHARS
+              : MAX_CHARACTER_FIELD_CHARS,
+          }),
+        ]),
+      ) as Record<CharacterDimensionKey, string>
+      const result: CharacterCopilotCandidate = {
+        name: stringField(source, 'name', { required: true, max: MAX_CHARACTER_NAME_CHARS }),
+        roleWeight: roleWeight as CharacterRoleWeight,
+        moralAxis: moralAxis as CharacterMoralAxis,
+        orderAxis: orderAxis as CharacterOrderAxis,
+        relationships: stringField(source, 'relationships'),
+        ...dimensions,
+      }
+      if (JSON.stringify(result).length > MAX_CHARACTER_CANDIDATE_CHARS) {
+        throw new Error(`角色候选超过 ${MAX_CHARACTER_CANDIDATE_CHARS} 字符。`)
+      }
+      return result
+    },
+  })
 }
 
 function structuredOutputContract(): string {
