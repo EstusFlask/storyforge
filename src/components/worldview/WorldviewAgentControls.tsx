@@ -7,11 +7,14 @@ import { CTextarea } from '../shared/CompositionInput'
 import PromptRunPanel from '../shared/PromptRunPanel'
 import {
   formatWorldviewFieldGenerationRequestV1,
+  WORLDVIEW_FIELD_DEFAULT_OUTPUT_TOKENS_V1,
   type WorldviewAgentField,
 } from '../../lib/agent/worldview-field-copilot'
 import type { FieldGenerationMode } from '../../lib/ai/field-generation-context'
 import type { Project } from '../../lib/types'
 import HarnessEvidencePanel from '../agent/HarnessEvidencePanel'
+import { useAIConfigStore } from '../../stores/ai-config'
+import { getModelPreset } from '../../lib/ai/context-budget'
 
 export default function WorldviewAgentControls({
   field,
@@ -41,6 +44,23 @@ export default function WorldviewAgentControls({
   const [systemOverride, setSystemOverride] = useState<string | null>(null)
   const [userOverride, setUserOverride] = useState<string | null>(null)
   const [mode, setMode] = useState<FieldGenerationMode>('expand')
+  const [lengthMode, setLengthMode] = useState<'default' | 'custom'>('default')
+  const [customOutputTokens, setCustomOutputTokens] = useState(WORLDVIEW_FIELD_DEFAULT_OUTPUT_TOKENS_V1)
+  const aiConfig = useAIConfigStore(state => state.config)
+  const modelCap = getModelPreset(aiConfig.provider, aiConfig.model).maxOutput
+  const configuredCap = aiConfig.maxTokens > 0 ? aiConfig.maxTokens : modelCap
+  const visibleEffectiveCap = Math.min(
+    modelCap,
+    configuredCap,
+    WORLDVIEW_FIELD_DEFAULT_OUTPUT_TOKENS_V1,
+  )
+  const lengthError = lengthMode === 'custom' && (
+    !Number.isSafeInteger(customOutputTokens)
+    || customOutputTokens < 1
+    || customOutputTokens > visibleEffectiveCap
+  )
+    ? `当前普通单次链路最多 ${visibleEffectiveCap.toLocaleString()} tokens；更长输出尚未启用 LONGOUT 分段协议。`
+    : ''
 
   const handleGenerate = async () => {
     onRunningChange(true)
@@ -57,6 +77,7 @@ export default function WorldviewAgentControls({
         promptExecution: {
           version: 1,
           moduleKey: 'worldview.dimension',
+          ...(lengthMode === 'custom' ? { maxTokens: customOutputTokens } : {}),
           ...(Object.keys(parameterValues).length ? { parameterValues } : {}),
           ...(systemOverride === null ? {} : { systemOverride }),
           ...(userOverride === null ? {} : { userOverride }),
@@ -70,6 +91,7 @@ export default function WorldviewAgentControls({
   const blocked = copilot.loading
     || copilot.busy
     || copilot.pendingCandidates.length > 0
+    || Boolean(lengthError)
     || (project.enableMultiWorld === true && activeGroupId == null)
 
   return (
@@ -105,6 +127,38 @@ export default function WorldviewAgentControls({
         onUserOverrideChange={setUserOverride}
       />
 
+      <div className="flex flex-wrap items-center gap-2 rounded border border-border bg-bg-elevated px-3 py-2 text-xs">
+        <span className="text-text-secondary">输出长度</span>
+        <select
+          value={lengthMode}
+          onChange={event => setLengthMode(event.target.value as 'default' | 'custom')}
+          className="rounded border border-border bg-bg-base px-2 py-1 text-text-primary"
+        >
+          <option value="default">默认（最多 {visibleEffectiveCap.toLocaleString()} tokens）</option>
+          <option value="custom">作者自定义</option>
+        </select>
+        {lengthMode === 'custom' && (
+          <input
+            aria-label="世界基座自定义输出 tokens"
+            type="number"
+            min={1}
+            step={100}
+            value={customOutputTokens}
+            onChange={event => setCustomOutputTokens(Number(event.target.value))}
+            className="w-28 rounded border border-border bg-bg-base px-2 py-1 text-right text-text-primary"
+          />
+        )}
+        <span className="text-[10px] text-text-muted">
+          “不限”按模型上限计算；Run 内始终冻结为有限值，不会静默截断或追加调用。
+        </span>
+      </div>
+
+      {lengthError && (
+        <p className="rounded border border-warning/30 bg-warning/5 px-3 py-2 text-xs text-warning">
+          {lengthError}
+        </p>
+      )}
+
       {copilot.error && (
         <p className="rounded border border-error/30 bg-error/5 px-3 py-2 text-xs text-error">
           {copilot.error}
@@ -126,7 +180,19 @@ export default function WorldviewAgentControls({
       {candidate && (
         <section className="border border-accent/30 bg-bg-surface p-4 rounded-lg">
           <div className="mb-2 flex items-center justify-between gap-3">
-            <h3 className="text-sm font-semibold text-text-primary">待确认 · {candidate.payload.label}</h3>
+            <div>
+              <h3 className="text-sm font-semibold text-text-primary">待确认 · {candidate.payload.label}</h3>
+              {candidate.payload.worldviewFieldOperation && (
+                <p className="mt-0.5 text-[10px] text-text-muted">
+                  模式：{{
+                    create: '新建', expand: '扩写', rewrite: '重写', polish: '润色',
+                  }[candidate.payload.worldviewFieldOperation]}
+                  {candidate.payload.worldviewFieldOutputBudget
+                    ? ` · 输出上限 ${candidate.payload.worldviewFieldOutputBudget.effectiveMaxTokens.toLocaleString()} tokens`
+                    : ''}
+                </p>
+              )}
+            </div>
             <span className="text-[11px] text-text-muted">
               {candidate.payload.contextEvidence
                 ? `约 ${candidate.payload.contextEvidence.estimatedInputTokens.toLocaleString()} tokens`

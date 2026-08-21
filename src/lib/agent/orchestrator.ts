@@ -78,6 +78,8 @@ import {
   parseWorldviewFieldCandidateDraft,
   prepareWorldviewFieldCopilot,
   type WorldviewAgentField,
+  type WorldviewFieldOperationV1,
+  type WorldviewFieldOutputBudgetV1,
   type WorldviewFieldCopilotSnapshot,
 } from './worldview-field-copilot'
 import {
@@ -266,6 +268,8 @@ export interface MasterCandidatePayload {
   storyCoreField?: StoryCoreField
   creativeRulesField?: CreativeRulesField
   worldviewField?: WorldviewAgentField
+  worldviewFieldOperation?: WorldviewFieldOperationV1
+  worldviewFieldOutputBudget?: WorldviewFieldOutputBudgetV1
   storylineProgressChapterId?: number
   proseOperation?: ProseCopilotOperation
   proseOutlineNodeId?: number
@@ -989,6 +993,8 @@ async function executeSequentialMasterAgentPlan(
               contextEvidence: prepared.contextEvidence,
               baseSnapshot: prepared.snapshot,
               worldviewField: prepared.targetField,
+              worldviewFieldOperation: prepared.input.mode,
+              worldviewFieldOutputBudget: prepared.input.outputBudget,
               workspaceScope: scope,
               dependsOnTaskIds: task.dependsOn,
               dependencyBindings,

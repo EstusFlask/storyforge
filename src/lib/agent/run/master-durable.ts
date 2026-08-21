@@ -98,6 +98,7 @@ import { STORY_CORE_FIELDS } from '../story-core-copilot'
 import { CREATIVE_RULES_FIELDS } from '../creative-rules-copilot'
 import {
   WORLDVIEW_AGENT_FIELDS,
+  parseWorldviewFieldOutputBudgetV1,
   resolveWorldviewAgentFieldV1,
 } from '../worldview-field-copilot'
 import { MAX_INSPIRATION_FRAGMENTS } from '../../inspiration/workspace'
@@ -1242,6 +1243,22 @@ function parseCandidatePayload(value: unknown, label: string): MasterCandidatePa
     payload.worldviewField !== undefined
     && !WORLDVIEW_AGENT_FIELDS.includes(payload.worldviewField)
   ) fail(label + ' worldviewField 无效')
+  if (
+    payload.worldviewFieldOperation !== undefined
+    && !['create', 'expand', 'rewrite', 'polish'].includes(payload.worldviewFieldOperation)
+  ) fail(label + ' worldviewFieldOperation 无效')
+  if (payload.worldviewFieldOutputBudget !== undefined) {
+    try {
+      payload.worldviewFieldOutputBudget = parseWorldviewFieldOutputBudgetV1(
+        payload.worldviewFieldOutputBudget,
+      )
+    } catch (error) {
+      fail(`${label} worldviewFieldOutputBudget 无效：${error instanceof Error ? error.message : String(error)}`)
+    }
+  }
+  if ((payload.worldviewFieldOperation === undefined) !== (payload.worldviewFieldOutputBudget === undefined)) {
+    fail(label + ' worldviewFieldOperation 与 worldviewFieldOutputBudget 必须同时存在')
+  }
   if (
     payload.storylineProgressChapterId !== undefined
     && (!Number.isInteger(payload.storylineProgressChapterId) || payload.storylineProgressChapterId < 1)

@@ -1,5 +1,6 @@
 import { useAIConfigStore } from '../../stores/ai-config'
-import { chat, resolveRequestConfig } from '../ai/client'
+import { getModelPreset } from '../ai/context-budget'
+import { chat, resolveRequestConfig, type ChatResult } from '../ai/client'
 import type { FieldGenerationMode } from '../ai/field-generation-context'
 import { db } from '../db/schema'
 import type {
@@ -73,6 +74,22 @@ export const WORLDVIEW_AGENT_FIELDS = [
 export type WorldviewAgentField = typeof WORLDVIEW_AGENT_FIELDS[number]
 export type WorldviewTextAgentField = Exclude<WorldviewAgentField, 'divineDesign'>
 export type WorldviewFoundationState = 'empty' | 'partial' | 'complete'
+export type WorldviewFieldOperationV1 = 'create' | FieldGenerationMode
+
+export const WORLDVIEW_FIELD_DEFAULT_OUTPUT_TOKENS_V1 = 6_000
+
+export interface WorldviewFieldOutputBudgetV1 {
+  version: 1
+  source: 'default' | 'author-custom'
+  requestedTokens: number
+  effectiveMaxTokens: number
+  effectiveCapTokens: number
+  modelCapTokens: number
+  authorConfigCapTokens: number
+  schemaCapTokens: number
+  skillCapTokens: number
+  longOutputMode: 'disabled'
+}
 
 export type WorldviewFieldCopilotCandidate =
   | { field: WorldviewTextAgentField; value: string; temporaryAssumptions?: string[] }
@@ -98,7 +115,7 @@ export interface WorldviewFieldCopilotInput {
   supplementalContext: string
   inputGuidance: string
   targetField: WorldviewAgentField
-  mode: FieldGenerationMode
+  mode: WorldviewFieldOperationV1
   assembled: AssembleContextResult
   snapshot: WorldviewFieldCopilotSnapshot
   config: AIConfig
@@ -106,6 +123,7 @@ export interface WorldviewFieldCopilotInput {
   generationOverrides?: { temperature?: number; maxTokens?: number }
   frozenPromptMessages?: ChatMessage[]
   promptExecutionEvidence?: PromptExecutionEvidenceV1
+  outputBudget?: WorldviewFieldOutputBudgetV1
   signal?: AbortSignal
 }
 
@@ -176,7 +194,8 @@ const FIELD_MAX_CHARS: Record<WorldviewTextAgentField, number> = {
   itemDesign: 30_000,
 }
 
-const MODE_INSTRUCTIONS: Record<FieldGenerationMode, string> = {
+const MODE_INSTRUCTIONS: Record<WorldviewFieldOperationV1, string> = {
+  create: '目标字段为空：创建一份可直接审阅的新设定，不得用“暂无资料”或待办占位交付。',
   expand: '保留目标字段当前已有事实和方向，在其基础上补足因果、约束与具体性。',
   rewrite: '允许重写目标字段，但必须遵守其他已确认字段和正式上下文，不得顺手改写它们。',
   polish: '只优化目标字段的表达、逻辑顺序和可读性，除非作者明确要求，不新增重大设定。',
@@ -274,7 +293,7 @@ async function readSnapshot(
 function assertAuthorRequest(value: string): string {
   const request = value.trim()
   if (request.length < 2) throw new Error('请至少输入 2 个字符的世界基座要求。')
-  if (request.length > 1_000) throw new Error('单次世界基座要求不能超过 1000 个字符。')
+  if (request.length > 8_000) throw new Error('单次世界基座要求不能超过 8000 个字符。')
   return request
 }
 
@@ -311,6 +330,93 @@ export function resolveWorldviewFieldModeV1(request: string): FieldGenerationMod
   if (/重写|重做|推倒重来/.test(request)) return 'rewrite'
   if (/润色|优化表达/.test(request)) return 'polish'
   return 'expand'
+}
+
+export function resolveWorldviewFieldOperationV1(input: {
+  requestedMode: FieldGenerationMode
+  currentValue: WorldviewFieldValue
+}): WorldviewFieldOperationV1 {
+  return hasMaterial(input.currentValue) ? input.requestedMode : 'create'
+}
+
+export function resolveWorldviewFieldOutputBudgetV1(input: {
+  config: AIConfig
+  targetField: WorldviewAgentField
+  skillMaxOutputTokens: number
+  requestedMaxTokens?: number
+}): WorldviewFieldOutputBudgetV1 {
+  const modelCapTokens = getModelPreset(input.config.provider, input.config.model).maxOutput
+  const authorConfigCapTokens = input.config.maxTokens > 0
+    ? input.config.maxTokens
+    : modelCapTokens
+  const fieldMaxChars = input.targetField === 'divineDesign'
+    ? 60_000
+    : FIELD_MAX_CHARS[input.targetField]
+  // Conservative CJK upper bound plus a small JSON envelope allowance.
+  const schemaCapTokens = Math.max(1, Math.floor(fieldMaxChars * 1.5) + 256)
+  const effectiveCapTokens = Math.min(
+    modelCapTokens,
+    authorConfigCapTokens,
+    schemaCapTokens,
+    input.skillMaxOutputTokens,
+  )
+  const source = input.requestedMaxTokens == null ? 'default' : 'author-custom'
+  const requestedTokens = input.requestedMaxTokens ?? WORLDVIEW_FIELD_DEFAULT_OUTPUT_TOKENS_V1
+  if (!Number.isSafeInteger(requestedTokens) || requestedTokens < 1) {
+    throw new Error('世界基座输出长度必须是正整数 token。')
+  }
+  if (source === 'author-custom' && requestedTokens > effectiveCapTokens) {
+    throw new Error(
+      `作者请求 ${requestedTokens.toLocaleString()} output tokens，超过当前单次 effective cap ${effectiveCapTokens.toLocaleString()}；LONGOUT-1 尚未启用，已在模型调用前明确拒绝，没有截断、降长或额外调用。`,
+    )
+  }
+  return {
+    version: 1,
+    source,
+    requestedTokens,
+    effectiveMaxTokens: Math.min(requestedTokens, effectiveCapTokens),
+    effectiveCapTokens,
+    modelCapTokens,
+    authorConfigCapTokens,
+    schemaCapTokens,
+    skillCapTokens: input.skillMaxOutputTokens,
+    longOutputMode: 'disabled',
+  }
+}
+
+export function parseWorldviewFieldOutputBudgetV1(value: unknown): WorldviewFieldOutputBudgetV1 {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error('世界基座输出预算证据无效。')
+  }
+  const source = value as Record<string, unknown>
+  const keys = [
+    'version', 'source', 'requestedTokens', 'effectiveMaxTokens', 'effectiveCapTokens',
+    'modelCapTokens', 'authorConfigCapTokens', 'schemaCapTokens', 'skillCapTokens',
+    'longOutputMode',
+  ] as const
+  exactKeys(source, keys, '世界基座输出预算')
+  if (source.version !== 1
+    || !['default', 'author-custom'].includes(String(source.source))
+    || source.longOutputMode !== 'disabled') {
+    throw new Error('世界基座输出预算版本、来源或长输出模式无效。')
+  }
+  for (const key of keys.slice(2, 9)) {
+    if (!Number.isSafeInteger(source[key]) || (source[key] as number) < 1) {
+      throw new Error(`世界基座输出预算 ${key} 必须是正整数。`)
+    }
+  }
+  const cap = Math.min(
+    source.modelCapTokens as number,
+    source.authorConfigCapTokens as number,
+    source.schemaCapTokens as number,
+    source.skillCapTokens as number,
+  )
+  if (source.effectiveCapTokens !== cap
+    || source.effectiveMaxTokens !== Math.min(source.requestedTokens as number, cap)
+    || (source.source === 'author-custom' && (source.requestedTokens as number) > cap)) {
+    throw new Error('世界基座输出预算 effective cap 派生不一致。')
+  }
+  return source as unknown as WorldviewFieldOutputBudgetV1
 }
 
 function exactKeys(source: Record<string, unknown>, expected: readonly string[], label: string): void {
@@ -731,7 +837,10 @@ export async function prepareWorldviewFieldCopilot(
     supplementalContext: input.supplementalContext ?? '',
     inputGuidance: buildAgentSkillInputGuidanceV1(skill, inputState),
     targetField,
-    mode: resolveWorldviewFieldModeV1(request),
+    mode: resolveWorldviewFieldOperationV1({
+      requestedMode: resolveWorldviewFieldModeV1(request),
+      currentValue: snapshot.values[targetField],
+    }),
     assembled,
     snapshot,
     config,
@@ -764,13 +873,9 @@ export async function prepareWorldviewFieldCopilot(
       ],
     })
     const generationOverrides = {
-      maxTokens: 6_000,
       temperature: 0.5,
       ...rendered.generationOverrides,
       ...input.generationOverrides,
-    }
-    if ((generationOverrides.maxTokens ?? 0) > skill.maxOutputTokens) {
-      throw new Error(`Prompt 请求输出 ${generationOverrides.maxTokens} tokens，超过 Skill 上限 ${skill.maxOutputTokens}；已在模型调用前阻止。`)
     }
     nodeInput.frozenPromptMessages = rendered.messages
     nodeInput.promptExecutionEvidence = {
@@ -779,6 +884,16 @@ export async function prepareWorldviewFieldCopilot(
       effectiveMaxTokens: generationOverrides.maxTokens ?? null,
     }
     nodeInput.generationOverrides = generationOverrides
+  }
+  nodeInput.outputBudget = resolveWorldviewFieldOutputBudgetV1({
+    config,
+    targetField,
+    skillMaxOutputTokens: skill.maxOutputTokens,
+    requestedMaxTokens: nodeInput.generationOverrides?.maxTokens,
+  })
+  nodeInput.generationOverrides = {
+    ...nodeInput.generationOverrides,
+    maxTokens: nodeInput.outputBudget.effectiveMaxTokens,
   }
   const node = createWorldviewFieldCopilotNode(nodeInput, dependencies)
   return {
@@ -810,15 +925,23 @@ export function createWorldviewFieldCopilotNode(
     targetField: input.targetField,
     candidate,
   }))
-  const runAI = dependencies.runAI ?? (messages => chat(messages, input.config, {
-    category: input.routingCategory,
-    projectId: input.projectId,
-    configOverrides: {
-      maxTokens: input.generationOverrides?.maxTokens ?? 6_000,
-      temperature: input.generationOverrides?.temperature ?? 0.5,
-    },
-    contextOverflowPolicy: 'reject',
-  }, input.signal))
+  const runAI = dependencies.runAI ?? (async messages => {
+    const result: ChatResult = {}
+    const content = await chat(messages, input.config, {
+      category: input.routingCategory,
+      projectId: input.projectId,
+      configOverrides: {
+        maxTokens: input.outputBudget?.effectiveMaxTokens
+          ?? WORLDVIEW_FIELD_DEFAULT_OUTPUT_TOKENS_V1,
+        temperature: input.generationOverrides?.temperature ?? 0.5,
+      },
+      contextOverflowPolicy: 'reject',
+    }, input.signal, result)
+    if (result.finishReason === 'length') {
+      throw new Error('模型因达到输出上限而停止；本次不是完整候选，已拒绝标记成功。请缩小目标或等待 LONGOUT-1 分段协议。')
+    }
+    return content
+  })
   return {
     id: `agent.world-foundation.worldview-field:${input.projectId}:${input.targetField}:${input.snapshot.updatedAt ?? 0}`,
     kind: 'world-foundation.worldview-field',
