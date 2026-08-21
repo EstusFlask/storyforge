@@ -39,6 +39,11 @@ import {
   type AgentSkillId,
 } from './skill-registry'
 import { parseStructuredOutputV1 } from './structured-output-pipeline'
+import {
+  renderFrozenPromptExecutionV1,
+  type PromptExecutionEvidenceV1,
+  type PromptExecutionOptionsV1,
+} from './prompt-execution'
 
 export const STORY_CORE_FIELDS = [
   'logline',
@@ -78,6 +83,8 @@ export interface StoryCoreCopilotInput {
   config: AIConfig
   routingCategory: string
   generationOverrides?: { temperature?: number; maxTokens?: number }
+  frozenPromptMessages?: ChatMessage[]
+  promptExecutionEvidence?: PromptExecutionEvidenceV1
   signal?: AbortSignal
 }
 
@@ -91,6 +98,7 @@ export interface PreparedStoryCoreCopilot {
   targetField: StoryCoreField
   label: string
   modelIdentity: MasterCandidateModelIdentityV1
+  promptExecutionEvidence?: PromptExecutionEvidenceV1
 }
 
 interface StoryCoreCopilotDependencies {
@@ -259,13 +267,8 @@ function candidateIssues(
   return issues
 }
 
-function buildStoryCoreMessages(input: StoryCoreCopilotInput): ChatMessage[] {
-  const supplemental = input.supplementalContext.trim()
-    ? `\n\n【本轮已验证上游候选（尚未采纳，不属于 Canon）】\n${input.supplementalContext.trim()}`
-    : ''
-  return [{
-    role: 'system',
-    content: `你是 StoryForge 世界基座 Agent，当前执行 story-core Skill。你只为作者生成一个故事核心字段的可确认候选。
+function storyCoreHardSystem(input: StoryCoreCopilotInput): string {
+  return `你是 StoryForge 世界基座 Agent，当前执行 story-core Skill。你只为作者生成一个故事核心字段的可确认候选。
 
 硬性要求：
 1. 本轮目标字段是 ${input.targetField}（${FIELD_LABELS[input.targetField]}），只允许生成这个字段。
@@ -273,7 +276,17 @@ function buildStoryCoreMessages(input: StoryCoreCopilotInput): ChatMessage[] {
 3. 正式上下文是约束；缺失内容可以为本字段做最小候选补全，但不得声称它已成为 Canon。
 4. 角色、故事线和既有大纲属于下游证据：上游缺失时可以据此反推当前目标字段，上游已有内容时用于核对兼容；不得借反推偷偷覆盖其他故事核心字段。
 5. 只输出严格 JSON 对象，不输出 Markdown、解释或额外字段：
-{"field":"${input.targetField}","value":"候选正文"}`,
+{"field":"${input.targetField}","value":"候选正文"}`
+}
+
+function buildStoryCoreMessages(input: StoryCoreCopilotInput): ChatMessage[] {
+  if (input.frozenPromptMessages) return input.frozenPromptMessages.map(message => ({ ...message }))
+  const supplemental = input.supplementalContext.trim()
+    ? `\n\n【本轮已验证上游候选（尚未采纳，不属于 Canon）】\n${input.supplementalContext.trim()}`
+    : ''
+  return [{
+    role: 'system',
+    content: storyCoreHardSystem(input),
   }, {
     role: 'user',
     content: [
@@ -355,6 +368,7 @@ export async function prepareStoryCoreCopilot(
     contextProfile?: AgentContextProfile
     configOverride?: AIConfig
     generationOverrides?: { temperature?: number; maxTokens?: number }
+    promptExecution?: PromptExecutionOptionsV1
     contextCompressionRuntime?: AgentContextCompressionRuntimeV1
     signal?: AbortSignal
   },
@@ -425,6 +439,46 @@ export async function prepareStoryCoreCopilot(
     generationOverrides: input.generationOverrides,
     signal: input.signal,
   }
+  if (input.promptExecution) {
+    const rendered = await renderFrozenPromptExecutionV1({
+      options: input.promptExecution,
+      context: {
+        projectName: project.name,
+        genres: project.genres?.join('/') || project.genre || '',
+        dimension: FIELD_LABELS[targetField],
+        worldContext: assembled.text || '（当前没有已填写的正式设定）',
+        storyCore: assembled.text || '',
+        currentValue: snapshot.values[targetField],
+        generationMode: nodeInput.mode,
+        userHint: '',
+      },
+      hardSystem: storyCoreHardSystem(nodeInput),
+      authorInstruction: request,
+      additionalUserMessages: [
+        nodeInput.inputGuidance,
+        ...(nodeInput.supplementalContext.trim()
+          ? [`【本轮已验证上游候选（尚未采纳，不属于 Canon）】\n${nodeInput.supplementalContext.trim()}`]
+          : []),
+        `【Harness 登记的正式上下文】\n${assembled.text || '（当前没有已填写的正式设定）'}`,
+      ],
+    })
+    const generationOverrides = {
+      maxTokens: 6_000,
+      temperature: 0.5,
+      ...rendered.generationOverrides,
+      ...input.generationOverrides,
+    }
+    if ((generationOverrides.maxTokens ?? 0) > skill.maxOutputTokens) {
+      throw new Error(`Prompt 请求输出 ${generationOverrides.maxTokens} tokens，超过 Skill 上限 ${skill.maxOutputTokens}；已在模型调用前阻止。`)
+    }
+    nodeInput.frozenPromptMessages = rendered.messages
+    nodeInput.promptExecutionEvidence = {
+      ...rendered.evidence,
+      effectiveTemperature: generationOverrides.temperature ?? null,
+      effectiveMaxTokens: generationOverrides.maxTokens ?? null,
+    }
+    nodeInput.generationOverrides = generationOverrides
+  }
   const node = createStoryCoreCopilotNode(nodeInput, dependencies)
   return {
     node,
@@ -436,6 +490,7 @@ export async function prepareStoryCoreCopilot(
     targetField,
     label: FIELD_LABELS[targetField],
     modelIdentity: { provider: config.provider, model: config.model },
+    promptExecutionEvidence: nodeInput.promptExecutionEvidence,
   }
 }
 
@@ -481,10 +536,6 @@ export function createStoryCoreCopilotNode(
   }
 }
 
-function compactText(value: string | null | undefined, max: number): string {
-  return (value ?? '').trim().replace(/\s+/g, ' ').slice(0, max)
-}
-
 export function formatStoryCoreGenerationRequestV1(input: {
   field: StoryCoreField
   mode: FieldGenerationMode
@@ -496,15 +547,11 @@ export function formatStoryCoreGenerationRequestV1(input: {
   const parts = [
     `生成故事核心字段。目标字段=${input.field}；生成模式=${input.mode}。`,
   ]
-  const hint = compactText(input.hint, 360)
+  const hint = (input.hint ?? '').trim()
   if (hint) parts.push(`作者要求：${hint}`)
-  if (input.parameterValues && Object.keys(input.parameterValues).length) {
-    const serialized = compactText(JSON.stringify(input.parameterValues), 240)
-    if (serialized) parts.push(`模板参数：${serialized}`)
+  const request = parts.join('\n')
+  if (request.length > 8_000) {
+    throw new Error('故事核心作者要求超过 8000 字符；没有截断，已在模型调用前阻止。')
   }
-  const systemOverride = compactText(input.systemOverride, 160)
-  if (systemOverride) parts.push(`自定义系统要求：${systemOverride}`)
-  const userOverride = compactText(input.userOverride, 160)
-  if (userOverride) parts.push(`自定义用户要求：${userOverride}`)
-  return parts.join('\n').slice(0, 1_000)
+  return request
 }

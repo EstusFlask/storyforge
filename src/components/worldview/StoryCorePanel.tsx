@@ -211,14 +211,23 @@ function FieldEditor({
   const handleGenerate = async () => {
     onRunningChange(true)
     try {
-      await copilot.submitRequest(formatStoryCoreGenerationRequestV1({
+      const request = formatStoryCoreGenerationRequestV1({
         field: field.key,
         mode,
         hint,
-        parameterValues: Object.keys(parameterValues).length ? parameterValues : undefined,
-        systemOverride,
-        userOverride,
-      }))
+      })
+      await copilot.submitTargetedRequest(request, {
+        agentId: 'world-origin',
+        skillId: 'world-origin.story-core',
+        instruction: request,
+        promptExecution: {
+          version: 1,
+          moduleKey: 'story.generate',
+          ...(Object.keys(parameterValues).length ? { parameterValues } : {}),
+          ...(systemOverride === null ? {} : { systemOverride }),
+          ...(userOverride === null ? {} : { userOverride }),
+        },
+      })
     } finally {
       onRunningChange(false)
     }

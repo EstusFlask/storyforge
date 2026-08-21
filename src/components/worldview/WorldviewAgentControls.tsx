@@ -44,14 +44,23 @@ export default function WorldviewAgentControls({
   const handleGenerate = async () => {
     onRunningChange(true)
     try {
-      await copilot.submitRequest(formatWorldviewFieldGenerationRequestV1({
+      const request = formatWorldviewFieldGenerationRequestV1({
         field,
         mode,
         hint,
-        parameterValues: Object.keys(parameterValues).length ? parameterValues : undefined,
-        systemOverride,
-        userOverride,
-      }))
+      })
+      await copilot.submitTargetedRequest(request, {
+        agentId: 'world-origin',
+        skillId: 'world-origin.worldview-field',
+        instruction: request,
+        promptExecution: {
+          version: 1,
+          moduleKey: 'worldview.dimension',
+          ...(Object.keys(parameterValues).length ? { parameterValues } : {}),
+          ...(systemOverride === null ? {} : { systemOverride }),
+          ...(userOverride === null ? {} : { userOverride }),
+        },
+      })
     } finally {
       onRunningChange(false)
     }

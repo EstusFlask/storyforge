@@ -39,8 +39,22 @@ export interface AgentSkillExecutionBindingV1 {
   toolSchemaHash: string
 }
 
+/** Immutable PromptTemplate/options identity bound before a formal step starts. */
+export interface AgentRunPromptExecutionBindingV1 {
+  version: 1
+  moduleKey: string
+  templateId: number | null
+  templateName: string
+  templateScope: 'system' | 'user'
+  templateUpdatedAt: number
+  templateHash: string
+  parameterValuesHash: string
+  overridesHash: string
+}
+
 export interface AgentRunStepExecutionBindingV1 extends AgentSkillExecutionBindingV1 {
   stepId: string
+  promptExecution?: AgentRunPromptExecutionBindingV1
 }
 
 export type AgentOptionalContextActivationReasonV2 =

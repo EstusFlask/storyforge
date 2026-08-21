@@ -160,10 +160,37 @@ function readExecutionBinding(value: unknown, path: string): AgentRunStepExecuti
     'promptVersion',
     'toolSchemaVersion',
     'toolSchemaHash',
+    'promptExecution',
   ] as const
-  assertExactKeys(record, keys, keys, path)
+  assertExactKeys(record, keys, keys.filter(key => key !== 'promptExecution'), path)
   if (record.version !== 1 || record.skillVersion !== 1) {
     failSchema('unsupported_version', path, '仅支持 execution binding v1 / Skill v1')
+  }
+  let promptExecution: AgentRunStepExecutionBindingV1['promptExecution']
+  if (record.promptExecution !== undefined) {
+    const prompt = readRecord(record.promptExecution, `${path}.promptExecution`)
+    const promptKeys = [
+      'version', 'moduleKey', 'templateId', 'templateName', 'templateScope',
+      'templateUpdatedAt', 'templateHash', 'parameterValuesHash', 'overridesHash',
+    ] as const
+    assertExactKeys(prompt, promptKeys, promptKeys, `${path}.promptExecution`)
+    if (prompt.version !== 1) failSchema('unsupported_version', `${path}.promptExecution.version`, '仅支持 v1')
+    if (prompt.templateScope !== 'system' && prompt.templateScope !== 'user') {
+      failSchema('invalid_value', `${path}.promptExecution.templateScope`, '必须是 system 或 user')
+    }
+    promptExecution = {
+      version: 1,
+      moduleKey: readString(prompt.moduleKey, `${path}.promptExecution.moduleKey`, { max: 160 }),
+      templateId: prompt.templateId === null
+        ? null
+        : readInteger(prompt.templateId, `${path}.promptExecution.templateId`, { min: 1 }),
+      templateName: readString(prompt.templateName, `${path}.promptExecution.templateName`, { max: 500 }),
+      templateScope: prompt.templateScope,
+      templateUpdatedAt: readInteger(prompt.templateUpdatedAt, `${path}.promptExecution.templateUpdatedAt`),
+      templateHash: readHash(prompt.templateHash, `${path}.promptExecution.templateHash`),
+      parameterValuesHash: readHash(prompt.parameterValuesHash, `${path}.promptExecution.parameterValuesHash`),
+      overridesHash: readHash(prompt.overridesHash, `${path}.promptExecution.overridesHash`),
+    }
   }
   return {
     stepId: readString(record.stepId, `${path}.stepId`, { max: 160 }),
@@ -173,6 +200,7 @@ function readExecutionBinding(value: unknown, path: string): AgentRunStepExecuti
     promptVersion: readString(record.promptVersion, `${path}.promptVersion`, { max: 160 }),
     toolSchemaVersion: readString(record.toolSchemaVersion, `${path}.toolSchemaVersion`, { max: 160 }),
     toolSchemaHash: readHash(record.toolSchemaHash, `${path}.toolSchemaHash`),
+    ...(promptExecution ? { promptExecution } : {}),
   }
 }
 

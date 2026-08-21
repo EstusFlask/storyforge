@@ -11,6 +11,7 @@ const mocks = vi.hoisted(() => ({
     busy: false,
     error: null as string | null,
     submitRequest: vi.fn(async () => undefined),
+    submitTargetedRequest: vi.fn(async () => undefined),
     updateCandidate: vi.fn(async () => undefined),
     rejectCandidate: vi.fn(async () => undefined),
     adoptCandidate: vi.fn(async () => undefined),
@@ -117,10 +118,15 @@ describe('R-HARNESS33 · 分步骤角色面板接入 character.create Skill', ()
     const button = Array.from(host.querySelectorAll('button')).find(item => item.textContent?.includes('AI 设计角色'))!
     await act(async () => button.click())
 
-    const request = mocks.copilot.submitRequest.mock.calls.at(-1)?.[0] as string
+    const [request, task] = mocks.copilot.submitTargetedRequest.mock.calls.at(-1)!
     expect(request).toContain('只创建角色候选')
     expect(request).toContain('作者要求与本轮维度')
     expect(request).toContain('已有角色：无')
+    expect(task).toMatchObject({
+      agentId: 'character',
+      skillId: 'character.create',
+      promptExecution: { version: 1, moduleKey: 'character.generate' },
+    })
     expect(mocks.characterStore.addCharacter).not.toHaveBeenCalled()
   })
 

@@ -149,12 +149,21 @@ export default function CharacterPanel({ project, view = 'generator', initialCha
     const enrichedHint = [hint, rosterGap, dimInstruction, `已有角色：${existing || '无'}`]
       .filter(Boolean)
       .join('\n')
-    await copilot.submitRequest(formatCharacterGenerationRequestV1({
+    const request = formatCharacterGenerationRequestV1({
       hint: enrichedHint,
-      parameterValues: Object.keys(parameterValues).length ? parameterValues : undefined,
-      systemOverride,
-      userOverride,
-    }))
+    })
+    await copilot.submitTargetedRequest(request, {
+      agentId: 'character',
+      skillId: 'character.create',
+      instruction: request,
+      promptExecution: {
+        version: 1,
+        moduleKey: 'character.generate',
+        ...(Object.keys(parameterValues).length ? { parameterValues } : {}),
+        ...(systemOverride === null ? {} : { systemOverride }),
+        ...(userOverride === null ? {} : { userOverride }),
+      },
+    })
   }
 
   const pendingCharacterCandidates = copilot.pendingCandidates.filter(candidate => (

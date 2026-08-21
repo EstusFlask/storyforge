@@ -181,6 +181,17 @@ import {
 } from './narrative-brief'
 import type { InformationBoundaryManifestV1 } from './information-boundary'
 import type { StructuredOutputRunEvidenceV1 } from './structured-output-pipeline'
+import { usePromptStore } from '../../stores/prompt'
+import {
+  freezePromptExecutionOptionsV1,
+  parsePromptExecutionOptionsV1,
+  promptExecutionRequestForModuleV1,
+  verifyPromptExecutionOptionsV1,
+  type GovernedPromptModuleKeyV1,
+  type PromptExecutionEvidenceV1,
+  type PromptExecutionOptionsV1,
+  type PromptExecutionRequestV1,
+} from './prompt-execution'
 
 export { DOMAIN_AGENT_IDS }
 export type { DomainAgentId }
@@ -204,6 +215,8 @@ export interface MasterAgentTask {
   characterSupplementRequest?: CharacterSupplementTaskInputV1
   /** 故事线进度映射固定的已写章节。 */
   storylineProgressChapterId?: number
+  /** New formal plans freeze the selected PromptTemplate and run options here. */
+  promptExecution?: PromptExecutionOptionsV1
 }
 
 export interface MasterAgentPlan {
@@ -269,6 +282,8 @@ export interface MasterCandidatePayload {
   creativeArtifact?: CreativeArtifactV1
   /** Absent on candidates created before WEH-0E or on free-text outputs. */
   structuredOutputEvidence?: StructuredOutputRunEvidenceV1
+  /** Absent on candidates created before WEH-0F or on non-governed prompt paths. */
+  promptExecutionEvidence?: PromptExecutionEvidenceV1
   /** Per-run narrative drive derived only from already assembled registered sources. */
   narrativeBrief?: NarrativeBriefV1
   /** Prose-only immutable knowledge boundary used for local author revalidation. */
@@ -302,6 +317,7 @@ export interface PinnedMasterAgentTaskV1 {
   characterRevisionRequest?: CharacterRevisionTaskInputV1
   characterSupplementRequest?: CharacterSupplementTaskInputV1
   storylineProgressChapterId?: number
+  promptExecution?: PromptExecutionRequestV1
   id?: string
 }
 
@@ -310,6 +326,42 @@ export interface MasterAgentReplanFailureV1 {
   code: string
   category: string
   fingerprint: string
+}
+
+function governedPromptModuleForTaskV1(
+  task: Pick<MasterAgentTask, 'agentId' | 'skillId'>,
+): GovernedPromptModuleKeyV1 | null {
+  const skill = resolveAgentSkillV1(task.agentId, task.skillId)
+  if (skill.executionMode === 'worldview-field') return 'worldview.dimension'
+  if (skill.executionMode === 'story-core') return 'story.generate'
+  if (task.agentId === 'character' && skill.executionMode === 'create') return 'character.generate'
+  return null
+}
+
+async function freezeMasterAgentPlanPromptsV1(plan: MasterAgentPlan): Promise<MasterAgentPlan> {
+  const tasks = await Promise.all(plan.tasks.map(async task => {
+    const expectedModuleKey = governedPromptModuleForTaskV1(task)
+    if (!expectedModuleKey) {
+      if (task.promptExecution !== undefined) {
+        throw new Error(`主 Agent 任务 ${task.id} 的 Skill 不允许携带 Prompt 执行选项。`)
+      }
+      return task
+    }
+    if (task.promptExecution) {
+      const frozen = parsePromptExecutionOptionsV1(task.promptExecution, expectedModuleKey)
+      await verifyPromptExecutionOptionsV1(frozen)
+      return { ...task, promptExecution: frozen }
+    }
+    const request = promptExecutionRequestForModuleV1(expectedModuleKey)
+    return {
+      ...task,
+      promptExecution: await freezePromptExecutionOptionsV1({
+        request,
+        template: usePromptStore.getState().getActive(expectedModuleKey),
+      }),
+    }
+  }))
+  return { ...plan, tasks }
 }
 
 function extractJsonObject(text: string): Record<string, unknown> {
@@ -545,40 +597,55 @@ export async function createMasterAgentPlan(input: {
     const characterSupplementRequest = pinned.characterSupplementRequest === undefined
       ? undefined
       : parseCharacterSupplementTaskInputV1(pinned.characterSupplementRequest)
-    return {
+    const instruction = pinned.instruction.trim()
+    if (instruction.length > 8_000) {
+      throw new Error('固定领域任务的作者要求超过 8000 字符；已在模型调用前阻止，请缩短后重试。')
+    }
+    const task: MasterAgentTask = {
+      id: pinned.id ?? `${pinned.agentId}-targeted`,
+      agentId: pinned.agentId,
+      ...(pinned.skillId ? { skillId: pinned.skillId } : {}),
+      instruction,
+      dependsOn: [...new Set(pinned.dependsOn ?? [])].slice(0, 5),
+      ...(pinned.perspectiveCharacterId !== undefined
+        ? { perspectiveCharacterId: pinned.perspectiveCharacterId }
+        : {}),
+      ...(pinned.inspirationFragmentIds !== undefined
+        ? { inspirationFragmentIds: [...new Set(pinned.inspirationFragmentIds)].slice(0, 24) }
+        : {}),
+      ...(pinned.characterDrivenPlanId !== undefined
+        ? { characterDrivenPlanId: pinned.characterDrivenPlanId }
+        : {}),
+      ...(characterRevisionRequest !== undefined
+        ? { characterRevisionRequest }
+        : {}),
+      ...(characterSupplementRequest !== undefined
+        ? { characterSupplementRequest }
+        : {}),
+      ...(pinned.storylineProgressChapterId !== undefined
+        ? { storylineProgressChapterId: pinned.storylineProgressChapterId }
+        : {}),
+    }
+    const expectedPromptModule = governedPromptModuleForTaskV1(task)
+    if (pinned.promptExecution !== undefined) {
+      if (!expectedPromptModule || pinned.promptExecution.moduleKey !== expectedPromptModule) {
+        throw new Error('固定任务的 Prompt 模块与 Agent Skill 不一致。')
+      }
+      task.promptExecution = await freezePromptExecutionOptionsV1({
+        request: pinned.promptExecution,
+        template: usePromptStore.getState().getActive(expectedPromptModule),
+      })
+    }
+    return freezeMasterAgentPlanPromptsV1({
       summary: pinned.agentId === 'inspiration'
         ? '按作者选择的灵感碎片生成结构化反推候选。'
         : '按固定领域任务执行一次受治理候选生成。',
-      tasks: [{
-        id: pinned.id ?? `${pinned.agentId}-targeted`,
-        agentId: pinned.agentId,
-        ...(pinned.skillId ? { skillId: pinned.skillId } : {}),
-        instruction: pinned.instruction.trim().slice(0, 8_000),
-        dependsOn: [...new Set(pinned.dependsOn ?? [])].slice(0, 5),
-        ...(pinned.perspectiveCharacterId !== undefined
-          ? { perspectiveCharacterId: pinned.perspectiveCharacterId }
-          : {}),
-        ...(pinned.inspirationFragmentIds !== undefined
-          ? { inspirationFragmentIds: [...new Set(pinned.inspirationFragmentIds)].slice(0, 24) }
-          : {}),
-        ...(pinned.characterDrivenPlanId !== undefined
-          ? { characterDrivenPlanId: pinned.characterDrivenPlanId }
-          : {}),
-        ...(characterRevisionRequest !== undefined
-          ? { characterRevisionRequest }
-          : {}),
-        ...(characterSupplementRequest !== undefined
-          ? { characterSupplementRequest }
-          : {}),
-        ...(pinned.storylineProgressChapterId !== undefined
-          ? { storylineProgressChapterId: pinned.storylineProgressChapterId }
-          : {}),
-      }],
+      tasks: [task],
       workflow,
-    }
+    })
   }
   if (getMasterWorkflowV1(workflow).planner === 'skip') {
-    return fallbackPlan(request, workflow)
+    return freezeMasterAgentPlanPromptsV1(fallbackPlan(request, workflow))
   }
   const config = resolveRequestConfig(
     useAIConfigStore.getState().config,
@@ -634,13 +701,13 @@ export async function createMasterAgentPlan(input: {
       input.budget!.settleCall(reservation, output)
       settled = true
     }
-    return sanitizePlan(extractJsonObject(output), request, workflow)
+    return freezeMasterAgentPlanPromptsV1(sanitizePlan(extractJsonObject(output), request, workflow))
   } catch (error) {
     if (reservation && !settled) input.budget!.settleFailedCall(reservation)
     if (error instanceof AgentTeamBudgetExceededError) throw error
     if (input.signal?.aborted) throw error
     console.warn('[master-agent] 计划模型失败，使用确定性路由降级：', error)
-    return fallbackPlan(request, workflow)
+    return freezeMasterAgentPlanPromptsV1(fallbackPlan(request, workflow))
   }
 }
 
@@ -872,6 +939,7 @@ async function executeSequentialMasterAgentPlan(
             routingCategory: `${AGENT_ROLE_CATEGORIES['world-origin']}.worldview-field`,
             contextProfile,
             contextCompressionRuntime,
+            promptExecution: task.promptExecution,
             signal: input.signal,
           })
           const result = await runBudgetedGenerationNode({
@@ -899,6 +967,7 @@ async function executeSequentialMasterAgentPlan(
               dependencyBindings,
               generator: prepared.modelIdentity,
               structuredOutputEvidence: result.structuredOutputEvidence,
+              promptExecutionEvidence: prepared.promptExecutionEvidence,
             },
             draft,
             runtimeNode: prepared.node,
@@ -916,6 +985,7 @@ async function executeSequentialMasterAgentPlan(
             routingCategory: `${AGENT_ROLE_CATEGORIES['world-origin']}.story-core`,
             contextProfile,
             contextCompressionRuntime,
+            promptExecution: task.promptExecution,
             signal: input.signal,
           })
           const result = await runBudgetedGenerationNode({
@@ -943,6 +1013,7 @@ async function executeSequentialMasterAgentPlan(
               dependencyBindings,
               generator: prepared.modelIdentity,
               structuredOutputEvidence: result.structuredOutputEvidence,
+              promptExecutionEvidence: prepared.promptExecutionEvidence,
             },
             draft,
             runtimeNode: prepared.node,
@@ -1142,6 +1213,7 @@ async function executeSequentialMasterAgentPlan(
             routingCategory: AGENT_ROLE_CATEGORIES.character,
             contextProfile,
             contextCompressionRuntime,
+            promptExecution: task.promptExecution,
             signal: input.signal,
           })
           const result = await runBudgetedGenerationNode({
@@ -1167,6 +1239,7 @@ async function executeSequentialMasterAgentPlan(
               dependsOnTaskIds: task.dependsOn,
               dependencyBindings,
               structuredOutputEvidence: result.structuredOutputEvidence,
+              promptExecutionEvidence: prepared.promptExecutionEvidence,
             },
             draft,
             runtimeNode: prepared.node,

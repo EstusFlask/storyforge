@@ -54,6 +54,12 @@ import {
   type AgentSkillId,
 } from './skill-registry'
 import { parseStructuredOutputV1 } from './structured-output-pipeline'
+import {
+  renderFrozenPromptExecutionV1,
+  type PromptExecutionEvidenceV1,
+  type PromptExecutionOptionsV1,
+} from './prompt-execution'
+import type { ChatMessage } from '../types'
 
 export const MAX_CHARACTER_CANDIDATE_CHARS = 40_000
 const MAX_CHARACTER_NAME_CHARS = 80
@@ -87,6 +93,8 @@ export interface CharacterCopilotInput {
   snapshot: CharacterRosterSnapshot
   config: AIConfig
   generationOverrides?: { temperature?: number; maxTokens?: number }
+  frozenPromptMessages?: ChatMessage[]
+  promptExecutionEvidence?: PromptExecutionEvidenceV1
   routingCategory?: string
   signal?: AbortSignal
 }
@@ -97,6 +105,7 @@ export interface PreparedCharacterCopilot {
   contextSources: string[]
   snapshot: CharacterRosterSnapshot
   contextEvidence: AgentContextEvidence
+  promptExecutionEvidence?: PromptExecutionEvidenceV1
 }
 
 interface CharacterCopilotDependencies {
@@ -263,7 +272,12 @@ ${dimensionLines}
 姓名与 shortDescription 必填。所有字段必须是字符串；三轴只能使用上面的英文枚举。`
 }
 
+function characterHardSystem(input: CharacterCopilotInput): string {
+  return `${input.inputGuidance}\n\n${structuredOutputContract()}\n\n权限与作用域：本轮只生成一名新角色候选；不得修改世界观、故事核心、故事线、大纲、物品或任何已有角色。正式上下文是只读约束，候选必须等待作者确认后才可采纳。`
+}
+
 function buildCharacterCopilotPrompt(input: CharacterCopilotInput) {
+  if (input.frozenPromptMessages) return input.frozenPromptMessages.map(message => ({ ...message }))
   const messages = buildCharacterPrompt(
     input.projectName,
     input.genres,
@@ -271,16 +285,15 @@ function buildCharacterCopilotPrompt(input: CharacterCopilotInput) {
     input.characterContext,
     input.authorRequest,
   )
-  const contract = structuredOutputContract()
-  const inputPolicy = input.inputGuidance
+  const contract = characterHardSystem(input)
   const systemIndex = messages.findIndex(message => message.role === 'system')
   if (systemIndex >= 0) {
     messages[systemIndex] = {
       ...messages[systemIndex],
-      content: `${messages[systemIndex].content}\n\n${inputPolicy}\n\n${contract}`,
+      content: `${messages[systemIndex].content}\n\n${contract}`,
     }
   } else {
-    messages.unshift({ role: 'system', content: `${inputPolicy}\n\n${contract}` })
+    messages.unshift({ role: 'system', content: contract })
   }
   return messages
 }
@@ -321,6 +334,7 @@ export async function prepareCharacterCopilot(input: {
   /** 节点级 AI preset 的解析结果；未提供时沿用全局路由配置。 */
   configOverride?: AIConfig
   generationOverrides?: { temperature?: number; maxTokens?: number }
+  promptExecution?: PromptExecutionOptionsV1
   contextCompressionRuntime?: AgentContextCompressionRuntimeV1
   signal?: AbortSignal
 }): Promise<PreparedCharacterCopilot> {
@@ -410,6 +424,41 @@ export async function prepareCharacterCopilot(input: {
     routingCategory,
     signal: input.signal,
   }
+  if (input.promptExecution) {
+    const rendered = await renderFrozenPromptExecutionV1({
+      options: input.promptExecution,
+      context: {
+        projectName: project.name,
+        genres: nodeInput.genres,
+        worldContext: nodeInput.worldContext || '（暂无）',
+        existingCharacters: nodeInput.characterContext || '（暂无）',
+        characters: nodeInput.characterContext || '（暂无）',
+        userHint: '',
+      },
+      hardSystem: characterHardSystem(nodeInput),
+      authorInstruction: authorRequest,
+      additionalUserMessages: [
+        `【Harness 登记的世界与故事上下文】\n${nodeInput.worldContext || '（暂无）'}`,
+        `【Harness 登记的已有角色】\n${nodeInput.characterContext || '（暂无）'}`,
+      ],
+    })
+    const generationOverrides = {
+      maxTokens: 6_000,
+      temperature: nodeInput.config.temperature,
+      ...rendered.generationOverrides,
+      ...input.generationOverrides,
+    }
+    if ((generationOverrides.maxTokens ?? 0) > skill.maxOutputTokens) {
+      throw new Error(`Prompt 请求输出 ${generationOverrides.maxTokens} tokens，超过 Skill 上限 ${skill.maxOutputTokens}；已在模型调用前阻止。`)
+    }
+    nodeInput.frozenPromptMessages = rendered.messages
+    nodeInput.promptExecutionEvidence = {
+      ...rendered.evidence,
+      effectiveTemperature: generationOverrides.temperature ?? null,
+      effectiveMaxTokens: generationOverrides.maxTokens ?? null,
+    }
+    nodeInput.generationOverrides = generationOverrides
+  }
   const node = createCharacterCopilotNode(nodeInput)
   return {
     node,
@@ -417,6 +466,7 @@ export async function prepareCharacterCopilot(input: {
     contextSources: nodeInput.contextSources,
     snapshot: afterRead,
     contextEvidence,
+    promptExecutionEvidence: nodeInput.promptExecutionEvidence,
   }
 }
 
@@ -537,10 +587,6 @@ export async function adoptCharacterCopilotCandidate(input: {
   )
 }
 
-function compactCharacterRequestText(value: string | null | undefined, max: number): string {
-  return (value ?? '').trim().replace(/\s+/g, ' ').slice(0, max)
-}
-
 /**
  * 分步骤角色面板与主 Agent 共用的任务合同入口。
  * Prompt 参数仍可见、可审计，但不再由组件直接拼接上下文或决定写回路径。
@@ -554,15 +600,11 @@ export function formatCharacterGenerationRequestV1(input: {
   const parts = [
     '生成一名新角色。只创建角色候选，不修改世界观、故事核心、故事线、大纲、物品或已有角色。',
   ]
-  const hint = compactCharacterRequestText(input.hint, 640)
+  const hint = (input.hint ?? '').trim()
   if (hint) parts.push(`作者要求与本轮维度：${hint}`)
-  if (input.parameterValues && Object.keys(input.parameterValues).length) {
-    const serialized = compactCharacterRequestText(JSON.stringify(input.parameterValues), 240)
-    if (serialized) parts.push(`模板参数：${serialized}`)
+  const request = parts.join('\n')
+  if (request.length > 8_000) {
+    throw new Error('角色作者要求超过 8000 字符；没有截断，已在模型调用前阻止。')
   }
-  const systemOverride = compactCharacterRequestText(input.systemOverride, 160)
-  if (systemOverride) parts.push(`自定义系统要求：${systemOverride}`)
-  const userOverride = compactCharacterRequestText(input.userOverride, 160)
-  if (userOverride) parts.push(`自定义用户要求：${userOverride}`)
-  return parts.join('\n').slice(0, 1_000)
+  return request
 }

@@ -39,6 +39,11 @@ import {
   type AgentSkillId,
 } from './skill-registry'
 import { parseStructuredOutputV1 } from './structured-output-pipeline'
+import {
+  renderFrozenPromptExecutionV1,
+  type PromptExecutionEvidenceV1,
+  type PromptExecutionOptionsV1,
+} from './prompt-execution'
 
 export const WORLDVIEW_AGENT_FIELDS = [
   'worldOrigin',
@@ -92,6 +97,8 @@ export interface WorldviewFieldCopilotInput {
   config: AIConfig
   routingCategory: string
   generationOverrides?: { temperature?: number; maxTokens?: number }
+  frozenPromptMessages?: ChatMessage[]
+  promptExecutionEvidence?: PromptExecutionEvidenceV1
   signal?: AbortSignal
 }
 
@@ -105,6 +112,7 @@ export interface PreparedWorldviewFieldCopilot {
   targetField: WorldviewAgentField
   label: string
   modelIdentity: MasterCandidateModelIdentityV1
+  promptExecutionEvidence?: PromptExecutionEvidenceV1
 }
 
 interface WorldviewFieldCopilotDependencies {
@@ -400,13 +408,8 @@ function outputContract(field: WorldviewAgentField): string {
     : `{"field":"${field}","value":"候选正文"}`
 }
 
-function buildWorldviewFieldMessages(input: WorldviewFieldCopilotInput): ChatMessage[] {
-  const supplemental = input.supplementalContext.trim()
-    ? `\n\n【本轮已验证上游候选（尚未采纳，不属于 Canon）】\n${input.supplementalContext.trim()}`
-    : ''
-  return [{
-    role: 'system',
-    content: `你是 StoryForge 世界基座 Agent，当前执行 worldview-field Skill。你只为作者生成一个世界基座字段的可确认候选。
+function worldviewFieldHardSystem(input: WorldviewFieldCopilotInput): string {
+  return `你是 StoryForge 世界基座 Agent，当前执行 worldview-field Skill。你只为作者生成一个世界基座字段的可确认候选。
 
 硬性要求：
 1. 本轮目标字段是 ${input.targetField}（${WORLDVIEW_AGENT_FIELD_LABELS[input.targetField]}），只允许生成这个字段。
@@ -415,7 +418,17 @@ function buildWorldviewFieldMessages(input: WorldviewFieldCopilotInput): ChatMes
 4. 世界观、规则、事实、故事核心和其他已确认内容属于正式约束；角色、故事线和大纲属于下游证据，只能在上游缺失时用于反推，不能覆盖已确认的上游设定。
 5. 不得输出对其他字段的顺带修改，也不得把推断冒充已经写入的数据。
 6. 只输出严格 JSON 对象，不输出 Markdown、解释或额外字段：
-${outputContract(input.targetField)}`,
+${outputContract(input.targetField)}`
+}
+
+function buildWorldviewFieldMessages(input: WorldviewFieldCopilotInput): ChatMessage[] {
+  if (input.frozenPromptMessages) return input.frozenPromptMessages.map(message => ({ ...message }))
+  const supplemental = input.supplementalContext.trim()
+    ? `\n\n【本轮已验证上游候选（尚未采纳，不属于 Canon）】\n${input.supplementalContext.trim()}`
+    : ''
+  return [{
+    role: 'system',
+    content: worldviewFieldHardSystem(input),
   }, {
     role: 'user',
     content: [
@@ -500,6 +513,7 @@ export async function prepareWorldviewFieldCopilot(
     contextProfile?: AgentContextProfile
     configOverride?: AIConfig
     generationOverrides?: { temperature?: number; maxTokens?: number }
+    promptExecution?: PromptExecutionOptionsV1
     contextCompressionRuntime?: AgentContextCompressionRuntimeV1
     signal?: AbortSignal
   },
@@ -572,6 +586,46 @@ export async function prepareWorldviewFieldCopilot(
     generationOverrides: input.generationOverrides,
     signal: input.signal,
   }
+  if (input.promptExecution) {
+    const rendered = await renderFrozenPromptExecutionV1({
+      options: input.promptExecution,
+      context: {
+        projectName: project.name,
+        genres: project.genres?.join('/') || project.genre || '',
+        dimension: WORLDVIEW_AGENT_FIELD_LABELS[targetField],
+        worldContext: assembled.text || '（当前没有已填写的正式设定）',
+        existingWorldview: assembled.text || '',
+        currentValue: JSON.stringify(snapshot.values[targetField]),
+        generationMode: nodeInput.mode,
+        userHint: '',
+      },
+      hardSystem: worldviewFieldHardSystem(nodeInput),
+      authorInstruction: request,
+      additionalUserMessages: [
+        nodeInput.inputGuidance,
+        ...(nodeInput.supplementalContext.trim()
+          ? [`【本轮已验证上游候选（尚未采纳，不属于 Canon）】\n${nodeInput.supplementalContext.trim()}`]
+          : []),
+        `【Harness 登记的正式上下文】\n${assembled.text || '（当前没有已填写的正式设定）'}`,
+      ],
+    })
+    const generationOverrides = {
+      maxTokens: 6_000,
+      temperature: 0.5,
+      ...rendered.generationOverrides,
+      ...input.generationOverrides,
+    }
+    if ((generationOverrides.maxTokens ?? 0) > skill.maxOutputTokens) {
+      throw new Error(`Prompt 请求输出 ${generationOverrides.maxTokens} tokens，超过 Skill 上限 ${skill.maxOutputTokens}；已在模型调用前阻止。`)
+    }
+    nodeInput.frozenPromptMessages = rendered.messages
+    nodeInput.promptExecutionEvidence = {
+      ...rendered.evidence,
+      effectiveTemperature: generationOverrides.temperature ?? null,
+      effectiveMaxTokens: generationOverrides.maxTokens ?? null,
+    }
+    nodeInput.generationOverrides = generationOverrides
+  }
   const node = createWorldviewFieldCopilotNode(nodeInput, dependencies)
   return {
     node,
@@ -583,6 +637,7 @@ export async function prepareWorldviewFieldCopilot(
     targetField,
     label: WORLDVIEW_AGENT_FIELD_LABELS[targetField],
     modelIdentity: { provider: config.provider, model: config.model },
+    promptExecutionEvidence: nodeInput.promptExecutionEvidence,
   }
 }
 
@@ -630,10 +685,6 @@ export function createWorldviewFieldCopilotNode(
   }
 }
 
-function compactText(value: string | null | undefined, max: number): string {
-  return (value ?? '').trim().replace(/\s+/g, ' ').slice(0, max)
-}
-
 export function formatWorldviewFieldGenerationRequestV1(input: {
   field: WorldviewAgentField
   mode: FieldGenerationMode
@@ -645,15 +696,11 @@ export function formatWorldviewFieldGenerationRequestV1(input: {
   const parts = [
     `生成世界基座字段。目标字段=${input.field}；生成模式=${input.mode}。`,
   ]
-  const hint = compactText(input.hint, 360)
+  const hint = (input.hint ?? '').trim()
   if (hint) parts.push(`作者要求：${hint}`)
-  if (input.parameterValues && Object.keys(input.parameterValues).length) {
-    const serialized = compactText(JSON.stringify(input.parameterValues), 240)
-    if (serialized) parts.push(`模板参数：${serialized}`)
+  const request = parts.join('\n')
+  if (request.length > 8_000) {
+    throw new Error('世界基座作者要求超过 8000 字符；没有截断，已在模型调用前阻止。')
   }
-  const systemOverride = compactText(input.systemOverride, 160)
-  if (systemOverride) parts.push(`自定义系统要求：${systemOverride}`)
-  const userOverride = compactText(input.userOverride, 160)
-  if (userOverride) parts.push(`自定义用户要求：${userOverride}`)
-  return parts.join('\n').slice(0, 1_000)
+  return request
 }

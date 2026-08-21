@@ -99,6 +99,12 @@ import { WORLDVIEW_AGENT_FIELDS } from '../worldview-field-copilot'
 import { MAX_INSPIRATION_FRAGMENTS } from '../../inspiration/workspace'
 import { parseCharacterRevisionTaskInputV1 } from '../character-revision-copilot'
 import { parseWorkspaceContentRevisionV1 } from '../../authoring/content-revision'
+import {
+  assertPromptEvidenceMatchesOptionsV1,
+  parsePromptExecutionEvidenceV1,
+  parsePromptExecutionOptionsV1,
+  type GovernedPromptModuleKeyV1,
+} from '../prompt-execution'
 
 export const MASTER_AGENT_PLAN_CHECKPOINT_KIND_V1 = 'master-agent-plan'
 export const MASTER_AGENT_PLAN_CHECKPOINT_VERSION_V1 = 1 as const
@@ -419,6 +425,17 @@ function readOptionalSkillId(
   return skill.id as AgentSkillId
 }
 
+function promptModuleForPlanTaskV1(
+  agentId: DomainAgentId,
+  skillId: AgentSkillId | undefined,
+): GovernedPromptModuleKeyV1 | null {
+  const skill = resolveAgentSkillV1(agentId, skillId)
+  if (skill.executionMode === 'worldview-field') return 'worldview.dimension'
+  if (skill.executionMode === 'story-core') return 'story.generate'
+  if (agentId === 'character' && skill.executionMode === 'create') return 'character.generate'
+  return null
+}
+
 function assertAcyclic(plan: MasterAgentPlan): void {
   const byId = new Map(plan.tasks.map(task => [task.id, task]))
   const visiting = new Set<string>()
@@ -450,7 +467,7 @@ export function parseMasterAgentPlanV1(value: unknown): MasterAgentPlan {
     assertKeysWithOptional(
       item,
       ['id', 'agentId', 'instruction', 'dependsOn'],
-      ['perspectiveCharacterId', 'skillId', 'inspirationFragmentIds', 'characterDrivenPlanId', 'characterRevisionRequest', 'characterSupplementRequest', 'storylineProgressChapterId'],
+      ['perspectiveCharacterId', 'skillId', 'inspirationFragmentIds', 'characterDrivenPlanId', 'characterRevisionRequest', 'characterSupplementRequest', 'storylineProgressChapterId', 'promptExecution'],
       '主 Agent 计划任务 ' + (index + 1),
     )
     const id = readString(item.id, `主 Agent 计划任务 ${index + 1}.id`, MAX_TASK_ID_CHARS)
@@ -501,6 +518,12 @@ export function parseMasterAgentPlanV1(value: unknown): MasterAgentPlan {
       skillId,
       '主 Agent 计划任务 ' + id,
     )
+    const expectedPromptModule = promptModuleForPlanTaskV1(agentId, skillId)
+    const promptExecution = item.promptExecution === undefined
+      ? undefined
+      : expectedPromptModule
+        ? parsePromptExecutionOptionsV1(item.promptExecution, expectedPromptModule)
+        : fail(`主 Agent 计划任务 ${id} 的 Skill 不允许 Prompt 执行选项`)
     return {
       id,
       agentId,
@@ -513,6 +536,7 @@ export function parseMasterAgentPlanV1(value: unknown): MasterAgentPlan {
       ...(characterRevisionRequest !== undefined ? { characterRevisionRequest } : {}),
       ...(characterSupplementRequest !== undefined ? { characterSupplementRequest } : {}),
       ...(storylineProgressChapterId !== undefined ? { storylineProgressChapterId } : {}),
+      ...(promptExecution !== undefined ? { promptExecution } : {}),
     }
   })
   const workflow = value.workflow === undefined
@@ -662,6 +686,19 @@ export function buildMasterAgentRunContractV1(input: {
         ...plan.tasks.map(task => ({
           stepId: taskStepId(task.id),
           ...createAgentSkillExecutionBindingV1(resolveAgentSkillV1(task.agentId, task.skillId)),
+          ...(task.promptExecution ? {
+            promptExecution: {
+              version: 1 as const,
+              moduleKey: task.promptExecution.moduleKey,
+              templateId: task.promptExecution.template.id,
+              templateName: task.promptExecution.template.name,
+              templateScope: task.promptExecution.template.scope,
+              templateUpdatedAt: task.promptExecution.template.updatedAt,
+              templateHash: task.promptExecution.templateHash,
+              parameterValuesHash: task.promptExecution.parameterValuesHash,
+              overridesHash: task.promptExecution.overridesHash,
+            },
+          } : {}),
         })),
         ...plan.tasks.flatMap(task => semanticReviewTaskIdSet.has(task.id)
           ? [1, 2].map(attempt => ({
@@ -1109,6 +1146,9 @@ function parseCandidatePayload(value: unknown, label: string): MasterCandidatePa
   if (payload.structuredOutputEvidence !== undefined) {
     payload.structuredOutputEvidence = parseStructuredOutputRunEvidenceV1(payload.structuredOutputEvidence)
   }
+  if (payload.promptExecutionEvidence !== undefined) {
+    payload.promptExecutionEvidence = parsePromptExecutionEvidenceV1(payload.promptExecutionEvidence)
+  }
   if (payload.narrativeBrief !== undefined) {
     payload.narrativeBrief = parseNarrativeBriefV1(payload.narrativeBrief)
   }
@@ -1210,6 +1250,12 @@ function assertCandidateMatchesTaskSkill(
   if (candidateSkill.id !== taskSkill.id) fail(`${label} 的 Skill 与计划不一致`)
   if (payload.executionBinding !== undefined) {
     assertAgentSkillExecutionBindingV1(payload.executionBinding, taskSkill, `${label} executionBinding`)
+  }
+  if (task.promptExecution !== undefined) {
+    if (!payload.promptExecutionEvidence) fail(`${label} 缺少冻结 Prompt 的实际运行证据`)
+    assertPromptEvidenceMatchesOptionsV1(payload.promptExecutionEvidence, task.promptExecution)
+  } else if (payload.promptExecutionEvidence !== undefined) {
+    fail(`${label} 不得为历史或非治理任务伪造 Prompt 运行证据`)
   }
   if (
     taskSkill.executionMode === 'story-core'
@@ -1322,13 +1368,32 @@ export function assertMasterAgentRunContractExecutionBindingsV1(
   for (const [stepId, skill] of expected) {
     const binding = byStep.get(stepId)
     if (!binding) fail(`主 Agent RunContract 缺少 ${stepId} execution binding`)
-    const { stepId: _stepId, ...skillBinding } = binding
-    if (skillBinding.version !== 1) fail(`主 Agent RunContract ${stepId} 当前只接受 V1 Skill 执行绑定`)
+    if (binding.version !== 1) fail(`主 Agent RunContract ${stepId} 当前只接受 V1 Skill 执行绑定`)
+    const { stepId: _stepId, promptExecution, ...skillBinding } = binding
     assertAgentSkillExecutionBindingV1(
       skillBinding,
       skill,
       `主 Agent RunContract ${stepId}`,
     )
+    const task = plan.tasks.find(item => taskStepId(item.id) === stepId)
+    if (task?.promptExecution) {
+      const expectedPrompt = {
+        version: 1 as const,
+        moduleKey: task.promptExecution.moduleKey,
+        templateId: task.promptExecution.template.id,
+        templateName: task.promptExecution.template.name,
+        templateScope: task.promptExecution.template.scope,
+        templateUpdatedAt: task.promptExecution.template.updatedAt,
+        templateHash: task.promptExecution.templateHash,
+        parameterValuesHash: task.promptExecution.parameterValuesHash,
+        overridesHash: task.promptExecution.overridesHash,
+      }
+      if (canonicalStringify(promptExecution) !== canonicalStringify(expectedPrompt)) {
+        fail(`主 Agent RunContract ${stepId} 的 Prompt 绑定与冻结计划不一致`)
+      }
+    } else if (promptExecution !== undefined) {
+      fail(`主 Agent RunContract ${stepId} 不得携带 Prompt 绑定`)
+    }
   }
 }
 

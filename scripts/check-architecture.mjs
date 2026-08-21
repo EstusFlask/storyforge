@@ -615,6 +615,52 @@ if (!failurePolicySource.includes('error instanceof StructuredOutputRepairFailed
   violations.push('[⑰失败重放] repair 额度耗尽后 durable Run 必须暂停，禁止按普通 protocol error 重跑整步')
 }
 
+// ── ⑱ WEH-0F 分步骤正式 Prompt 必须冻结、真渲染且禁止 UI 静默截断 ──
+const promptExecutionSource = read('src/lib/agent/prompt-execution.ts')
+const worldviewCopilotSource = read('src/lib/agent/worldview-field-copilot.ts')
+const storyCoreCopilotSource = read('src/lib/agent/story-core-copilot.ts')
+const characterCopilotSource = read('src/lib/agent/character-copilot.ts')
+const worldviewControlsSource = read('src/components/worldview/WorldviewAgentControls.tsx')
+const storyCorePanelSource = read('src/components/worldview/StoryCorePanel.tsx')
+const characterPanelSource = read('src/components/character/CharacterPanel.tsx')
+if (!promptExecutionSource.includes('renderPrompt(options.template')
+  || !promptExecutionSource.includes('templateHash: await hashCanonicalValue(template)')
+  || !promptExecutionSource.includes('renderedPromptHash: await hashCanonicalValue(messages)')) {
+  violations.push('[⑱Prompt 冻结] PromptExecution 必须冻结模板并记录实际渲染 messages hash')
+}
+for (const [file, source] of [
+  ['src/lib/agent/worldview-field-copilot.ts', worldviewCopilotSource],
+  ['src/lib/agent/story-core-copilot.ts', storyCoreCopilotSource],
+  ['src/lib/agent/character-copilot.ts', characterCopilotSource],
+]) {
+  if (!source.includes('renderFrozenPromptExecutionV1')
+    || !source.includes('promptExecutionEvidence')) {
+    violations.push(`[⑱Prompt 真接入] ${file}: 正式节点必须执行冻结模板并返回运行证据`)
+  }
+  if (/\.slice\(0,\s*(?:1_000|1000|360|640|240|160)\)/.test(source)) {
+    violations.push(`[⑱禁止静默截断] ${file}: 作者说明、参数或 override 不得按旧固定前缀截断`)
+  }
+}
+for (const [file, source, moduleKey] of [
+  ['src/components/worldview/WorldviewAgentControls.tsx', worldviewControlsSource, 'worldview.dimension'],
+  ['src/components/worldview/StoryCorePanel.tsx', storyCorePanelSource, 'story.generate'],
+  ['src/components/character/CharacterPanel.tsx', characterPanelSource, 'character.generate'],
+]) {
+  if (!source.includes('submitTargetedRequest') || !source.includes(`moduleKey: '${moduleKey}'`)) {
+    violations.push(`[⑱UI Prompt 合同] ${file}: 必须把 Prompt 参数按角色分离后提交固定 Skill`)
+  }
+}
+if (!orchestratorSource.includes('freezeMasterAgentPlanPromptsV1')
+  || !orchestratorSource.includes('promptExecution: task.promptExecution')
+  || !orchestratorSource.includes('promptExecutionEvidence: prepared.promptExecutionEvidence')) {
+  violations.push('[⑱计划与候选] 主计划必须冻结 Prompt，执行节点和候选必须携带同一绑定证据')
+}
+if (!masterDurableSource.includes('parsePromptExecutionOptionsV1')
+  || !masterDurableSource.includes('parsePromptExecutionEvidenceV1')
+  || !masterDurableSource.includes('parameterValuesHash: task.promptExecution.parameterValuesHash')) {
+  violations.push('[⑱durable Prompt] durable 计划、Run Contract 和候选恢复必须验证 Prompt 绑定')
+}
+
 // ── 报告 ──
 if (violations.length) {
   console.error('[architecture] ❌ 发现反模式违规(违反 CLAUDE.md 三注册表铁律):\n')
