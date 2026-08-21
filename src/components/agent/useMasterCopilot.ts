@@ -32,6 +32,14 @@ import { revalidateStoryArcCreativeDraftV1 } from '../../lib/agent/story-arc-cop
 import { revalidateOutlineCreativeDraftV1 } from '../../lib/agent/outline-copilot'
 import { revalidateProseCreativeDraftV1 } from '../../lib/agent/prose-copilot'
 import { flushPendingEditsV1 } from '../../lib/authoring/pending-edit-coordinator'
+import {
+  CandidateDraftSyncErrorV1,
+  flushCandidateDraftV1,
+  flushCandidateDraftsV1,
+  hasPendingCandidateDraftsV1,
+  queueCandidateDraftV1,
+} from '../../lib/agent/candidate-draft-coordinator'
+import type { CreativeArtifactV1 } from '../../lib/agent/creative-reliability'
 
 function errorMessage(error: unknown): string {
   if (error instanceof Error && error.message.trim()) return error.message
@@ -75,6 +83,37 @@ export interface PendingMasterCandidate {
   payload: MasterCandidatePayload
 }
 
+function revalidateCandidateCreativeArtifactV1(input: {
+  draft: string
+  creativeArtifact: CreativeArtifactV1
+  payload: Readonly<Record<string, unknown>>
+}): CreativeArtifactV1 {
+  const payload = input.payload as unknown as MasterCandidatePayload
+  if (payload.skillId === 'outline.story-arcs' && payload.storyArcKind) {
+    return revalidateStoryArcCreativeDraftV1({
+      draft: input.draft,
+      snapshot: payload.baseSnapshot as Parameters<typeof revalidateStoryArcCreativeDraftV1>[0]['snapshot'],
+      kind: payload.storyArcKind,
+      previousArtifact: input.creativeArtifact,
+    })
+  }
+  if (payload.agentId === 'outline' && payload.outlineMode) {
+    return revalidateOutlineCreativeDraftV1({
+      draft: input.draft,
+      snapshot: payload.baseSnapshot as Parameters<typeof revalidateOutlineCreativeDraftV1>[0]['snapshot'],
+      previousArtifact: input.creativeArtifact,
+    })
+  }
+  if (payload.agentId === 'prose' && payload.informationBoundary) {
+    return revalidateProseCreativeDraftV1({
+      draft: input.draft,
+      informationBoundary: payload.informationBoundary,
+      previousArtifact: input.creativeArtifact,
+    })
+  }
+  return input.creativeArtifact
+}
+
 export function useMasterCopilot(input: {
   project: Project
   worldGroupId: number | null
@@ -90,6 +129,8 @@ export function useMasterCopilot(input: {
   const [error, setError] = useState<string | null>(null)
   const abortRef = useRef<AbortController | null>(null)
   const runtimeCandidates = useRef(new Map<number, ExecutedMasterCandidate>())
+  const localCandidateDrafts = useRef(new Map<number, string>())
+  const activeCandidateScope = useRef('')
   const workspaceScope = useMemo<WorkspaceScope | undefined>(() => (
     project.id != null && project.activeWorldId != null && project.activeWorkId != null
       ? { projectId: project.id, worldId: project.activeWorldId, workId: project.activeWorkId }
@@ -97,9 +138,19 @@ export function useMasterCopilot(input: {
   ), [project.activeWorkId, project.activeWorldId, project.id])
   const scopeKey = `${project.id}:${project.activeWorldId ?? 'legacy'}:${project.activeWorkId ?? 'legacy'}:${worldGroupId ?? 'global'}`
 
+  activeCandidateScope.current = scopeKey
+
+  const overlayLocalCandidateDrafts = useCallback((rows: AgentEvent[]): AgentEvent[] => (
+    rows.map(event => {
+      if (event.id == null) return event
+      const draft = localCandidateDrafts.current.get(event.id)
+      return draft == null ? event : { ...event, content: draft }
+    })
+  ), [])
+
   const reload = useCallback(async (id: number) => {
-    setEvents(await readAgentEvents(id, workspaceScope))
-  }, [workspaceScope])
+    setEvents(overlayLocalCandidateDrafts(await readAgentEvents(id, workspaceScope)))
+  }, [overlayLocalCandidateDrafts, workspaceScope])
 
   useEffect(() => {
     if (conversationId == null || typeof window === 'undefined') return
@@ -133,6 +184,7 @@ export function useMasterCopilot(input: {
     let active = true
     abortRef.current?.abort()
     runtimeCandidates.current.clear()
+    localCandidateDrafts.current.clear()
     setBusy(MASTER_COPILOT_SCOPE_OWNERS.has(scopeKey))
     setRecoveryAvailable(false)
     setError(null)
@@ -164,7 +216,7 @@ export function useMasterCopilot(input: {
         rows = await readAgentEvents(conversation.id!, workspaceScope)
       }
       if (active) {
-        setEvents(rows)
+        setEvents(overlayLocalCandidateDrafts(rows))
         setRecoveryAvailable(workspaceScope
           ? await findResumableMasterAgentRunV1({
               scope: workspaceScope,
@@ -183,7 +235,34 @@ export function useMasterCopilot(input: {
       active = false
       abortRef.current?.abort()
     }
-  }, [project.id, scopeKey, workspaceScope, worldGroupId])
+  }, [overlayLocalCandidateDrafts, project.id, scopeKey, workspaceScope, worldGroupId])
+
+  const candidateDraftPrefix = conversationId == null
+    ? null
+    : `${scopeKey}:conversation:${conversationId}:candidate:`
+  const candidateDraftKey = useCallback((eventId: number) => {
+    if (conversationId == null) throw new Error('Agent 对话尚未就绪。')
+    return `${scopeKey}:conversation:${conversationId}:candidate:${eventId}`
+  }, [conversationId, scopeKey])
+
+  useEffect(() => {
+    if (!candidateDraftPrefix || typeof window === 'undefined') return
+    const prefix = candidateDraftPrefix
+    const flush = () => { void flushCandidateDraftsV1(prefix).catch(() => undefined) }
+    const handleBeforeUnload = (event: BeforeUnloadEvent) => {
+      if (!hasPendingCandidateDraftsV1(prefix)) return
+      flush()
+      event.preventDefault()
+      event.returnValue = ''
+    }
+    window.addEventListener('pagehide', flush)
+    window.addEventListener('beforeunload', handleBeforeUnload)
+    return () => {
+      window.removeEventListener('pagehide', flush)
+      window.removeEventListener('beforeunload', handleBeforeUnload)
+      flush()
+    }
+  }, [candidateDraftPrefix])
 
   const pendingCandidates = useMemo(() => {
     const resolved = new Set<number>()
@@ -433,41 +512,52 @@ export function useMasterCopilot(input: {
     }
   }, [busy, conversationId, project.id, recordTask, reload, scopeKey, worldGroupId, workspaceScope])
 
-  const updateCandidate = useCallback(async (eventId: number, draft: string) => {
-    const candidate = pendingCandidates.find(item => item.event.id === eventId)
-    let creativeArtifact = candidate?.payload.creativeArtifact
-    if (creativeArtifact && candidate?.payload.skillId === 'outline.story-arcs' && candidate.payload.storyArcKind) {
-      creativeArtifact = revalidateStoryArcCreativeDraftV1({
-          draft,
-          snapshot: candidate.payload.baseSnapshot as Parameters<typeof revalidateStoryArcCreativeDraftV1>[0]['snapshot'],
-          kind: candidate.payload.storyArcKind,
-          previousArtifact: creativeArtifact,
-        })
-    } else if (creativeArtifact && candidate?.payload.agentId === 'outline' && candidate.payload.outlineMode) {
-      creativeArtifact = revalidateOutlineCreativeDraftV1({
-        draft,
-        snapshot: candidate.payload.baseSnapshot as Parameters<typeof revalidateOutlineCreativeDraftV1>[0]['snapshot'],
-        previousArtifact: creativeArtifact,
-      })
-    } else if (creativeArtifact && candidate?.payload.agentId === 'prose' && candidate.payload.informationBoundary) {
-      creativeArtifact = revalidateProseCreativeDraftV1({
-        draft,
-        informationBoundary: candidate.payload.informationBoundary,
-        previousArtifact: creativeArtifact,
-      })
-    }
-    const nextPayload = await updateAgentEventCandidate(
-      eventId,
-      project.id!,
-      draft,
-      workspaceScope,
-      { creativeArtifact },
-    )
+  const updateCandidate = useCallback((eventId: number, draft: string): Promise<void> => {
+    const key = candidateDraftKey(eventId)
+    const editingScope = scopeKey
+    localCandidateDrafts.current.set(eventId, draft)
     setEvents(current => current.map(event => event.id === eventId
-      ? { ...event, content: draft, ...(nextPayload ? { payload: nextPayload } : {}) }
+      ? { ...event, content: draft }
       : event))
-    notifyMasterCopilotSync(scopeKey)
-  }, [pendingCandidates, project.id, scopeKey, workspaceScope])
+    setError(null)
+    queueCandidateDraftV1({
+      key,
+      draft,
+      persist: persistedDraft => updateAgentEventCandidate(
+        eventId,
+        project.id!,
+        persistedDraft,
+        workspaceScope,
+        {
+          revalidateCreativeArtifact: ({ creativeArtifact, payload }) => (
+            revalidateCandidateCreativeArtifactV1({
+              draft: persistedDraft,
+              creativeArtifact,
+              payload,
+            })
+          ),
+        },
+      ),
+      onSynced: (persistedDraft, result) => {
+        if (activeCandidateScope.current !== editingScope) return
+        const currentDraft = localCandidateDrafts.current.get(eventId)
+        if (currentDraft === persistedDraft) localCandidateDrafts.current.delete(eventId)
+        const nextPayload = typeof result === 'string' ? result : null
+        setEvents(current => current.map(event => event.id === eventId
+          ? {
+              ...event,
+              content: localCandidateDrafts.current.get(eventId) ?? persistedDraft,
+              ...(nextPayload ? { payload: nextPayload } : {}),
+            }
+          : event))
+        notifyMasterCopilotSync(editingScope)
+      },
+      onError: syncError => {
+        if (activeCandidateScope.current === editingScope) setError(syncError.message)
+      },
+    })
+    return Promise.resolve()
+  }, [candidateDraftKey, project.id, scopeKey, workspaceScope])
 
   const resolveCandidate = useCallback(async (
     candidate: PendingMasterCandidate,
@@ -478,21 +568,38 @@ export function useMasterCopilot(input: {
     if (!scopeOwner) return
     setBusy(true)
     setError(null)
+    let shouldReload = false
     try {
+      await flushCandidateDraftV1(candidateDraftKey(candidate.event.id))
+      const persistedEvents = await readAgentEvents(conversationId, workspaceScope)
+      const persistedEvent = persistedEvents.find(event => event.id === candidate.event.id && event.kind === 'candidate')
+      if (!persistedEvent) throw new Error('待确认候选在同步后不存在。')
+      const persistedCandidate: PendingMasterCandidate = {
+        event: persistedEvent,
+        payload: parseAgentEventPayload<MasterCandidatePayload>(persistedEvent, {
+          version: 1,
+          taskId: '',
+          agentId: 'character',
+          label: '候选',
+          contextSources: [],
+          baseSnapshot: {},
+        }),
+      }
+      shouldReload = true
       let message = '候选已拒绝，没有写入项目。'
       let terminalMessage: string | null = null
-      const durableCandidate = candidate.payload.runId != null && candidate.payload.runStepId
+      const durableCandidate = persistedCandidate.payload.runId != null && persistedCandidate.payload.runStepId
       if (durableCandidate && decision === 'adopted') {
         const adoption = await commitMasterAgentCandidateAdoptionV1({
           scope: workspaceScope!,
-          runId: candidate.payload.runId!,
-          candidateEventId: candidate.event.id,
-          runtime: runtimeCandidates.current.get(candidate.event.id),
+          runId: persistedCandidate.payload.runId!,
+          candidateEventId: persistedCandidate.event.id!,
+          runtime: runtimeCandidates.current.get(persistedCandidate.event.id!),
         })
         message = adoption.message
         const verification = await verifyMasterAgentRunV1({
           scope: workspaceScope!,
-          runId: candidate.payload.runId!,
+          runId: persistedCandidate.payload.runId!,
         })
         if (verification.accepted) {
           // Keep the business-adoption message stable for existing callers and
@@ -504,18 +611,18 @@ export function useMasterCopilot(input: {
       } else if (durableCandidate) {
         await rejectMasterAgentCandidateV1({
           scope: workspaceScope!,
-          runId: candidate.payload.runId!,
-          candidateEventId: candidate.event.id,
+          runId: persistedCandidate.payload.runId!,
+          candidateEventId: persistedCandidate.event.id!,
         })
       } else if (decision === 'adopted') {
         message = await adoptMasterCandidate({
           projectId: project.id!,
           scope: workspaceScope,
           worldGroupId,
-          event: candidate.event,
-          payload: candidate.payload,
-          draft: candidate.event.content,
-          runtime: runtimeCandidates.current.get(candidate.event.id),
+          event: persistedCandidate.event,
+          payload: persistedCandidate.payload,
+          draft: persistedCandidate.event.content,
+          runtime: runtimeCandidates.current.get(persistedCandidate.event.id!),
         })
       }
       if (!durableCandidate) {
@@ -524,7 +631,7 @@ export function useMasterCopilot(input: {
           conversationId,
           kind: 'confirmation',
           content: message,
-          payload: { candidateEventId: candidate.event.id, decision },
+          payload: { candidateEventId: persistedCandidate.event.id, decision },
           scope: workspaceScope,
         })
       }
@@ -546,10 +653,13 @@ export function useMasterCopilot(input: {
           scope: workspaceScope,
         })
       }
-      runtimeCandidates.current.delete(candidate.event.id)
+      runtimeCandidates.current.delete(persistedCandidate.event.id!)
+      localCandidateDrafts.current.delete(persistedCandidate.event.id!)
       return true
     } catch (error) {
       setError(errorMessage(error))
+      if (error instanceof CandidateDraftSyncErrorV1) return false
+      shouldReload = true
       await appendAgentEvent({
         projectId: project.id!,
         conversationId,
@@ -561,10 +671,10 @@ export function useMasterCopilot(input: {
       return false
     } finally {
       releaseMasterCopilotScope(scopeKey, scopeOwner)
-      await reload(conversationId)
+      if (shouldReload) await reload(conversationId)
       notifyMasterCopilotSync(scopeKey)
     }
-  }, [busy, conversationId, project.id, reload, scopeKey, workspaceScope, worldGroupId])
+  }, [busy, candidateDraftKey, conversationId, project.id, reload, scopeKey, workspaceScope, worldGroupId])
 
   const stop = useCallback(() => abortRef.current?.abort(), [])
 

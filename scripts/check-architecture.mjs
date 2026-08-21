@@ -538,6 +538,29 @@ if (!/contentRevision:\s*input\.contentRevision/.test(chapterEditorSource)
   violations.push('[⑮正文候选证据] 正文 durable candidate 必须冻结并在采纳前复核 content revision')
 }
 
+// ── ⑯ WEH-0D 候选必须本地响应、按候选串行并在决策前同步 ──
+const candidateDraftCoordinatorSource = read('src/lib/agent/candidate-draft-coordinator.ts')
+const conversationsSource = read('src/lib/agent/conversations.ts')
+if (!candidateDraftCoordinatorSource.includes('queueCandidateDraftV1')
+  || !candidateDraftCoordinatorSource.includes('flushCandidateDraftV1')
+  || !/while \(entry\.persistedVersion < entry\.version\)/.test(candidateDraftCoordinatorSource)) {
+  violations.push('[⑯候选队列] CandidateDraftCoordinator 必须按 candidate key 合并、串行并可强制 flush')
+}
+if (!/localCandidateDrafts\.current\.set\(eventId, draft\)[\s\S]*?setEvents\([\s\S]*?queueCandidateDraftV1\s*\(/.test(masterCopilotSource)) {
+  violations.push('[⑯候选本地草稿] useMasterCopilot 必须先更新本地 draft，再登记异步候选保存')
+}
+if (!/flushCandidateDraftV1\(candidateDraftKey\(candidate\.event\.id\)\)[\s\S]*?readAgentEvents\(conversationId, workspaceScope\)[\s\S]*?commitMasterAgentCandidateAdoptionV1/.test(masterCopilotSource)) {
+  violations.push('[⑯候选决策屏障] Master 候选必须 flush 后从 IndexedDB 重读，才可进入 durable adoption')
+}
+if (!masterCopilotSource.includes("window.addEventListener('beforeunload', handleBeforeUnload)")
+  || !masterCopilotSource.includes("window.addEventListener('pagehide', flush)")
+  || !/hasPendingCandidateDraftsV1\(prefix\)[\s\S]*?flush\(\)[\s\S]*?event\.preventDefault\(\)/.test(masterCopilotSource)) {
+  violations.push('[⑯候选离开屏障] 未同步候选必须在刷新意图和页面离开时触发保护性 flush')
+}
+if (!/revalidateCreativeArtifact[\s\S]*?parseCreativeArtifactV1\(payload\.creativeArtifact\)/.test(conversationsSource)) {
+  violations.push('[⑯候选当前载荷] 候选语义证据必须基于事务读取到的当前 payload 重算，不得使用 UI 闭包旧版本')
+}
+
 // ── 报告 ──
 if (violations.length) {
   console.error('[architecture] ❌ 发现反模式违规(违反 CLAUDE.md 三注册表铁律):\n')
