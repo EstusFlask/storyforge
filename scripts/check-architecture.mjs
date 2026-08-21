@@ -972,6 +972,32 @@ if (!agentExecutionBindingSource.includes("AGENT_TOOL_SCHEMA_VERSION_V1 = 'agent
   violations.push('[㉕工具版本] 四个工具必须升级并冻结 Agent tool schema version/hash')
 }
 
+// ── ㉖ CTXG-5 选择器必须由 task kind / Policy / descriptors 纯派生 ──
+const contextSelectorSource = read('src/lib/context-gateway/selector.ts')
+for (const token of [
+  'CONTEXT_SELECTOR_POLICIES_V1', 'AGENT_CONTEXT_TASK_KINDS', 'mandatoryResourceKeys',
+  'categoryShares', 'maxOneHopResources', 'early-anchor', 'recent-change',
+  'createContextSufficiencyReportV1', 'selectorHash',
+]) {
+  if (!contextSelectorSource.includes(token)) violations.push(`[㉖确定性选择器] selector 缺少 ${token}`)
+}
+if (!contextSelectorSource.includes('input.accessPolicy.selectorPolicyId')
+  || !contextSelectorSource.includes('isContextResourceDiscoverableV1')
+  || !contextSelectorSource.includes('input.accessPolicy.perKindMinimumTokens')) {
+  violations.push('[㉖Policy 绑定] selector 必须执行 policy version、权限与 kind 配额，不得由 UI 私自决定')
+}
+if (!contextSelectorSource.includes("'must-read'")
+  || !contextSelectorSource.includes("'pinned'")
+  || !contextSelectorSource.includes("hardRequirement: entry.hard")) {
+  violations.push('[㉖Mandatory/Pinned] 硬资源必须保留交付与超预算阻断证据')
+}
+if (/\bdb\.|from ['"]\.\.\/db\//.test(contextSelectorSource)) {
+  violations.push('[㉖选择器纯函数] selector 不得读取或写入数据库，只能消费 Provider descriptors')
+}
+if (!assembleContextSource.includes("from '../context-gateway/selector'")) {
+  violations.push('[㉖唯一入口] selector 必须由现有 assembleContext 边界统一导出')
+}
+
 // ── 报告 ──
 if (violations.length) {
   console.error('[architecture] ❌ 发现反模式违规(违反 CLAUDE.md 三注册表铁律):\n')

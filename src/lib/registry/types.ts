@@ -608,6 +608,10 @@ export interface ContextResourceDescriptorV1 {
   tokenEstimate: Partial<Record<ContextResourceDepthV1, number>>
   availableDepths: ContextResourceDepthV1[]
   priority: 'normal' | 'pinned' | 'must-read'
+  /** CTXG-5: 作者检索权重；旧 V1 descriptor 缺省按 1 处理。 */
+  retrievalWeight?: number
+  /** CTXG-5: 作者为该资源冻结的单次读取上限；旧 V1 descriptor 缺省不额外收窄。 */
+  tokenCap?: number
 }
 
 export interface FrozenResourceScopeV1 {

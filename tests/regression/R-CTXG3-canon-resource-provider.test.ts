@@ -351,7 +351,7 @@ describe('CTXG-3 · Canon resource provider', () => {
       tableName: custom.tableName,
       recordId: custom.recordId,
       fieldKey: custom.fieldKey,
-      patch: { priority: 'must-read' },
+      patch: { priority: 'must-read', weight: 4.2, tokenCap: 2100 },
     })
     const refreshed = await buildRagLibrary({
       projectId: fixture.projectId,
@@ -363,6 +363,8 @@ describe('CTXG-3 · Canon resource provider', () => {
     const descriptors = await allDescriptors(scope, 10)
     const customDescriptor = descriptors.find(item => item.resourceKey.endsWith(':field:custom.lifespan'))!
     expect(customDescriptor.priority).toBe('must-read')
+    expect(customDescriptor.retrievalWeight).toBe(4.2)
+    expect(customDescriptor.tokenCap).toBe(2100)
     expect(customDescriptor.policyRevision).toBe(1)
     expect(customDescriptor.sourceRefs[0].field).toBe('fields')
   })

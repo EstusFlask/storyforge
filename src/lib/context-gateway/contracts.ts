@@ -138,6 +138,14 @@ export function assertContextResourceDescriptorV1(input: {
       fail('invalid-token-estimate', `${descriptor.resourceKey}.${depth} token estimate 非法`)
     }
   }
+  if (descriptor.retrievalWeight != null
+    && (!Number.isFinite(descriptor.retrievalWeight) || descriptor.retrievalWeight < 0.1 || descriptor.retrievalWeight > 5)) {
+    fail('invalid-retrieval-weight', `${descriptor.resourceKey} retrievalWeight 必须在 0.1..5`)
+  }
+  if (descriptor.tokenCap != null
+    && (!Number.isSafeInteger(descriptor.tokenCap) || descriptor.tokenCap < 100 || descriptor.tokenCap > 50_000)) {
+    fail('invalid-token-cap', `${descriptor.resourceKey} tokenCap 必须在 100..50000`)
+  }
   for (const relation of descriptor.relations) {
     if (!RESOURCE_KEY.test(relation.targetResourceKey)) fail('invalid-relation', `${descriptor.resourceKey} 含非法关系目标`)
   }
@@ -295,14 +303,27 @@ export async function createContextSufficiencyReportV1(input: {
   readsAllowed: boolean
 }): Promise<ContextSufficiencyReportV1> {
   const obligations = [...input.obligations]
-    .map(obligation => ({
-      ...obligation,
-      evidenceResourceKeys: uniqueSorted(obligation.evidenceResourceKeys, `${obligation.id}.evidenceResourceKeys`),
-    }))
+    .map(obligation => {
+      assertExactKeys(obligation, ['id', 'kind', 'required', 'status', 'evidenceResourceKeys', 'reasonCode'], 'ContextSufficiencyObligationV1')
+      if (!obligation.id.trim() || !obligation.reasonCode.trim()) fail('invalid-obligation', 'Sufficiency obligation 缺少 id/reasonCode')
+      if (!['mandatory-source', 'resource-kind', 'entity', 'time-boundary', 'conflict-check'].includes(obligation.kind)
+        || !['satisfied', 'missing', 'conflicted', 'not-applicable'].includes(obligation.status)
+        || (obligation.required !== true && obligation.required !== false)) {
+        fail('invalid-obligation', `${obligation.id} 的 kind/status/required 非法`)
+      }
+      const evidenceResourceKeys = uniqueSorted(obligation.evidenceResourceKeys, `${obligation.id}.evidenceResourceKeys`)
+      if (obligation.status === 'satisfied' && evidenceResourceKeys.length === 0) {
+        fail('invalid-obligation', `${obligation.id} satisfied 时必须提供 evidenceResourceKeys`)
+      }
+      if (obligation.status === 'not-applicable' && evidenceResourceKeys.length !== 0) {
+        fail('invalid-obligation', `${obligation.id} not-applicable 时不得提供 evidenceResourceKeys`)
+      }
+      return { ...obligation, evidenceResourceKeys }
+    })
     .sort((left, right) => left.id.localeCompare(right.id))
   if (new Set(obligations.map(item => item.id)).size !== obligations.length) fail('duplicate-obligation', 'Sufficiency obligation id 重复')
   const hardFailure = obligations.some(item => item.required && (item.status === 'missing' || item.status === 'conflicted'))
-  const softMissing = obligations.some(item => !item.required && item.status === 'missing')
+  const softMissing = obligations.some(item => !item.required && (item.status === 'missing' || item.status === 'conflicted'))
   const additionalRead = hardFailure || !input.readsAllowed
     ? 'forbidden' as const
     : softMissing

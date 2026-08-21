@@ -32,6 +32,14 @@ export {
   filterContextResourcePageV1,
   parseContextGatewayContractSnapshotV1,
 } from '../context-gateway/contracts'
+export {
+  CONTEXT_SELECTION_REASON_CODES_V1,
+  CONTEXT_SELECTOR_CATEGORIES_V1,
+  CONTEXT_SELECTOR_POLICIES_V1,
+  CONTEXT_SELECTOR_VERSION_V1,
+  getContextSelectorPolicyV1,
+  selectContextResourcesV1,
+} from '../context-gateway/selector'
 
 /** 拿不到模型时的保守默认输入预算(原固定 24K 偏紧,放宽避免内部提前裁) */
 const FALLBACK_INPUT_BUDGET = 48_000

@@ -134,6 +134,8 @@ async function resourcePolicy(row: ResourceRow, fieldKey?: string): Promise<{
   revision: number
   hash: string
   priority: 'normal' | 'pinned' | 'must-read'
+  weight: number
+  tokenCap: number
 }> {
   const raw = row.ragPolicy ?? {}
   const documentHash = await hashCanonicalValue({ version: 1, policy: raw })
@@ -142,7 +144,13 @@ async function resourcePolicy(row: ResourceRow, fieldKey?: string): Promise<{
   }
   const document = normalizedPolicy(raw)
   if (!fieldKey) {
-    return { revision: row.ragPolicyRevision ?? 0, hash: documentHash, priority: document.priority }
+    return {
+      revision: row.ragPolicyRevision ?? 0,
+      hash: documentHash,
+      priority: document.priority,
+      weight: document.weight,
+      tokenCap: document.tokenCap,
+    }
   }
   const own = normalizedPolicy(raw.fields?.[fieldKey])
   const effective = {
@@ -155,6 +163,8 @@ async function resourcePolicy(row: ResourceRow, fieldKey?: string): Promise<{
     revision: row.ragPolicyRevision ?? 0,
     hash: await hashCanonicalValue({ version: 1, documentHash, fieldKey, effective }),
     priority: effective.priority,
+    weight: effective.weight,
+    tokenCap: effective.tokenCap,
   }
 }
 
@@ -518,6 +528,8 @@ async function makeDescriptor(input: {
       },
       availableDepths: ['index', 'summary', 'focused', 'full', 'original'],
       priority: policy.priority,
+      retrievalWeight: policy.weight,
+      tokenCap: policy.tokenCap,
     },
     fullContent: input.fullContent,
     focusedContent: input.focusedContent ?? input.fullContent,
