@@ -3,11 +3,16 @@ import { FIELD_BY_TARGET } from '../../registry/field-registry'
 import { ADOPTION_EXTENSIONS } from '../../registry/adoption-schema'
 import { REGISTRY_BY_NAME } from '../../registry/project-tables'
 import type {
+  AcceptedAgentRunContract,
   AcceptedAgentRunContractV1,
+  AcceptedAgentRunContractV2,
   AgentRunAcceptanceCriterionV1,
   AgentRunAcceptanceKind,
+  AgentRunContract,
   AgentRunContractV1,
+  AgentRunContractV2,
   AgentRunParentLineageV1,
+  AgentRunStepExecutionBindingV2,
   AgentRunVerificationKind,
   AgentRunVerificationStepV1,
   AgentRunWorkflowKind,
@@ -16,6 +21,7 @@ import type {
   AgentRunWriteTargetV1,
 } from '../../types/agent-run'
 import { hashCanonicalValue } from './hash'
+import { assertAgentSkillExecutionBindingIntegrityV2 } from '../execution-binding'
 import {
   assertExactKeys,
   assertUnique,
@@ -158,6 +164,90 @@ function readExecutionBinding(value: unknown, path: string): AgentRunStepExecuti
     promptVersion: readString(record.promptVersion, `${path}.promptVersion`, { max: 160 }),
     toolSchemaVersion: readString(record.toolSchemaVersion, `${path}.toolSchemaVersion`, { max: 160 }),
     toolSchemaHash: readHash(record.toolSchemaHash, `${path}.toolSchemaHash`),
+  }
+}
+
+function readExecutionBindingV2(value: unknown, path: string): AgentRunStepExecutionBindingV2 {
+  const record = readRecord(value, path)
+  const keys = [
+    'stepId',
+    'version',
+    'skillId',
+    'skillVersion',
+    'skillDefinitionJson',
+    'skillDefinitionHash',
+    'contextAccessPolicyHash',
+    'promptVersion',
+    'toolSchemaVersion',
+    'toolSchemaHash',
+    'contextSourceKeys',
+    'optionalContextActivations',
+    'writeTargets',
+    'maxOutputTokens',
+  ] as const
+  assertExactKeys(record, keys, keys, path)
+  if (record.version !== 2 || record.skillVersion !== 2) {
+    failSchema('unsupported_version', path, '仅支持 execution binding v2 / Skill snapshot v2')
+  }
+  const contextSourceKeys = readArray(record.contextSourceKeys, `${path}.contextSourceKeys`)
+    .map((item, index) => readString(item, `${path}.contextSourceKeys[${index}]`, { max: 160 }))
+  assertUnique(contextSourceKeys, `${path}.contextSourceKeys`)
+  for (const sourceKey of contextSourceKeys) {
+    if (!CONTEXT_SOURCE_BY_KEY.has(sourceKey)) {
+      failSchema('unknown_context_source', `${path}.contextSourceKeys`, `未登记的上下文源 ${sourceKey}`)
+    }
+  }
+  const optionalContextActivations = readArray(
+    record.optionalContextActivations,
+    `${path}.optionalContextActivations`,
+  ).map((item, index) => {
+    const activationPath = `${path}.optionalContextActivations[${index}]`
+    const activation = readRecord(item, activationPath)
+    assertExactKeys(
+      activation,
+      ['sourceKey', 'reasonCode', 'boundaryHash'],
+      ['sourceKey', 'reasonCode'],
+      activationPath,
+    )
+    return {
+      sourceKey: readString(activation.sourceKey, `${activationPath}.sourceKey`, { max: 160 }),
+      reasonCode: readEnum(
+        activation.reasonCode,
+        ['perspective-character', 'prior-outline-candidate', 'explicit-runtime-boundary'],
+        `${activationPath}.reasonCode`,
+      ),
+      ...(activation.boundaryHash === undefined ? {} : {
+        boundaryHash: readHash(activation.boundaryHash, `${activationPath}.boundaryHash`),
+      }),
+    }
+  })
+  assertUnique(optionalContextActivations.map(item => item.sourceKey), `${path}.optionalContextActivations`)
+  for (const activation of optionalContextActivations) {
+    if (!contextSourceKeys.includes(activation.sourceKey)) {
+      failSchema('invalid_execution_binding', path, `激活来源 ${activation.sourceKey} 未进入实际上下文集合`)
+    }
+  }
+  const writeTargets = readArray(record.writeTargets, `${path}.writeTargets`)
+    .map((item, index) => readWriteTarget(item, `${path}.writeTargets[${index}]`))
+  assertUnique(
+    writeTargets.map(item => `${item.table}:${item.adoptionExtension ?? ''}`),
+    `${path}.writeTargets`,
+  )
+  return {
+    stepId: readString(record.stepId, `${path}.stepId`, { max: 160 }),
+    version: 2,
+    skillId: readString(record.skillId, `${path}.skillId`, { max: 160 }),
+    skillVersion: 2,
+    skillDefinitionJson: readString(record.skillDefinitionJson, `${path}.skillDefinitionJson`, { max: 100_000 }),
+    skillDefinitionHash: readHash(record.skillDefinitionHash, `${path}.skillDefinitionHash`),
+    contextAccessPolicyHash: readHash(record.contextAccessPolicyHash, `${path}.contextAccessPolicyHash`),
+    promptVersion: readString(record.promptVersion, `${path}.promptVersion`, { max: 160 }),
+    toolSchemaVersion: readString(record.toolSchemaVersion, `${path}.toolSchemaVersion`, { max: 160 }),
+    toolSchemaHash: readHash(record.toolSchemaHash, `${path}.toolSchemaHash`),
+    contextSourceKeys,
+    optionalContextActivations,
+    writeTargets,
+    maxOutputTokens: readInteger(record.maxOutputTokens, `${path}.maxOutputTokens`, { min: 1 }),
   }
 }
 
@@ -441,4 +531,114 @@ export function parseAgentRunContractV1(value: unknown): AgentRunContractV1 {
 export async function acceptAgentRunContractV1(value: unknown): Promise<AcceptedAgentRunContractV1> {
   const contract = parseAgentRunContractV1(value)
   return { contract, contractHash: await hashCanonicalValue(contract) }
+}
+
+function writePermissionSignatures(targets: readonly AgentRunWriteTargetV1[]): string[] {
+  const signatures: string[] = []
+  for (const target of targets) {
+    if (target.fields.length === 0) {
+      signatures.push(`${target.table}:${target.adoptionExtension ?? ''}:${target.mode}:#extension`)
+      continue
+    }
+    for (const field of target.fields) {
+      signatures.push(`${target.table}:${target.adoptionExtension ?? ''}:${target.mode}:${field}`)
+    }
+  }
+  return [...new Set(signatures)].sort()
+}
+
+export function parseAgentRunContractV2(value: unknown): AgentRunContractV2 {
+  const record = readRecord(value, 'contract')
+  const allowedKeys = [
+    'version',
+    'objective',
+    'workflowKind',
+    'lineage',
+    'scope',
+    'permissions',
+    'runtimeBindingHash',
+    'executionBindings',
+    'dependencyReceiptPolicy',
+    'candidateSemanticReviewPolicy',
+    'budget',
+    'acceptance',
+    'verificationPlan',
+    'failurePolicy',
+  ] as const
+  assertExactKeys(record, allowedKeys, [
+    'version',
+    'objective',
+    'workflowKind',
+    'scope',
+    'permissions',
+    'executionBindings',
+    'budget',
+    'acceptance',
+    'verificationPlan',
+    'failurePolicy',
+  ], 'contract')
+  if (record.version !== 2) failSchema('unsupported_version', 'contract.version', '仅支持版本 2')
+  const executionBindings = readArray(record.executionBindings, 'contract.executionBindings')
+    .map((item, index) => readExecutionBindingV2(item, `contract.executionBindings[${index}]`))
+  if (executionBindings.length === 0) {
+    failSchema('invalid_execution_binding', 'contract.executionBindings', 'V2 正式契约必须包含 Skill 派生绑定')
+  }
+  assertUnique(executionBindings.map(item => item.stepId), 'contract.executionBindings')
+
+  const legacyShape = { ...record, version: 1 } as Record<string, unknown>
+  delete legacyShape.executionBindings
+  const base = parseAgentRunContractV1(legacyShape)
+  const permissionSources = [...new Set(base.permissions.contextSourceKeys)].sort()
+  const bindingSources = [...new Set(executionBindings.flatMap(binding => binding.contextSourceKeys))].sort()
+  if (JSON.stringify(permissionSources) !== JSON.stringify(bindingSources)) {
+    failSchema(
+      'invalid_execution_binding',
+      'contract.permissions.contextSourceKeys',
+      'V2 Run permissions 必须等于所有 Skill binding 的实际来源并集',
+    )
+  }
+  const permissionWrites = writePermissionSignatures(base.permissions.writeTargets)
+  const bindingWrites = writePermissionSignatures(executionBindings.flatMap(binding => binding.writeTargets))
+  if (JSON.stringify(permissionWrites) !== JSON.stringify(bindingWrites)) {
+    failSchema(
+      'invalid_execution_binding',
+      'contract.permissions.writeTargets',
+      'V2 Run permissions 必须等于所有 Skill binding 的实际写目标并集',
+    )
+  }
+  if (executionBindings.some(binding => binding.maxOutputTokens > base.budget.maxOutputTokens)) {
+    failSchema(
+      'invalid_execution_binding',
+      'contract.budget.maxOutputTokens',
+      'Run 输出预算不得小于任一步骤的 Skill 输出预算',
+    )
+  }
+  return {
+    ...base,
+    version: 2,
+    executionBindings,
+  }
+}
+
+export function parseAgentRunContract(value: unknown): AgentRunContract {
+  const record = readRecord(value, 'contract')
+  if (record.version === 1) return parseAgentRunContractV1(value)
+  if (record.version === 2) return parseAgentRunContractV2(value)
+  failSchema('unsupported_version', 'contract.version', '仅支持版本 1 或 2')
+}
+
+export async function acceptAgentRunContractV2(value: unknown): Promise<AcceptedAgentRunContractV2> {
+  const contract = parseAgentRunContractV2(value)
+  for (const binding of contract.executionBindings) {
+    const { stepId: _stepId, ...skillBinding } = binding
+    await assertAgentSkillExecutionBindingIntegrityV2(skillBinding, `Run step ${binding.stepId}`)
+  }
+  return { contract, contractHash: await hashCanonicalValue(contract) }
+}
+
+export async function acceptAgentRunContract(value: unknown): Promise<AcceptedAgentRunContract> {
+  const record = readRecord(value, 'contract')
+  if (record.version === 1) return acceptAgentRunContractV1(value)
+  if (record.version === 2) return acceptAgentRunContractV2(value)
+  failSchema('unsupported_version', 'contract.version', '仅支持版本 1 或 2')
 }

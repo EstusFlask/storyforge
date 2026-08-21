@@ -139,6 +139,9 @@ function assertChapterPostAdoptionExecutionBindingsV1(snapshot: AgentRunSnapshot
   if (!organization || !memory) throw new Error('正文后处理缺少 Skill/Prompt 执行绑定。')
   const { stepId: _organizationStepId, ...organizationBinding } = organization
   const { stepId: _memoryStepId, ...memoryBinding } = memory
+  if (organizationBinding.version !== 1 || memoryBinding.version !== 1) {
+    throw new Error('正文后处理当前只接受历史 V1 Skill 执行绑定。')
+  }
   assertAgentSkillExecutionBindingV1(organizationBinding, ORGANIZATION_SKILL_V1, '章节六域整理执行绑定')
   assertAgentSkillExecutionBindingV1(memoryBinding, MEMORY_SKILL_V1, '章节记忆执行绑定')
   const consistency = bindings.get(CHAPTER_POST_ADOPTION_STEP_IDS_V1.consistency)
@@ -148,6 +151,7 @@ function assertChapterPostAdoptionExecutionBindingsV1(snapshot: AgentRunSnapshot
   if (requiresConsistency && !consistency) throw new Error('正文后处理缺少一致性守卫执行绑定。')
   if (consistency) {
     const { stepId: _consistencyStepId, ...consistencyBinding } = consistency
+    if (consistencyBinding.version !== 1) throw new Error('正文一致性守卫当前只接受 V1 Skill 执行绑定。')
     assertAgentSkillExecutionBindingV1(consistencyBinding, CONSISTENCY_SKILL_V1, '正文一致性守卫执行绑定')
   }
 }

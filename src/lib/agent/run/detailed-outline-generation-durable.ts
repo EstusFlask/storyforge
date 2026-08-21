@@ -181,6 +181,7 @@ export function assertDetailedOutlineGenerationExecutionBindingV1(
     throw new Error('细纲生成 RunContract execution binding 步骤无效。')
   }
   const { stepId: _stepId, ...skillBinding } = binding
+  if (skillBinding.version !== 1) throw new Error('细纲生成当前只接受 V1 Skill 执行绑定。')
   assertAgentSkillExecutionBindingV1(
     skillBinding,
     getAgentSkillV1('outline.details', 'outline'),

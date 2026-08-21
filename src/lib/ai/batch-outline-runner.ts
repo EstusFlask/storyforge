@@ -202,6 +202,7 @@ export async function runBatchOutlineGeneration(
         worldGroupId: volume.worldGroupId ?? null,
         request,
         assembled,
+        priorOutlineCandidateText: scopedPrevious ? priorCandidateContext(scopedPrevious) : undefined,
         durable: true,
         batch: {
           batchGroupId,

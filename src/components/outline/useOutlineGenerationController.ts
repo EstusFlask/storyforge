@@ -50,8 +50,10 @@ interface Options {
   runOptions: RunOptions
   ai: GenerationAI
   assembleContext: (
+    request: OutlineGenerationRequest,
     worldGroupId: number | null,
     outlineNodeId?: number | null,
+    priorOutlineCandidateText?: string,
   ) => Promise<AssembleContextResult>
   openPromptPanel: () => void
   clearPreview: () => void
@@ -162,7 +164,7 @@ export function useOutlineGenerationController({
     try {
       const targetVolume = findGenerationTargetVolume(request, nodes, volumes)
       const assembled = contextSnapshot
-        ?? await assembleContext(targetVolume?.worldGroupId ?? null, targetVolume?.id)
+        ?? await assembleContext(request, targetVolume?.worldGroupId ?? null, targetVolume?.id)
       const node = buildNode(request)
       const prepared = preparedSnapshot ?? prepareGenerationNode(node, assembled)
       generationTrace = await createOutlineGenerationTraceV1({
@@ -266,6 +268,7 @@ export function useOutlineGenerationController({
     try {
       const targetVolume = findGenerationTargetVolume(request, nodes, volumes)
       const assembled = await assembleContext(
+        request,
         targetVolume?.worldGroupId ?? null,
         targetVolume?.id,
       )

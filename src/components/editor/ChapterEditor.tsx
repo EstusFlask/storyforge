@@ -66,7 +66,14 @@ import { useItemLedgerStore } from '../../stores/item-ledger'
 import { useLocationStore } from '../../stores/location'
 import { useCodexStore } from '../../stores/codex'
 import { buildEditorEntityReferences } from '../../lib/editor/entity-reference'
-import type { ChatMessage, Project, StateDiffItem, WorkspaceScope } from '../../lib/types'
+import type {
+  AgentSkillExecutionBindingV2,
+  ChatMessage,
+  Project,
+  StateDiffItem,
+  WorkspaceScope,
+} from '../../lib/types'
+import { assertAgentSkillBindingMatchesAssemblyV2 } from '../../lib/agent/execution-binding'
 import {
   adoptChapterOrganizationSelection,
   isChapterOrganizationCurrent,
@@ -184,7 +191,7 @@ import {
   recordProseGenerationModelOutputV1,
   rejectProseGenerationCandidateV1,
   recoverProseGenerationCandidateV1,
-  PROSE_GENERATION_SOURCE_KEYS_V1,
+  resolveProseGenerationExecutionBindingV2,
   PROSE_GENERATION_STEP_ID_V1,
   type ProseGenerationCandidateV1,
 } from '../../lib/agent/run/prose-generation-durable'
@@ -229,6 +236,7 @@ interface PendingChapterGeneration {
   prepared: PreparedGenerationNode
   backgroundMemoryIds: number[]
   assembled: Awaited<ReturnType<typeof assembleContext>>
+  generationBinding: AgentSkillExecutionBindingV2
   informationBoundary: InformationBoundaryManifestV1
 }
 
@@ -1009,22 +1017,26 @@ export default function ChapterEditor({ project, outlineNodeId }: Props) {
   const [charCtx, setCharCtx] = useState('')
   useEffect(() => {
     let cancelled = false
-    assembleContext({
+    void resolveProseGenerationExecutionBindingV2({
+      operation: 'generate',
+      perspectiveCharacterId,
+    }).then(binding => assembleContext({
       projectId: project.id!,
       worldGroupId: chapterWorldGroupId ?? null,
       outlineNodeId: outlineNode?.id ?? null,
       chapterId: currentChapter?.id ?? null,
       provider: aiConfig.provider,
       model: aiConfig.model,
-      sourceKeys: ['contextMemo', 'chapterOutline', 'canonAssertions', 'worldview', 'storyCore', 'characterDrivenPlan', 'powerSystem', 'cultivationProgress', 'codex', 'characters', 'creativeRules', 'worldRules', 'historical', 'locations', 'userStyleProfile'],
-    }).then(assembled => {
+      sourceKeys: binding.contextSourceKeys,
+      ...(perspectiveCharacterId != null ? { characterId: perspectiveCharacterId } : {}),
+    })).then(assembled => {
       if (cancelled) return
       const charIdx = assembled.included.indexOf('characters')
       setWorldCtx(assembled.text)
       setCharCtx(charIdx >= 0 ? assembled.segments[charIdx]?.content ?? '' : '')
     })
     return () => { cancelled = true }
-  }, [project.id, chapterWorldGroupId, outlineNode?.id, currentChapter?.id, aiConfig.provider, aiConfig.model])
+  }, [project.id, chapterWorldGroupId, outlineNode?.id, currentChapter?.id, aiConfig.provider, aiConfig.model, perspectiveCharacterId])
 
   // A2: 按需召回 — 根据章节大纲+标题+已有文本筛选相关状态卡
   const selectiveState = useMemo(() => {
@@ -1112,7 +1124,10 @@ export default function ChapterEditor({ project, outlineNodeId }: Props) {
     })()
   }
 
-  const buildFullWorldCtx = async (taskType: MemoryTaskType = 'write') => {
+  const buildFullWorldCtx = async (
+    operation: 'generate' | 'continue',
+    taskType: MemoryTaskType = 'write',
+  ) => {
     // 引用手法注入（Phase 20）
     let citedIds: number[] = []
     try {
@@ -1125,6 +1140,11 @@ export default function ChapterEditor({ project, outlineNodeId }: Props) {
       currentChapter?.title,
       plainText.slice(-2000),
     ].filter(Boolean).join(' ')
+
+    const generationBinding = await resolveProseGenerationExecutionBindingV2({
+      operation,
+      perspectiveCharacterId,
+    })
 
     const assembled = await assembleContext({
       projectId: project.id!,
@@ -1139,41 +1159,7 @@ export default function ChapterEditor({ project, outlineNodeId }: Props) {
       extraStateIds,
       // 角色也由同一次 assembleContext 装配，随后从主文本中拆出一次注入；
       // 这样 durable Context Manifest 能覆盖真正发送给模型的全部注册表来源。
-      sourceKeys: [
-        'contextMemo',
-        'chapterOutline',
-        'detailedOutline', // FB-9:正文生成读入本章场景细纲
-        'chapterContinuityHandoff',
-        'previousPlanReconciliation',
-        'previousChapterEnding',
-        'recentChapterSummaries',
-        'worldview',
-        'storyCore',
-        'characterDrivenPlan',
-        'powerSystem',
-        'cultivationProgress',
-        'codex',
-        'creativeRules',
-        'worldRules',
-        'historical',
-        'locations',
-        'foreshadows',
-        'storyArcs',
-        'storylineProgress',
-        'emotionBeats',
-        'stateCards',
-        'currentFacts', // NS-4:当前章生效的已确认事实，回注生成防止前后矛盾
-        'consistencyDossier', // MEMORY-9:结构化事实/依赖/本地关键词的可追溯一致性档案
-        'canonAssertions', // CONSISTENCY-3:不依赖章节时点的已确认世界宪法
-        ...(perspectiveCharacterId != null
-          ? ['characterKnowledge'] as const
-          : []), // CONSISTENCY-2:只有明确视角时才注入该角色认知
-        'heldItems', // CONSISTENCY-1:当前已持有物品，避免新章重复写首次获得
-        'retrievedPassages', // NS-5:相关前文召回，防远距离细节/伏笔矛盾
-        'references',
-        'userStyleProfile',
-        'characters',
-      ],
+      sourceKeys: generationBinding.contextSourceKeys,
       ...(perspectiveCharacterId != null ? { characterId: perspectiveCharacterId } : {}),
     })
 
@@ -1211,6 +1197,7 @@ export default function ChapterEditor({ project, outlineNodeId }: Props) {
       text: parts.filter(Boolean).join('\n\n'),
       segments: assembledSegmentsWithoutContinuity,
       assembled,
+      generationBinding,
       characterContext: segmentFor('characters'),
       worldRulesContext: worldRulesIdx >= 0 ? assembled.segments[worldRulesIdx]?.content ?? '' : '',
       continuity: {
@@ -1246,11 +1233,13 @@ export default function ChapterEditor({ project, outlineNodeId }: Props) {
     prepared: PreparedGenerationNode
     messages?: ChatMessage[]
     assembled?: Awaited<ReturnType<typeof assembleContext>>
+    generationBinding: AgentSkillExecutionBindingV2
     informationBoundary: InformationBoundaryManifestV1
   }): Promise<void> => {
     if (!currentChapter?.id || !input.assembled) {
       throw new Error('正文生成缺少章节或受控上下文快照。')
     }
+    assertAgentSkillBindingMatchesAssemblyV2(input.generationBinding, input.assembled, '正文生成')
     const chapterId = currentChapter.id
     const chapterTitle = outlineNode?.title || currentChapter.title || '未知章节'
     const scope = await resolveScopeLike(project.id!)
@@ -1285,6 +1274,8 @@ export default function ChapterEditor({ project, outlineNodeId }: Props) {
       chapterId,
       operation: input.operation,
       semanticReview: false,
+      perspectiveCharacterId,
+      generationBinding: input.generationBinding,
     })
     const contextManifest = await createContextManifestFromAssemblyV1({
       runId: snapshot.run.id,
@@ -1292,7 +1283,7 @@ export default function ChapterEditor({ project, outlineNodeId }: Props) {
       attempt: 1,
       projectId: project.id!,
       worldGroupId: chapterWorldGroupId ?? null,
-      declaredSourceKeys: PROSE_GENERATION_SOURCE_KEYS_V1,
+      declaredSourceKeys: input.generationBinding.contextSourceKeys,
       assembled: input.assembled,
       boundary: { chapterId, outlineNodeId: sourceChapter.outlineNodeId },
       readerVersion: 'chapter-prose-generation-context-v1',
@@ -1424,10 +1415,11 @@ export default function ChapterEditor({ project, outlineNodeId }: Props) {
     backgroundMemoryIds: number[],
     messages?: ChatMessage[],
     assembled?: Awaited<ReturnType<typeof assembleContext>>,
+    generationBinding?: AgentSkillExecutionBindingV2,
     informationBoundary?: InformationBoundaryManifestV1,
   ) => {
-    if (!informationBoundary) {
-      setProseGenerationError('正文生成缺少信息边界快照，已阻止模型调用。')
+    if (!informationBoundary || !generationBinding) {
+      setProseGenerationError('正文生成缺少 Skill 或信息边界快照，已阻止模型调用。')
       return
     }
     ai.setOperation(operation)
@@ -1439,6 +1431,7 @@ export default function ChapterEditor({ project, outlineNodeId }: Props) {
       prepared,
       messages,
       assembled,
+      generationBinding,
       informationBoundary,
     }).catch(error => {
       console.error('[ChapterEditor] 生成节点执行失败:', error)
@@ -1452,6 +1445,7 @@ export default function ChapterEditor({ project, outlineNodeId }: Props) {
     messages: ChatMessage[],
     backgroundMemoryIds: number[],
     assembled: Awaited<ReturnType<typeof assembleContext>>,
+    generationBinding: AgentSkillExecutionBindingV2,
     informationBoundary: InformationBoundaryManifestV1,
   ) => {
     const node = chapterGenerationNode(operation, category, informationBoundary)
@@ -1464,6 +1458,7 @@ export default function ChapterEditor({ project, outlineNodeId }: Props) {
         prepared,
         backgroundMemoryIds,
         assembled,
+        generationBinding,
         informationBoundary,
       })
       return
@@ -1476,6 +1471,7 @@ export default function ChapterEditor({ project, outlineNodeId }: Props) {
       backgroundMemoryIds,
       undefined,
       assembled,
+      generationBinding,
       informationBoundary,
     )
   }
@@ -1489,11 +1485,12 @@ export default function ChapterEditor({ project, outlineNodeId }: Props) {
       text: fullCtx,
       segments: assembledSegments,
       assembled,
+      generationBinding,
       characterContext,
       worldRulesContext,
       continuity,
       continuityBudgetTokens,
-    } = await buildFullWorldCtx('write')
+    } = await buildFullWorldCtx('generate', 'write')
     const informationBoundary = await buildChapterInformationBoundaryV1({
       scope: await resolveScopeLike(project.id!),
       chapterId: currentChapter?.id ?? null,
@@ -1529,6 +1526,7 @@ export default function ChapterEditor({ project, outlineNodeId }: Props) {
       messages,
       backgroundMemoryIds,
       assembled,
+      generationBinding,
       informationBoundary,
     )
   }
@@ -1541,10 +1539,11 @@ export default function ChapterEditor({ project, outlineNodeId }: Props) {
     const {
       text: fullCtx,
       assembled,
+      generationBinding,
       characterContext,
       continuity,
       continuityBudgetTokens,
-    } = await buildFullWorldCtx('write')
+    } = await buildFullWorldCtx('continue', 'write')
     const informationBoundary = await buildChapterInformationBoundaryV1({
       scope: await resolveScopeLike(project.id!),
       chapterId: currentChapter?.id ?? null,
@@ -1568,6 +1567,7 @@ export default function ChapterEditor({ project, outlineNodeId }: Props) {
       messages,
       backgroundMemoryIds,
       assembled,
+      generationBinding,
       informationBoundary,
     )
   }
@@ -3303,6 +3303,7 @@ export default function ChapterEditor({ project, outlineNodeId }: Props) {
                 pending.backgroundMemoryIds,
                 messages,
                 pending.assembled,
+                pending.generationBinding,
                 pending.informationBoundary,
               )
             }}

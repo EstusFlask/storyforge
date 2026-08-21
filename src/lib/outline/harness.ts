@@ -1,20 +1,33 @@
 import {
-  acceptAgentRunContractV1,
+  acceptAgentRunContract,
   appendAgentRunEventV1,
   allocateInMemoryAgentRunIdV1,
   createContextManifestFromAssemblyV1,
   createAgentRunV1,
   createGenerationNodeDurableTraceV1,
   createGenerationNodeShadowTraceV1,
+  hashCanonicalValue,
   type AgentRunSnapshotV1,
   type GenerationNodeDurableTraceV1,
   type GenerationNodeShadowTraceV1,
 } from '../agent/run'
+import {
+  assertAgentSkillBindingMatchesAssemblyV2,
+  createAgentSkillExecutionBindingV2,
+} from '../agent/execution-binding'
+import {
+  getAgentSkillV1,
+  resolveAgentSkillContextSourceKeysV1,
+} from '../agent/skill-registry'
 import { getOrCreateAgentConversation } from '../agent/conversations'
 import type { GenerationNodeShadowTrace } from '../generation/generation-node'
 import type { AssembleContextResult } from '../registry/types'
 import { resolveScope } from '../world-engine/scope'
-import type { AgentRunContractV1, WorkspaceScope } from '../types'
+import type {
+  AgentRunContractV2,
+  AgentSkillExecutionBindingV2,
+  WorkspaceScope,
+} from '../types'
 import type { OutlineGenerationRequest } from './generation-request'
 import {
   encodeGenerationOperation,
@@ -29,27 +42,12 @@ import {
 
 export * from './candidate-lifecycle'
 
-export const OUTLINE_GENERATION_SOURCE_KEYS = [
-  'canonAssertions',
-  'worldview',
-  'storyCore',
-  'activeNarrativeBlueprint',
-  'characterDrivenPlan',
-  'powerSystem',
-  'cultivationProgress',
-  'codex',
-  'characters',
-  'creativeRules',
-  'worldRules',
-  'historical',
-  'locations',
-  'foreshadows',
-  'storyArcs',
-  'storylineProgress',
-  'existingVolumeOutlines',
-  'writtenChapterProgress',
-  'priorOutlineCandidate',
-] as const
+/** Historical read-only alias. Formal V2 runs resolve the exact runtime set. */
+export const OUTLINE_GENERATION_SOURCE_KEYS: readonly string[] = Object.freeze(
+  resolveAgentSkillContextSourceKeysV1(
+    getAgentSkillV1('outline.compose', 'outline'),
+  ),
+)
 
 export const OUTLINE_DURABLE_HARNESS_STORAGE_KEY = 'storyforge:harness:outline-durable-v1'
 
@@ -72,16 +70,56 @@ function writeFields(request: OutlineGenerationRequest): string[] {
   return ['parentId', 'type', 'title', 'summary', 'order']
 }
 
-function outlineRunContract(input: {
+function outlineSkillId(request: OutlineGenerationRequest): 'outline.volumes' | 'outline.chapters' {
+  return request.kind === 'volumes' || request.kind === 'single-volume'
+    ? 'outline.volumes'
+    : 'outline.chapters'
+}
+
+export function resolveOutlineGenerationSourceKeysV2(input: {
+  request: OutlineGenerationRequest
+  hasPriorOutlineCandidate?: boolean
+}): string[] {
+  const skill = getAgentSkillV1(outlineSkillId(input.request), 'outline')
+  return resolveAgentSkillContextSourceKeysV1(skill, {
+    includeOptional: input.hasPriorOutlineCandidate === true,
+  })
+}
+
+export async function resolveOutlineGenerationExecutionBindingV2(input: {
+  request: OutlineGenerationRequest
+  priorOutlineCandidateText?: string
+}): Promise<AgentSkillExecutionBindingV2> {
+  const skill = getAgentSkillV1(outlineSkillId(input.request), 'outline')
+  const priorText = input.priorOutlineCandidateText?.trim() ?? ''
+  return createAgentSkillExecutionBindingV2(skill, {
+    optionalContextActivations: priorText ? [{
+      sourceKey: 'priorOutlineCandidate',
+      reasonCode: 'prior-outline-candidate',
+      boundaryHash: await hashCanonicalValue(priorText),
+    }] : [],
+    writeTargets: [{
+      table: 'outlineNodes',
+      fields: writeFields(input.request),
+      mode: 'candidate-only',
+    }],
+  })
+}
+
+async function outlineRunContract(input: {
   projectId: number
   worldGroupId: number | null
   request: OutlineGenerationRequest
   assembled: AssembleContextResult
-}): AgentRunContractV1 {
+  priorOutlineCandidateText?: string
+  binding?: AgentSkillExecutionBindingV2
+}): Promise<AgentRunContractV2> {
   const stepId = encodeGenerationOperation(input.request)
   const outlineNodeId = targetOutlineNodeId(input.request)
+  const binding = input.binding ?? await resolveOutlineGenerationExecutionBindingV2(input)
+  assertAgentSkillBindingMatchesAssemblyV2(binding, input.assembled, `大纲 ${stepId}`)
   return {
-    version: 1,
+    version: 2,
     objective: `生成${outlineGenerationModuleKey(input.request) === 'outline.volume' ? '卷纲' : '章纲'}候选：${stepId}`,
     workflowKind: 'direct-generation',
     scope: {
@@ -90,16 +128,15 @@ function outlineRunContract(input: {
       outlineNodeIds: outlineNodeId == null ? undefined : [outlineNodeId],
     },
     permissions: {
-      contextSourceKeys: [...OUTLINE_GENERATION_SOURCE_KEYS],
-      writeTargets: [
-        { table: 'outlineNodes', fields: writeFields(input.request), mode: 'candidate-only' },
-      ],
+      contextSourceKeys: [...binding.contextSourceKeys],
+      writeTargets: binding.writeTargets.map(target => ({ ...target, fields: [...target.fields] })),
     },
+    executionBindings: [{ stepId, ...binding }],
     budget: {
       maxModelCalls: 1,
       maxToolCalls: 0,
       maxInputTokens: input.assembled.inputBudget,
-      maxOutputTokens: 8_000,
+      maxOutputTokens: binding.maxOutputTokens,
       maxAttemptsPerStep: 1,
     },
     acceptance: [
@@ -127,6 +164,7 @@ async function outlineManifest(input: {
   worldGroupId: number | null
   request: OutlineGenerationRequest
   assembled: AssembleContextResult
+  binding: AgentSkillExecutionBindingV2
 }) {
   const outlineNodeId = targetOutlineNodeId(input.request)
   return createContextManifestFromAssemblyV1({
@@ -135,7 +173,7 @@ async function outlineManifest(input: {
     attempt: 1,
     projectId: input.projectId,
     worldGroupId: input.worldGroupId,
-    declaredSourceKeys: OUTLINE_GENERATION_SOURCE_KEYS,
+    declaredSourceKeys: input.binding.contextSourceKeys,
     assembled: input.assembled,
     boundary: outlineNodeId == null ? undefined : { outlineNodeId },
     readerVersion: 'assemble-context-v1',
@@ -147,16 +185,20 @@ export async function createOutlineGenerationShadowTraceV1(input: {
   worldGroupId: number | null
   request: OutlineGenerationRequest
   assembled: AssembleContextResult
+  priorOutlineCandidateText?: string
+  binding?: AgentSkillExecutionBindingV2
 }): Promise<GenerationNodeShadowTraceV1> {
   const runId = allocateInMemoryAgentRunIdV1()
   const stepId = encodeGenerationOperation(input.request)
-  const acceptedContract = await acceptAgentRunContractV1(outlineRunContract(input))
+  const binding = input.binding ?? await resolveOutlineGenerationExecutionBindingV2(input)
+  const acceptedContract = await acceptAgentRunContract(await outlineRunContract({ ...input, binding }))
   const manifest = await outlineManifest({
     runId,
     projectId: input.projectId,
     worldGroupId: input.worldGroupId,
     request: input.request,
     assembled: input.assembled,
+    binding,
   })
   return createGenerationNodeShadowTraceV1({ runId, stepId, acceptedContract, manifest })
 }
@@ -288,10 +330,13 @@ export async function createOutlineGenerationTraceV1(input: {
   worldGroupId: number | null
   request: OutlineGenerationRequest
   assembled: AssembleContextResult
+  priorOutlineCandidateText?: string
   batch?: OutlineGenerationBatchRefV1
   durable?: boolean
 }): Promise<OutlineGenerationTraceV1> {
-  const shadow = await createOutlineGenerationShadowTraceV1(input)
+  const binding = await resolveOutlineGenerationExecutionBindingV2(input)
+  assertAgentSkillBindingMatchesAssemblyV2(binding, input.assembled, `大纲 ${encodeGenerationOperation(input.request)}`)
+  const shadow = await createOutlineGenerationShadowTraceV1({ ...input, binding })
   if ((input.durable ?? isOutlineDurableHarnessEnabledV1()) === false) {
     return composeOutlineTraces({ shadow, request: input.request, batch: input.batch })
   }
@@ -312,7 +357,7 @@ export async function createOutlineGenerationTraceV1(input: {
       scope,
       worldGroupId: input.worldGroupId,
       conversationId: conversation.id,
-      contract: outlineRunContract(input),
+      contract: await outlineRunContract({ ...input, binding }),
     })
     const manifest = await outlineManifest({
       runId: created.run.id,
@@ -320,6 +365,7 @@ export async function createOutlineGenerationTraceV1(input: {
       worldGroupId: input.worldGroupId,
       request: input.request,
       assembled: input.assembled,
+      binding,
     })
     const durable = createGenerationNodeDurableTraceV1({
       scope,

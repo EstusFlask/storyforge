@@ -413,6 +413,36 @@ for (const file of walk('src/lib')) {
   }
 }
 
+// ── ⑬ 正文/大纲正式生成来源只能由 Agent Skill binding 派生 ──
+const chapterEditorSource = read('src/components/editor/ChapterEditor.tsx')
+const outlinePanelSource = read('src/components/outline/OutlinePanel.tsx')
+const proseDurableSource = read('src/lib/agent/run/prose-generation-durable.ts')
+const outlineHarnessSource = read('src/lib/outline/harness.ts')
+if (/\bPROSE_GENERATION_SOURCE_KEYS_V1\b/.test(chapterEditorSource)) {
+  violations.push('[⑬Skill来源旁路] ChapterEditor 不得拥有 PROSE_GENERATION_SOURCE_KEYS_V1；正式来源必须取 generationBinding.contextSourceKeys')
+}
+if (!/sourceKeys:\s*generationBinding\.contextSourceKeys/.test(chapterEditorSource)) {
+  violations.push('[⑬Skill来源派生] ChapterEditor 正文正式请求未从 generationBinding.contextSourceKeys 装配')
+}
+if (/\bOUTLINE_GENERATION_SOURCE_KEYS\b/.test(outlinePanelSource)) {
+  violations.push('[⑬Skill来源旁路] OutlinePanel 不得拥有 OUTLINE_GENERATION_SOURCE_KEYS；正式来源必须由 Skill resolver 派生')
+}
+if (!/sourceKeys:\s*resolveOutlineGenerationSourceKeysV2\s*\(/.test(outlinePanelSource)) {
+  violations.push('[⑬Skill来源派生] OutlinePanel 大纲正式请求未调用 resolveOutlineGenerationSourceKeysV2')
+}
+if (!/PROSE_GENERATION_SOURCE_KEYS_V1[\s\S]*?resolveAgentSkillContextSourceKeysV1\s*\([\s\S]*?getAgentSkillV1\('prose\.generate'/.test(proseDurableSource)) {
+  violations.push('[⑬Skill来源别名] prose 历史来源别名必须只读派生自 prose.generate Skill')
+}
+if (!/OUTLINE_GENERATION_SOURCE_KEYS[\s\S]*?resolveAgentSkillContextSourceKeysV1\s*\([\s\S]*?getAgentSkillV1\('outline\.compose'/.test(outlineHarnessSource)) {
+  violations.push('[⑬Skill来源别名] outline 历史来源别名必须只读派生自 outline.compose Skill')
+}
+if (!/version:\s*2[\s\S]*?executionBindings:\s*stepBindings/.test(proseDurableSource)) {
+  violations.push('[⑬Skill运行契约] 正文正式 durable contract 必须冻结 V2 executionBindings')
+}
+if (!/version:\s*2[\s\S]*?executionBindings:\s*\[\{\s*stepId,\s*\.\.\.binding\s*\}\]/.test(outlineHarnessSource)) {
+  violations.push('[⑬Skill运行契约] 大纲正式 durable contract 必须冻结 V2 execution binding')
+}
+
 // ── 报告 ──
 if (violations.length) {
   console.error('[architecture] ❌ 发现反模式违规(违反 CLAUDE.md 三注册表铁律):\n')

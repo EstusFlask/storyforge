@@ -2,7 +2,10 @@ import type { ChatMessage, WorkspaceScope } from '../../types'
 import type { AssembleContextResult } from '../../registry/types'
 import { assembleContext } from '../../registry/assemble-context'
 import { estimateTokens } from '../../ai/context-budget'
-import { createAgentSkillExecutionBindingV1 } from '../execution-binding'
+import {
+  createAgentSkillExecutionBindingV1,
+  createAgentSkillExecutionBindingV2,
+} from '../execution-binding'
 import { getAgentSkillV1, resolveAgentSkillContextSourceKeysV1 } from '../skill-registry'
 import {
   runProseSemanticReviewCycleV1,
@@ -19,7 +22,6 @@ import {
   completeProseSemanticStepV1,
   failProseSemanticStepV1,
   recordProseSemanticModelOutputV1,
-  PROSE_GENERATION_SOURCE_KEYS_V1,
   PROSE_SEMANTIC_REVIEW_STEP_ID_V1,
   PROSE_SEMANTIC_REVISION_STEP_ID_V1,
   PROSE_SEMANTIC_REREVIEW_STEP_ID_V1,
@@ -57,9 +59,36 @@ export async function runDurableProseSemanticReviewV1(input: {
   let activeStep: ProseSemanticStepIdV1 | null = null
   const publish = () => input.onSnapshot?.(snapshot)
   const reviewerSkill = getAgentSkillV1('prose.review', 'prose')
-  const reviewSourceKeys = resolveAgentSkillContextSourceKeysV1(reviewerSkill, {
-    includeOptional: input.informationBoundary.perspectiveCharacterId != null,
-  })
+  const revisionSkill = getAgentSkillV1('prose.revise', 'prose')
+  const optionalContextActivations = input.informationBoundary.perspectiveCharacterId == null ? [] : [{
+    sourceKey: 'characterKnowledge' as const,
+    reasonCode: 'perspective-character' as const,
+    boundaryHash: await hashCanonicalValue({
+      perspectiveCharacterId: input.informationBoundary.perspectiveCharacterId,
+    }),
+  }]
+  const reviewerBinding = input.snapshot.contract.version === 2
+    ? await createAgentSkillExecutionBindingV2(reviewerSkill, {
+        optionalContextActivations,
+        writeTargets: [],
+      })
+    : createAgentSkillExecutionBindingV1(reviewerSkill)
+  const revisionBinding = input.snapshot.contract.version === 2
+    ? await createAgentSkillExecutionBindingV2(revisionSkill, {
+        optionalContextActivations,
+        writeTargets: [],
+      })
+    : createAgentSkillExecutionBindingV1(revisionSkill)
+  const reviewSourceKeys = reviewerBinding.version === 2
+    ? reviewerBinding.contextSourceKeys
+    : resolveAgentSkillContextSourceKeysV1(reviewerSkill, {
+        includeOptional: input.informationBoundary.perspectiveCharacterId != null,
+      })
+  const revisionSourceKeys = revisionBinding.version === 2
+    ? revisionBinding.contextSourceKeys
+    : resolveAgentSkillContextSourceKeysV1(revisionSkill, {
+        includeOptional: input.informationBoundary.perspectiveCharacterId != null,
+      })
   const reviewAssembled = await assembleContext({
     projectId: input.projectId,
     scope: input.scope,
@@ -100,7 +129,7 @@ export async function runDurableProseSemanticReviewV1(input: {
     manifestFor(
       PROSE_SEMANTIC_REVISION_STEP_ID_V1,
       input.generationAssembled,
-      PROSE_GENERATION_SOURCE_KEYS_V1,
+      revisionSourceKeys,
     ),
     manifestFor(
       PROSE_SEMANTIC_REREVIEW_STEP_ID_V1,
@@ -108,8 +137,6 @@ export async function runDurableProseSemanticReviewV1(input: {
       reviewSourceKeys,
     ),
   ])
-  const reviewerBinding = createAgentSkillExecutionBindingV1(reviewerSkill)
-  const revisionBinding = createAgentSkillExecutionBindingV1(getAgentSkillV1('prose.revise'))
   const phaseEvidence = {
     review: {
       stepId: PROSE_SEMANTIC_REVIEW_STEP_ID_V1,

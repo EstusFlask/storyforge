@@ -4,7 +4,7 @@ import { CONTEXT_SOURCE_BY_KEY } from '../registry/context-sources'
 import { FIELD_BY_TARGET } from '../registry/field-registry'
 import { REGISTRY_BY_NAME } from '../registry/project-tables'
 import type {
-  AgentRunContractV1,
+  AgentRunContract,
   AgentRunProjectionV1,
   AgentRunRecord,
   AnyAgentRunEventV1,
@@ -16,7 +16,7 @@ import { hashCanonicalValue } from '../agent/run/hash'
 
 export interface MemorySettlementSnapshotV1 {
   run: AgentRunRecord & { id: number }
-  contract: AgentRunContractV1
+  contract: AgentRunContract
   events: AnyAgentRunEventV1[]
   projection: AgentRunProjectionV1
 }

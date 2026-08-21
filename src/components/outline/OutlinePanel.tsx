@@ -4,7 +4,7 @@ import { useWorldGroupStore } from '../../stores/world-group'
 import { useAIStream } from '../../hooks/useAIStream'
 import { createAISessionKey } from '../../stores/ai-generation-session'
 import { assembleContext } from '../../lib/registry/assemble-context'
-import { OUTLINE_GENERATION_SOURCE_KEYS } from '../../lib/outline/harness'
+import { resolveOutlineGenerationSourceKeysV2 } from '../../lib/outline/harness'
 import {
   parseChapterOutlineOutput, parseVolumeOutlineOutput,
   type ParsedVolume, type ParsedChapter,
@@ -199,6 +199,7 @@ export default function OutlinePanel({ project, onOpenChapter, initialNodeId }: 
   }), [parameterValues, systemOverride, userOverride])
 
   const buildOutlineAssembledContext = useCallback(async (
+    request: Parameters<typeof resolveOutlineGenerationSourceKeysV2>[0]['request'],
     worldGroupId: number | null,
     outlineNodeId?: number | null,
     priorOutlineCandidateText?: string,
@@ -210,7 +211,10 @@ export default function OutlinePanel({ project, onOpenChapter, initialNodeId }: 
       priorOutlineCandidateText,
       provider: aiConfig.provider,
       model: aiConfig.model,
-      sourceKeys: [...OUTLINE_GENERATION_SOURCE_KEYS],
+      sourceKeys: resolveOutlineGenerationSourceKeysV2({
+        request,
+        hasPriorOutlineCandidate: Boolean(priorOutlineCandidateText?.trim()),
+      }),
     })
   }, [project.id, aiConfig.provider, aiConfig.model])
 

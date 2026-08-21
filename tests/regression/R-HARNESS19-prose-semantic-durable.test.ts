@@ -311,7 +311,11 @@ describe.sequential('R-HARNESS19 · 正文语义评审 durable 主路径', () =>
       boundary: { chapterId: fixture.chapterId, outlineNodeId: fixture.outlineNodeId },
       readerVersion: 'prose-semantic-review-context-v1',
     })
-    const reviewerBinding = createAgentSkillExecutionBindingV1(reviewSkill)
+    const contractBinding = snapshot.contract.executionBindings?.find(binding => (
+      binding.stepId === PROSE_SEMANTIC_REVIEW_STEP_ID_V1
+    ))
+    if (!contractBinding) throw new Error('测试夹具缺少冻结语义评审 binding')
+    const { stepId: _stepId, ...reviewerBinding } = contractBinding
     snapshot = await beginProseSemanticStepV1({
       scope: fixture.scope,
       snapshot,

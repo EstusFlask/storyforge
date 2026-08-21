@@ -1,9 +1,9 @@
-import type { AgentRunContractV1 } from '../../types'
-import { parseAgentRunContractV1 } from './contract'
+import type { AgentRunContract } from '../../types'
+import { parseAgentRunContract } from './contract'
 import { canonicalStringify, hashCanonicalValue } from './hash'
 
 export interface PortableContractResultV1 {
-  contract: AgentRunContractV1
+  contract: AgentRunContract
   contractJson: string
   contractHash: string
 }
@@ -14,10 +14,10 @@ function fail(message: string): never {
   throw new Error(`[agent-run-portability] ${message}`)
 }
 
-function parseContractJson(contractJson: unknown): AgentRunContractV1 {
+function parseContractJson(contractJson: unknown): AgentRunContract {
   if (typeof contractJson !== 'string') fail('contractJson 不是字符串')
   try {
-    return parseAgentRunContractV1(JSON.parse(contractJson))
+    return parseAgentRunContract(JSON.parse(contractJson))
   } catch (error) {
     fail(error instanceof Error ? error.message : 'contractJson 无法解析')
   }
@@ -43,7 +43,7 @@ function reboundId(
   return mapped
 }
 
-async function assertHash(contract: AgentRunContractV1, expectedHash: unknown): Promise<void> {
+async function assertHash(contract: AgentRunContract, expectedHash: unknown): Promise<void> {
   if (typeof expectedHash !== 'string' || await hashCanonicalValue(contract) !== expectedHash) {
     fail('contractHash 与 contractJson 不一致')
   }
@@ -56,7 +56,7 @@ export async function portableizeAgentRunContractV1(input: {
 }): Promise<PortableContractResultV1> {
   const source = parseContractJson(input.contractJson)
   await assertHash(source, input.contractHash)
-  const contract = parseAgentRunContractV1({
+  const contract = parseAgentRunContract({
     ...source,
     ...(source.lineage ? {
       lineage: {
@@ -101,7 +101,7 @@ export async function rebindPortableAgentRunContractV1(input: {
   const portable = parseContractJson(input.contractJson)
   await assertHash(portable, input.contractHash)
   if (portable.scope.projectId !== 1) fail('便携 RunContract.projectId 必须为逻辑根 1')
-  const contract = parseAgentRunContractV1({
+  const contract = parseAgentRunContract({
     ...portable,
     ...(portable.lineage ? {
       lineage: {

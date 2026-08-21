@@ -31,10 +31,17 @@ import {
 import { AgentTeamBudgetTracker, type AgentTeamBudgetEvidence } from '../team-budget'
 import {
   assertAgentSkillExecutionBindingV1,
+  assertAgentSkillExecutionBindingIntegrityV2,
   createAgentSkillExecutionBindingV1,
+  createAgentSkillExecutionBindingV2,
 } from '../execution-binding'
-import { getAgentSkillV1 } from '../skill-registry'
-import type { AgentSkillExecutionBindingV1 } from '../../types/agent-run'
+import { getAgentSkillV1, resolveAgentSkillContextSourceKeysV1 } from '../skill-registry'
+import type {
+  AgentRunContractV2,
+  AgentRunStepExecutionBindingV2,
+  AgentSkillExecutionBindingV1,
+  AgentSkillExecutionBindingV2,
+} from '../../types/agent-run'
 
 export const PROSE_GENERATION_STEP_ID_V1 = 'prose-generation'
 export const PROSE_SEMANTIC_REVIEW_STEP_ID_V1 = 'prose-semantic-review'
@@ -45,46 +52,33 @@ export const PROSE_GENERATION_VERIFIER_SET_V2 = 'prose-generation-terminal-v2-in
 export const PROSE_GENERATION_VERIFIER_SET_V3 = 'prose-generation-terminal-v3-semantic-review'
 export const PROSE_GENERATION_CANDIDATE_TYPE_V1 = 'prose-generation-candidate'
 
-/**
- * These are the sources used by the chapter editor's actual generation
- * prompt. Keeping the list here makes the durable contract auditable and
- * prevents a future prompt edit from silently widening the read boundary.
- */
-export const PROSE_GENERATION_SOURCE_KEYS_V1 = [
-  'contextMemo',
-  'chapterOutline',
-  'detailedOutline',
-  'chapterContinuityHandoff',
-  'previousPlanReconciliation',
-  'previousChapterEnding',
-  'recentChapterSummaries',
-  'worldview',
-  'storyCore',
-  'characterDrivenPlan',
-  'powerSystem',
-  'cultivationProgress',
-  'codex',
-  'creativeRules',
-  'worldRules',
-  'historical',
-  'locations',
-  'foreshadows',
-  'storyArcs',
-  'storylineProgress',
-  'emotionBeats',
-  'stateCards',
-  'currentFacts',
-  'consistencyDossier',
-  'canonAssertions',
-  'characterKnowledge',
-  'heldItems',
-  'retrievedPassages',
-  'references',
-  'userStyleProfile',
-  'characters',
-] as const
+/** Historical read-only alias. Formal V2 runs resolve the exact runtime set. */
+export const PROSE_GENERATION_SOURCE_KEYS_V1: readonly string[] = Object.freeze(
+  resolveAgentSkillContextSourceKeysV1(
+    getAgentSkillV1('prose.generate', 'prose'),
+  ),
+)
 
 export type ProseGenerationOperationV1 = 'generate' | 'continue'
+
+export async function resolveProseGenerationExecutionBindingV2(input: {
+  operation: ProseGenerationOperationV1
+  perspectiveCharacterId?: number | null
+}): Promise<AgentSkillExecutionBindingV2> {
+  const skill = getAgentSkillV1(`prose.${input.operation}`, 'prose')
+  return createAgentSkillExecutionBindingV2(skill, {
+    optionalContextActivations: input.perspectiveCharacterId == null ? [] : [{
+      sourceKey: 'characterKnowledge',
+      reasonCode: 'perspective-character',
+      boundaryHash: await hashCanonicalValue({ perspectiveCharacterId: input.perspectiveCharacterId }),
+    }],
+    writeTargets: [{
+      table: 'chapters',
+      fields: ['content', 'wordCount'],
+      mode: 'author-confirmed',
+    }],
+  })
+}
 
 export interface ProseGenerationDurableEvidenceV1 {
   runId: number
@@ -228,6 +222,53 @@ export function buildProseGenerationRunContractV1(input: {
   }
 }
 
+export async function buildProseGenerationRunContractV2(input: {
+  projectId: number
+  worldGroupId: number | null
+  chapterId: number
+  operation: ProseGenerationOperationV1
+  semanticReview?: boolean
+  perspectiveCharacterId?: number | null
+  generationBinding?: AgentSkillExecutionBindingV2
+}): Promise<AgentRunContractV2> {
+  const legacy = buildProseGenerationRunContractV1(input)
+  const expectedGeneration = await resolveProseGenerationExecutionBindingV2(input)
+  const generationBinding = input.generationBinding ?? expectedGeneration
+  await assertAgentSkillExecutionBindingIntegrityV2(generationBinding, '正文生成 binding')
+  if (await hashCanonicalValue(generationBinding) !== await hashCanonicalValue(expectedGeneration)) {
+    throw new Error('正文生成 binding 与本轮 Skill/视角边界不一致。')
+  }
+
+  const stepBindings: AgentRunStepExecutionBindingV2[] = [{
+    stepId: PROSE_GENERATION_STEP_ID_V1,
+    ...generationBinding,
+  }]
+  if (input.semanticReview === true) {
+    const optionalContextActivations = generationBinding.optionalContextActivations
+    for (const [stepId, skillId] of [
+      [PROSE_SEMANTIC_REVIEW_STEP_ID_V1, 'prose.review'],
+      [PROSE_SEMANTIC_REVISION_STEP_ID_V1, 'prose.revise'],
+      [PROSE_SEMANTIC_REREVIEW_STEP_ID_V1, 'prose.review'],
+    ] as const) {
+      stepBindings.push({
+        stepId,
+        ...await createAgentSkillExecutionBindingV2(getAgentSkillV1(skillId, 'prose'), {
+          optionalContextActivations,
+          writeTargets: [],
+        }),
+      })
+    }
+  }
+  const contextSourceKeys = [...new Set(stepBindings.flatMap(binding => binding.contextSourceKeys))]
+  const writeTargets = generationBinding.writeTargets.map(target => ({ ...target, fields: [...target.fields] }))
+  return {
+    ...legacy,
+    version: 2,
+    permissions: { contextSourceKeys, writeTargets },
+    executionBindings: stepBindings,
+  }
+}
+
 function requiresSemanticReview(snapshot: AgentRunSnapshotV1): boolean {
   return snapshot.contract.acceptance.some(criterion => (
     criterion.id === 'prose-generation.semantic-review'
@@ -241,9 +282,11 @@ export function assertProseGenerationExecutionBindingsV1(snapshot: AgentRunSnaps
   const operation = snapshot.contract.objective.startsWith('续写') ? 'continue' : 'generate'
   const expected = new Map<string, ReturnType<typeof getAgentSkillV1>>([
     [PROSE_GENERATION_STEP_ID_V1, getAgentSkillV1(`prose.${operation}`, 'prose')],
-    [PROSE_SEMANTIC_REVIEW_STEP_ID_V1, getAgentSkillV1('prose.review', 'prose')],
-    [PROSE_SEMANTIC_REVISION_STEP_ID_V1, getAgentSkillV1('prose.revise', 'prose')],
-    [PROSE_SEMANTIC_REREVIEW_STEP_ID_V1, getAgentSkillV1('prose.review', 'prose')],
+    ...(requiresSemanticReview(snapshot) ? [
+      [PROSE_SEMANTIC_REVIEW_STEP_ID_V1, getAgentSkillV1('prose.review', 'prose')],
+      [PROSE_SEMANTIC_REVISION_STEP_ID_V1, getAgentSkillV1('prose.revise', 'prose')],
+      [PROSE_SEMANTIC_REREVIEW_STEP_ID_V1, getAgentSkillV1('prose.review', 'prose')],
+    ] as const : []),
   ])
   if (snapshot.contract.executionBindings.length !== expected.size) {
     throw new Error('正文生成 RunContract execution bindings 数量无效。')
@@ -252,7 +295,11 @@ export function assertProseGenerationExecutionBindingsV1(snapshot: AgentRunSnaps
     const skill = expected.get(binding.stepId)
     if (!skill) throw new Error(`正文生成 RunContract 包含未知 execution binding：${binding.stepId}`)
     const { stepId: _stepId, ...skillBinding } = binding
-    assertAgentSkillExecutionBindingV1(skillBinding, skill, `正文生成 ${binding.stepId}`)
+    if (skillBinding.version === 1) {
+      assertAgentSkillExecutionBindingV1(skillBinding, skill, `正文生成 ${binding.stepId}`)
+    } else if (skillBinding.skillId !== skill.id) {
+      throw new Error(`正文生成 ${binding.stepId} 与冻结 Skill 身份不一致`)
+    }
   }
 }
 
@@ -263,22 +310,22 @@ async function verifySemanticReviewEvidence(
   if (!evidence || evidence.version !== 1 || evidence.final.verdict !== 'pass') return false
   try {
     new AgentTeamBudgetTracker(evidence.budget.profile, evidence.budget)
-    assertAgentSkillExecutionBindingV1(
-      evidence.initial.reviewer.executionBinding,
-      getAgentSkillV1('prose.review', 'prose'),
-      '正文语义初审 execution binding',
-    )
-    assertAgentSkillExecutionBindingV1(
-      evidence.final.reviewer.executionBinding,
-      getAgentSkillV1('prose.review', 'prose'),
-      '正文语义复核 execution binding',
-    )
+    const verifyBinding = async (
+      binding: AgentSkillExecutionBindingV1 | AgentSkillExecutionBindingV2,
+      skillId: 'prose.review' | 'prose.revise',
+      label: string,
+    ) => {
+      if (binding.version === 1) {
+        assertAgentSkillExecutionBindingV1(binding, getAgentSkillV1(skillId, 'prose'), label)
+      } else {
+        await assertAgentSkillExecutionBindingIntegrityV2(binding, label)
+        if (binding.skillId !== skillId) throw new Error(`${label} Skill 身份不一致`)
+      }
+    }
+    await verifyBinding(evidence.initial.reviewer.executionBinding, 'prose.review', '正文语义初审 execution binding')
+    await verifyBinding(evidence.final.reviewer.executionBinding, 'prose.review', '正文语义复核 execution binding')
     if (evidence.revision) {
-      assertAgentSkillExecutionBindingV1(
-        evidence.revision.executionBinding,
-        getAgentSkillV1('prose.revise', 'prose'),
-        '正文语义修订 execution binding',
-      )
+      await verifyBinding(evidence.revision.executionBinding, 'prose.revise', '正文语义修订 execution binding')
     }
   } catch {
     return false
@@ -358,16 +405,20 @@ export async function createProseGenerationDurableRunV1(input: {
   chapterId: number
   operation: ProseGenerationOperationV1
   semanticReview?: boolean
+  perspectiveCharacterId?: number | null
+  generationBinding?: AgentSkillExecutionBindingV2
 }): Promise<AgentRunSnapshotV1> {
   return createAgentRunV1({
     scope: input.scope,
     worldGroupId: input.worldGroupId,
-    contract: buildProseGenerationRunContractV1({
+    contract: await buildProseGenerationRunContractV2({
       projectId: input.scope.projectId,
       worldGroupId: input.worldGroupId,
       chapterId: input.chapterId,
       operation: input.operation,
       semanticReview: input.semanticReview,
+      perspectiveCharacterId: input.perspectiveCharacterId,
+      generationBinding: input.generationBinding,
     }),
   })
 }
@@ -464,7 +515,7 @@ export async function beginProseSemanticStepV1(input: {
   snapshot: AgentRunSnapshotV1
   stepId: ProseSemanticStepIdV1
   contextManifest: ContextManifestV1
-  executionBinding: AgentSkillExecutionBindingV1
+  executionBinding: AgentSkillExecutionBindingV1 | AgentSkillExecutionBindingV2
   requestBinding: unknown
   reservedTokens: number
 }): Promise<AgentRunSnapshotV1> {

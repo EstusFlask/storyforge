@@ -17,6 +17,7 @@ import {
   type OutlineGenerationCandidateV1,
 } from '../../lib/outline/harness'
 import { decodeGenerationOperation } from '../../lib/outline/generation-request'
+import type { OutlineGenerationRequest } from '../../lib/outline/generation-request'
 import type { AssembleContextResult } from '../../lib/registry/types'
 import type { OutlineNode, Project } from '../../lib/types'
 
@@ -28,6 +29,7 @@ interface Options {
   hint: string
   runOptions: RunOptions
   assembleContext: (
+    request: OutlineGenerationRequest,
     worldGroupId: number | null,
     outlineNodeId?: number | null,
     priorOutlineCandidateText?: string,
@@ -122,6 +124,7 @@ export function useOutlineBatchGeneration({
         userHint: hint || undefined,
         runOptions,
         assembleContext: ({ volume, priorOutlineCandidateText }) => assembleContext(
+          { kind: 'chapters', volumeId: volume.id! },
           multiWorldEnabled ? (volume.worldGroupId ?? null) : null,
           volume.id,
           priorOutlineCandidateText,

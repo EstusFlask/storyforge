@@ -1311,6 +1311,7 @@ export function assertMasterAgentRunContractExecutionBindingsV1(
     const binding = byStep.get(stepId)
     if (!binding) fail(`主 Agent RunContract 缺少 ${stepId} execution binding`)
     const { stepId: _stepId, ...skillBinding } = binding
+    if (skillBinding.version !== 1) fail(`主 Agent RunContract ${stepId} 当前只接受 V1 Skill 执行绑定`)
     assertAgentSkillExecutionBindingV1(
       skillBinding,
       skill,

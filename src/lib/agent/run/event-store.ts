@@ -1,8 +1,8 @@
 import Dexie from 'dexie'
 import { db } from '../../db/schema'
 import type {
-  AcceptedAgentRunContractV1,
-  AgentRunContractV1,
+  AcceptedAgentRunContract,
+  AgentRunContract,
   AgentRunEventPayloadByTypeV1,
   AgentRunEventRecord,
   AgentRunEventTypeV1,
@@ -17,7 +17,7 @@ import {
   scopeTransactionTables,
   stampNewRecord,
 } from '../../world-engine/scope'
-import { acceptAgentRunContractV1, parseAgentRunContractV1 } from './contract'
+import { acceptAgentRunContract } from './contract'
 import { parseAgentRunEventV1 } from './event-schema'
 import { canonicalStringify, hashCanonicalValue } from './hash'
 import {
@@ -39,7 +39,7 @@ export class AgentRunStoreError extends Error {
 
 export interface AgentRunSnapshotV1 {
   run: AgentRunRecord & { id: number }
-  contract: AgentRunContractV1
+  contract: AgentRunContract
   events: AnyAgentRunEventV1[]
   projection: AgentRunProjectionV1
 }
@@ -112,7 +112,7 @@ async function waitForHash(value: unknown): Promise<string> {
 
 async function assertContractScope(
   scope: WorkspaceScope,
-  contract: AgentRunContractV1,
+  contract: AgentRunContract,
   expectedWorldGroupId: number | null,
   expectedSimulationSessionId: number | null,
 ): Promise<void> {
@@ -256,16 +256,17 @@ async function readRunEvents(run: AgentRunRecord & { id: number }): Promise<AnyA
   return records.map(recordToEvent)
 }
 
-async function verifyContractRecord(run: AgentRunRecord & { id: number }): Promise<AgentRunContractV1> {
+async function verifyContractRecord(run: AgentRunRecord & { id: number }): Promise<AgentRunContract> {
   let raw: unknown
   try {
     raw = JSON.parse(run.contractJson)
   } catch {
     fail('contract_json', '运行契约 JSON 已损坏')
   }
-  const contract = parseAgentRunContractV1(raw)
-  const contractHash = await waitForHash(contract)
-  if (contractHash !== run.contractHash || run.contractVersion !== 1) {
+  const accepted = await Dexie.waitFor(acceptAgentRunContract(raw))
+  const contract = accepted.contract
+  const contractHash = accepted.contractHash
+  if (contractHash !== run.contractHash || run.contractVersion !== contract.version) {
     fail('contract_hash', '运行契约哈希或版本不匹配')
   }
   if (
@@ -289,7 +290,7 @@ async function verifyContractRecord(run: AgentRunRecord & { id: number }): Promi
 
 async function assertParentLineageForCreationV1(
   scope: WorkspaceScope,
-  contract: AgentRunContractV1,
+  contract: AgentRunContract,
   simulationSessionId: number | null,
 ): Promise<void> {
   const lineage = contract.lineage?.parent
@@ -390,7 +391,7 @@ async function persistProjection(
   runId: number,
   projection: AgentRunProjectionV1,
   updatedAt: number,
-  contract?: AcceptedAgentRunContractV1,
+  contract?: AcceptedAgentRunContract,
 ): Promise<{ projectionJson: string; projectionHash: string }> {
   const projectionBody = toAgentRunProjectionBodyV1(projection)
   const projectionHash = await waitForHash(projectionBody)
@@ -403,7 +404,7 @@ async function persistProjection(
     projectionHash,
     terminalReceiptHash: projection.terminalReceiptHash ?? null,
     ...(contract ? {
-      contractVersion: 1 as const,
+      contractVersion: contract.contract.version,
       contractJson: canonicalStringify(contract.contract),
       contractHash: contract.contractHash,
     } : {}),
@@ -416,7 +417,7 @@ async function persistProjection(
 export async function appendPrivilegedAgentRunEventInTransactionV1(
   snapshot: AgentRunSnapshotV1,
   event: AnyAgentRunEventV1,
-  contract?: AcceptedAgentRunContractV1,
+  contract?: AcceptedAgentRunContract,
 ): Promise<AgentRunSnapshotV1> {
   if (event.sequence !== snapshot.projection.lastSequence + 1) {
     fail('sequence_conflict', '追加事件序号已过期')
@@ -449,7 +450,7 @@ export async function appendPrivilegedAgentRunEventInTransactionV1(
 }
 
 export async function createAgentRunV1(input: CreateAgentRunV1Input): Promise<AgentRunSnapshotV1> {
-  const accepted = await acceptAgentRunContractV1(input.contract)
+  const accepted = await acceptAgentRunContract(input.contract)
   const worldGroupId = input.worldGroupId ?? null
   if (!sameNullableId(worldGroupId, accepted.contract.scope.worldGroupId)) {
     fail('contract_scope', '创建参数 worldGroupId 与 RunContract 不一致')
@@ -490,7 +491,7 @@ export async function createAgentRunV1(input: CreateAgentRunV1Input): Promise<Ag
         parentReceiptHash: parent?.receiptHash ?? null,
         parentArtifactHash: parent?.artifactHash ?? null,
         status: 'planned' as const,
-        contractVersion: 1 as const,
+        contractVersion: accepted.contract.version,
         contractJson: canonicalStringify(accepted.contract),
         contractHash: accepted.contractHash,
         generation: 1,
@@ -774,7 +775,7 @@ export async function reviseAgentRunContractV1(input: {
   expectedLastSequence?: number
   now?: number
 }): Promise<AgentRunSnapshotV1> {
-  const accepted = await acceptAgentRunContractV1(input.contract)
+  const accepted = await acceptAgentRunContract(input.contract)
   return withAgentRunMutationLockV1(input.runId, () => db.transaction(
     'rw',
     agentRunScopeTransactionTablesV1(

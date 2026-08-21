@@ -37,6 +37,43 @@ export interface AgentRunStepExecutionBindingV1 extends AgentSkillExecutionBindi
   stepId: string
 }
 
+export type AgentOptionalContextActivationReasonV2 =
+  | 'perspective-character'
+  | 'prior-outline-candidate'
+  | 'explicit-runtime-boundary'
+
+export interface AgentOptionalContextActivationV2 {
+  sourceKey: string
+  reasonCode: AgentOptionalContextActivationReasonV2
+  /** Hash of the runtime boundary that activated the optional source. */
+  boundaryHash?: string
+}
+
+/**
+ * Immutable Skill-derived execution snapshot. The canonical V2 Skill body is
+ * stored as JSON so an accepted run remains auditable after the live registry
+ * changes without creating a second editable registry.
+ */
+export interface AgentSkillExecutionBindingV2 {
+  version: 2
+  skillId: string
+  skillVersion: 2
+  skillDefinitionJson: string
+  skillDefinitionHash: string
+  contextAccessPolicyHash: string
+  promptVersion: string
+  toolSchemaVersion: string
+  toolSchemaHash: string
+  contextSourceKeys: string[]
+  optionalContextActivations: AgentOptionalContextActivationV2[]
+  writeTargets: AgentRunWriteTargetV1[]
+  maxOutputTokens: number
+}
+
+export interface AgentRunStepExecutionBindingV2 extends AgentSkillExecutionBindingV2 {
+  stepId: string
+}
+
 /** Durable provenance for a run created from another run's verified artifact. */
 export interface AgentRunParentLineageV1 {
   runId: number
@@ -154,10 +191,28 @@ export interface AgentRunContractV1 {
   }
 }
 
+/**
+ * V2 requires every executable step to carry a complete Skill-derived binding.
+ * Historical V1 contracts remain readable and are never upgraded in place.
+ */
+export interface AgentRunContractV2 extends Omit<AgentRunContractV1, 'version' | 'executionBindings'> {
+  version: 2
+  executionBindings: AgentRunStepExecutionBindingV2[]
+}
+
+export type AgentRunContract = AgentRunContractV1 | AgentRunContractV2
+
 export interface AcceptedAgentRunContractV1 {
   contract: AgentRunContractV1
   contractHash: string
 }
+
+export interface AcceptedAgentRunContractV2 {
+  contract: AgentRunContractV2
+  contractHash: string
+}
+
+export type AcceptedAgentRunContract = AcceptedAgentRunContractV1 | AcceptedAgentRunContractV2
 
 export type ContextManifestSourceStatus = 'included' | 'omitted' | 'trimmed'
 export type ContextManifestSourceDeliveryV1 = 'full' | 'compressed' | 'truncated'
@@ -328,7 +383,7 @@ export interface AgentRunRecord {
   parentReceiptHash?: string | null
   parentArtifactHash?: string | null
   status: AgentRunState
-  contractVersion: 1
+  contractVersion: 1 | 2
   contractJson: string
   contractHash: string
   generation: number

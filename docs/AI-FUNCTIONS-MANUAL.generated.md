@@ -241,7 +241,7 @@ AI 输出经 `adopt({ target, data })` 写回,只有这里登记的字段可写(
 | `chapter.continuity` | `src/lib/node-authoring/domain-execution.ts:552`<br/>`src/lib/node-authoring/domain-execution.ts:616` |
 | `chapter.deai` | `src/components/editor/ChapterEditor.tsx:1608` |
 | `chapter.expand` | `src/components/editor/ChapterEditor.tsx:1588` |
-| `chapter.memory` | `src/components/editor/ChapterEditor.tsx:1076` |
+| `chapter.memory` | `src/components/editor/ChapterEditor.tsx:1088` |
 | `chapter.organize` | `src/components/editor/ChapterEditor.tsx:1733`<br/>`src/components/editor/ChapterEditor.tsx:2618` |
 | `chapter.polish` | `src/components/editor/ChapterEditor.tsx:1580` |
 | `chapter.toolbar` | `src/lib/agent/run/selection-edit-durable.ts:567` |
@@ -315,4 +315,4 @@ AI 输出经 `adopt({ target, data })` 写回,只有这里登记的字段可写(
 
 ---
 
-生成时间基准:commit `a023cf3`
+生成时间基准:commit `2c9ad71`

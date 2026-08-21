@@ -3,7 +3,7 @@ import type {
   PreparedGenerationNode,
 } from '../../generation/generation-node'
 import type {
-  AcceptedAgentRunContractV1,
+  AcceptedAgentRunContract,
   AgentRunEventPayloadByTypeV1,
   AgentRunEventTypeV1,
   AgentRunProjectionV1,
@@ -51,7 +51,7 @@ function errorCode(phase: 'model' | 'gate' | 'adoption', error: unknown): string
 export async function createGenerationNodeShadowTraceV1(input: {
   runId: number
   stepId: string
-  acceptedContract: AcceptedAgentRunContractV1
+  acceptedContract: AcceptedAgentRunContract
   manifest?: ContextManifestV1
   now?: () => number
 }): Promise<GenerationNodeShadowTraceV1> {

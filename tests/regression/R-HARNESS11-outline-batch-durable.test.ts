@@ -6,8 +6,8 @@ import { assembleContext } from '../../src/lib/registry/assemble-context'
 import {
   beginOutlineGenerationAdoptionV1,
   commitOutlineGenerationAdoptionV1,
-  OUTLINE_GENERATION_SOURCE_KEYS,
   rejectOutlineGenerationCandidateV1,
+  resolveOutlineGenerationSourceKeysV2,
   restoreLatestOutlineGenerationBatchV1,
   restoreLatestOutlineGenerationCandidateV1,
 } from '../../src/lib/outline/harness'
@@ -132,7 +132,10 @@ describe.sequential('R-HARNESS11 · 批量章纲 durable 主路径', () => {
           worldGroupId: fixture.worldGroupId,
           outlineNodeId: volume.id,
           priorOutlineCandidateText,
-          sourceKeys: [...OUTLINE_GENERATION_SOURCE_KEYS],
+          sourceKeys: resolveOutlineGenerationSourceKeysV2({
+            request: { kind: 'chapters', volumeId: volume.id! },
+            hasPriorOutlineCandidate: Boolean(priorOutlineCandidateText?.trim()),
+          }),
         })
         contextRequests.push({
           volumeId: volume.id!,
@@ -221,7 +224,10 @@ describe.sequential('R-HARNESS11 · 批量章纲 durable 主路径', () => {
         scope: fixture.scope,
         worldGroupId: fixture.worldGroupId,
         outlineNodeId: volume.id,
-        sourceKeys: [...OUTLINE_GENERATION_SOURCE_KEYS],
+        sourceKeys: resolveOutlineGenerationSourceKeysV2({
+          request: { kind: 'chapters', volumeId: volume.id! },
+          hasPriorOutlineCandidate: false,
+        }),
       }),
     })
 
@@ -257,7 +263,10 @@ describe.sequential('R-HARNESS11 · 批量章纲 durable 主路径', () => {
         scope: fixture.scope,
         worldGroupId: fixture.worldGroupId,
         outlineNodeId: volume.id,
-        sourceKeys: [...OUTLINE_GENERATION_SOURCE_KEYS],
+        sourceKeys: resolveOutlineGenerationSourceKeysV2({
+          request: { kind: 'chapters', volumeId: volume.id! },
+          hasPriorOutlineCandidate: false,
+        }),
       }),
     })
 
@@ -308,7 +317,10 @@ describe.sequential('R-HARNESS11 · 批量章纲 durable 主路径', () => {
           worldGroupId: volume.worldGroupId ?? null,
           outlineNodeId: volume.id,
           priorOutlineCandidateText,
-          sourceKeys: [...OUTLINE_GENERATION_SOURCE_KEYS],
+          sourceKeys: resolveOutlineGenerationSourceKeysV2({
+            request: { kind: 'chapters', volumeId: volume.id! },
+            hasPriorOutlineCandidate: Boolean(priorOutlineCandidateText?.trim()),
+          }),
         })
       },
     })

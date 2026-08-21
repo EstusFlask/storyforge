@@ -1,7 +1,7 @@
 import type { ChatMessage } from '../types'
 import type { AssembleContextResult } from '../registry/types'
 import type { GenerationGateIssue } from '../generation/generation-node'
-import type { AgentSkillExecutionBindingV1 } from '../types/agent-run'
+import type { AgentSkillExecutionBindingV1, AgentSkillExecutionBindingV2 } from '../types/agent-run'
 import { estimateTokens } from '../ai/context-budget'
 import { hashCanonicalValue } from './run/hash'
 import {
@@ -11,6 +11,8 @@ import {
 
 export const PROSE_SEMANTIC_REVIEW_PROMPT_VERSION_V1 = 'prose-semantic-review-v1'
 export const PROSE_SEMANTIC_REVISION_PROMPT_VERSION_V1 = 'prose-semantic-revision-v1'
+
+type ProseSemanticExecutionBinding = AgentSkillExecutionBindingV1 | AgentSkillExecutionBindingV2
 
 export const PROSE_SEMANTIC_ISSUE_CODES_V1 = [
   'world-rule-conflict',
@@ -46,7 +48,7 @@ export interface ProseSemanticReviewerIdentityV1 {
   provider: string
   model: string
   promptVersion: typeof PROSE_SEMANTIC_REVIEW_PROMPT_VERSION_V1
-  executionBinding: AgentSkillExecutionBindingV1
+  executionBinding: ProseSemanticExecutionBinding
   correlatedJudge: boolean
 }
 
@@ -70,7 +72,7 @@ export interface ProseSemanticRevisionArtifactV1 {
   sourceReviewArtifactHash: string
   issueCodes: ProseSemanticIssueCodeV1[]
   outputTextHash: string
-  executionBinding: AgentSkillExecutionBindingV1
+  executionBinding: ProseSemanticExecutionBinding
   createdAt: number
   artifactHash: string
 }
@@ -369,7 +371,7 @@ export async function runProseSemanticReviewCycleV1(input: {
   assembled: AssembleContextResult
   contextManifestHashes: { initial: string; final: string }
   reviewer: ProseSemanticReviewerIdentityV1
-  revisionExecutionBinding: AgentSkillExecutionBindingV1
+  revisionExecutionBinding: ProseSemanticExecutionBinding
   budget: AgentTeamBudgetTracker
   review: (messages: ChatMessage[]) => Promise<string>
   revise: (messages: ChatMessage[]) => Promise<string>
