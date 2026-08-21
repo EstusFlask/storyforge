@@ -12,6 +12,7 @@ import { PROJECT_TABLES, REGISTRY_BY_NAME } from './project-tables'
 import { FIELD_REGISTRY, FIELD_BY_TARGET } from './field-registry'
 import { ADOPTION_EXTENSIONS, ADOPTION_SCHEMAS } from './adoption-schema'
 import { CONTEXT_SOURCES } from './context-sources'
+import { CONTEXT_RESOURCE_KINDS_V1 } from './types'
 
 /** 解析 'tableName[field]' → tableName */
 function parseTargetTable(target: string): string | null {
@@ -41,6 +42,18 @@ export function checkRegistry(): RegistryValidationResult {
 
   // ref / remap target 表名存在性
   for (const spec of PROJECT_TABLES) {
+    if (spec.resourceIdentity) {
+      if (!CONTEXT_RESOURCE_KINDS_V1.includes(spec.resourceIdentity.contextKind)) {
+        errors.push(`${spec.name}.resourceIdentity.contextKind 未登记: ${spec.resourceIdentity.contextKind}`)
+      }
+      if (!spec.resourceIdentity.label.trim()) {
+        errors.push(`${spec.name}.resourceIdentity.label 不能为空`)
+      }
+      if (spec.resourceIdentity.descriptorMode === 'registered-fields'
+        && !(FIELD_BY_TARGET.get(spec.name)?.length)) {
+        errors.push(`${spec.name}.resourceIdentity 要求 registered-fields，但 FIELD_REGISTRY 无字段`)
+      }
+    }
     if (spec.communityShare === 'world' && !spec.releaseSection) {
       errors.push(`${spec.name}.communityShare=world 必须登记 releaseSection`)
     }
@@ -182,6 +195,7 @@ export function checkRegistry(): RegistryValidationResult {
   }
 
   const sourceKeys = new Set<string>()
+  const providerIds = new Set<string>()
   for (const source of CONTEXT_SOURCES) {
     if (sourceKeys.has(source.key)) errors.push(`CONTEXT_SOURCES key 重复登记: ${source.key}`)
     sourceKeys.add(source.key)
@@ -199,6 +213,22 @@ export function checkRegistry(): RegistryValidationResult {
     }
     if (source.budgetTokens <= 0) {
       errors.push(`CONTEXT_SOURCES budgetTokens 必须为正数: ${source.key}`)
+    }
+    if (source.resources) {
+      const provider = source.resources
+      if (providerIds.has(provider.providerId)) {
+        errors.push(`CONTEXT_SOURCES resource providerId 重复: ${provider.providerId}`)
+      }
+      providerIds.add(provider.providerId)
+      if (!provider.providerVersion.trim() || !provider.normalizationVersion.trim()) {
+        errors.push(`CONTEXT_SOURCES resource provider 缺版本: ${source.key}`)
+      }
+      if (!provider.kinds.length) errors.push(`CONTEXT_SOURCES resource provider kinds 不能为空: ${source.key}`)
+      for (const kind of provider.kinds) {
+        if (!CONTEXT_RESOURCE_KINDS_V1.includes(kind)) {
+          errors.push(`CONTEXT_SOURCES resource provider kind 未登记: ${source.key}.${kind}`)
+        }
+      }
     }
   }
 

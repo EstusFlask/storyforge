@@ -2,6 +2,7 @@ import { estimateTokens } from '../ai/context-budget'
 import { sha256Text } from '../ai/chapter-memory/text-normalization'
 import { hashCanonicalValue } from '../agent/run/hash'
 import { REGISTRY_BY_NAME } from '../registry/project-tables'
+import { CONTEXT_RESOURCE_KINDS_V1 } from '../registry/types'
 import type {
   AgentRunArtifactV1,
   ContextAccessPolicyV1,
@@ -23,12 +24,7 @@ import { assertExactRunArtifactBodySafeV1 } from '../memory/evidence-policy'
 
 const HASH = /^[a-f0-9]{64}$/
 const RESOURCE_KEY = /^[a-z][a-z0-9-]*:[^\s:]+(?::[^\s:]+)*$/
-const KINDS: readonly ContextResourceKind[] = [
-  'workspace', 'world', 'worldview-field', 'story-core-field', 'character',
-  'character-relation', 'story-arc', 'storyline-progress', 'outline-node',
-  'detailed-outline', 'chapter', 'foreshadow', 'location', 'codex-entry',
-  'world-link', 'fact', 'reference', 'narrative-blueprint',
-]
+const KINDS: readonly ContextResourceKind[] = CONTEXT_RESOURCE_KINDS_V1
 const DEPTHS: readonly ContextResourceDepthV1[] = ['index', 'summary', 'focused', 'full', 'original']
 
 export class ContextGatewayContractError extends Error {
@@ -118,6 +114,13 @@ export function assertContextResourceDescriptorV1(input: {
   if (!descriptor.title.trim() || descriptor.shortSummary.length > 800) {
     fail('invalid-metadata', `${descriptor.resourceKey} metadata 非法`)
   }
+  if ((typeof descriptor.contentRevision !== 'number' && typeof descriptor.contentRevision !== 'string')
+    || descriptor.contentRevision === ''
+    || !Number.isSafeInteger(descriptor.policyRevision) || descriptor.policyRevision < 0) {
+    fail('invalid-revision', `${descriptor.resourceKey} content/policy revision 非法`)
+  }
+  requireHash(descriptor.contentHash, `${descriptor.resourceKey}.contentHash`)
+  requireHash(descriptor.policyHash, `${descriptor.resourceKey}.policyHash`)
   if ('content' in descriptor || 'body' in descriptor || 'original' in descriptor) {
     fail('metadata-body-leak', `${descriptor.resourceKey} 的 metadata 夹带正文`)
   }

@@ -4,32 +4,17 @@
  * 这里不复制 Canon：资料正文实时投影自现有业务表；仅把稳定 ragDocumentId 和作者的
  * 启用/权重/token 策略写回源记录。节点执行仍通过 CONTEXT_SOURCES.ragSelection 读取。
  */
-import Dexie, { type Table } from 'dexie'
+import Dexie from 'dexie'
 import { estimateTokens } from '../ai/context-budget'
 import { db } from '../db/schema'
 import {
-  parseEntryFields,
-  parseFieldSchema,
-  type Character,
-  type CharacterRelation,
-  type Chapter,
-  type CodexCategory,
-  type CodexEntry,
-  type Foreshadow,
-  type History,
-  type ImportantLocation,
-  type ItemLedgerEntry,
-  type OutlineNode,
   type RagDocumentMetadata,
   type RagDocumentPolicy,
   type RagFieldPolicy,
   type RagLibraryEntry,
   type RagSelectionTraceCollector,
-  type Reference,
-  type StoryCore,
-  type Worldview,
 } from '../types'
-import { htmlToPlainText } from '../utils/html'
+import type { ContextResourceDescriptorV1 } from '../registry/types'
 import type { WorkspaceScope } from '../types/world-ownership'
 import {
   assertRecordInScope,
@@ -40,8 +25,14 @@ import {
   type WorkspaceScopeLike,
 } from '../world-engine/scope'
 import { REGISTRY_BY_NAME } from '../registry/project-tables'
+import { FIELD_BY_TARGET } from '../registry/field-registry'
 import { hashCanonicalValue } from '../agent/run/hash'
 import { ContextResourceIdentityError, isPortableResourceUidV1 } from '../context-gateway/resource-uid'
+import {
+  CANON_RESOURCE_PROVIDER_V1,
+  logicalFieldKeyFromResourceKeyV1,
+  readCanonicalDescriptorV1,
+} from '../context-gateway/canon-provider'
 
 type RagRow = RagDocumentMetadata & {
   id?: number
@@ -50,49 +41,10 @@ type RagRow = RagDocumentMetadata & {
   createdAt?: number
 }
 
-type RagField = {
-  key: string
-  label: string
-  content: string
-}
-
-interface RagDescriptor<Row extends RagRow = RagRow> {
-  tableName: string
-  table: Table<Row, number>
-  sourceKey: string
-  sourceLabel: string
-  title: (row: Row, context: ProjectionContext) => string
-  fields: (row: Row, context: ProjectionContext) => RagField[]
-  visible?: (row: Row, context: ProjectionContext) => boolean
-}
-
-interface ProjectionContext {
-  worldGroupId: number | null
-  outlineWorldById: Map<number, number | null>
-  characterNameById: Map<number, string>
-  categoryById: Map<number, CodexCategory>
-  chapterChunks: Map<number, { count: number; embedded: number }>
-}
-
 const DEFAULT_WEIGHT = 1
 const DEFAULT_TOKEN_CAP = 4000
 const MIN_TOKEN_CAP = 100
 const MAX_TOKEN_CAP = 50_000
-
-function text(value: unknown): string {
-  if (typeof value === 'string') return value.trim()
-  if (typeof value === 'number' || typeof value === 'boolean') return String(value)
-  if (value == null) return ''
-  try {
-    return JSON.stringify(value, null, 2)
-  } catch {
-    return String(value)
-  }
-}
-
-function field(key: string, label: string, value: unknown): RagField {
-  return { key, label, content: text(value) }
-}
 
 function stableDocumentId(tableName: string, row: RagRow): string {
   const identity = REGISTRY_BY_NAME.get(tableName)?.resourceIdentity
@@ -115,6 +67,9 @@ function recordPolicy(row: RagRow): Required<Omit<RagDocumentPolicy, 'fields'>> 
     enabled: row.ragPolicy?.enabled !== false,
     weight: normalizeWeight(row.ragPolicy?.weight),
     tokenCap: normalizeTokenCap(row.ragPolicy?.tokenCap),
+    priority: row.ragPolicy?.priority === 'pinned' || row.ragPolicy?.priority === 'must-read'
+      ? row.ragPolicy.priority
+      : 'normal',
     fields: row.ragPolicy?.fields ?? {},
   }
 }
@@ -131,246 +86,6 @@ function normalizeTokenCap(value: unknown): number {
     : DEFAULT_TOKEN_CAP
 }
 
-function exactWorld(rowWorld: number | null | undefined, current: number | null): boolean {
-  return (rowWorld ?? null) === current
-}
-
-const WORLDVIEW_FIELDS: Array<[keyof Worldview, string]> = [
-  ['summary', '世界观摘要'],
-  ['worldOrigin', '世界来源'],
-  ['powerHierarchy', '力量层级'],
-  ['worldStructure', '世界结构'],
-  ['worldDimensions', '世界尺寸'],
-  ['continentLayout', '大陆分布'],
-  ['mountainsRivers', '山川河流'],
-  ['climateByRegion', '分区气候'],
-  ['naturalResourceOverview', '自然资源全貌'],
-  ['historyLine', '历史线'],
-  ['worldEvents', '世界大事记'],
-  ['races', '种族设定'],
-  ['factionLayout', '势力分布'],
-  ['politicsOverview', '政治制度'],
-  ['economyOverview', '经济体系'],
-  ['cultureOverview', '文化风俗'],
-  ['internalConflicts', '矛盾冲突'],
-  ['itemDesign', '道具设计'],
-  ['rules', '世界规则（旧字段）'],
-]
-
-const STORY_CORE_FIELDS: Array<[keyof StoryCore, string]> = [
-  ['logline', '一句话故事'],
-  ['concept', '故事概念'],
-  ['theme', '主题'],
-  ['centralConflict', '核心冲突'],
-  ['plotPattern', '情节模式'],
-  ['mainPlot', '故事主线'],
-  ['subPlots', '故事复线'],
-]
-
-const CHARACTER_FIELDS: Array<[keyof Character, string]> = [
-  ['shortDescription', '一句话简介'],
-  ['identity', '身份'],
-  ['profile', '基础档案'],
-  ['appearance', '外貌'],
-  ['personality', '性格'],
-  ['background', '背景'],
-  ['motivation', '动机'],
-  ['values', '价值观'],
-  ['strengths', '长处'],
-  ['weaknesses', '弱点'],
-  ['fears', '恐惧'],
-  ['goals', '目标'],
-  ['innerConflict', '内心冲突'],
-  ['abilities', '能力'],
-  ['powerLevel', '实力定位'],
-  ['relationships', '关系描述'],
-  ['arc', '角色弧光'],
-  ['keyEvents', '关键经历'],
-  ['speechStyle', '语言风格'],
-  ['habits', '习惯'],
-  ['signatureItem', '标志性物品'],
-]
-
-function descriptors(): RagDescriptor<any>[] {
-  return [
-    {
-      tableName: 'worldviews',
-      table: db.worldviews,
-      sourceKey: 'worldview',
-      sourceLabel: '世界观',
-      title: (_row, context) => context.worldGroupId == null ? '主世界观' : '当前世界观',
-      visible: (row: Worldview, context) => exactWorld(row.worldGroupId, context.worldGroupId),
-      fields: (row: Worldview) => WORLDVIEW_FIELDS.map(([key, label]) => field(String(key), label, row[key])),
-    },
-    {
-      tableName: 'storyCores',
-      table: db.storyCores,
-      sourceKey: 'storyCore',
-      sourceLabel: '故事核心',
-      title: () => '故事核心',
-      fields: (row: StoryCore) => STORY_CORE_FIELDS.map(([key, label]) => field(String(key), label, row[key])),
-    },
-    {
-      tableName: 'characters',
-      table: db.characters,
-      sourceKey: 'characters',
-      sourceLabel: '角色档案',
-      title: (row: Character) => row.name || `角色 #${row.id}`,
-      visible: (row: Character, context) => (
-        !!row.isCrossWorld || exactWorld(row.homeWorldGroupId, context.worldGroupId)
-      ),
-      fields: (row: Character) => CHARACTER_FIELDS.map(([key, label]) => field(String(key), label, row[key])),
-    },
-    {
-      tableName: 'characterRelations',
-      table: db.characterRelations,
-      sourceKey: 'characterRelations',
-      sourceLabel: '角色关系',
-      title: (row: CharacterRelation, context) => {
-        const from = context.characterNameById.get(row.fromCharacterId) ?? `角色 #${row.fromCharacterId}`
-        const to = context.characterNameById.get(row.toCharacterId) ?? `角色 #${row.toCharacterId}`
-        return `${from} → ${to}`
-      },
-      fields: (row: CharacterRelation) => [
-        field('relationType', '关系类型', row.relationType),
-        field('label', '关系标签', row.label),
-        field('description', '关系说明', row.description),
-        field('isBidirectional', '是否双向', row.isBidirectional ? '双向' : '单向'),
-      ],
-    },
-    {
-      tableName: 'chapters',
-      table: db.chapters,
-      sourceKey: 'chapterContent',
-      sourceLabel: '章节与前文',
-      title: (row: Chapter) => row.title || `章节 #${row.id}`,
-      visible: (row: Chapter, context) => (
-        exactWorld(context.outlineWorldById.get(row.outlineNodeId), context.worldGroupId)
-      ),
-      fields: (row: Chapter) => [
-        field('content', '正文', htmlToPlainText(row.content || '')),
-        field('summary', '章节摘要', row.summary),
-        field('notes', '作者笔记', row.notes),
-      ],
-    },
-    {
-      tableName: 'codexEntries',
-      table: db.codexEntries,
-      sourceKey: 'codex',
-      sourceLabel: '设定词条',
-      title: (row: CodexEntry) => row.name || `词条 #${row.id}`,
-      visible: (row: CodexEntry, context) => exactWorld(row.worldGroupId, context.worldGroupId),
-      fields: (row: CodexEntry, context) => {
-        const category = context.categoryById.get(row.categoryId)
-        const customValues = parseEntryFields(row.fields)
-        const customFields = parseFieldSchema(category?.fieldSchema).map(definition =>
-          field(`custom.${definition.key}`, definition.label, customValues[definition.key]),
-        )
-        return [
-          field('summary', '简介', row.summary),
-          field('description', '详细描述', row.description),
-          ...customFields,
-          field('tags', '标签', row.tags),
-        ]
-      },
-    },
-    {
-      tableName: 'importantLocations',
-      table: db.importantLocations,
-      sourceKey: 'locations',
-      sourceLabel: '重要地点',
-      title: (row: ImportantLocation) => row.name || `地点 #${row.id}`,
-      fields: (row: ImportantLocation) => [
-        field('description', '地点描述', row.description),
-        field('significance', '剧情作用', row.significance),
-        field('tags', '地点标签', row.tags),
-      ],
-    },
-    {
-      tableName: 'histories',
-      table: db.histories,
-      sourceKey: 'historical',
-      sourceLabel: '历史',
-      title: (_row, context) => context.worldGroupId == null ? '主世界历史' : '当前世界历史',
-      visible: (row: History, context) => exactWorld(row.worldGroupId, context.worldGroupId),
-      fields: (row: History) => [
-        field('overview', '历史总述', row.overview),
-        field('eraSystem', '纪年体系', row.eraSystem),
-        field('events', '历史事件', row.events),
-      ],
-    },
-    {
-      tableName: 'foreshadows',
-      table: db.foreshadows,
-      sourceKey: 'foreshadows',
-      sourceLabel: '伏笔',
-      title: (row: Foreshadow) => row.name || `伏笔 #${row.id}`,
-      fields: (row: Foreshadow) => [
-        field('description', '伏笔描述', row.description),
-        field('notes', '作者备注', row.notes),
-        field('status', '当前状态', row.status),
-      ],
-    },
-    {
-      tableName: 'references',
-      table: db.references,
-      sourceKey: 'references',
-      sourceLabel: '项目参考',
-      title: (row: Reference) => row.title || `参考 #${row.id}`,
-      fields: (row: Reference) => [
-        field('note', '作者备注', row.note),
-        field('analysisSummary', '分析摘要', row.analysisSummary),
-        field('importedData', '结构化参考', row.importedData),
-      ],
-    },
-    {
-      tableName: 'itemLedger',
-      table: db.itemLedger,
-      sourceKey: 'itemLedger',
-      sourceLabel: '角色物品流水',
-      title: (row: ItemLedgerEntry) => `${row.heldByName || '未知持有人'} · ${row.itemName}`,
-      fields: (row: ItemLedgerEntry) => [
-        field(
-          'event',
-          '物品事件',
-          `${row.heldByName || '未知持有人'}${row.action === 'gain' ? '获得' : '消耗'}`
-            + `${row.quantity} × ${row.itemName}${row.chapterTitle ? `（${row.chapterTitle}）` : ''}`,
-        ),
-        field('note', '物品备注', row.note),
-      ],
-    },
-  ]
-}
-
-async function projectionContext(
-  scope: WorkspaceScope,
-  worldGroupId: number | null,
-): Promise<ProjectionContext> {
-  const [outlineNodes, characters, categories, chunks] = await Promise.all([
-    readOwnedRows<OutlineNode>(scope, 'outlineNodes', { owner: 'work' }),
-    readOwnedRows<Character>(scope, 'characters', { owner: 'world' }),
-    readOwnedRows<CodexCategory>(scope, 'codexCategories', { owner: 'world' }),
-    readOwnedRows<any>(scope, 'retrievalChunks', { owner: 'work' }),
-  ])
-  const outlineWorldById = new Map(outlineNodes.flatMap(node =>
-    node.id == null ? [] : [[node.id, node.worldGroupId ?? null] as const],
-  ))
-  const characterNameById = new Map(characters.flatMap(character =>
-    character.id == null ? [] : [[character.id, character.name] as const],
-  ))
-  const categoryById = new Map(categories.flatMap(category =>
-    category.id == null ? [] : [[category.id, category] as const],
-  ))
-  const chapterChunks = new Map<number, { count: number; embedded: number }>()
-  for (const chunk of chunks) {
-    const current = chapterChunks.get(chunk.sourceChapterId) ?? { count: 0, embedded: 0 }
-    current.count++
-    if (chunk.embedding?.length) current.embedded++
-    chapterChunks.set(chunk.sourceChapterId, current)
-  }
-  return { worldGroupId, outlineWorldById, characterNameById, categoryById, chapterChunks }
-}
-
 function effectiveFieldPolicy(row: RagRow, fieldKey: string) {
   const record = recordPolicy(row)
   const own = record.fields[fieldKey] ?? {}
@@ -378,16 +93,13 @@ function effectiveFieldPolicy(row: RagRow, fieldKey: string) {
     enabled: record.enabled && own.enabled !== false,
     weight: normalizeWeight(own.weight ?? record.weight),
     tokenCap: normalizeTokenCap(own.tokenCap ?? record.tokenCap),
+    priority: own.priority === 'pinned' || own.priority === 'must-read' ? own.priority : record.priority,
   }
 }
 
-function indexState(
-  tableName: string,
-  recordId: number,
-  context: ProjectionContext,
-): Pick<RagLibraryEntry, 'chunkCount' | 'vectorState'> {
+function indexState(tableName: string, recordId: number, chapterChunks: Map<number, { count: number; embedded: number }>): Pick<RagLibraryEntry, 'chunkCount' | 'vectorState'> {
   if (tableName !== 'chapters') return { chunkCount: 0, vectorState: 'keyword' }
-  const state = context.chapterChunks.get(recordId) ?? { count: 0, embedded: 0 }
+  const state = chapterChunks.get(recordId) ?? { count: 0, embedded: 0 }
   if (!state.count) return { chunkCount: 0, vectorState: 'none' }
   if (!state.embedded) return { chunkCount: state.count, vectorState: 'keyword' }
   if (state.embedded < state.count) return { chunkCount: state.count, vectorState: 'partial' }
@@ -398,7 +110,39 @@ export function makeRagEntryKey(documentId: string, fieldKey: string): string {
   return `${documentId}::${encodeURIComponent(fieldKey)}`
 }
 
-/** 实时、严格只读地投影当前世界资料；缺稳定 UID 时明确失败并要求显式迁移。 */
+function fieldLabel(tableName: string, fieldKey: string): string {
+  const field = FIELD_BY_TARGET.get(tableName)?.find(candidate => candidate.field === fieldKey)
+  return field?.label ?? field?.aliases?.find(alias => /[\u3400-\u9fff]/.test(alias)) ?? fieldKey
+}
+
+function titleWithoutField(descriptor: ContextResourceDescriptorV1, label: string): string {
+  const suffix = ` · ${label}`
+  return descriptor.title.endsWith(suffix) ? descriptor.title.slice(0, -suffix.length) : descriptor.title
+}
+
+function descriptorFieldLabel(
+  descriptor: ContextResourceDescriptorV1,
+  tableName: string,
+  fieldKey: string,
+): string {
+  const registered = fieldLabel(tableName, fieldKey)
+  const separator = descriptor.title.lastIndexOf(' · ')
+  return separator >= 0 ? descriptor.title.slice(separator + 3) : registered
+}
+
+async function listAllFieldDescriptors(scope: WorkspaceScope, worldGroupId: number | null): Promise<ContextResourceDescriptorV1[]> {
+  const frozen = { ...scope, worldGroupId }
+  const descriptors: ContextResourceDescriptorV1[] = []
+  let cursor: string | undefined
+  do {
+    const page = await CANON_RESOURCE_PROVIDER_V1.listMetadata({ scope: frozen, limit: 100, cursor })
+    descriptors.push(...page.items.filter(item => item.resourceKey.includes(':field:')))
+    cursor = page.nextCursor ?? undefined
+  } while (cursor)
+  return descriptors
+}
+
+/** 旧资料库 UI 兼容桥：字段集合由 Canon Provider 派生，不再维护手写表/字段清单。 */
 export async function buildRagLibrary(input: {
   projectId: number
   scope?: WorkspaceScope
@@ -406,42 +150,58 @@ export async function buildRagLibrary(input: {
 }): Promise<RagLibraryEntry[]> {
   const worldGroupId = input.worldGroupId ?? null
   const scope = await resolveScope({ projectId: input.projectId, scope: input.scope })
-  const context = await projectionContext(scope, worldGroupId)
+  const descriptors = await listAllFieldDescriptors(scope, worldGroupId)
+  const chunks = await db.retrievalChunks.where('projectId').equals(input.projectId).toArray()
+  const chapterChunks = new Map<number, { count: number; embedded: number }>()
+  for (const chunk of chunks) {
+    const current = chapterChunks.get(chunk.sourceChapterId) ?? { count: 0, embedded: 0 }
+    current.count++
+    if (chunk.embedding?.length) current.embedded++
+    chapterChunks.set(chunk.sourceChapterId, current)
+  }
   const entries: RagLibraryEntry[] = []
-
-  for (const descriptor of descriptors()) {
-    const rows = await readOwnedRows<any>(scope, descriptor.tableName)
-    for (const row of rows) {
-      if (row.id == null || descriptor.visible?.(row, context) === false) continue
-      const documentId = stableDocumentId(descriptor.tableName, row)
-      const title = descriptor.title(row, context)
-      const documentPolicy = recordPolicy(row)
-      for (const currentField of descriptor.fields(row, context)) {
-        if (!currentField.content.trim()) continue
-        const policy = effectiveFieldPolicy(row, currentField.key)
-        entries.push({
-          key: makeRagEntryKey(documentId, currentField.key),
-          documentId,
-          tableName: descriptor.tableName,
-          recordId: row.id,
-          sourceKey: descriptor.sourceKey,
-          sourceLabel: descriptor.sourceLabel,
-          title,
-          fieldKey: currentField.key,
-          fieldLabel: currentField.label,
-          content: currentField.content,
-          updatedAt: row.updatedAt ?? row.createdAt ?? 0,
-          tokenEstimate: estimateTokens(currentField.content),
-          documentEnabled: documentPolicy.enabled,
-          documentWeight: documentPolicy.weight,
-          documentTokenCap: documentPolicy.tokenCap,
-          enabled: policy.enabled,
-          weight: policy.weight,
-          tokenCap: policy.tokenCap,
-          ...indexState(descriptor.tableName, row.id, context),
-        })
-      }
-    }
+  for (const descriptor of descriptors) {
+    const ref = descriptor.sourceRefs[0]
+    if (!ref || typeof ref.recordId !== 'number') continue
+    const spec = REGISTRY_BY_NAME.get(ref.table)
+    if (!spec?.resourceIdentity) continue
+    const row = await spec.table.get(ref.recordId) as RagRow | undefined
+    if (!row) continue
+    const documentId = stableDocumentId(ref.table, row)
+    const fieldKey = logicalFieldKeyFromResourceKeyV1(descriptor.resourceKey)
+    if (!fieldKey) continue
+    const label = descriptorFieldLabel(descriptor, ref.table, fieldKey)
+    const content = (await readCanonicalDescriptorV1({
+      scope: { ...scope, worldGroupId },
+      descriptor,
+      depth: 'full',
+      maxTokens: 100_000,
+    })).content
+    if (!content.trim()) continue
+    const documentPolicy = recordPolicy(row)
+    const policy = effectiveFieldPolicy(row, fieldKey)
+    entries.push({
+      key: makeRagEntryKey(documentId, fieldKey),
+      documentId,
+      tableName: ref.table,
+      recordId: ref.recordId,
+      sourceKey: descriptor.sourceKey,
+      sourceLabel: spec.resourceIdentity.label,
+      title: titleWithoutField(descriptor, label),
+      fieldKey,
+      fieldLabel: label,
+      content,
+      updatedAt: typeof ref.revision === 'number' ? ref.revision : 0,
+      tokenEstimate: estimateTokens(content),
+      documentEnabled: documentPolicy.enabled,
+      documentWeight: documentPolicy.weight,
+      documentTokenCap: documentPolicy.tokenCap,
+      enabled: policy.enabled,
+      weight: policy.weight,
+      tokenCap: policy.tokenCap,
+      priority: policy.priority,
+      ...indexState(ref.table, ref.recordId, chapterChunks),
+    })
   }
 
   return entries.sort((left, right) => (
@@ -449,12 +209,6 @@ export async function buildRagLibrary(input: {
     || left.title.localeCompare(right.title, 'zh-CN')
     || left.fieldLabel.localeCompare(right.fieldLabel, 'zh-CN')
   ))
-}
-
-function descriptorFor(tableName: string): RagDescriptor {
-  const descriptor = descriptors().find(item => item.tableName === tableName)
-  if (!descriptor) throw new Error(`不支持的 RAG 资料表：${tableName}`)
-  return descriptor
 }
 
 async function updatePolicy(input: {
@@ -465,9 +219,10 @@ async function updatePolicy(input: {
   transform: (policy: RagDocumentPolicy) => RagDocumentPolicy
 }): Promise<void> {
   const scope = await resolveScope({ projectId: input.projectId, scope: input.scope })
-  const descriptor = descriptorFor(input.tableName)
-  await db.transaction('rw', scopeTransactionTables(descriptor.table), async () => {
-    const row = await descriptor.table.get(input.recordId)
+  const spec = REGISTRY_BY_NAME.get(input.tableName)
+  if (!spec?.resourceIdentity) throw new Error(`不支持的 RAG 资料表：${input.tableName}`)
+  await db.transaction('rw', scopeTransactionTables(spec.table), async () => {
+    const row = await spec.table.get(input.recordId) as RagRow | undefined
     if (!row || !await assertRecordInScope(scope, input.tableName, row)) {
       throw new Error('资料记录不存在或不属于当前 World/Work。')
     }
@@ -475,7 +230,7 @@ async function updatePolicy(input: {
     const next = input.transform(row.ragPolicy ?? {})
     const nextRevision = (row.ragPolicyRevision ?? 0) + 1
     const nextHash = await Dexie.waitFor(hashCanonicalValue({ version: 1, policy: next }))
-    await descriptor.table.update(input.recordId, {
+    await spec.table.update(input.recordId, {
       ragPolicy: next,
       ragPolicyRevision: nextRevision,
       ragPolicyHash: nextHash,

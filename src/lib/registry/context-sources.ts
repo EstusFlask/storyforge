@@ -53,6 +53,7 @@ import {
 } from '../cultivation/progress'
 import { readForeshadowSuggestionBaselineContextV1 } from '../foreshadow/suggestions'
 import { readStyleLearningBaselineContextV1 } from '../style/learning-agent'
+import { CANON_RESOURCE_PROVIDER_V1 } from '../context-gateway/canon-provider'
 import type {
   Chapter,
   Character,
@@ -1229,6 +1230,7 @@ export const CONTEXT_SOURCES: ContextSource[] = [
     layer: 'L0',
     budgetTokens: 100_000,
     enabled: input => !!input.ragEntryKeys?.length,
+    resources: CANON_RESOURCE_PROVIDER_V1,
     read: input => readRagSelectionContext({
       projectId: input.projectId,
       scope: input.scope,

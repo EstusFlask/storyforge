@@ -282,6 +282,11 @@ export interface TableSpec<T = any> {
     version: 1
     field: 'ragDocumentId'
     resourceKind: string
+    /** Context Gateway catalog metadata remains on this registry entry. */
+    contextKind: ContextResourceKind
+    label: string
+    /** registered-fields follows FIELD_REGISTRY; semantic-fields derives safe row fields. */
+    descriptorMode: 'registered-fields' | 'semantic-fields'
   }
   /** MEMORY-10: every table receives one registry-derived disk-memory policy. */
   memoryClassification: WorkspaceMemoryClassificationV1
@@ -538,25 +543,14 @@ export interface AssembleContextInput {
   continuitySnapshot?: PreparedContinuityContext
 }
 
-export type ContextResourceKind =
-  | 'workspace'
-  | 'world'
-  | 'worldview-field'
-  | 'story-core-field'
-  | 'character'
-  | 'character-relation'
-  | 'story-arc'
-  | 'storyline-progress'
-  | 'outline-node'
-  | 'detailed-outline'
-  | 'chapter'
-  | 'foreshadow'
-  | 'location'
-  | 'codex-entry'
-  | 'world-link'
-  | 'fact'
-  | 'reference'
-  | 'narrative-blueprint'
+export const CONTEXT_RESOURCE_KINDS_V1 = [
+  'workspace', 'world', 'worldview-field', 'story-core-field', 'character',
+  'character-relation', 'story-arc', 'storyline-progress', 'outline-node',
+  'detailed-outline', 'chapter', 'foreshadow', 'location', 'codex-entry',
+  'world-link', 'fact', 'reference', 'narrative-blueprint',
+] as const
+
+export type ContextResourceKind = typeof CONTEXT_RESOURCE_KINDS_V1[number]
 
 export type ContextResourceDepthV1 = 'index' | 'summary' | 'focused' | 'full' | 'original'
 export type ContextResourceAuthorityV1 =
@@ -595,6 +589,12 @@ export interface ContextResourceDescriptorV1 {
   title: string
   shortSummary: string
   authority: ContextResourceAuthorityV1
+  /** Canon body identity, independent from retrieval policy. */
+  contentRevision: number | string
+  contentHash: string
+  /** Retrieval policy identity, independent from Canon edits. */
+  policyRevision: number
+  policyHash: string
   scope: {
     projectId: number
     worldId?: number

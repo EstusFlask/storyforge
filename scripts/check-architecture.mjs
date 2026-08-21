@@ -846,7 +846,7 @@ const artifactRecordSource = read('src/lib/memory/artifact-record.ts')
 const artifactRetentionStoreSource = read('src/lib/memory/artifact-retention-store.ts')
 const schemaSource = read('src/lib/db/schema.ts')
 if (!registryTypeSource.includes('resourceIdentity?:')
-  || !projectTableSource.includes("resourceIdentity: RESOURCE_IDENTITY('worldview')")
+  || !projectTableSource.includes("resourceIdentity: RESOURCE_IDENTITY('worldview',")
   || !scopeSource.includes('stampResourceIdentityV1(spec, result)')) {
   violations.push('[㉓资源身份单一来源] searchable resource 必须由 PROJECT_TABLES 声明并在统一新建边界盖章')
 }
@@ -882,6 +882,43 @@ for (const token of ['assertExactRunArtifactBodySafeV1', 'sha256Text', 'pruneRec
 if (!artifactRetentionStoreSource.includes('pruneUnreferencedAgentRunArtifactsInCurrentTransactionV1')
   || !artifactRetentionStoreSource.includes("'evidence-pruned'")) {
   violations.push('[㉓artifact 清理] Run 删除必须 mark-and-sweep，共享正文保留并留下 tombstone')
+}
+
+// ── ㉔ CTXG-3 Canon resource descriptor 覆盖与旧 RAG 收口 ──
+const canonProviderSource = read('src/lib/context-gateway/canon-provider.ts')
+const contextSourceRegistrySource = read('src/lib/registry/context-sources.ts')
+const registryValidationSource = read('src/lib/registry/validate.ts')
+if (!/key:\s*'ragSelection'[\s\S]*?resources:\s*CANON_RESOURCE_PROVIDER_V1/.test(contextSourceRegistrySource)) {
+  violations.push('[㉔Provider 挂载] Canon Provider 必须挂在 CONTEXT_SOURCES.ragSelection.resources')
+}
+if (!/PROJECT_TABLES\.filter\(\(spec\):\s*spec is ResourceSpec => spec\.resourceIdentity != null\)/.test(canonProviderSource)
+  || /const\s+(?:RESOURCE_TABLES|CANON_TABLES|CATALOG_TABLES)\s*=\s*\[/.test(canonProviderSource)) {
+  violations.push('[㉔目录单一来源] Canon resource table 集合必须只由 PROJECT_TABLES.resourceIdentity 派生')
+}
+if (!canonProviderSource.includes("FIELD_BY_TARGET.get(spec.name)")
+  || !projectTableSource.includes("'registered-fields'")
+  || !registryValidationSource.includes("descriptorMode === 'registered-fields'")) {
+  violations.push('[㉔字段单一来源] 核心字段描述符必须由 FIELD_REGISTRY 派生并接受启动校验')
+}
+for (const token of [
+  'contentRevision', 'contentHash', 'policyRevision', 'policyHash',
+  'sourceRefs', 'timeRangeForRow', 'relationsForRow', 'readOriginal',
+  'nestedStoryStages', 'nestedDetailedScenes', 'worldLinkAggregate',
+  'logicalFieldKeyFromResourceKeyV1', 'readCanonicalDescriptorV1',
+]) {
+  if (!canonProviderSource.includes(token)) violations.push(`[㉔描述符合同] Canon Provider 缺少 ${token}`)
+}
+for (const legacyList of ['WORLDVIEW_FIELDS', 'STORY_CORE_FIELDS', 'CHARACTER_FIELDS', 'function descriptors(']) {
+  if (ragLibrarySource.includes(legacyList)) {
+    violations.push(`[㉔旧 RAG 清单] rag-library.ts 不得恢复手写 ${legacyList}`)
+  }
+}
+if (!ragLibrarySource.includes('CANON_RESOURCE_PROVIDER_V1.listMetadata')
+  || !ragLibrarySource.includes('readCanonicalDescriptorV1')) {
+  violations.push('[㉔旧 RAG 收口] 旧资料库 UI 必须从 Canon Provider 分页目录与定点读取派生')
+}
+if (/\.(?:add|put|update|delete|bulkPut|bulkDelete|clear)\s*\(/.test(canonProviderSource)) {
+  violations.push('[㉔Provider 只读] Canon Provider 不得写任何数据库表')
 }
 
 // ── 报告 ──

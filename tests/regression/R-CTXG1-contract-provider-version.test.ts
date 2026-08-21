@@ -34,6 +34,10 @@ const descriptor: ContextResourceDescriptorV1 = {
   title: '种族与民族',
   shortSummary: '三个相互制衡的边境民族。',
   authority: 'author-canon',
+  contentRevision: 9,
+  contentHash: '1'.repeat(64),
+  policyRevision: 0,
+  policyHash: '2'.repeat(64),
   scope: { projectId: 1, worldId: 7, worldGroupId: null },
   relations: [],
   sourceRefs: [{
