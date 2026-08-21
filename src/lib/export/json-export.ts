@@ -38,6 +38,7 @@ import type {
   AgentRunRecord,
   AgentRunEventRecord,
   AgentRunCheckpointRecord,
+  AgentRunArtifactRecordV1,
   NodeFlow,
   NodeRunRecord,
   SimulationSession,
@@ -246,6 +247,8 @@ export interface ProjectExportData {
     & WorldGroupExportRef
     & { _agentRunExportId: number }
   )[]
+  /** CTXG-2 content-addressed exact evidence bodies and prune tombstones. */
+  agentRunArtifacts?: Omit<AgentRunArtifactRecordV1, 'id' | 'projectId'>[]
   /** FLOW-2 独立自由节点文档与运行记录。 */
   nodeFlows?: (
     Omit<NodeFlow, 'id' | 'projectId' | 'worldGroupId'>

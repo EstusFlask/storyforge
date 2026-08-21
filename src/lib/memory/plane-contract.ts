@@ -35,6 +35,7 @@ export const MEMORY_PLANE_CONTRACT_V1 = {
         'agentRuns',
         'agentRunEvents',
         'agentRunCheckpoints',
+        'agentRunArtifacts',
         'nodeFlows',
         'nodeRuns',
         'simulationSessions',

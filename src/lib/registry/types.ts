@@ -239,6 +239,9 @@ export type PortableDataSpec = {
     hashField: string
     sizeField: string
   }
+} | {
+  /** CTXG-2 immutable UTF-8 body or a verified evidence-pruned tombstone. */
+  kind: 'exact-run-artifact'
 }
 
 /**
@@ -270,6 +273,16 @@ export interface TableSpec<T = any> {
   domainOwner?: DomainOwnershipSpec
   /** MEMORY-2 人工可编辑工作区投影；未登记即禁止落盘。 */
   workspaceProjection?: WorkspaceProjectionSpecV1
+  /**
+   * CTXG-2 portable resource identity. This remains PROJECT_TABLES metadata so
+   * creation, backfill, export/import and Gateway catalog cannot drift into a
+   * fourth hand-written table list.
+   */
+  resourceIdentity?: {
+    version: 1
+    field: 'ragDocumentId'
+    resourceKind: string
+  }
   /** MEMORY-10: every table receives one registry-derived disk-memory policy. */
   memoryClassification: WorkspaceMemoryClassificationV1
   /** 树形(parentId 字段名) */

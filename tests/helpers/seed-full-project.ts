@@ -10,6 +10,7 @@ import { canonicalStringify, hashCanonicalValue } from '../../src/lib/agent/run/
 import { replayAgentRunEventsV1, toAgentRunProjectionBodyV1 } from '../../src/lib/agent/run/projection'
 import { createNarrativeSimulationAcceptanceContent } from '../../src/lib/narrative-simulation/authoring'
 import type { AnyAgentRunEventV1 } from '../../src/lib/types'
+import { sha256Text } from '../../src/lib/ai/chapter-memory/text-normalization'
 
 const now = 1_700_000_000_000 // 固定时间戳,保证派生/手写两版导出可逐字段比对
 
@@ -549,6 +550,20 @@ export async function seedFullProject() {
     lastSequence: harnessProjection.lastSequence,
     projectionJson: canonicalStringify(harnessProjectionBody),
     projectionHash: await hashCanonicalValue(harnessProjectionBody),
+  })
+  const exactArtifactContent = '{"fixture":"seed-full-project"}'
+  await db.agentRunArtifacts.add({
+    projectId,
+    artifactKind: 'context-packet',
+    contentHash: await sha256Text(exactArtifactContent),
+    encoding: 'utf-8',
+    byteLength: new TextEncoder().encode(exactArtifactContent).byteLength,
+    content: exactArtifactContent,
+    retentionState: 'available',
+    pruneReceiptJson: null,
+    pruneReceiptHash: null,
+    createdAt: now,
+    updatedAt: now,
   })
 
   // ── FLOW-2 独立节点文档与可见运行记录 ──

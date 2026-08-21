@@ -18,6 +18,7 @@ import type { ProjectExportData } from './json-export'
 import { redactAuthoringSecrets } from '../node-authoring/contracts'
 import { ensureWorkspaceOwnership } from '../world-engine/ownership'
 import { portableizeAgentRunLedgerExportV1 } from '../agent/run/ledger-portability'
+import { assertAgentRunArtifactRecordIntegrityV1 } from '../memory/artifact-record'
 
 /** 当前导出格式版本(与手写版保持一致) */
 const EXPORT_VERSION = 3
@@ -220,6 +221,14 @@ async function portableizeSnapshot(snapshot: StrictProjectExportSnapshot): Promi
   }
   const portable = snapshot.data as unknown as Record<string, unknown>
   for (const spec of PROJECT_TABLES) {
+    if (spec.portableData?.kind === 'exact-run-artifact') {
+      const rows = portable[spec.name]
+      if (!Array.isArray(rows)) continue
+      for (const row of rows) {
+        await assertAgentRunArtifactRecordIntegrityV1(row as any, { requireProjectId: false })
+      }
+      continue
+    }
     if (spec.portableData?.kind !== 'binary-blob') continue
     const rows = portable[spec.name]
     if (!Array.isArray(rows)) continue

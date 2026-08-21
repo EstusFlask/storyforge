@@ -13,6 +13,7 @@ import { ensureWorkspaceOwnership } from '../lib/world-engine/ownership'
 import { updateProjectAndActiveWork } from '../lib/world-engine/works'
 import { generateWorkspaceUid } from '../lib/memory/identity'
 import { clearProjectFolderHandle } from '../lib/storage/folder-handle-store'
+import { backfillResourceUidsV1 } from '../lib/context-gateway/resource-identity'
 
 async function ensureWorldIdentity(project: Project): Promise<Project> {
   if (hasShareableWorldIdentity(project)) return project
@@ -65,6 +66,9 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
     // WORLD-2C C2: projectId-only legacy routes resolve through one ownership
     // service before any project-scoped stores begin reading the workspace.
     const project = migrateGenre((await ensureWorkspaceOwnership(id)).project)
+    // CTXG-2 explicit workspace-entry migration. Catalog/search remain strictly
+    // read-only; legacy identity repair happens once before feature stores load.
+    await backfillResourceUidsV1(id)
     const projects = get().projects
     const exists = projects.some(p => p.id === id)
     const nextProjects = exists

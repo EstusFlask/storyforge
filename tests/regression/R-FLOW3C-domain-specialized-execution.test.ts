@@ -20,6 +20,7 @@ import {
   runAuthoringGraph,
 } from '../../src/lib/node-authoring/executor'
 import { buildRagLibrary } from '../../src/lib/retrieval/rag-library'
+import { backfillResourceUidsV1 } from '../../src/lib/context-gateway/resource-identity'
 import { useAIConfigStore } from '../../src/stores/ai-config'
 import type { AIConfig, NodeFlow, Project } from '../../src/lib/types'
 import { resolveScopeLike, stampNewRecord } from '../../src/lib/world-engine/scope'
@@ -125,6 +126,7 @@ describe('FLOW-3C · 领域节点专用执行器', () => {
       createdAt: 1,
       updatedAt: 1,
     } as any)
+    await backfillResourceUidsV1(project.id!)
     vi.mocked(chat).mockReset()
     setCreativeReliabilityRuntimeEnabledV1(true)
     useAIConfigStore.setState({
@@ -397,6 +399,7 @@ describe('FLOW-3C · 领域节点专用执行器', () => {
       projectId: project.id!, name: '潮汐测者', shortDescription: '已有角色二。', motivation: '原动机二',
       worldGroupId: null, homeWorldGroupId: null, createdAt: 1, updatedAt: 1,
     } as any)
+    await backfillResourceUidsV1(project.id!)
     const target = (await buildRagLibrary({ projectId: project.id!, worldGroupId: null }))
       .find(entry => entry.tableName === 'characters' && entry.recordId === secondId && entry.fieldKey === 'motivation')
     expect(target).toBeDefined()

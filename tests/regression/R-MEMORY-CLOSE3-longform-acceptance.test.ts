@@ -24,6 +24,7 @@ import {
 import { buildWorkspaceImpactPlanV1 } from '../../src/lib/memory/workspace-impact'
 import { ensureWorkspaceOwnership } from '../../src/lib/world-engine/ownership'
 import { resolveScopeLike } from '../../src/lib/world-engine/scope'
+import { backfillResourceUidsV1 } from '../../src/lib/context-gateway/resource-identity'
 
 const legacyFixturePath = path.resolve(__dirname, '../fixtures/legacy-export-v3.json')
 const now = 1_800_000_000_000
@@ -301,6 +302,10 @@ async function seedRepresentativeLongform() {
     createdAt: now,
     updatedAt: now,
   } as any) as number
+
+  // A real workspace enters through project.loadProject before disk-memory
+  // self-check. Keep this acceptance fixture on that explicit CTXG-2 migration boundary.
+  await backfillResourceUidsV1(projectId)
 
   return {
     projectId,

@@ -29,6 +29,7 @@ import {
   buildMemorySettlementReceiptFromSnapshotV1,
   hashMemoryArtifactIndexV1,
 } from '../../memory/settlement-core'
+import { pruneUnreferencedAgentRunArtifactsInCurrentTransactionV1 } from '../../memory/artifact-retention-store'
 
 export class AgentRunStoreError extends Error {
   constructor(public readonly code: string, message: string) {
@@ -75,6 +76,7 @@ const RESERVED_EVENT_TYPES = new Set<AgentRunEventTypeV1>([
   'recovery.started',
   'recovery.completed',
   'runtime.candidate.adopted',
+  'evidence.artifact.recorded',
 ])
 
 const RUN_MUTATION_TAILS = new Map<number, Promise<void>>()
@@ -830,7 +832,14 @@ export async function deleteAgentRunV1(
 ): Promise<boolean> {
   return withAgentRunMutationLockV1(runId, () => db.transaction(
     'rw',
-    agentRunScopeTransactionTablesV1(runId, db.agentEvents, db.agentRuns, db.agentRunEvents, db.agentRunCheckpoints),
+    agentRunScopeTransactionTablesV1(
+      runId,
+      db.agentEvents,
+      db.agentRuns,
+      db.agentRunEvents,
+      db.agentRunCheckpoints,
+      db.agentRunArtifacts,
+    ),
     async () => {
       const run = await db.agentRuns.get(runId)
       if (!run) return false
@@ -851,6 +860,7 @@ export async function deleteAgentRunV1(
         .anyOf(runIds)
         .modify({ durableRunId: null })
       await db.agentRuns.bulkDelete(runIds)
+      await pruneUnreferencedAgentRunArtifactsInCurrentTransactionV1(scope.projectId)
       return true
     },
   ))

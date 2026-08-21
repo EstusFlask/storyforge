@@ -11,6 +11,7 @@
 import Dexie from 'dexie'
 import { db } from '../db/schema'
 import { PROJECT_TABLES } from '../registry/project-tables'
+import { backfillResourceUidsInCurrentTransactionV1 } from '../context-gateway/resource-identity'
 import { remapWorldPortalTargets } from '../utils/world-portals'
 import { transactionTablesFor } from '../registry/lifecycle'
 import { importLegacyArraysToCodex } from '../migrations/legacy-to-codex-upgrade'
@@ -31,6 +32,7 @@ import {
   isWorkspaceUid,
   isWorkCode,
 } from '../memory/identity'
+import { assertAgentRunArtifactRecordIntegrityV1 } from '../memory/artifact-record'
 
 const STRICT_EXPORT_VERSION = 4
 
@@ -354,6 +356,9 @@ export async function deriveImportProjectJSON(data: ProjectExportData): Promise<
         }
 
         if (spec.owner === 'project') obj.projectId = newProjectId
+        if (spec.portableData?.kind === 'exact-run-artifact') {
+          await Dexie.waitFor(assertAgentRunArtifactRecordIntegrityV1(obj))
+        }
         if (spec.portableData?.kind === 'binary-blob') {
           const binary = restorePortableBinaryBlob(
             obj[spec.portableData.field],
@@ -479,6 +484,8 @@ export async function deriveImportProjectJSON(data: ProjectExportData): Promise<
         idMaps: newIdMaps,
       })
     }
+
+    await backfillResourceUidsInCurrentTransactionV1(newProjectId)
 
     return newProjectId
   })

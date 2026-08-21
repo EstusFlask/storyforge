@@ -19,6 +19,9 @@ export interface RagDocumentPolicy extends RagFieldPolicy {
 export interface RagDocumentMetadata {
   ragDocumentId?: string
   ragPolicy?: RagDocumentPolicy
+  /** Retrieval policy evolves independently from Canon content revisions. */
+  ragPolicyRevision?: number
+  ragPolicyHash?: string
 }
 
 export type RagVectorState = 'none' | 'keyword' | 'partial' | 'ready'

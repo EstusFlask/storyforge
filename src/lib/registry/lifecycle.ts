@@ -17,6 +17,7 @@ import { db } from '../db/schema'
 import { removeCodexEntryReferences } from '../codex/references'
 import { clearCultivationSystemReferences } from '../cultivation/lifecycle'
 import { PROJECT_TABLES, REGISTRY_BY_NAME } from './project-tables'
+import { markAndSweepAgentRunArtifactsV1 } from '../memory/artifact-retention-store'
 import type { TableSpec } from './types'
 
 // ─────────────────────────────────────────────────────────────
@@ -246,6 +247,7 @@ export async function cascadeDeleteGroup(projectId: number, wgId: number): Promi
     await db.worldGroupLinks.where('toGroupId').equals(wgId).delete()
     await db.worldGroups.delete(wgId)
   })
+  await markAndSweepAgentRunArtifactsV1(projectId)
 }
 
 // ─────────────────────────────────────────────────────────────

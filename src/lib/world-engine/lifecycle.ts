@@ -14,6 +14,7 @@ import {
   projectCompatibilityWithoutWork,
   projectCompatibilityWithoutWorld,
 } from './works'
+import { markAndSweepAgentRunArtifactsV1 } from '../memory/artifact-retention-store'
 
 function ownerField(spec: typeof PROJECT_TABLES[number]): { owner: 'world' | 'work'; field: string } | null {
   const locator = spec.domainOwner?.locator
@@ -107,6 +108,7 @@ export async function deleteWork(workId: number): Promise<void> {
       })
     }
   })
+  await markAndSweepAgentRunArtifactsV1(work.projectId)
 }
 
 export async function deleteWorld(worldId: number, options: { confirm: boolean } = { confirm: false }): Promise<void> {
@@ -145,6 +147,7 @@ export async function deleteWorld(worldId: number, options: { confirm: boolean }
       })
     }
   })
+  await markAndSweepAgentRunArtifactsV1(world.projectId)
 }
 
 export async function deleteWorkspace(projectId: number): Promise<void> {

@@ -835,6 +835,55 @@ if (!assembleContextSource.includes("from '../context-gateway/contracts'")) {
   violations.push('[㉒唯一入口] Gateway 合同必须由现有 assembleContext 边界导出')
 }
 
+// ── ㉓ CTXG-2 资源身份、纯目录与 exact artifact 物理生命周期 ──
+const projectTableSource = read('src/lib/registry/project-tables.ts')
+const scopeSource = read('src/lib/world-engine/scope.ts')
+const resourceUidSource = read('src/lib/context-gateway/resource-uid.ts')
+const resourceIdentitySource = read('src/lib/context-gateway/resource-identity.ts')
+const ragLibrarySource = read('src/lib/retrieval/rag-library.ts')
+const artifactStoreSource = read('src/lib/memory/artifact-store.ts')
+const artifactRecordSource = read('src/lib/memory/artifact-record.ts')
+const artifactRetentionStoreSource = read('src/lib/memory/artifact-retention-store.ts')
+const schemaSource = read('src/lib/db/schema.ts')
+if (!registryTypeSource.includes('resourceIdentity?:')
+  || !projectTableSource.includes("resourceIdentity: RESOURCE_IDENTITY('worldview')")
+  || !scopeSource.includes('stampResourceIdentityV1(spec, result)')) {
+  violations.push('[㉓资源身份单一来源] searchable resource 必须由 PROJECT_TABLES 声明并在统一新建边界盖章')
+}
+if (!resourceUidSource.includes('crypto.randomUUID()')
+  || /projectId|row\.id/.test(resourceUidSource.split('createPortableResourceUidV1')[1]?.split('/** Stamps')[0] ?? '')) {
+  violations.push('[㉓资源身份可移植] resource UID 不得派生自 projectId 或 Dexie numeric id')
+}
+if (!resourceIdentitySource.includes("PROJECT_TABLES.filter(spec => spec.resourceIdentity != null)")
+  || !resourceIdentitySource.includes("db.transaction('rw'")
+  || !resourceIdentitySource.includes('let written = 0')) {
+  violations.push('[㉓显式 backfill] 身份迁移必须从 PROJECT_TABLES 派生、全事务且返回幂等证据')
+}
+if (/descriptor\.table\.update\(/.test(ragLibrarySource.match(/export async function buildRagLibrary[\s\S]*?function descriptorFor/)?.[0] ?? '')
+  || !ragLibrarySource.includes("'identity-missing'")) {
+  violations.push('[㉓纯读取目录] buildRagLibrary 不得写库，缺 UID 必须明确诊断')
+}
+if (!ragLibrarySource.includes('ragPolicyRevision') || !ragLibrarySource.includes('ragPolicyHash')) {
+  violations.push('[㉓策略版本] retrieval policy 必须拥有独立 revision/hash，不得冒充 Canon revision')
+}
+if (!schemaSource.includes("agentRunArtifacts: '++id, projectId, &[projectId+artifactKind+contentHash]")
+  || !projectTableSource.includes("portableData: { kind: 'exact-run-artifact' }")) {
+  violations.push('[㉓exact artifact 表] 内容寻址证据表必须登记 schema、PROJECT_TABLES 与 portable integrity')
+}
+for (const token of [
+  'recordAgentRunArtifactV1', 'readAgentRunArtifactExactV1',
+  'appendPrivilegedAgentRunEventInTransactionV1', 'sameEvidenceEvent',
+]) {
+  if (!artifactStoreSource.includes(token)) violations.push(`[㉓exact artifact 原子性] artifact-store 缺少 ${token}`)
+}
+for (const token of ['assertExactRunArtifactBodySafeV1', 'sha256Text', 'pruneReceiptHash']) {
+  if (!artifactRecordSource.includes(token)) violations.push(`[㉓导入导出完整性] artifact-record 缺少 ${token}`)
+}
+if (!artifactRetentionStoreSource.includes('pruneUnreferencedAgentRunArtifactsInCurrentTransactionV1')
+  || !artifactRetentionStoreSource.includes("'evidence-pruned'")) {
+  violations.push('[㉓artifact 清理] Run 删除必须 mark-and-sweep，共享正文保留并留下 tombstone')
+}
+
 // ── 报告 ──
 if (violations.length) {
   console.error('[architecture] ❌ 发现反模式违规(违反 CLAUDE.md 三注册表铁律):\n')

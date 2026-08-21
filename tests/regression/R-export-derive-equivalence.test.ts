@@ -95,6 +95,7 @@ function normalize(data: any) {
   delete data.agentRuns
   delete data.agentRunEvents
   delete data.agentRunCheckpoints
+  delete data.agentRunArtifacts
   delete data.nodeFlows
   delete data.nodeRuns
   // SIM-1 process/runtime data is newer than the legacy v3 fixture.

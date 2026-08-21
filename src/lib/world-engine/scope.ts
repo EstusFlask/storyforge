@@ -10,6 +10,7 @@ import { db } from '../db/schema'
 import { PROJECT_TABLES } from '../registry/project-tables'
 import type { DomainOwnerKind, TableSpec } from '../registry/types'
 import type { WorkspaceScope } from '../types/world-ownership'
+import { stampResourceIdentityV1 } from '../context-gateway/resource-uid'
 
 export type ScopeOwner = Exclude<DomainOwnerKind, 'instance'>
 
@@ -260,6 +261,7 @@ export function stampNewRecord<T>(
   if (isLegacyReadScope(scope)) fail(`${tableName} 不得使用只读兼容 scope 写入`)
   const spec = getTableSpec(tableName)
   const result: Record<string, unknown> = { ...(input as Record<string, unknown>), projectId: scope.projectId }
+  stampResourceIdentityV1(spec, result)
   const owner = locatorOwner(spec, options.owner)
   const locator = spec.domainOwner?.locator
   if (!locator || locator.kind === 'workspace' || owner == null) {

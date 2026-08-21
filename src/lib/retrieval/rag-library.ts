@@ -4,7 +4,7 @@
  * 这里不复制 Canon：资料正文实时投影自现有业务表；仅把稳定 ragDocumentId 和作者的
  * 启用/权重/token 策略写回源记录。节点执行仍通过 CONTEXT_SOURCES.ragSelection 读取。
  */
-import type { Table } from 'dexie'
+import Dexie, { type Table } from 'dexie'
 import { estimateTokens } from '../ai/context-budget'
 import { db } from '../db/schema'
 import {
@@ -36,8 +36,12 @@ import {
   readOwnedRows,
   resolveReadScopeLike,
   resolveScope,
+  scopeTransactionTables,
   type WorkspaceScopeLike,
 } from '../world-engine/scope'
+import { REGISTRY_BY_NAME } from '../registry/project-tables'
+import { hashCanonicalValue } from '../agent/run/hash'
+import { ContextResourceIdentityError, isPortableResourceUidV1 } from '../context-gateway/resource-uid'
 
 type RagRow = RagDocumentMetadata & {
   id?: number
@@ -91,8 +95,17 @@ function field(key: string, label: string, value: unknown): RagField {
 }
 
 function stableDocumentId(tableName: string, row: RagRow): string {
-  if (row.ragDocumentId?.trim()) return row.ragDocumentId
-  return `rag:${tableName}:${row.projectId}:${row.id}`
+  const identity = REGISTRY_BY_NAME.get(tableName)?.resourceIdentity
+  if (!identity) {
+    throw new ContextResourceIdentityError('unregistered', `${tableName} 未登记 resource identity`)
+  }
+  if (!isPortableResourceUidV1(row.ragDocumentId, identity.resourceKind)) {
+    throw new ContextResourceIdentityError(
+      'identity-missing',
+      `${tableName}#${row.id ?? '?'} 缺少 portable resource UID；请先执行显式 backfill`,
+    )
+  }
+  return row.ragDocumentId
 }
 
 function recordPolicy(row: RagRow): Required<Omit<RagDocumentPolicy, 'fields'>> & {
@@ -385,7 +398,7 @@ export function makeRagEntryKey(documentId: string, fieldKey: string): string {
   return `${documentId}::${encodeURIComponent(fieldKey)}`
 }
 
-/** 实时投影所有当前世界可见资料；缺稳定 ID 时只补元数据，不复制正文。 */
+/** 实时、严格只读地投影当前世界资料；缺稳定 UID 时明确失败并要求显式迁移。 */
 export async function buildRagLibrary(input: {
   projectId: number
   scope?: WorkspaceScope
@@ -401,10 +414,6 @@ export async function buildRagLibrary(input: {
     for (const row of rows) {
       if (row.id == null || descriptor.visible?.(row, context) === false) continue
       const documentId = stableDocumentId(descriptor.tableName, row)
-      if (row.ragDocumentId !== documentId) {
-        await descriptor.table.update(row.id, { ragDocumentId: documentId } as Partial<RagRow>)
-        row.ragDocumentId = documentId
-      }
       const title = descriptor.title(row, context)
       const documentPolicy = recordPolicy(row)
       for (const currentField of descriptor.fields(row, context)) {
@@ -457,15 +466,21 @@ async function updatePolicy(input: {
 }): Promise<void> {
   const scope = await resolveScope({ projectId: input.projectId, scope: input.scope })
   const descriptor = descriptorFor(input.tableName)
-  const row = await descriptor.table.get(input.recordId)
-  if (!row || !await assertRecordInScope(scope, input.tableName, row)) {
-    throw new Error('资料记录不存在或不属于当前 World/Work。')
-  }
-  const next = input.transform(row.ragPolicy ?? {})
-  await descriptor.table.update(input.recordId, {
-    ragDocumentId: stableDocumentId(input.tableName, row),
-    ragPolicy: next,
-  } as Partial<RagRow>)
+  await db.transaction('rw', scopeTransactionTables(descriptor.table), async () => {
+    const row = await descriptor.table.get(input.recordId)
+    if (!row || !await assertRecordInScope(scope, input.tableName, row)) {
+      throw new Error('资料记录不存在或不属于当前 World/Work。')
+    }
+    stableDocumentId(input.tableName, row)
+    const next = input.transform(row.ragPolicy ?? {})
+    const nextRevision = (row.ragPolicyRevision ?? 0) + 1
+    const nextHash = await Dexie.waitFor(hashCanonicalValue({ version: 1, policy: next }))
+    await descriptor.table.update(input.recordId, {
+      ragPolicy: next,
+      ragPolicyRevision: nextRevision,
+      ragPolicyHash: nextHash,
+    } as Partial<RagRow>)
+  })
 }
 
 export async function updateRagDocumentPolicy(input: {

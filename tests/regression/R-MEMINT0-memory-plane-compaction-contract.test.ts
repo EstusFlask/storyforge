@@ -17,6 +17,7 @@ import {
   readWorkingContextReplayV1,
 } from '../../src/lib/memory/working-context'
 import { buildMemoryArtifactIndexV1 } from '../../src/lib/memory/settlement'
+import { recordAgentRunArtifactV1 } from '../../src/lib/memory/artifact-store'
 import { planExactArtifactRetentionV1 } from '../../src/lib/memory/artifact-retention'
 import { ensureWorkspaceOwnership } from '../../src/lib/world-engine/ownership'
 
@@ -78,9 +79,22 @@ async function runFixture() {
       now: 1_787_360_000_100 + snapshot.projection.lastSequence,
     } as any)
   }
+  const record = async (content: string, artifactKind: 'context-packet' | 'raw-response') => {
+    const result = await recordAgentRunArtifactV1({
+      scope: seeded.scope,
+      runId: snapshot.run.id,
+      artifactKind,
+      content,
+      stepId: 'compose',
+      attempt: 1,
+      expectedLastSequence: snapshot.projection.lastSequence,
+    })
+    snapshot = result.snapshot
+    return result
+  }
   await append('step.scheduled', { stepId: 'compose' })
   await append('step.started', { stepId: 'compose', attempt: 1 })
-  return { ...seeded, get snapshot() { return snapshot }, append }
+  return { ...seeded, get snapshot() { return snapshot }, append, record }
 }
 
 describe('MEMINT-0 · five memory planes and compaction replay contract', () => {
@@ -117,27 +131,15 @@ describe('MEMINT-0 · five memory planes and compaction replay contract', () => 
 
   it('records exact artifact refs in the existing settlement and keeps portable hashes across import', async () => {
     const fixture = await runFixture()
-    await fixture.append('evidence.artifact.recorded', {
-      artifactKind: 'context-packet',
-      contentHash: HASH_A,
-      byteLength: 2048,
-      stepId: 'compose',
-      attempt: 1,
-    })
-    await fixture.append('evidence.artifact.recorded', {
-      artifactKind: 'context-packet',
-      contentHash: HASH_A,
-      byteLength: 2048,
-      stepId: 'compose',
-      attempt: 1,
-    })
+    const recorded = await fixture.record('{"packet":"exact"}', 'context-packet')
+    await fixture.record('{"packet":"exact"}', 'context-packet')
     await fixture.append('run.failed', { code: 'fixture-terminal', retryable: false })
 
     const sourceIndex = await buildMemoryArtifactIndexV1(fixture.projectId)
     const sourceRefs = sourceIndex.runs[0].artifactRefs.filter(ref => ref.sourceKind === 'agent-run-artifact')
     expect(sourceRefs).toHaveLength(1)
     expect(sourceRefs[0]).toMatchObject({
-      artifactKind: 'context-packet', contentHash: HASH_A, authority: 'evidence',
+      artifactKind: 'context-packet', contentHash: recorded.artifact.contentHash, authority: 'evidence',
     })
 
     const importedProjectId = await importProjectJSON(await exportProjectJSON(fixture.projectId))
@@ -149,15 +151,12 @@ describe('MEMINT-0 · five memory planes and compaction replay contract', () => 
 
   it('replays a bounded compaction from checkpoint plus tail without dropping raw evidence refs', async () => {
     const fixture = await runFixture()
-    await fixture.append('evidence.artifact.recorded', {
-      artifactKind: 'context-packet', contentHash: HASH_A, byteLength: 4096,
-      stepId: 'compose', attempt: 1,
-    })
+    const recorded = await fixture.record('{"packet":"original"}', 'context-packet')
     const saved = await createWorkingContextCompactionCheckpointV1({
       scope: fixture.scope,
       runId: fixture.snapshot.run.id,
       expectedLastSequence: fixture.snapshot.projection.lastSequence,
-      originalPacketHash: HASH_A,
+      originalPacketHash: recorded.artifact.contentHash,
       replacementPacketHash: HASH_B,
       sources: [
         {
@@ -175,7 +174,7 @@ describe('MEMINT-0 · five memory planes and compaction replay contract', () => 
       gatewayVersion: 'memint-contract-v1',
       beforeTokens: 1800,
       afterTokens: 900,
-      rawArtifactRefs: [HASH_C, HASH_A],
+      rawArtifactRefs: [HASH_C, recorded.artifact.contentHash],
       now: 1_787_360_000_500,
     })
     await appendAgentRunEventV1({
@@ -190,7 +189,7 @@ describe('MEMINT-0 · five memory planes and compaction replay contract', () => 
     const first = await readWorkingContextReplayV1(fixture.scope, saved.snapshot.run.id)
     const second = await readWorkingContextReplayV1(fixture.scope, saved.snapshot.run.id)
     expect(first?.replayHash).toBe(second?.replayHash)
-    expect(first?.compaction.rawArtifactRefs).toContain(HASH_A)
+    expect(first?.compaction.rawArtifactRefs).toContain(recorded.artifact.contentHash)
     expect(first?.compaction.sources.map(source => source.sourceKey)).toEqual([
       'projectInfo', 'worldview.races',
     ])
@@ -232,14 +231,11 @@ describe('MEMINT-0 · five memory planes and compaction replay contract', () => 
 
   it('removes exact references with their Run ledger so later mark-and-sweep can collect bodies', async () => {
     const fixture = await runFixture()
-    await fixture.append('evidence.artifact.recorded', {
-      artifactKind: 'raw-response', contentHash: HASH_B, byteLength: 42,
-      stepId: 'compose', attempt: 1,
-    })
+    const recorded = await fixture.record('exact raw response', 'raw-response')
     expect(await deleteAgentRunV1(fixture.scope, fixture.snapshot.run.id)).toBe(true)
     expect(await db.agentRunEvents.where('runId').equals(fixture.snapshot.run.id).count()).toBe(0)
     const plan = await planExactArtifactRetentionV1({
-      artifacts: [{ artifactKind: 'raw-response', contentHash: HASH_B }],
+      artifacts: [{ artifactKind: 'raw-response', contentHash: recorded.artifact.contentHash }],
       liveRefs: [],
       mode: 'mark-and-sweep',
       now: 300,

@@ -292,6 +292,30 @@ export interface ExactRunArtifactReferenceV1 {
   attempt?: number
 }
 
+/**
+ * CTXG-2 content-addressed exact evidence body. The immutable identity is
+ * project + kind + SHA-256; Run ownership remains in the append-only event
+ * ledger so identical bytes can be shared safely by multiple runs.
+ */
+export interface AgentRunArtifactRecordV1 extends ExactRunArtifactIdentityV1 {
+  id?: number
+  projectId: number
+  encoding: 'utf-8'
+  byteLength: number
+  content: string | null
+  retentionState: ExactRunArtifactRetentionStateV1
+  pruneReceiptJson: string | null
+  pruneReceiptHash: string | null
+  createdAt: number
+  updatedAt: number
+}
+
+export interface ExactRunArtifactAvailabilityV1 extends ExactRunArtifactIdentityV1 {
+  state: ExactRunArtifactRetentionStateV1 | 'missing' | 'corrupt'
+  byteLength: number | null
+  pruneReceiptHash: string | null
+}
+
 export interface WorkingContextSourceDecisionV1 {
   sourceKey: string
   sourceRevision: string
@@ -356,6 +380,7 @@ export interface MemoryArtifactIndexV1 {
     contextManifestHashes: readonly string[]
     adoptionHashes: readonly string[]
     artifactRefs: readonly MemoryArtifactRefV1[]
+    artifactAvailability: readonly ExactRunArtifactAvailabilityV1[]
     artifactIndexHash: string
   }[]
   indexHash: string

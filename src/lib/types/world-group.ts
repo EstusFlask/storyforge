@@ -1,3 +1,5 @@
+import type { RagDocumentMetadata } from './rag-library'
+
 /**
  * Phase 25.4 — 多世界系统类型定义
  */
@@ -12,7 +14,7 @@ export type WorldGroupType =
   | 'custom'       // 自定义
 
 /** 世界组 — 一组独立的世界观设定 */
-export interface WorldGroup {
+export interface WorldGroup extends RagDocumentMetadata {
   id?: number
   projectId: number
   /** 世界组名称（如"斗破世界"、"遮天世界"） */
@@ -56,7 +58,7 @@ export type WorldGroupLinkType =
   | 'custom'       // 自定义
 
 /** 世界组之间的关联关系 */
-export interface WorldGroupLink {
+export interface WorldGroupLink extends RagDocumentMetadata {
   id?: number
   projectId: number
   /** 源世界组 ID */

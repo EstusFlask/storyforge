@@ -57,6 +57,7 @@ import type {
   AgentRunRecord,
   AgentRunEventRecord,
   AgentRunCheckpointRecord,
+  AgentRunArtifactRecordV1,
   NodeFlow,
   NodeRunRecord,
   SimulationSession,
@@ -205,6 +206,7 @@ class StoryForgeDB extends Dexie {
   agentRuns!: Table<AgentRunRecord, number>
   agentRunEvents!: Table<AgentRunEventRecord, number>
   agentRunCheckpoints!: Table<AgentRunCheckpointRecord, number>
+  agentRunArtifacts!: Table<AgentRunArtifactRecordV1, number>
 
   // FLOW-2 —— 独立自由节点文档与逐节点可见运行记录
   nodeFlows!: Table<NodeFlow, number>
@@ -637,6 +639,12 @@ class StoryForgeDB extends Dexie {
           run.simulationSessionId = null
         }
       })
+    })
+
+    // v63 / CTXG-2: exact Harness evidence bodies. Historical event hashes are
+    // preserved verbatim; no body is guessed from old summaries or projections.
+    this.version(63).stores({
+      agentRunArtifacts: '++id, projectId, &[projectId+artifactKind+contentHash], contentHash, retentionState, createdAt',
     })
   }
 }
