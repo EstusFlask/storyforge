@@ -14,6 +14,11 @@ export default defineConfig({
     globals: true,
     environment: 'happy-dom',
     setupFiles: ['./tests/setup.ts'],
+    // 444 个测试文件里有多组 IndexedDB 生命周期和长回放/UI 用例。
+    // 10 核默认并发曾让无关用例随机饿死；保留有界并行，既稳定发布闸门
+    // 又不把日常验证完全串行化，且不放宽任何单测超时时间。
+    minWorkers: 1,
+    maxWorkers: 4,
     include: [
       'tests/**/*.test.ts',
       'tests/**/*.test.tsx',
