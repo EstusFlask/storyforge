@@ -75,6 +75,8 @@ export type OutlineGenerationAdoptionIntentV1 =
       kind: 'single-volume' | 'single-chapter'
       targetId: number
       summary: string
+      /** Optional only for historical pending intents; new formal adoption requires it. */
+      baseSummary?: string
     })
   | (OutlineGenerationAdoptionIntentBaseV1 & {
       kind: 'volumes'
@@ -102,6 +104,23 @@ interface OutlineGenerationAdoptionIntentPayloadV1 {
 export interface OutlineGenerationAdoptionRecoveryResultV1 {
   recoveredRunIds: number[]
   failed: Array<{ runId: number; reason: string }>
+}
+
+export type OutlineGenerationAdoptionFaultBoundaryV1 =
+  | 'before-confirmation'
+  | 'after-intent'
+  | 'before-cas'
+  | 'after-cas'
+  | 'business-write-in-progress'
+  | 'after-business-write'
+  | 'after-adoption-event'
+  | 'verification-in-progress'
+  | 'after-terminal-receipt'
+
+export interface OutlineGenerationAdoptionResultV1 {
+  evidence: unknown
+  receiptHash: string
+  postStateHash: string
 }
 
 export interface RestoredOutlineGenerationBatchV1 {
@@ -216,6 +235,7 @@ function parseOutlineAdoptionIntent(value: unknown): OutlineGenerationAdoptionIn
   if (intent.version !== 1 || typeof intent.kind !== 'string') return null
   if (intent.kind === 'single-volume' || intent.kind === 'single-chapter') {
     if (!validId(intent.targetId) || typeof intent.summary !== 'string') return null
+    if (intent.baseSummary !== undefined && typeof intent.baseSummary !== 'string') return null
     return intent as OutlineGenerationAdoptionIntentV1
   }
   if (intent.kind === 'volumes' || intent.kind === 'chapters') {
@@ -485,13 +505,16 @@ export async function commitOutlineGenerationAdoptionV1(
   candidate: OutlineGenerationCandidateV1,
   adoptionEvidence: unknown,
   intent?: OutlineGenerationAdoptionIntentV1,
-): Promise<void> {
+  options: {
+    faultInjector?: (boundary: OutlineGenerationAdoptionFaultBoundaryV1) => void | Promise<void>
+  } = {},
+): Promise<{ receiptHash: string; postStateHash: string } | null> {
   let resolved = await resolveOutlineCandidate(candidate)
   let step = resolved.snapshot.projection.steps[candidate.stepId]
   if (step?.status === 'succeeded' && step.adoptionHash) {
     const frozen = await adoptionIntentForSnapshot(resolved.scope, resolved.snapshot, candidate)
-    if (frozen) await verifyOutlineGenerationAdoptionV1(candidate, frozen.intent)
-    return
+    if (frozen) return verifyOutlineGenerationAdoptionV1(candidate, frozen.intent)
+    return null
   }
   if (step?.status === 'awaiting_confirmation') {
     await beginOutlineGenerationAdoptionV1(candidate, intent)
@@ -531,9 +554,14 @@ export async function commitOutlineGenerationAdoptionV1(
       })
     },
   )
+  await options.faultInjector?.('after-adoption-event')
   resolved = await resolveOutlineCandidate(candidate)
   const frozen = await adoptionIntentForSnapshot(resolved.scope, resolved.snapshot, candidate)
-  if (frozen) await verifyOutlineGenerationAdoptionV1(candidate, frozen.intent)
+  if (!frozen) return null
+  await options.faultInjector?.('verification-in-progress')
+  const receipt = await verifyOutlineGenerationAdoptionV1(candidate, frozen.intent)
+  await options.faultInjector?.('after-terminal-receipt')
+  return receipt
 }
 
 async function adoptionIntentForSnapshot(
@@ -572,6 +600,7 @@ async function executeOutlineAdoptionIntent(
   candidate: OutlineGenerationCandidateV1,
   scope: WorkspaceScope,
   intent: OutlineGenerationAdoptionIntentV1,
+  faultInjector?: (boundary: OutlineGenerationAdoptionFaultBoundaryV1) => void | Promise<void>,
 ): Promise<unknown> {
   if (intent.kind === 'single-volume' || intent.kind === 'single-chapter') {
     const result = await adoptGeneratedOutlineSummary(
@@ -580,21 +609,32 @@ async function executeOutlineAdoptionIntent(
       intent.summary,
     )
     if (!result.written) throw new Error(result.reason ?? '定点大纲采纳没有写入')
+    await faultInjector?.('business-write-in-progress')
     return { recovered: true, kind: intent.kind, targetIds: [intent.targetId], result }
   }
   if (!('items' in intent)) throw new Error('不支持的大纲采纳计划')
 
   const parentId = intent.kind === 'chapters' ? intent.destinationVolumeId : null
   const type = intent.kind === 'chapters' ? 'chapter' as const : 'volume' as const
-  const result = await adoptGeneratedOutlineItems({
-    projectId: candidate.projectId,
-    workspaceScope: scope,
-    worldGroupId: candidate.worldGroupId,
-    parentId,
-    type,
-    items: intent.items,
-    startingOrder: intent.startingOrder,
-  })
+  let writtenCount = 0
+  let firstId: number | null = null
+  const skippedReasons = new Set<string>()
+  for (let index = 0; index < intent.items.length; index++) {
+    const itemResult = await adoptGeneratedOutlineItems({
+      projectId: candidate.projectId,
+      workspaceScope: scope,
+      worldGroupId: candidate.worldGroupId,
+      parentId,
+      type,
+      items: [intent.items[index]],
+      startingOrder: intent.startingOrder + index,
+    })
+    writtenCount += itemResult.writtenCount
+    if (firstId == null) firstId = itemResult.firstId
+    itemResult.skippedReasons.forEach(reason => skippedReasons.add(reason))
+    if (index === 0) await faultInjector?.('business-write-in-progress')
+  }
+  const result = { writtenCount, firstId, skippedReasons: [...skippedReasons] }
   const seenTitles = new Set(intent.baseExistingTitles.map(normalizedTitle))
   const expected = intent.items
     .map((item, index) => ({ item, order: intent.startingOrder + index }))
@@ -617,6 +657,113 @@ async function executeOutlineAdoptionIntent(
     throw new Error('恢复采纳后业务表与作者确认计划仍不一致')
   }
   return { recovered: true, kind: intent.kind, targetIds, result }
+}
+
+async function assertOutlineAdoptionPreWriteCas(
+  scope: WorkspaceScope,
+  intent: OutlineGenerationAdoptionIntentV1,
+): Promise<void> {
+  if (intent.kind === 'single-volume' || intent.kind === 'single-chapter') {
+    if (typeof intent.baseSummary !== 'string') {
+      throw new Error('正式定点大纲采纳缺少确认时基线摘要')
+    }
+    const row = await db.outlineNodes.get(intent.targetId)
+    if (
+      !row
+      || !await assertRecordInScope(scope, 'outlineNodes', row, { owner: 'work' })
+      || row.summary !== intent.baseSummary
+    ) throw new Error('大纲目标在作者确认后已变化，采纳 CAS 已阻断')
+    return
+  }
+  const parentId = intent.kind === 'chapters' ? intent.destinationVolumeId : null
+  const type = intent.kind === 'chapters' ? 'chapter' : 'volume'
+  const rows = (await readOwnedRows<OutlineNode>(scope, 'outlineNodes', { owner: 'work' }))
+    .filter(row => row.type === type && (row.parentId ?? null) === parentId)
+    .sort((left, right) => left.order - right.order)
+  const currentTitles = rows.map(row => normalizedTitle(row.title))
+  if (!('baseExistingTitles' in intent)) throw new Error('大纲列表采纳缺少确认时基线标题')
+  const frozenTitles = intent.baseExistingTitles.map(normalizedTitle)
+  if (JSON.stringify(currentTitles) !== JSON.stringify(frozenTitles)) {
+    throw new Error('大纲列表在作者确认后已变化，采纳 CAS 已阻断')
+  }
+}
+
+async function assertOutlineAdoptionRecoveryState(
+  candidate: OutlineGenerationCandidateV1,
+  scope: WorkspaceScope,
+  intent: OutlineGenerationAdoptionIntentV1,
+): Promise<void> {
+  if (intent.kind === 'single-volume' || intent.kind === 'single-chapter') {
+    const row = await db.outlineNodes.get(intent.targetId)
+    if (!row || !await assertRecordInScope(scope, 'outlineNodes', row, { owner: 'work' })) {
+      throw new Error('恢复采纳时大纲目标已不存在或越出作用域')
+    }
+    if (typeof intent.baseSummary === 'string'
+      && row.summary !== intent.baseSummary
+      && row.summary !== intent.summary) {
+      throw new Error('恢复采纳时目标摘要包含确认后的并发修改')
+    }
+    return
+  }
+  if (!('baseExistingTitles' in intent) || !('items' in intent)) {
+    throw new Error('恢复采纳缺少冻结列表基线')
+  }
+  const parentId = intent.kind === 'chapters' ? intent.destinationVolumeId : null
+  const type = intent.kind === 'chapters' ? 'chapter' : 'volume'
+  const rows = (await readOwnedRows<OutlineNode>(scope, 'outlineNodes', { owner: 'work' }))
+    .filter(row => row.type === type && (row.parentId ?? null) === parentId)
+  const baseTitles = new Set(intent.baseExistingTitles.map(normalizedTitle))
+  const expected = intent.items.map((item, index) => ({
+    title: normalizedTitle(item.title),
+    summary: item.summary,
+    order: intent.startingOrder + index,
+  }))
+  for (const row of rows) {
+    if (baseTitles.has(normalizedTitle(row.title))) continue
+    const matchesFrozenWrite = expected.some(item => (
+      item.title === normalizedTitle(row.title)
+      && item.summary === row.summary
+      && item.order === row.order
+      && (row.worldGroupId ?? null) === candidate.worldGroupId
+    ))
+    if (!matchesFrozenWrite) {
+      throw new Error('恢复采纳时列表包含确认后的并发修改')
+    }
+  }
+}
+
+/** Single formal adoption command: freeze intent → CAS → idempotent write → receipt. */
+export async function adoptOutlineGenerationCandidateV1(input: {
+  candidate: OutlineGenerationCandidateV1
+  intent: OutlineGenerationAdoptionIntentV1
+  /** Development/test-only deterministic interruption hook. */
+  faultInjector?: (boundary: OutlineGenerationAdoptionFaultBoundaryV1) => void | Promise<void>
+}): Promise<OutlineGenerationAdoptionResultV1> {
+  const inject = async (boundary: OutlineGenerationAdoptionFaultBoundaryV1) => {
+    if (input.faultInjector && !import.meta.env.PROD) await input.faultInjector(boundary)
+  }
+  await inject('before-confirmation')
+  await beginOutlineGenerationAdoptionV1(input.candidate, input.intent)
+  await inject('after-intent')
+  const { scope } = await resolveOutlineCandidate(input.candidate)
+  await inject('before-cas')
+  await assertOutlineAdoptionPreWriteCas(scope, input.intent)
+  await inject('after-cas')
+  const evidence = await executeOutlineAdoptionIntent(
+    input.candidate,
+    scope,
+    input.intent,
+    input.faultInjector && !import.meta.env.PROD ? input.faultInjector : undefined,
+  )
+  await inject('after-business-write')
+  const receipt = await commitOutlineGenerationAdoptionV1(
+    input.candidate,
+    evidence,
+    input.intent,
+    { faultInjector: input.faultInjector && !import.meta.env.PROD ? input.faultInjector : undefined },
+  )
+  if (!receipt) throw new Error('正式大纲采纳没有生成终态凭证')
+  return { evidence, ...receipt }
 }
 
 async function readOutlineAdoptionPostState(
@@ -817,6 +964,7 @@ export async function recoverPendingOutlineGenerationAdoptionsV1(
       } else {
         const intent = await adoptionIntentForSnapshot(scope, snapshot, candidate)
         if (!intent) throw new Error('已确认运行缺少哈希匹配的采纳计划')
+        await assertOutlineAdoptionRecoveryState(candidate, scope, intent.intent)
         const evidence = await executeOutlineAdoptionIntent(candidate, scope, intent.intent)
         await commitOutlineGenerationAdoptionV1(candidate, {
           ...evidence as Record<string, unknown>,

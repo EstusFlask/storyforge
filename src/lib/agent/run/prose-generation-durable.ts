@@ -38,6 +38,7 @@ import {
 import { getAgentSkillV1, resolveAgentSkillContextSourceKeysV1 } from '../skill-registry'
 import type {
   AgentRunContractV2,
+  AgentRunContractV3,
   AgentRunStepExecutionBindingV2,
   AgentSkillExecutionBindingV1,
   AgentSkillExecutionBindingV2,
@@ -222,7 +223,7 @@ export function buildProseGenerationRunContractV1(input: {
   }
 }
 
-export async function buildProseGenerationRunContractV2(input: {
+export interface BuildProseGenerationRunContractV2Input {
   projectId: number
   worldGroupId: number | null
   chapterId: number
@@ -230,7 +231,11 @@ export async function buildProseGenerationRunContractV2(input: {
   semanticReview?: boolean
   perspectiveCharacterId?: number | null
   generationBinding?: AgentSkillExecutionBindingV2
-}): Promise<AgentRunContractV2> {
+}
+
+export async function buildProseGenerationRunContractV2(
+  input: BuildProseGenerationRunContractV2Input,
+): Promise<AgentRunContractV2> {
   const legacy = buildProseGenerationRunContractV1(input)
   const expectedGeneration = await resolveProseGenerationExecutionBindingV2(input)
   const generationBinding = input.generationBinding ?? expectedGeneration
@@ -267,6 +272,13 @@ export async function buildProseGenerationRunContractV2(input: {
     permissions: { contextSourceKeys, writeTargets },
     executionBindings: stepBindings,
   }
+}
+
+export async function buildProseGenerationRunContractV3(
+  input: BuildProseGenerationRunContractV2Input,
+): Promise<AgentRunContractV3> {
+  const v2 = await buildProseGenerationRunContractV2(input)
+  return { ...v2, version: 3, executionBoundary: 'formal' }
 }
 
 function requiresSemanticReview(snapshot: AgentRunSnapshotV1): boolean {
@@ -411,7 +423,7 @@ export async function createProseGenerationDurableRunV1(input: {
   return createAgentRunV1({
     scope: input.scope,
     worldGroupId: input.worldGroupId,
-    contract: await buildProseGenerationRunContractV2({
+    contract: await buildProseGenerationRunContractV3({
       projectId: input.scope.projectId,
       worldGroupId: input.worldGroupId,
       chapterId: input.chapterId,

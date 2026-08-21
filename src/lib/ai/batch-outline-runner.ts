@@ -108,14 +108,10 @@ async function finalizeFailedTrace(input: {
   code: string
 }): Promise<void> {
   if (!input.trace) return
-  try {
-    await input.trace.terminateRun({
-      status: input.cancelled ? 'cancelled' : 'failed',
-      code: input.code,
-    })
-  } catch (error) {
-    console.warn('[BatchOutline] 未能提交卷级运行终止证据。', error)
-  }
+  await input.trace.terminateRun({
+    status: input.cancelled ? 'cancelled' : 'failed',
+    code: input.code,
+  })
 }
 
 /**
@@ -214,7 +210,10 @@ export async function runBatchOutlineGeneration(
       if (!trace.durable) {
         throw new Error(`durable 运行初始化失败：${trace.initializationError ?? '未知原因'}`)
       }
-      const generation = await runGenerationNode(node, prepared, { shadowTrace: trace })
+      const generation = await runGenerationNode(node, prepared, {
+        shadowTrace: trace,
+        traceFailureMode: 'throw',
+      })
       if (generation.gate?.status === 'blocked') {
         throw new Error(generation.gate.issues.map(issue => issue.message).join('；'))
       }

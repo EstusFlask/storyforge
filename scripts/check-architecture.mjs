@@ -436,11 +436,44 @@ if (!/PROSE_GENERATION_SOURCE_KEYS_V1[\s\S]*?resolveAgentSkillContextSourceKeysV
 if (!/OUTLINE_GENERATION_SOURCE_KEYS[\s\S]*?resolveAgentSkillContextSourceKeysV1\s*\([\s\S]*?getAgentSkillV1\('outline\.compose'/.test(outlineHarnessSource)) {
   violations.push('[⑬Skill来源别名] outline 历史来源别名必须只读派生自 outline.compose Skill')
 }
-if (!/version:\s*2[\s\S]*?executionBindings:\s*stepBindings/.test(proseDurableSource)) {
+if (!/version:\s*2[\s\S]*?executionBindings:\s*stepBindings/.test(proseDurableSource)
+  || !/buildProseGenerationRunContractV3[\s\S]*?executionBoundary:\s*'formal'/.test(proseDurableSource)) {
   violations.push('[⑬Skill运行契约] 正文正式 durable contract 必须冻结 V2 executionBindings')
 }
-if (!/version:\s*2[\s\S]*?executionBindings:\s*\[\{\s*stepId,\s*\.\.\.binding\s*\}\]/.test(outlineHarnessSource)) {
+if (!/version:\s*3[\s\S]*?executionBindings:\s*\[\{\s*stepId,\s*\.\.\.binding\s*\}\]/.test(outlineHarnessSource)) {
   violations.push('[⑬Skill运行契约] 大纲正式 durable contract 必须冻结 V2 execution binding')
+}
+
+// ── ⑭ 大纲 formal 入口必须 fail-closed，UI 不得拆开 durable adoption ──
+const outlineControllerSource = read('src/components/outline/useOutlineGenerationController.ts')
+const outlinePanelFormalSource = read('src/components/outline/OutlinePanel.tsx')
+const outlineBatchControllerSource = read('src/components/outline/useOutlineBatchGeneration.ts')
+const batchOutlineRunnerSource = read('src/lib/ai/batch-outline-runner.ts')
+for (const [file, source] of [
+  ['src/components/outline/useOutlineGenerationController.ts', outlineControllerSource],
+  ['src/lib/ai/batch-outline-runner.ts', batchOutlineRunnerSource],
+]) {
+  if (/继续沿原生成路径|候选持久化失败，本次结果仍保留|正式采纳仍按原入口继续/.test(source)) {
+    violations.push(`[⑭formal fail-open] ${file}: 正式 trace/candidate/adoption 失败不得 catch-and-warn 后继续`)
+  }
+}
+if (!/traceFailureMode:\s*executionBoundary === 'formal' \? 'throw' : 'ignore'/.test(outlineControllerSource)) {
+  violations.push('[⑭formal trace] 大纲 controller 未把 formal trace 失败配置为 throw')
+}
+if (!/traceFailureMode:\s*'throw'/.test(batchOutlineRunnerSource)) {
+  violations.push('[⑭formal trace] 批量章纲 runner 未把 durable trace 失败配置为 throw')
+}
+for (const [file, source] of [
+  ['src/components/outline/OutlinePanel.tsx', outlinePanelFormalSource],
+  ['src/components/outline/useOutlineBatchGeneration.ts', outlineBatchControllerSource],
+]) {
+  if (/\badoptGeneratedOutline(?:Items|Summary)\b|\bbeginOutlineGenerationAdoptionV1\b|\bcommitOutlineGenerationAdoptionV1\b/.test(source)) {
+    violations.push(`[⑭采纳旁路] ${file}: UI 必须调用单一 adoptOutlineGenerationCandidateV1，不得拆开 intent/业务写/终态`)
+  }
+}
+if (!/正式大纲运行必须启用 durable Harness/.test(outlineHarnessSource)
+  || !/executionBoundary === 'formal'/.test(outlineHarnessSource)) {
+  violations.push('[⑭formal durable] 大纲 Harness 必须在 formal 边界拒绝 shadow-only 降级')
 }
 
 // ── 报告 ──

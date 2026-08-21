@@ -13,6 +13,7 @@ import {
   type GenerationNode,
 } from '../../src/lib/generation/generation-node'
 import {
+  adoptOutlineGenerationCandidateV1,
   beginOutlineGenerationAdoptionV1,
   commitOutlineGenerationAdoptionV1,
   createOutlineGenerationTraceV1,
@@ -25,6 +26,8 @@ import {
   recoverPendingOutlineGenerationAdoptionsV1,
   restoreLatestOutlineGenerationCandidateV1,
   staleOutlineGenerationCandidateV1,
+  type OutlineGenerationAdoptionFaultBoundaryV1,
+  type OutlineGenerationTraceFaultBoundaryV1,
 } from '../../src/lib/outline/harness'
 import { adoptGeneratedOutlineItems } from '../../src/lib/outline/adopt-generation'
 import { encodeGenerationOperation, type OutlineGenerationRequest } from '../../src/lib/outline/generation-request'
@@ -205,6 +208,19 @@ describe.sequential('R-HARNESS1-outline-durable-adapter · 大纲双写接入', 
     expect(listRecentGenerationShadowTracesV1()).toHaveLength(1)
     const durableRunId = trace.durable!.runId
     const snapshot = await readAgentRunV1(fixture.scope, durableRunId)
+    expect(snapshot.contract).toMatchObject({
+      version: 3,
+      executionBoundary: 'formal',
+      permissions: {
+        writeTargets: [expect.objectContaining({ mode: 'author-confirmed' })],
+      },
+    })
+    expect(snapshot.contract.acceptance.map(item => item.id)).toEqual([
+      'outline.output',
+      'outline.confirmed',
+      'outline.adopted',
+      'outline.post-state',
+    ])
     expect(snapshot.projection.steps[`outline.chapter:batch:${fixture.outlineNodeId}`]).toMatchObject({
       status: 'awaiting_confirmation',
       attempt: 1,
@@ -230,6 +246,159 @@ describe.sequential('R-HARNESS1-outline-durable-adapter · 大纲双写接入', 
       kind: 'candidate',
       content: '第一章：潮门关闭前的最后一班船',
     })
+  })
+
+  it.each([
+    'trace-initialization',
+    'before-model-evidence',
+    'candidate-persistence',
+  ] as const)('formal trace 在 %s 故障时 fail-closed', async faultBoundary => {
+    const fixture = await createWorkspace()
+    const assembled = assembly()
+    const run = vi.fn(async () => '不会成为无证据候选')
+    const generationNode = node(run)
+    const faultInjector = vi.fn(async (boundary: OutlineGenerationTraceFaultBoundaryV1) => {
+      if (boundary === faultBoundary) throw new Error(`fault:${boundary}`)
+    })
+
+    if (faultBoundary === 'trace-initialization') {
+      await expect(createOutlineGenerationTraceV1({
+        projectId: fixture.scope.projectId,
+        worldGroupId: fixture.worldGroupId,
+        request: { kind: 'chapters', volumeId: fixture.outlineNodeId },
+        assembled,
+        executionBoundary: 'formal',
+        faultInjector,
+      })).rejects.toThrow('fault:trace-initialization')
+    } else {
+      const trace = await createOutlineGenerationTraceV1({
+        projectId: fixture.scope.projectId,
+        worldGroupId: fixture.worldGroupId,
+        request: { kind: 'chapters', volumeId: fixture.outlineNodeId },
+        assembled,
+        executionBoundary: 'formal',
+        faultInjector,
+      })
+      await expect(runGenerationNode(
+        generationNode,
+        prepareGenerationNode(generationNode, assembled),
+        { shadowTrace: trace, traceFailureMode: 'throw' },
+      )).rejects.toThrow(`fault:${faultBoundary}`)
+    }
+
+    expect(run).toHaveBeenCalledTimes(faultBoundary === 'candidate-persistence' ? 1 : 0)
+    expect((await db.agentEvents.toArray()).filter(event => event.kind === 'candidate')).toHaveLength(0)
+    expect((await db.outlineNodes.where('projectId').equals(fixture.scope.projectId).toArray())
+      .filter(row => row.type === 'chapter')).toHaveLength(0)
+  })
+
+  it.each([
+    'before-confirmation',
+    'after-intent',
+    'before-cas',
+    'after-cas',
+    'business-write-in-progress',
+    'after-business-write',
+    'after-adoption-event',
+    'verification-in-progress',
+    'after-terminal-receipt',
+  ] as const)('正式采纳在 %s 中断后保持一次写入或可幂等恢复', async faultBoundary => {
+    const fixture = await createWorkspace()
+    const { candidate, run } = await persistOutlineCandidate(
+      fixture,
+      { kind: 'chapters', volumeId: fixture.outlineNodeId },
+      `故障候选-${faultBoundary}`,
+    )
+    const items = [
+      { title: `第一章-${faultBoundary}`, summary: '开端' },
+      { title: `第二章-${faultBoundary}`, summary: '升级' },
+    ]
+    const intent = {
+      version: 1 as const,
+      kind: 'chapters' as const,
+      destinationVolumeId: fixture.outlineNodeId,
+      items,
+      startingOrder: 0,
+      baseExistingTitles: [],
+    }
+    const faultInjector = async (boundary: OutlineGenerationAdoptionFaultBoundaryV1) => {
+      if (boundary === faultBoundary) throw new Error(`fault:${boundary}`)
+    }
+
+    await expect(adoptOutlineGenerationCandidateV1({
+      candidate,
+      intent,
+      faultInjector,
+    })).rejects.toThrow(`fault:${faultBoundary}`)
+
+    const beforeRecovery = (await db.outlineNodes
+      .where('projectId').equals(fixture.scope.projectId).toArray())
+      .filter(row => row.type === 'chapter')
+    if (faultBoundary === 'before-confirmation'
+      || faultBoundary === 'after-intent'
+      || faultBoundary === 'before-cas'
+      || faultBoundary === 'after-cas') {
+      expect(beforeRecovery).toHaveLength(0)
+    }
+
+    const recovery = await recoverPendingOutlineGenerationAdoptionsV1(fixture.scope.projectId)
+    if (faultBoundary === 'before-confirmation' || faultBoundary === 'after-terminal-receipt') {
+      expect(recovery).toEqual({ recoveredRunIds: [], failed: [] })
+    } else {
+      expect(recovery).toEqual({ recoveredRunIds: [candidate.runId], failed: [] })
+    }
+    const chapters = (await db.outlineNodes
+      .where('projectId').equals(fixture.scope.projectId).toArray())
+      .filter(row => row.type === 'chapter')
+      .sort((left, right) => left.order - right.order)
+    if (faultBoundary === 'before-confirmation') {
+      expect(chapters).toHaveLength(0)
+    } else {
+      expect(chapters.map(row => ({ title: row.title, summary: row.summary, order: row.order })))
+        .toEqual(items.map((item, order) => ({ ...item, order })))
+    }
+    expect(run).toHaveBeenCalledOnce()
+  })
+
+  it('确认后出现并发大纲修改时 CAS 与恢复都阻断候选覆盖', async () => {
+    const fixture = await createWorkspace()
+    const { candidate } = await persistOutlineCandidate(
+      fixture,
+      { kind: 'chapters', volumeId: fixture.outlineNodeId },
+      '并发 CAS 候选',
+    )
+    const intent = {
+      version: 1 as const,
+      kind: 'chapters' as const,
+      destinationVolumeId: fixture.outlineNodeId,
+      items: [{ title: '候选第一章', summary: '候选内容' }],
+      startingOrder: 0,
+      baseExistingTitles: [],
+    }
+    await expect(adoptOutlineGenerationCandidateV1({
+      candidate,
+      intent,
+      faultInjector: async boundary => {
+        if (boundary !== 'after-intent') return
+        await adoptGeneratedOutlineItems({
+          projectId: fixture.scope.projectId,
+          workspaceScope: fixture.scope,
+          worldGroupId: fixture.worldGroupId,
+          parentId: fixture.outlineNodeId,
+          type: 'chapter',
+          items: [{ title: '作者并发新增章', summary: '应被保留' }],
+          startingOrder: 0,
+        })
+      },
+    })).rejects.toThrow('采纳 CAS 已阻断')
+
+    expect(await recoverPendingOutlineGenerationAdoptionsV1(fixture.scope.projectId)).toEqual({
+      recoveredRunIds: [],
+      failed: [{ runId: candidate.runId, reason: '恢复采纳时列表包含确认后的并发修改' }],
+    })
+    const chapters = (await db.outlineNodes.where('projectId').equals(fixture.scope.projectId).toArray())
+      .filter(row => row.type === 'chapter')
+    expect(chapters.map(row => row.title)).toEqual(['作者并发新增章'])
   })
 
   it.each(RECOVERY_BATCH_STARTS)('模型返回后、UI 接管前第 %i 轮起连续 5 次刷新均恢复原候选', async batchStart => {
@@ -658,6 +827,7 @@ describe.sequential('R-HARNESS1-outline-durable-adapter · 大纲双写接入', 
       request: { kind: 'chapters', volumeId: fixture.outlineNodeId },
       assembled,
       durable: false,
+      executionBoundary: 'evaluation',
     })
 
     await runGenerationNode(
@@ -669,6 +839,22 @@ describe.sequential('R-HARNESS1-outline-durable-adapter · 大纲双写接入', 
     expect(trace.mode).toBe('shadow-only')
     expect(run).toHaveBeenCalledOnce()
     expect(await db.agentRuns.count()).toBe(0)
+  })
+
+  it('正式运行不能因 durable 开关关闭而降级为 shadow-only', async () => {
+    const fixture = await createWorkspace()
+
+    await expect(createOutlineGenerationTraceV1({
+      projectId: fixture.scope.projectId,
+      worldGroupId: fixture.worldGroupId,
+      request: { kind: 'chapters', volumeId: fixture.outlineNodeId },
+      assembled: assembly(),
+      durable: false,
+      executionBoundary: 'formal',
+    })).rejects.toThrow('正式大纲运行必须启用 durable Harness')
+
+    expect(await db.agentRuns.count()).toBe(0)
+    expect(await db.agentEvents.count()).toBe(0)
   })
 
   it('本机回滚开关默认启用，显式 disabled 后关闭 durable 接入', () => {

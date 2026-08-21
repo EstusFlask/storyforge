@@ -6,11 +6,14 @@ import type {
   AcceptedAgentRunContract,
   AcceptedAgentRunContractV1,
   AcceptedAgentRunContractV2,
+  AcceptedAgentRunContractV3,
   AgentRunAcceptanceCriterionV1,
   AgentRunAcceptanceKind,
   AgentRunContract,
   AgentRunContractV1,
   AgentRunContractV2,
+  AgentRunContractV3,
+  AgentExecutionBoundaryV1,
   AgentRunParentLineageV1,
   AgentRunStepExecutionBindingV2,
   AgentRunVerificationKind,
@@ -43,6 +46,12 @@ const WORKFLOW_KINDS: readonly AgentRunWorkflowKind[] = [
   'multi-domain-sequential',
   'fan-out-synthesize',
   'long-running-resumable',
+]
+const EXECUTION_BOUNDARIES: readonly AgentExecutionBoundaryV1[] = [
+  'formal',
+  'evaluation',
+  'simulation',
+  'experimental',
 ]
 
 const WRITE_MODES: readonly AgentRunWriteMode[] = ['none', 'candidate-only', 'author-confirmed']
@@ -547,7 +556,14 @@ function writePermissionSignatures(targets: readonly AgentRunWriteTargetV1[]): s
   return [...new Set(signatures)].sort()
 }
 
-export function parseAgentRunContractV2(value: unknown): AgentRunContractV2 {
+function parseSkillBoundContract(
+  value: unknown,
+  expectedVersion: 2 | 3,
+): {
+  base: AgentRunContractV1
+  executionBindings: AgentRunStepExecutionBindingV2[]
+  record: Record<string, unknown>
+} {
   const record = readRecord(value, 'contract')
   const allowedKeys = [
     'version',
@@ -564,6 +580,7 @@ export function parseAgentRunContractV2(value: unknown): AgentRunContractV2 {
     'acceptance',
     'verificationPlan',
     'failurePolicy',
+    ...(expectedVersion === 3 ? ['executionBoundary'] as const : []),
   ] as const
   assertExactKeys(record, allowedKeys, [
     'version',
@@ -576,8 +593,11 @@ export function parseAgentRunContractV2(value: unknown): AgentRunContractV2 {
     'acceptance',
     'verificationPlan',
     'failurePolicy',
+    ...(expectedVersion === 3 ? ['executionBoundary'] as const : []),
   ], 'contract')
-  if (record.version !== 2) failSchema('unsupported_version', 'contract.version', '仅支持版本 2')
+  if (record.version !== expectedVersion) {
+    failSchema('unsupported_version', 'contract.version', `仅支持版本 ${expectedVersion}`)
+  }
   const executionBindings = readArray(record.executionBindings, 'contract.executionBindings')
     .map((item, index) => readExecutionBindingV2(item, `contract.executionBindings[${index}]`))
   if (executionBindings.length === 0) {
@@ -587,6 +607,7 @@ export function parseAgentRunContractV2(value: unknown): AgentRunContractV2 {
 
   const legacyShape = { ...record, version: 1 } as Record<string, unknown>
   delete legacyShape.executionBindings
+  if (expectedVersion === 3) delete legacyShape.executionBoundary
   const base = parseAgentRunContractV1(legacyShape)
   const permissionSources = [...new Set(base.permissions.contextSourceKeys)].sort()
   const bindingSources = [...new Set(executionBindings.flatMap(binding => binding.contextSourceKeys))].sort()
@@ -613,9 +634,24 @@ export function parseAgentRunContractV2(value: unknown): AgentRunContractV2 {
       'Run 输出预算不得小于任一步骤的 Skill 输出预算',
     )
   }
+  return { base, executionBindings, record }
+}
+
+export function parseAgentRunContractV2(value: unknown): AgentRunContractV2 {
+  const { base, executionBindings } = parseSkillBoundContract(value, 2)
+  return { ...base, version: 2, executionBindings }
+}
+
+export function parseAgentRunContractV3(value: unknown): AgentRunContractV3 {
+  const { base, executionBindings, record } = parseSkillBoundContract(value, 3)
   return {
     ...base,
-    version: 2,
+    version: 3,
+    executionBoundary: readEnum(
+      record.executionBoundary,
+      EXECUTION_BOUNDARIES,
+      'contract.executionBoundary',
+    ),
     executionBindings,
   }
 }
@@ -624,7 +660,8 @@ export function parseAgentRunContract(value: unknown): AgentRunContract {
   const record = readRecord(value, 'contract')
   if (record.version === 1) return parseAgentRunContractV1(value)
   if (record.version === 2) return parseAgentRunContractV2(value)
-  failSchema('unsupported_version', 'contract.version', '仅支持版本 1 或 2')
+  if (record.version === 3) return parseAgentRunContractV3(value)
+  failSchema('unsupported_version', 'contract.version', '仅支持版本 1、2 或 3')
 }
 
 export async function acceptAgentRunContractV2(value: unknown): Promise<AcceptedAgentRunContractV2> {
@@ -636,9 +673,19 @@ export async function acceptAgentRunContractV2(value: unknown): Promise<Accepted
   return { contract, contractHash: await hashCanonicalValue(contract) }
 }
 
+export async function acceptAgentRunContractV3(value: unknown): Promise<AcceptedAgentRunContractV3> {
+  const contract = parseAgentRunContractV3(value)
+  for (const binding of contract.executionBindings) {
+    const { stepId: _stepId, ...skillBinding } = binding
+    await assertAgentSkillExecutionBindingIntegrityV2(skillBinding, `Run step ${binding.stepId}`)
+  }
+  return { contract, contractHash: await hashCanonicalValue(contract) }
+}
+
 export async function acceptAgentRunContract(value: unknown): Promise<AcceptedAgentRunContract> {
   const record = readRecord(value, 'contract')
   if (record.version === 1) return acceptAgentRunContractV1(value)
   if (record.version === 2) return acceptAgentRunContractV2(value)
-  failSchema('unsupported_version', 'contract.version', '仅支持版本 1 或 2')
+  if (record.version === 3) return acceptAgentRunContractV3(value)
+  failSchema('unsupported_version', 'contract.version', '仅支持版本 1、2 或 3')
 }

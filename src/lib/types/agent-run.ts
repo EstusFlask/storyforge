@@ -9,6 +9,12 @@ export type AgentRunWorkflowKind =
   | 'fan-out-synthesize'
   | 'long-running-resumable'
 
+export type AgentExecutionBoundaryV1 =
+  | 'formal'
+  | 'evaluation'
+  | 'simulation'
+  | 'experimental'
+
 export interface AgentRunScopeV1 {
   projectId: number
   worldGroupId: number | null
@@ -200,7 +206,12 @@ export interface AgentRunContractV2 extends Omit<AgentRunContractV1, 'version' |
   executionBindings: AgentRunStepExecutionBindingV2[]
 }
 
-export type AgentRunContract = AgentRunContractV1 | AgentRunContractV2
+export interface AgentRunContractV3 extends Omit<AgentRunContractV2, 'version'> {
+  version: 3
+  executionBoundary: AgentExecutionBoundaryV1
+}
+
+export type AgentRunContract = AgentRunContractV1 | AgentRunContractV2 | AgentRunContractV3
 
 export interface AcceptedAgentRunContractV1 {
   contract: AgentRunContractV1
@@ -212,7 +223,15 @@ export interface AcceptedAgentRunContractV2 {
   contractHash: string
 }
 
-export type AcceptedAgentRunContract = AcceptedAgentRunContractV1 | AcceptedAgentRunContractV2
+export interface AcceptedAgentRunContractV3 {
+  contract: AgentRunContractV3
+  contractHash: string
+}
+
+export type AcceptedAgentRunContract =
+  | AcceptedAgentRunContractV1
+  | AcceptedAgentRunContractV2
+  | AcceptedAgentRunContractV3
 
 export type ContextManifestSourceStatus = 'included' | 'omitted' | 'trimmed'
 export type ContextManifestSourceDeliveryV1 = 'full' | 'compressed' | 'truncated'
@@ -383,7 +402,7 @@ export interface AgentRunRecord {
   parentReceiptHash?: string | null
   parentArtifactHash?: string | null
   status: AgentRunState
-  contractVersion: 1 | 2
+  contractVersion: 1 | 2 | 3
   contractJson: string
   contractHash: string
   generation: number

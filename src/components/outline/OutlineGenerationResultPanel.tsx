@@ -22,6 +22,8 @@ interface Props {
   onConfirmVolumes: () => void
   onConfirmChapters: () => void
   onCancelPreview: () => void
+  canAdopt: boolean
+  adoptionRecoveryRequired: boolean
 }
 
 export default function OutlineGenerationResultPanel({
@@ -42,6 +44,8 @@ export default function OutlineGenerationResultPanel({
   onConfirmVolumes,
   onConfirmChapters,
   onCancelPreview,
+  canAdopt,
+  adoptionRecoveryRequired,
 }: Props) {
   return (
     <>
@@ -71,6 +75,8 @@ export default function OutlineGenerationResultPanel({
           items={previewVolumes}
           onConfirm={onConfirmVolumes}
           onCancel={onCancelPreview}
+          canConfirm={canAdopt}
+          disabledReason={adoptionRecoveryRequired ? '等待恢复' : undefined}
         />
       )}
 
@@ -82,6 +88,8 @@ export default function OutlineGenerationResultPanel({
           items={previewChapters}
           onConfirm={onConfirmChapters}
           onCancel={onCancelPreview}
+          canConfirm={canAdopt}
+          disabledReason={adoptionRecoveryRequired ? '等待恢复' : undefined}
         />
       )}
     </>

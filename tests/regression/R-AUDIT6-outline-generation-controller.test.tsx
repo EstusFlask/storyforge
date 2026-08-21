@@ -6,6 +6,7 @@ import type { AssembleContextResult } from '../../src/lib/registry/types'
 import type { OutlineNode, Project } from '../../src/lib/types'
 import { useOutlineGenerationController } from '../../src/components/outline/useOutlineGenerationController'
 import { OUTLINE_DURABLE_HARNESS_STORAGE_KEY } from '../../src/lib/outline/harness'
+import { resolveOutlineGenerationSourceKeysV2 } from '../../src/lib/outline/harness'
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true
 
@@ -24,6 +25,9 @@ function node(id: number, type: OutlineNode['type'], parentId: number | null, ti
 }
 
 function assembled(text: string): AssembleContextResult {
+  const sourceKeys = resolveOutlineGenerationSourceKeysV2({
+    request: { kind: 'chapters', volumeId: 1 },
+  })
   return {
     text,
     included: ['storyCore'],
@@ -34,6 +38,13 @@ function assembled(text: string): AssembleContextResult {
     inputBudget: 48_000,
     overBudgetBeforeTrim: false,
     overBudgetAfterTrim: false,
+    sourceEvidence: sourceKeys.map(key => ({
+      key,
+      status: key === 'storyCore' ? 'included' as const : 'omitted' as const,
+      delivery: key === 'storyCore' ? 'full' as const : 'none' as const,
+      originalTokens: key === 'storyCore' ? 1 : 0,
+      inputTokens: key === 'storyCore' ? 1 : 0,
+    })),
   }
 }
 
@@ -95,6 +106,7 @@ async function mount(patch: Partial<Parameters<typeof useOutlineGenerationContro
     clearPreview: vi.fn(),
     onInfo: vi.fn(),
     onError: vi.fn(),
+    executionBoundary: 'experimental',
     ...patch,
   }
   function Harness() {
@@ -170,10 +182,17 @@ describe('AUDIT-6 · 大纲生成 controller', () => {
     expect(controller.pendingRequest).toBeNull()
   })
 
-  it('运行追踪初始化失败不能阻断原模型调用', async () => {
+  it('正式运行追踪初始化失败会在模型调用前 fail-closed', async () => {
     const malformedAssembly = {
       ...assembled('仍可发送'),
       included: ['unregistered-source'],
+      sourceEvidence: [{
+        key: 'unregistered-source',
+        status: 'included' as const,
+        delivery: 'full' as const,
+        originalTokens: 1,
+        inputTokens: 1,
+      }],
     }
     const ai = createAI()
     const onError = vi.fn()
@@ -181,13 +200,14 @@ describe('AUDIT-6 · 大纲生成 controller', () => {
       ai,
       onError,
       assembleContext: vi.fn(async () => malformedAssembly),
+      executionBoundary: 'formal',
     })
 
     await act(async () => { await controller.prepare({ kind: 'chapters', volumeId: 1 }) })
     await act(async () => { await controller.confirm() })
 
-    expect(ai.start).toHaveBeenCalledOnce()
-    expect(onError).not.toHaveBeenCalled()
+    expect(ai.start).not.toHaveBeenCalled()
+    expect(onError).toHaveBeenCalledWith(expect.stringContaining('实际来源集合'))
   })
 
   it('透明模式先停在最终消息闸门，编辑后才把本次副本交给 AI', async () => {

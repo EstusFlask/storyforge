@@ -9,9 +9,10 @@ import {
 import { getAgentSkillV1 } from '../../src/lib/agent/skill-registry'
 import {
   buildProseGenerationRunContractV2,
+  buildProseGenerationRunContractV3,
   resolveProseGenerationExecutionBindingV2,
 } from '../../src/lib/agent/run/prose-generation-durable'
-import { parseAgentRunContractV2 } from '../../src/lib/agent/run/contract'
+import { parseAgentRunContractV2, parseAgentRunContractV3 } from '../../src/lib/agent/run/contract'
 import {
   portableizeAgentRunContractV1,
   rebindPortableAgentRunContractV1,
@@ -55,8 +56,25 @@ describe('WEH-0A · Skill → formal Run 单向派生', () => {
       .toEqual(continued.contextSourceKeys)
   })
 
+  it('入口边界属于 Run：formal 可形成候选写权限，非正式边界写集合为空', async () => {
+    const request = { kind: 'chapters' as const, volumeId: 9 }
+    const formal = await resolveOutlineGenerationExecutionBindingV2({
+      request,
+      executionBoundary: 'formal',
+    })
+    const evaluation = await resolveOutlineGenerationExecutionBindingV2({
+      request,
+      executionBoundary: 'evaluation',
+    })
+    expect(formal.writeTargets).toEqual([expect.objectContaining({
+      table: 'outlineNodes',
+      mode: 'author-confirmed',
+    })])
+    expect(evaluation.writeTargets).toEqual([])
+  })
+
   it('V2 Run permissions 精确等于 Skill binding，并冻结定义/策略 hash', async () => {
-    const contract = await buildProseGenerationRunContractV2({
+    const contract = await buildProseGenerationRunContractV3({
       projectId: 1,
       worldGroupId: null,
       chapterId: 2,
@@ -66,7 +84,8 @@ describe('WEH-0A · Skill → formal Run 单向派生', () => {
     const binding = contract.executionBindings[0]
     const { stepId: _stepId, ...skillBinding } = binding
 
-    expect(contract.version).toBe(2)
+    expect(contract.version).toBe(3)
+    expect(contract.executionBoundary).toBe('formal')
     expect(contract.permissions.contextSourceKeys).toEqual(binding.contextSourceKeys)
     expect(contract.permissions.writeTargets).toEqual(binding.writeTargets)
     expect(binding.writeTargets).toEqual([{
@@ -78,7 +97,7 @@ describe('WEH-0A · Skill → formal Run 单向派生', () => {
 
     const widened = structuredClone(contract)
     widened.permissions.contextSourceKeys.push('manualText')
-    expect(() => parseAgentRunContractV2(widened)).toThrow('实际来源并集')
+    expect(() => parseAgentRunContractV3(widened)).toThrow('实际来源并集')
   })
 
   it('已登记来源或字段也不能越过 Skill 授权', async () => {
@@ -130,6 +149,43 @@ describe('WEH-0A · Skill → formal Run 单向派生', () => {
     expect(rebound.contract.version).toBe(2)
     expect(rebound.contract.scope).toMatchObject({ projectId: 9, chapterIds: [22] })
     expect(rebound.contract.executionBindings).toEqual(contract.executionBindings)
+  })
+
+  it('WEH-0A 已落盘 V2 无 executionBoundary 时仍可读取', async () => {
+    const contract = await buildProseGenerationRunContractV2({
+      projectId: 1,
+      worldGroupId: null,
+      chapterId: 2,
+      operation: 'generate',
+    })
+    expect(contract.version).toBe(2)
+    expect('executionBoundary' in contract).toBe(false)
+    expect(parseAgentRunContractV2(contract)).toEqual(contract)
+  })
+
+  it('V3 formal boundary 在便携导出与项目重绑定后保持不变', async () => {
+    const contract = await buildProseGenerationRunContractV3({
+      projectId: 1,
+      worldGroupId: null,
+      chapterId: 2,
+      operation: 'generate',
+    })
+    const portable = await portableizeAgentRunContractV1({
+      contractJson: canonicalStringify(contract),
+      contractHash: await hashCanonicalValue(contract),
+      idMaps: new Map([['chapters', new Map([[2, 0]])]]),
+    })
+    const rebound = await rebindPortableAgentRunContractV1({
+      contractJson: portable.contractJson,
+      contractHash: portable.contractHash,
+      projectId: 9,
+      idMaps: new Map([['chapters', new Map([[0, 22]])]]),
+    })
+    expect(rebound.contract).toMatchObject({
+      version: 3,
+      executionBoundary: 'formal',
+      scope: { projectId: 9, chapterIds: [22] },
+    })
   })
 
   it('assembly 必须覆盖 binding 的精确声明集合', async () => {

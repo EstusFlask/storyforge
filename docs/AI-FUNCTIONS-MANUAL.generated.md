@@ -259,7 +259,7 @@ AI 输出经 `adopt({ target, data })` 写回,只有这里登记的字段可写(
 | `inventory.extract` | `src/lib/agent/run/inventory-extraction-durable.ts:943` |
 | `location.extract` | `src/lib/agent/run/location-extraction-durable.ts:618` |
 | `node.creation` | `src/lib/node-authoring/executor.ts:362`<br/>`src/lib/node-flow/executor.ts:207` |
-| `outline.chapter` | `src/lib/ai/batch-outline-runner.ts:188`<br/>`src/lib/outline/generation-node.ts:59` |
+| `outline.chapter` | `src/lib/ai/batch-outline-runner.ts:184`<br/>`src/lib/outline/generation-node.ts:59` |
 | `outline.impact-regenerate` | `src/lib/agent/run/impact-outline-regeneration-durable.ts:652` |
 | `outline.volume` | `src/lib/outline/generation-node.ts:55` |
 | `outline.workshop.collision` | `src/lib/outline/workshop.ts:448` |
@@ -315,4 +315,4 @@ AI 输出经 `adopt({ target, data })` 写回,只有这里登记的字段可写(
 
 ---
 
-生成时间基准:commit `2c9ad71`
+生成时间基准:commit `616ad49`

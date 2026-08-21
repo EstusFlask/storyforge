@@ -67,13 +67,13 @@ export async function runDurableProseSemanticReviewV1(input: {
       perspectiveCharacterId: input.informationBoundary.perspectiveCharacterId,
     }),
   }]
-  const reviewerBinding = input.snapshot.contract.version === 2
+  const reviewerBinding = input.snapshot.contract.version !== 1
     ? await createAgentSkillExecutionBindingV2(reviewerSkill, {
         optionalContextActivations,
         writeTargets: [],
       })
     : createAgentSkillExecutionBindingV1(reviewerSkill)
-  const revisionBinding = input.snapshot.contract.version === 2
+  const revisionBinding = input.snapshot.contract.version !== 1
     ? await createAgentSkillExecutionBindingV2(revisionSkill, {
         optionalContextActivations,
         writeTargets: [],
