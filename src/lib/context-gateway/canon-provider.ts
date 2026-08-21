@@ -30,9 +30,17 @@ import { parseStages } from '../types/story-arc'
 import { htmlToPlainText } from '../utils/html'
 import { assertRecordInScope, resolveScope } from '../world-engine/scope'
 import { isPortableResourceUidV1 } from './resource-uid'
+import {
+  narrativePlanMatchesSourceRefsV1,
+  planNarrativeRetrievalV1,
+} from './narrative-retrieval'
+import {
+  contextGatewayCacheEpochV1,
+  createCachedContextResourceProviderV1,
+} from './provider-cache'
 
 const PROVIDER_SOURCE_KEY = 'ragSelection'
-const PROVIDER_VERSION = 'canon-resource-provider-v1'
+const PROVIDER_VERSION = 'canon-resource-provider-v2'
 const NORMALIZATION_VERSION = 'canon-resource-normalization-v1'
 const MAX_PAGE_SIZE = 100
 const MAX_READ_TOKENS = 100_000
@@ -842,13 +850,17 @@ async function catalogPage(input: ResourceListInputV1 | ResourceSearchInputV1): 
   const storyArcKeys = 'query' in input ? normalizedResourceKeys(input.storyArcKeys, 'storyArcKeys') : []
   const timeRange = 'query' in input ? input.timeRange : undefined
   assertTimeRangeFilter(timeRange)
+  const catalogEpoch = contextGatewayCacheEpochV1()
   const requestHash = await hashCanonicalValue({
-    version: 1, scopeFingerprint, requestedKinds, query, entityKeys, storyArcKeys, timeRange: timeRange ?? null,
+    version: 1, scopeFingerprint, catalogEpoch, requestedKinds, query, entityKeys, storyArcKeys, timeRange: timeRange ?? null,
   })
   const cursor = decodeCursor(input.cursor)
   if (cursor && (cursor.requestHash !== requestHash || cursor.scopeFingerprint !== scopeFingerprint)) {
     fail('cursor-scope', '目录 cursor 不属于当前 scope/filter/query')
   }
+  const narrativePlan = query
+    ? await planNarrativeRetrievalV1({ scope: input.scope, query, timeRange })
+    : null
   const specs = resourceSpecs()
   const found: LocatedProjectionV1[] = []
   outer: for (let tableIndex = cursor?.tableIndex ?? 0; tableIndex < specs.length; tableIndex++) {
@@ -867,7 +879,12 @@ async function catalogPage(input: ResourceListInputV1 | ResourceSearchInputV1): 
         const projected = resources[itemIndex]
         const searchable = `${projected.descriptor.resourceKey}\n${projected.descriptor.title}\n${projected.descriptor.shortSummary}`
           .toLocaleLowerCase('zh-CN')
-        if (query && !searchable.includes(query)) continue
+        const narrativeMatch = narrativePlan
+          ? narrativePlanMatchesSourceRefsV1(narrativePlan, projected.descriptor.sourceRefs)
+          : null
+        const canonFallbackMatch = narrativeMatch?.canonFallback === true
+          && projected.fullContent.toLocaleLowerCase('zh-CN').includes(query)
+        if (query && !searchable.includes(query) && !narrativeMatch?.candidate && !canonFallbackMatch) continue
         if (!matchesResourceKeys(projected.descriptor, entityKeys)
           || !matchesResourceKeys(projected.descriptor, storyArcKeys)
           || !matchesTimeRange(projected.descriptor, timeRange)) continue
@@ -878,6 +895,9 @@ async function catalogPage(input: ResourceListInputV1 | ResourceSearchInputV1): 
   }
   const pageItems = found.slice(0, input.limit)
   const last = pageItems[pageItems.length - 1]
+  if (catalogEpoch !== contextGatewayCacheEpochV1()) {
+    fail('catalog-mutated', '目录读取期间 Canon 已变化，请从第一页重新读取')
+  }
   return {
     version: 1,
     items: pageItems.map(item => item.projected.descriptor),
@@ -1053,7 +1073,7 @@ async function readOriginal(input: OriginalEvidenceReadInputV1): Promise<Origina
   }
 }
 
-export const CANON_RESOURCE_PROVIDER_V1: ContextResourceProviderV1 = {
+export const UNCACHED_CANON_RESOURCE_PROVIDER_V1: ContextResourceProviderV1 = {
   version: 'context-resource-provider-v1',
   providerId: 'storyforge-canon-resource-provider',
   providerVersion: PROVIDER_VERSION,
@@ -1065,6 +1085,9 @@ export const CANON_RESOURCE_PROVIDER_V1: ContextResourceProviderV1 = {
   readOriginal,
   fingerprint: canonScopeFingerprintV1,
 }
+
+export const CANON_RESOURCE_PROVIDER_V1: ContextResourceProviderV1 =
+  createCachedContextResourceProviderV1(UNCACHED_CANON_RESOURCE_PROVIDER_V1)
 
 export function contextResourceSpecsV1(): readonly ResourceSpec[] {
   return resourceSpecs()

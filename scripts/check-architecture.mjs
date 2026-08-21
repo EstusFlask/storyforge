@@ -1098,6 +1098,39 @@ if (!contextGatewayIndexSource.includes("from './execution'")
   violations.push('[㉘公开入口] 快慢路径与 Skill policy 必须从唯一 Context Gateway headless 边界导出')
 }
 
+// ── ㉙ CTXG-8 Provider 缓存必须可丢弃、实时失效且 derived retrieval 不得升权 ──
+const contextProviderCacheSource = read('src/lib/context-gateway/provider-cache.ts')
+const narrativeRetrievalSource = read('src/lib/context-gateway/narrative-retrieval.ts')
+for (const token of [
+  'createCachedContextResourceProviderV1', 'Dexie.on.storagemutated.subscribe',
+  'providerVersion', 'normalizationVersion', 'contentHash', 'policyHash',
+  'markContextGatewayCacheUncertainV1', 'invalidateContextGatewayCacheV1',
+  'contextGatewayCacheEpochV1', 'startedEpoch !== cacheEpoch', 'return input.load()',
+]) {
+  if (!contextProviderCacheSource.includes(token)) violations.push(`[㉙缓存失效] Provider cache 缺少 ${token}`)
+}
+if (/\bdb\.|from ['"]\.\.\/db\//.test(contextProviderCacheSource)
+  || /contextGateway(?:Cache|Catalog|Index)(?:Entries|Records)?\s*!:\s*Table/.test(schemaSource)) {
+  violations.push('[㉙缓存非权威] Gateway cache 必须是可丢弃的 Provider 包装，不得直接写库或新增权威表')
+}
+for (const token of [
+  'retrievalChunks', 'narrativeSummaryNodes', 'buildLongTermConsistencyDossierV1',
+  'hashChapterText', "summary.status !== 'verified'", 'canonFallbackRecordKeys',
+  'embeddingAuthoritative: false', 'narrativePlanMatchesSourceRefsV1',
+]) {
+  if (!narrativeRetrievalSource.includes(token)) violations.push(`[㉙长篇候选检索] 缺少 ${token}`)
+}
+if (!canonProviderSource.includes('UNCACHED_CANON_RESOURCE_PROVIDER_V1')
+  || !canonProviderSource.includes('createCachedContextResourceProviderV1(UNCACHED_CANON_RESOURCE_PROVIDER_V1)')
+  || !canonProviderSource.includes('planNarrativeRetrievalV1')
+  || !canonProviderSource.includes('projected.fullContent.toLocaleLowerCase')) {
+  violations.push('[㉙Provider 透明接入] Canon 必须以同合同包装缓存，并在 derived index 坏/缺时定点回 Canon body')
+}
+if (!contextGatewayIndexSource.includes("from './provider-cache'")
+  || !contextGatewayIndexSource.includes("from './narrative-retrieval'")) {
+  violations.push('[㉙公开入口] 缓存诊断与长篇候选规划必须从唯一 Context Gateway headless 边界导出')
+}
+
 // ── 报告 ──
 if (violations.length) {
   console.error('[architecture] ❌ 发现反模式违规(违反 CLAUDE.md 三注册表铁律):\n')
