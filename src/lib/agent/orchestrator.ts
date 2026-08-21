@@ -247,6 +247,8 @@ export interface MasterCandidatePayload {
   label: string
   contextSources: string[]
   contextEvidence?: AgentContextEvidence
+  /** Durable Context Manifest identity frozen before candidate persistence. */
+  contextManifestHash?: string
   /** Absent on candidates created before WEH-0C. */
   contentRevision?: WorkspaceContentRevisionVectorV1
   teamBudgetEvidence?: AgentTeamBudgetEvidence

@@ -13,6 +13,24 @@ function resolveBuildSha(): string {
   }
 }
 
+function manualChunkFor(moduleId: string): string | undefined {
+  const id = moduleId.replaceAll('\\', '/')
+  const packagePath = id.split('/node_modules/')[1]
+
+  if (packagePath) {
+    if (/^(?:react|react-dom|scheduler|react-router)(?:\/|$)/.test(packagePath)) {
+      return 'vendor-react'
+    }
+    if (packagePath.startsWith('@tiptap/')) return 'vendor-editor'
+    if (packagePath.startsWith('dexie/')) return 'vendor-db'
+    if (packagePath.startsWith('d3-hierarchy/')) return 'vendor-d3'
+    if (packagePath.startsWith('lucide-react/')) return 'vendor-icons'
+  }
+
+  if (id.endsWith('/src/lib/ai/context-builder.ts')) return 'ai-context'
+  return undefined
+}
+
 export default defineConfig({
   define: {
     __STORYFORGE_BUILD_SHA__: JSON.stringify(resolveBuildSha()),
@@ -167,17 +185,10 @@ export default defineConfig({
         // 不可在此用 manualChunks 固定它们——否则会被并入主包静态引用、反而变回首屏 eager 加载。
         // Phase 3.5:把大的静态依赖拆成独立 vendor chunk。
         // 好处:① 主包变小、解析更快 ② 这些库很少变,浏览器可长期缓存(应用更新不必重下)。
-        manualChunks: {
-          'vendor-react': ['react', 'react-dom', 'react-router'],
-          'vendor-editor': ['@tiptap/react', '@tiptap/starter-kit', '@tiptap/extension-placeholder'],
-          'vendor-db': ['dexie'],
-          'vendor-d3': ['d3-hierarchy'],
-          // 侧栏与工作区共享大量图标；独立缓存，避免每次功能加一个图标都把入口包推过预算。
-          'vendor-icons': ['lucide-react'],
-          // 上下文装配被首页、写作与多个懒加载面板共同引用；单独缓存可避免
-          // 每次扩展项目数据源都推高首屏入口包，同时不改变其同步调用语义。
-          'ai-context': ['./src/lib/ai/context-builder.ts'],
-        },
+        // 按真实模块路径归组，确保 react-dom/client 及其 CJS 实现都进入
+        // vendor-react；对象式入口声明会让 @tiptap/react 抢先吸收 react-dom，
+        // 形成 vendor-editor ↔ vendor-react 循环并把 React DOM 回灌首屏。
+        manualChunks: manualChunkFor,
       },
     },
   },

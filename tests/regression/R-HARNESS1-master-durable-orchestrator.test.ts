@@ -26,6 +26,11 @@ import { countWords } from '../../src/lib/utils/html'
 import { plainTextToHtml } from '../../src/lib/utils/html'
 import { readAgentRunV1 } from '../../src/lib/agent/run/event-store'
 import { readLatestVerifiedAgentRunCheckpointV1 } from '../../src/lib/agent/run/checkpoint'
+import { verifyMasterAgentRunV1 } from '../../src/lib/agent/run/master-verification'
+import {
+  configureHarnessFaultInjectionV1,
+  resetHarnessFaultInjectionV1,
+} from '../../src/lib/agent/dev-fault-injection'
 import { AgentTeamBudgetTracker } from '../../src/lib/agent/team-budget'
 import type { MasterAgentPlan } from '../../src/lib/agent/orchestrator'
 import type { WorkspaceScope } from '../../src/lib/types'
@@ -117,6 +122,14 @@ function fakeExecutor(input: {
           agentId: task.agentId,
           label: task.agentId,
           contextSources: ['worldview'],
+          contextEvidence: {
+            profile: 'balanced',
+            included: ['worldview'],
+            omitted: [],
+            trimmed: [],
+            estimatedInputTokens: 1,
+            inputBudgetTokens: 100,
+          },
           baseSnapshot: task.agentId === 'world-origin'
             ? { id: null, updatedAt: null, worldOrigin: '' }
             : {},
@@ -143,7 +156,10 @@ describe.sequential('R-HARNESS1-master-durable-orchestrator · 主 Agent durable
     await db.open()
   })
 
-  afterEach(() => db.close())
+  afterEach(() => {
+    resetHarnessFaultInjectionV1()
+    db.close()
+  })
 
   it('正文视角进入严格计划契约并决定角色认知读取权限', async () => {
     const fixture = await createWorkspace('视角契约')
@@ -233,6 +249,50 @@ describe.sequential('R-HARNESS1-master-durable-orchestrator · 主 Agent durable
     const ledger = await readAgentRunV1(fixture.scope, result.runId)
     expect(ledger.events.map(event => event.type)).toContain('candidate.persisted')
     expect(JSON.stringify(ledger)).not.toContain('潮汐由沉睡的海神')
+    expect(result.candidates.every(candidate => candidate.payload.contextManifestHash?.length === 64)).toBe(true)
+  })
+
+  it('候选持久化前故障零候选，持久化后故障保留可恢复候选且不写 Canon', async () => {
+    const beforeFixture = await createWorkspace('候选前故障')
+    const beforeConversation = await getOrCreateAgentConversation({
+      projectId: beforeFixture.scope.projectId,
+      worldGroupId: beforeFixture.worldGroupId,
+      scope: beforeFixture.scope,
+    })
+    configureHarnessFaultInjectionV1(['candidate.before-persist'])
+    await expect(runDurableMasterAgentPlanV1({
+      scope: beforeFixture.scope,
+      worldGroupId: beforeFixture.worldGroupId,
+      conversationId: beforeConversation.id,
+      plan: { summary: '建立世界。', tasks: [{ id: 'world-1', agentId: 'world-origin', instruction: '生成。', dependsOn: [] }] },
+      budget: new AgentTeamBudgetTracker('balanced'),
+    }, { execute: fakeExecutor({ calls: vi.fn() }) as any })).rejects.toThrow('candidate.before-persist')
+    expect((await db.agentEvents.toArray()).filter(event => event.kind === 'candidate')).toHaveLength(0)
+    expect(await db.worldviews.count()).toBe(0)
+
+    resetHarnessFaultInjectionV1()
+    await db.delete()
+    await db.open()
+    const afterFixture = await createWorkspace('候选后故障')
+    const afterConversation = await getOrCreateAgentConversation({
+      projectId: afterFixture.scope.projectId,
+      worldGroupId: afterFixture.worldGroupId,
+      scope: afterFixture.scope,
+    })
+    configureHarnessFaultInjectionV1(['candidate.after-persist'])
+    await expect(runDurableMasterAgentPlanV1({
+      scope: afterFixture.scope,
+      worldGroupId: afterFixture.worldGroupId,
+      conversationId: afterConversation.id,
+      plan: { summary: '建立世界。', tasks: [{ id: 'world-1', agentId: 'world-origin', instruction: '生成。', dependsOn: [] }] },
+      budget: new AgentTeamBudgetTracker('balanced'),
+    }, { execute: fakeExecutor({ calls: vi.fn() }) as any })).rejects.toThrow('candidate.after-persist')
+    const run = (await db.agentRuns.toArray())[0]
+    resetHarnessFaultInjectionV1()
+    const restored = await restoreMasterAgentCandidatesV1({ scope: afterFixture.scope, runId: run.id! })
+    expect(restored.candidates).toHaveLength(1)
+    expect(restored.candidates[0].payload.contextManifestHash).toMatch(/^[a-f0-9]{64}$/)
+    expect(await db.worldviews.count()).toBe(0)
   })
 
   it('首任务候选原子持久化后中断，恢复只调用剩余任务并恢复累计预算', async () => {
@@ -457,6 +517,57 @@ describe.sequential('R-HARNESS1-master-durable-orchestrator · 主 Agent durable
     expect(await recoverPendingMasterAgentAdoptionsV1(fixture.scope))
       .toEqual({ recoveredRunIds: [], failed: [] })
     expect(await db.worldviews.count()).toBe(1)
+  })
+
+  it('标准采纳/终态故障点保持零越权写入，并可从 ledger 补齐回执', async () => {
+    const fixture = await createWorkspace('标准故障恢复')
+    const conversation = await getOrCreateAgentConversation({
+      projectId: fixture.scope.projectId,
+      worldGroupId: fixture.worldGroupId,
+      scope: fixture.scope,
+    })
+    const result = await runDurableMasterAgentPlanV1({
+      scope: fixture.scope,
+      worldGroupId: fixture.worldGroupId,
+      conversationId: conversation.id,
+      plan: {
+        summary: '建立世界来源。',
+        tasks: [{ id: 'world-1', agentId: 'world-origin', instruction: '生成世界来源。', dependsOn: [] }],
+      },
+      budget: new AgentTeamBudgetTracker('balanced'),
+    }, { execute: fakeExecutor({ calls: vi.fn() }) as any })
+    const ref = {
+      scope: fixture.scope,
+      runId: result.runId,
+      candidateEventId: result.candidates[0].event.id!,
+    }
+
+    configureHarnessFaultInjectionV1(['adoption.before-write'])
+    await expect(commitMasterAgentCandidateAdoptionV1(ref)).rejects.toThrow('adoption.before-write')
+    expect(await db.worldviews.count()).toBe(0)
+
+    configureHarnessFaultInjectionV1(['adoption.after-write'])
+    await expect(commitMasterAgentCandidateAdoptionV1(ref)).rejects.toThrow('adoption.after-write')
+    expect(await db.worldviews.count()).toBe(1)
+    expect((await readAgentRunV1(fixture.scope, result.runId)).projection.steps['master:world-1'])
+      .toMatchObject({ status: 'running', confirmation: 'adopt' })
+
+    resetHarnessFaultInjectionV1()
+    expect(await recoverPendingMasterAgentAdoptionsV1(fixture.scope))
+      .toEqual({ recoveredRunIds: [result.runId], failed: [] })
+    expect(await db.worldviews.count()).toBe(1)
+
+    configureHarnessFaultInjectionV1(['terminal.after-receipt'])
+    await expect(verifyMasterAgentRunV1({ scope: fixture.scope, runId: result.runId }))
+      .rejects.toThrow('terminal.after-receipt')
+    const completed = await readAgentRunV1(fixture.scope, result.runId)
+    expect(completed.projection).toMatchObject({ state: 'completed' })
+    expect(completed.projection.terminalReceiptHash).toMatch(/^[a-f0-9]{64}$/)
+
+    resetHarnessFaultInjectionV1()
+    const replayed = await verifyMasterAgentRunV1({ scope: fixture.scope, runId: result.runId })
+    expect(replayed.accepted).toBe(true)
+    expect(replayed.snapshot.projection.terminalReceiptHash).toBe(completed.projection.terminalReceiptHash)
   })
 
   it('大纲部分写入后恢复只补齐缺项，不产生重复条目', async () => {

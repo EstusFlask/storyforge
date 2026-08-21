@@ -552,7 +552,7 @@ export type AssembleContextSourceDelivery = 'full' | 'compressed' | 'truncated' 
 
 /**
  * Per-source delivery evidence derived by assembleContext(). It records only
- * token counts and delivery state; source text remains in segments/business tables.
+ * counts, hashes and delivery state; source text remains in segments/business tables.
  */
 export interface AssembleContextSourceEvidence {
   key: string
@@ -560,6 +560,10 @@ export interface AssembleContextSourceEvidence {
   delivery: AssembleContextSourceDelivery
   /** SHA-256 of the registered reader's complete raw output before compression or truncation. */
   sourceHash?: string
+  /** UTF-16 character count returned by the registered reader before its source budget was applied. */
+  originalCharacters?: number
+  /** UTF-16 character count actually delivered to the model. Zero for omitted/trimmed sources. */
+  inputCharacters?: number
   /** Tokens returned by the registered reader before its source budget was applied. */
   originalTokens: number
   /** Tokens actually delivered to the model. Zero for omitted/trimmed sources. */

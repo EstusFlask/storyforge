@@ -19,6 +19,8 @@ import { estimateCreativeRunPreviewV1 } from '../../lib/agent/creative-run-previ
 import { useAIConfigStore } from '../../stores/ai-config'
 import { useMasterCopilot } from './useMasterCopilot'
 import CreativeArtifactSummary from './CreativeArtifactSummary'
+import HarnessEvidencePanel from './HarnessEvidencePanel'
+import type { HarnessLifecycleEvidenceV1 } from '../../lib/agent/harness-evidence'
 
 interface Props {
   project: Project
@@ -126,18 +128,27 @@ export default function ChatCopilotPanel({
           </div>
         )}
 
-        {messages.map(message => (
-          <div
-            key={message.id}
-            className={`max-w-[92%] rounded-lg px-3 py-2 text-xs leading-5 ${
-              message.role === 'user'
-                ? 'ml-auto bg-accent text-white'
-                : 'border border-border/70 bg-bg-base text-text-secondary'
-            }`}
-          >
-            {message.content}
-          </div>
-        ))}
+        {messages.map(message => {
+          const payload = parseAgentEventPayload<{
+            kind?: string
+            lifecycle?: HarnessLifecycleEvidenceV1
+          }>(message, {})
+          return (
+            <div
+              key={message.id}
+              className={`max-w-[92%] rounded-lg px-3 py-2 text-xs leading-5 ${
+                message.role === 'user'
+                  ? 'ml-auto bg-accent text-white'
+                  : 'border border-border/70 bg-bg-base text-text-secondary'
+              }`}
+            >
+              <p>{message.content}</p>
+              {payload.kind === 'harness-lifecycle' && payload.lifecycle && (
+                <HarnessEvidencePanel lifecycle={payload.lifecycle} />
+              )}
+            </div>
+          )
+        })}
 
         {(latestTasks.length > 0 || copilot.busy) && (
           <section className="rounded-lg border border-border/70 bg-bg-base">
@@ -237,26 +248,11 @@ export default function ChatCopilotPanel({
                 narrativeBrief={candidate.payload.narrativeBrief}
               />
             )}
-            {candidate.payload.contextEvidence && (
-              <details className="mt-2 rounded border border-border/60 bg-bg-surface px-2 py-1.5 text-[10px] text-text-muted">
-                <summary className="cursor-pointer text-text-secondary">
-                  查看本次实际输入证据 · {candidate.payload.contextEvidence.included.length} 个来源
-                </summary>
-                <div className="mt-2 space-y-1 break-words">
-                  <p>
-                    上下文估算 {candidate.payload.contextEvidence.estimatedInputTokens.toLocaleString()} /
-                    {' '}{candidate.payload.contextEvidence.inputBudgetTokens.toLocaleString()} tokens
-                  </p>
-                  <p>已纳入：{candidate.payload.contextEvidence.included.join('、') || '无'}</p>
-                  {candidate.payload.contextEvidence.trimmed.length > 0 && (
-                    <p className="text-warning">整段裁剪：{candidate.payload.contextEvidence.trimmed.join('、')}</p>
-                  )}
-                  {candidate.payload.contextEvidence.omitted.length > 0 && (
-                    <p>无数据/未启用：{candidate.payload.contextEvidence.omitted.join('、')}</p>
-                  )}
-                </div>
-              </details>
-            )}
+            <HarnessEvidencePanel
+              contextEvidence={candidate.payload.contextEvidence}
+              lifecycle={candidate.lifecycle}
+              promptExecutionEvidence={candidate.payload.promptExecutionEvidence}
+            />
             {candidate.payload.teamBudgetEvidence && (
               <p className="mt-2 rounded border border-border/60 bg-bg-surface px-2 py-1.5 text-[10px] text-text-muted">
                 本轮团队预算约 {candidate.payload.teamBudgetEvidence.usedTokens.toLocaleString()} /

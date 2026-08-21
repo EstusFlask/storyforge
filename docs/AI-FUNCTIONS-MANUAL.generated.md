@@ -232,8 +232,8 @@ AI 输出经 `adopt({ target, data })` 写回,只有这里登记的字段可写(
 
 | category | 触发文件 |
 |---|---|
-| `agent.orchestrator` | `src/lib/agent/orchestrator.ts:694` |
-| `agent.orchestrator.replan` | `src/lib/agent/orchestrator.ts:781` |
+| `agent.orchestrator` | `src/lib/agent/orchestrator.ts:696` |
+| `agent.orchestrator.replan` | `src/lib/agent/orchestrator.ts:783` |
 | `agent.readonly` | `src/lib/agent/client-adapter.ts:116` |
 | `canon.setting.extract` | `src/lib/agent/run/constitution-extraction-durable.ts:509` |
 | `chapter.content` | `src/lib/generation/chapter-generation-node.ts:23` |
@@ -348,4 +348,4 @@ AI 输出经 `adopt({ target, data })` 写回,只有这里登记的字段可写(
 
 ---
 
-生成时间基准:commit `73f535a`
+生成时间基准:commit `efd88e27`

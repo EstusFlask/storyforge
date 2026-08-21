@@ -2594,6 +2594,16 @@ export function validateAgentSkillContextEvidenceV1(
         || source.inputTokens < 0
         || source.originalTokens < source.inputTokens
       ) throw new Error(`Agent Skill ${skill.id} 来源 ${source.key} token 证据无效`)
+      if (source.originalCharacters !== undefined || source.inputCharacters !== undefined) {
+        if (
+          !Number.isInteger(source.originalCharacters)
+          || source.originalCharacters! < 0
+          || !Number.isInteger(source.inputCharacters)
+          || source.inputCharacters! < 0
+          || source.originalCharacters! < source.inputCharacters!
+          || (source.delivery === 'full' && source.originalCharacters !== source.inputCharacters)
+        ) throw new Error(`Agent Skill ${skill.id} 来源 ${source.key} 字符证据无效`)
+      }
       if (source.status === 'included') {
         if (!included.includes(source.key) || source.delivery === 'none' || source.inputTokens < 1) {
           throw new Error(`Agent Skill ${skill.id} 来源 ${source.key} included 证据不一致`)

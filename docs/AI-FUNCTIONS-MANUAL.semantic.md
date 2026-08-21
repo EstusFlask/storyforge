@@ -84,6 +84,9 @@
 
 ### 分步骤主 Agent 的执行版本
 - **业务意图**:每次新主 Agent 运行按计划步骤冻结 Skill、提示词和只读工具 schema 版本；候选与运行合同使用同一绑定，刷新恢复时可判断结果究竟由哪套执行协议产生。
+- **作者可见证据**:新候选共用 `HarnessEvidencePanel`，逐来源显示全文/语义压缩/确定性截断/未输入、字符与 token 前后数量、原始来源哈希，并显示内容修订、Context Manifest、候选、采纳和 terminal receipt 身份。五段状态只从真实持久化证据派生；多任务尚未全部确认时终态保持等待，旧候选缺证据时显示不可用，不补造成功。
+- **错误分类**:正式入口统一归入 save、scope、context、budget、provider、parse、schema、gate、candidate、stale、adoption、terminal 十二类，并记录确定性 fingerprint；类别用于定位责任层，不授权隐藏重试或绕过作者确认。
+- **故障演练边界**:`dev-fault-injection.ts` 只在 DEV/test 中以进程内存启用，覆盖保存、上下文、候选、采纳和终态关键边界；生产 UI 没有开关、存储或导入路径。
 - **兼容边界**:HARNESS-18 前的运行没有 execution binding，继续按旧 hash 恢复；新运行不得省略绑定。修改 Skill、提示词协议或工具声明后必须升级相应版本并重跑登记回归。
 - **fan-out 回执**:新 fan-out 运行要求每个上游候选先取得绑定 candidate/output、Context Manifest、attempt 和 verifier 版本的确定性步骤回执，汇合模型调用前再次检查 freshness，下游候选冻结实际消费的 receipt hash。作者编辑或重规划会使旧回执失效；历史无回执运行只按旧协议读取，不补造证据。
 - **维护闸门**:`check:agent-freshness` 检查 owner、提示词版本、复核日期和回归证据；工具 schema 的实际快照另由 SHA-256 回归校验。版本绑定用于可归因和防漂移，不代表模型输出已经通过质量评测。

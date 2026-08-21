@@ -5,6 +5,7 @@
  * register their promise under a stable key. Formal generation calls flush() so
  * it cannot race ahead of blur/debounce persistence.
  */
+import { maybeInjectHarnessFaultV1 } from '../agent/dev-fault-injection'
 
 export interface PendingEditFlushReceiptV1 {
   version: 1
@@ -72,6 +73,7 @@ export function coordinatePendingEditV1<T>(input: {
 }
 
 export async function flushPendingEditsV1(): Promise<PendingEditFlushReceiptV1> {
+  maybeInjectHarnessFaultV1('save.before-flush')
   const flushers = [...draftFlushers.values()]
   const draftResults = await Promise.allSettled(flushers.map(flusher => flusher()))
   const draftFailures = draftResults
@@ -92,6 +94,7 @@ export async function flushPendingEditsV1(): Promise<PendingEditFlushReceiptV1> 
   if (failures.length) {
     throw new Error(`作者编辑保存失败，已阻止正式生成：${failures.map(message).join('；')}`)
   }
+  maybeInjectHarnessFaultV1('save.after-flush')
   return {
     version: 1,
     draftFlushersInvoked: flushers.length,

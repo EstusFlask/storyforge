@@ -68,6 +68,7 @@ import {
   type WorldGameCopilotSnapshotV1,
 } from '../world-game-copilot'
 import { assertWorkspaceContentRevisionFreshV1 } from '../../authoring/content-revision'
+import { maybeInjectHarnessFaultV1 } from '../dev-fault-injection'
 
 export interface MasterAgentCandidateAdoptionRefV1 {
   scope: WorkspaceScope
@@ -199,6 +200,7 @@ export async function beginMasterAgentCandidateAdoptionV1(
     candidateHash,
     taskId: resolved.candidate.payload.taskId,
   })
+  maybeInjectHarnessFaultV1('adoption.before-intent')
   await db.transaction(
     'rw',
     scopeTransactionTables(db.agentConversations, db.agentEvents, db.agentRuns, db.agentRunEvents),
@@ -288,6 +290,7 @@ export async function commitMasterAgentCandidateAdoptionV1(
 
   await assertRequiredSemanticReviewFresh(resolved)
   const adopt = dependencies.adopt ?? adoptMasterCandidate
+  maybeInjectHarnessFaultV1('adoption.before-write')
   const message = await adopt({
     projectId: input.scope.projectId,
     scope: input.scope,
@@ -298,6 +301,7 @@ export async function commitMasterAgentCandidateAdoptionV1(
     runtime: input.runtime,
   })
   await dependencies.afterBusinessAdoption?.()
+  maybeInjectHarnessFaultV1('adoption.after-write')
   const adoptionHash = await hashCanonicalValue({
     version: 1,
     candidateHash: resolved.candidate.payload.candidateHash,

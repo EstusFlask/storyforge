@@ -140,6 +140,10 @@ describe('Phase 1.3a · 统一上下文装配层', () => {
       delivery: 'full',
     })
     expect(assembled.sourceEvidence?.[0]?.sourceHash).toMatch(/^[a-f0-9]{64}$/)
+    expect(assembled.sourceEvidence?.[0]).toMatchObject({
+      originalCharacters: assembled.text.length,
+      inputCharacters: assembled.text.length,
+    })
   })
 
   it('worldGroupId 为 null 时世界观/力量体系可回退到项目首条，非 null 仍严格隔离', async () => {

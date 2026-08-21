@@ -706,6 +706,63 @@ for (const dir of UI_DIRS) {
   }
 }
 
+// ── ⑳ WEH-0G 证据可视化、统一错误分类与开发态故障注入 ──
+const harnessEvidenceSource = read('src/lib/agent/harness-evidence.ts')
+const harnessEvidencePanelSource = read('src/components/agent/HarnessEvidencePanel.tsx')
+const harnessFailureSource = read('src/lib/agent/run/harness-failure.ts')
+const harnessFaultSource = read('src/lib/agent/dev-fault-injection.ts')
+const assembleContextSource = read('src/lib/registry/assemble-context.ts')
+for (const failureClass of [
+  'save', 'scope', 'context', 'budget', 'provider', 'parse',
+  'schema', 'gate', 'candidate', 'stale', 'adoption', 'terminal',
+]) {
+  if (!harnessFailureSource.includes(`'${failureClass}'`)) {
+    violations.push(`[⑳错误分类] harness-failure.ts 缺少 ${failureClass}`)
+  }
+}
+for (const stageId of [
+  'author-edits-saved', 'context-frozen', 'candidate-persisted', 'adoptable', 'terminal-verified',
+]) {
+  if (!harnessEvidenceSource.includes(`'${stageId}'`)) {
+    violations.push(`[⑳五段证据] harness-evidence.ts 缺少 ${stageId}`)
+  }
+}
+if (!harnessEvidencePanelSource.includes('source.originalCharacters')
+  || !harnessEvidencePanelSource.includes('source.inputCharacters')
+  || !harnessEvidencePanelSource.includes('source.sourceHash')
+  || !harnessEvidencePanelSource.includes('terminalReceiptHash')) {
+  violations.push('[⑳证据面板] 共享面板必须显示字符/token 前后数量、来源哈希和终态回执')
+}
+if (!assembleContextSource.includes('originalCharacters: content.length')
+  || !assembleContextSource.includes('inputCharacters: item.segment.content.length')) {
+  violations.push('[⑳上下文证据] assembleContext 必须从实际 reader/delivery 内容派生字符计数')
+}
+if (!masterDurableSource.includes('payload.contextManifestHash = contextManifestHash')
+  || !masterDurableSource.includes("maybeInjectHarnessFaultV1('candidate.before-persist')")
+  || !masterDurableSource.includes("maybeInjectHarnessFaultV1('candidate.after-persist')")) {
+  violations.push('[⑳候选证据] durable 候选必须冻结 Context Manifest 并覆盖持久化前后故障点')
+}
+if (!masterCopilotSource.includes('classifyHarnessFailureV1')
+  || !masterCopilotSource.includes('buildSettledHarnessLifecycleEvidenceV1')
+  || !masterCopilotSource.includes('terminalReceiptHash')) {
+  violations.push('[⑳产品证据] 主 Agent 必须统一分类错误并展示采纳/终态结构化证据')
+}
+if (!harnessFaultSource.includes('import.meta.env.DEV')
+  || !harnessFaultSource.includes("import.meta.env.MODE === 'test'")
+  || /localStorage|sessionStorage|\bdb\./.test(harnessFaultSource)) {
+  violations.push('[⑳故障注入隔离] 故障注入必须仅 DEV/test 可用、只驻留内存且不得写库')
+}
+for (const dir of UI_DIRS) {
+  for (const file of walk(dir)) {
+    const source = read(file)
+    if (source.includes('dev-fault-injection')
+      || source.includes('configureHarnessFaultInjectionV1')
+      || source.includes('maybeInjectHarnessFaultV1')) {
+      violations.push(`[⑳生产 UI 隔离] ${file}: UI 不得导入或暴露 Harness 故障注入`)
+    }
+  }
+}
+
 // ── 报告 ──
 if (violations.length) {
   console.error('[architecture] ❌ 发现反模式违规(违反 CLAUDE.md 三注册表铁律):\n')

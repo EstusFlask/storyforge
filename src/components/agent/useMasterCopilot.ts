@@ -39,7 +39,19 @@ import {
   hasPendingCandidateDraftsV1,
   queueCandidateDraftV1,
 } from '../../lib/agent/candidate-draft-coordinator'
-import type { CreativeArtifactV1 } from '../../lib/agent/creative-reliability'
+import {
+  creativeArtifactCanAdoptV1,
+  type CreativeArtifactV1,
+} from '../../lib/agent/creative-reliability'
+import {
+  buildPendingHarnessLifecycleEvidenceV1,
+  buildSettledHarnessLifecycleEvidenceV1,
+  type HarnessLifecycleEvidenceV1,
+} from '../../lib/agent/harness-evidence'
+import {
+  classifyHarnessFailureV1,
+  type HarnessFailureClassV1,
+} from '../../lib/agent/run/harness-failure'
 import {
   StructuredOutputPipelineErrorV1,
   StructuredOutputRepairFailedErrorV1,
@@ -79,6 +91,21 @@ function structuredOutputFailurePayload(error: unknown): unknown {
   return undefined
 }
 
+async function classifiedFailurePayload(
+  error: unknown,
+  stage?: HarnessFailureClassV1,
+): Promise<{ message: string; payload: Record<string, unknown> }> {
+  const failure = await classifyHarnessFailureV1(error, { stage })
+  const structured = structuredOutputFailurePayload(error)
+  return {
+    message: `【${failure.label}】${errorMessage(error)}`,
+    payload: {
+      ...(structured && typeof structured === 'object' ? structured as Record<string, unknown> : { version: 1 }),
+      harnessFailure: failure,
+    },
+  }
+}
+
 const MASTER_COPILOT_SYNC_EVENT = 'storyforge:master-copilot-sync-v1'
 const MASTER_COPILOT_SCOPE_OWNERS = new Map<string, symbol>()
 
@@ -114,6 +141,7 @@ function releaseMasterCopilotScope(scopeKey: string, owner: symbol): void {
 export interface PendingMasterCandidate {
   event: AgentEvent
   payload: MasterCandidatePayload
+  lifecycle?: HarnessLifecycleEvidenceV1
 }
 
 function revalidateCandidateCreativeArtifactV1(input: {
@@ -305,17 +333,32 @@ export function useMasterCopilot(input: {
     })
     return events
       .filter(event => event.kind === 'candidate' && event.id != null && !resolved.has(event.id))
-      .map(event => ({
-        event,
-        payload: parseAgentEventPayload<MasterCandidatePayload>(event, {
+      .map(event => {
+        const payload = parseAgentEventPayload<MasterCandidatePayload>(event, {
           version: 1,
           taskId: '',
           agentId: 'character',
           label: '候选',
           contextSources: [],
           baseSnapshot: {},
-        }),
-      }))
+        })
+        return {
+          event,
+          payload,
+          lifecycle: buildPendingHarnessLifecycleEvidenceV1({
+            runId: payload.runId,
+            candidateEventId: event.id,
+            contentRevision: payload.contentRevision,
+            contextManifestHash: payload.contextManifestHash,
+            candidateHash: payload.candidateHash,
+            contextEvidence: payload.contextEvidence,
+            promptExecutionEvidence: payload.promptExecutionEvidence,
+            ...(payload.creativeArtifact != null && !creativeArtifactCanAdoptV1(payload.creativeArtifact)
+              ? { blockedReason: '创作可靠性门禁尚未通过' }
+              : {}),
+          }),
+        }
+      })
   }, [events])
 
   const submitRequest = useCallback(async (
@@ -437,14 +480,14 @@ export function useMasterCopilot(input: {
       })
     } catch (error) {
       if (!controller.signal.aborted) {
-        const message = errorMessage(error)
-        setError(message)
+        const failure = await classifiedFailurePayload(error)
+        setError(failure.message)
         await appendAgentEvent({
           projectId: project.id!,
           conversationId,
           kind: 'error',
-          content: message,
-          payload: structuredOutputFailurePayload(error),
+          content: failure.message,
+          payload: failure.payload,
           scope: workspaceScope,
         })
         await appendAgentEvent({
@@ -452,7 +495,7 @@ export function useMasterCopilot(input: {
           conversationId,
           kind: 'message',
           role: 'assistant',
-          content: `本轮没有完成：${message}`,
+          content: `本轮没有完成：${failure.message}`,
           scope: workspaceScope,
         })
       }
@@ -524,13 +567,15 @@ export function useMasterCopilot(input: {
       setRecoveryAvailable(false)
     } catch (error) {
       if (!controller.signal.aborted) {
-        setError(errorMessage(error))
+        const failure = await classifiedFailurePayload(error)
+        setError(failure.message)
         await appendAgentEvent({
           projectId: project.id!,
           conversationId,
           kind: 'message',
           role: 'assistant',
-          content: `恢复本轮失败：${errorMessage(error)}`,
+          content: `恢复本轮失败：${failure.message}`,
+          payload: failure.payload,
           scope: workspaceScope,
         })
       }
@@ -603,6 +648,7 @@ export function useMasterCopilot(input: {
     setBusy(true)
     setError(null)
     let shouldReload = false
+    let failureStage: HarnessFailureClassV1 = 'candidate'
     try {
       await flushCandidateDraftV1(candidateDraftKey(candidate.event.id))
       const persistedEvents = await readAgentEvents(conversationId, workspaceScope)
@@ -622,8 +668,10 @@ export function useMasterCopilot(input: {
       shouldReload = true
       let message = '候选已拒绝，没有写入项目。'
       let terminalMessage: string | null = null
+      let lifecycleEvidence: HarnessLifecycleEvidenceV1 | undefined
       const durableCandidate = persistedCandidate.payload.runId != null && persistedCandidate.payload.runStepId
       if (durableCandidate && decision === 'adopted') {
+        failureStage = 'adoption'
         const adoption = await commitMasterAgentCandidateAdoptionV1({
           scope: workspaceScope!,
           runId: persistedCandidate.payload.runId!,
@@ -631,6 +679,16 @@ export function useMasterCopilot(input: {
           runtime: runtimeCandidates.current.get(persistedCandidate.event.id!),
         })
         message = adoption.message
+        const pendingLifecycle = buildPendingHarnessLifecycleEvidenceV1({
+          runId: persistedCandidate.payload.runId,
+          candidateEventId: persistedCandidate.event.id,
+          contentRevision: persistedCandidate.payload.contentRevision,
+          contextManifestHash: persistedCandidate.payload.contextManifestHash,
+          candidateHash: persistedCandidate.payload.candidateHash,
+          contextEvidence: persistedCandidate.payload.contextEvidence,
+          promptExecutionEvidence: persistedCandidate.payload.promptExecutionEvidence,
+        })
+        failureStage = 'terminal'
         const verification = await verifyMasterAgentRunV1({
           scope: workspaceScope!,
           runId: persistedCandidate.payload.runId!,
@@ -639,8 +697,30 @@ export function useMasterCopilot(input: {
           // Keep the business-adoption message stable for existing callers and
           // surface terminal verification as a separate auditable event.
           terminalMessage = '本轮所有步骤均已通过终态校验。'
+          lifecycleEvidence = buildSettledHarnessLifecycleEvidenceV1({
+            pending: pendingLifecycle,
+            adoptionHash: adoption.adoptionHash,
+            terminal: 'passed',
+            terminalReceiptHash: verification.receipt?.receiptHash
+              ?? verification.snapshot.projection.terminalReceiptHash
+              ?? undefined,
+            terminalDetail: '确定性终验已签发回执',
+          })
+        } else if (verification.codes.includes('run-not-ready')) {
+          lifecycleEvidence = buildSettledHarnessLifecycleEvidenceV1({
+            pending: pendingLifecycle,
+            adoptionHash: adoption.adoptionHash,
+            terminal: 'pending',
+            terminalDetail: '等待本轮其余候选完成确认',
+          })
         } else if (!verification.codes.includes('run-not-ready')) {
           message = `${message} 终态校验未通过：${verification.codes.join('、')}。`
+          lifecycleEvidence = buildSettledHarnessLifecycleEvidenceV1({
+            pending: pendingLifecycle,
+            adoptionHash: adoption.adoptionHash,
+            terminal: 'blocked',
+            terminalDetail: `终验阻断：${verification.codes.join('、')}`,
+          })
         }
       } else if (durableCandidate) {
         await rejectMasterAgentCandidateV1({
@@ -675,6 +755,9 @@ export function useMasterCopilot(input: {
         kind: 'message',
         role: 'assistant',
         content: message,
+        ...(lifecycleEvidence ? {
+          payload: { version: 1, kind: 'harness-lifecycle', lifecycle: lifecycleEvidence },
+        } : {}),
         scope: workspaceScope,
       })
       if (terminalMessage) {
@@ -691,7 +774,8 @@ export function useMasterCopilot(input: {
       localCandidateDrafts.current.delete(persistedCandidate.event.id!)
       return true
     } catch (error) {
-      setError(errorMessage(error))
+      const failure = await classifiedFailurePayload(error, failureStage)
+      setError(failure.message)
       if (error instanceof CandidateDraftSyncErrorV1) return false
       shouldReload = true
       await appendAgentEvent({
@@ -699,7 +783,8 @@ export function useMasterCopilot(input: {
         conversationId,
         kind: 'message',
         role: 'assistant',
-        content: errorMessage(error),
+        content: failure.message,
+        payload: failure.payload,
         scope: workspaceScope,
       })
       return false

@@ -69,6 +69,7 @@ import {
   classifyAgentRunFailureV1,
   matchingFailureCountV1,
 } from './failure-policy'
+import { maybeInjectHarnessFaultV1 } from '../dev-fault-injection'
 import {
   MASTER_CANDIDATE_STEP_VERIFIER_SET_VERSION_V1,
   contextManifestHashForStepAttemptV1,
@@ -1172,6 +1173,10 @@ function parseCandidatePayload(value: unknown, label: string): MasterCandidatePa
       || payload.contextSources.some((source, index) => source !== payload.contextEvidence!.included[index])
     ) fail(`${label} payload contextSources 与上下文证据不一致`)
   }
+  if (payload.contextManifestHash !== undefined) {
+    readHash(payload.contextManifestHash, `${label} payload contextManifestHash`)
+    if (!payload.contextEvidence) fail(`${label} payload Context Manifest 缺少上下文证据`)
+  }
   if (payload.contentRevision !== undefined) {
     try {
       payload.contentRevision = parseWorkspaceContentRevisionV1(payload.contentRevision)
@@ -2026,6 +2031,7 @@ export async function runDurableMasterAgentPlanV1(
             contextEvidence: payload.contextEvidence,
           })
         : null
+      if (contextManifestHash) payload.contextManifestHash = contextManifestHash
       const semanticRequired = snapshot.contract.candidateSemanticReviewPolicy
         ?.taskIds.includes(task.id) === true
       if (semanticRequired) {
@@ -2193,6 +2199,7 @@ export async function runDurableMasterAgentPlanV1(
             generator: payload.generator,
           })
         : null
+      maybeInjectHarnessFaultV1('candidate.before-persist')
       const persisted = await db.transaction(
         'rw',
         scopeTransactionTables(db.agentConversations, db.agentEvents, db.agentRuns, db.agentRunEvents),
@@ -2272,6 +2279,7 @@ export async function runDurableMasterAgentPlanV1(
       )
       snapshot = persisted.snapshot
       previousBudget = evidence
+      maybeInjectHarnessFaultV1('candidate.after-persist')
       const durableCandidate: MasterAgentDurableCandidateV1 = {
         event: persisted.event,
         payload,

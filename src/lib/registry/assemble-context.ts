@@ -15,6 +15,7 @@ import { prepareContinuityContext } from '../ai/chapter-memory/continuity-contex
 import { sha256Text } from '../ai/chapter-memory/text-normalization'
 import { db } from '../db/schema'
 import { assertRecordInScope, resolveReadScope } from '../world-engine/scope'
+import { maybeInjectHarnessFaultV1 } from '../agent/dev-fault-injection'
 
 /** 拿不到模型时的保守默认输入预算(原固定 24K 偏紧,放宽避免内部提前裁) */
 const FALLBACK_INPUT_BUDGET = 48_000
@@ -24,6 +25,7 @@ interface KeyedContextSegment {
   key: string
   segment: ContextSegment
   sourceHash: string
+  originalCharacters: number
   originalTokens: number
   delivery: 'full' | 'compressed' | 'truncated'
   compression?: AssembleContextSourceEvidence['compression']
@@ -102,6 +104,7 @@ function deriveInputBudget(input: AssembleContextInput): number {
 }
 
 export async function assembleContext(input: AssembleContextInput): Promise<AssembleContextResult> {
+  maybeInjectHarnessFaultV1('context.before-assemble')
   const scope = await resolveReadScope(input)
   const resolvedBase: AssembleContextInput = { ...input, projectId: scope.projectId, scope }
   const selected = selectSources(resolvedBase)
@@ -134,6 +137,8 @@ export async function assembleContext(input: AssembleContextInput): Promise<Asse
       status: 'omitted',
       delivery: 'none',
       ...(sourceHash ? { sourceHash } : {}),
+      originalCharacters: 0,
+      inputCharacters: 0,
       originalTokens: 0,
       inputTokens: 0,
     })
@@ -215,6 +220,7 @@ export async function assembleContext(input: AssembleContextInput): Promise<Asse
     keyedSegments.push({
       key: source.key,
       sourceHash,
+      originalCharacters: content.length,
       segment: {
         label: source.label,
         layer: source.layer,
@@ -247,6 +253,8 @@ export async function assembleContext(input: AssembleContextInput): Promise<Asse
         status: 'trimmed',
         delivery: 'none',
         sourceHash: item.sourceHash,
+        originalCharacters: item.originalCharacters,
+        inputCharacters: 0,
         originalTokens: item.originalTokens,
         inputTokens: 0,
       }
@@ -256,13 +264,15 @@ export async function assembleContext(input: AssembleContextInput): Promise<Asse
       status: 'included',
       delivery: item.delivery,
       sourceHash: item.sourceHash,
+      originalCharacters: item.originalCharacters,
+      inputCharacters: item.segment.content.length,
       originalTokens: item.originalTokens,
       inputTokens: item.segment.tokens,
       ...(item.compression ? { compression: item.compression } : {}),
     }
   })
 
-  return {
+  const result: AssembleContextResult = {
     text: segments.map(s => s.content).join('\n\n'),
     segments,
     included: kept.map(s => s.key),
@@ -274,6 +284,8 @@ export async function assembleContext(input: AssembleContextInput): Promise<Asse
     overBudgetBeforeTrim,
     overBudgetAfterTrim: totalInputTokens > inputBudget,
   }
+  maybeInjectHarnessFaultV1('context.after-assemble')
+  return result
 }
 
 async function assertContextAnchors(input: AssembleContextInput, selected: ContextSource[]): Promise<void> {
