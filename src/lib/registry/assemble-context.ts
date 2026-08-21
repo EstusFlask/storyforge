@@ -314,6 +314,18 @@ async function assertContextAnchors(input: AssembleContextInput, selected: Conte
       }
     }
   }
+  if (input.comicPageIds?.length) {
+    if (new Set(input.comicPageIds).size !== input.comicPageIds.length) throw new Error('[assembleContext] comicPageIds 不得重复')
+    for (const pageId of input.comicPageIds) {
+      const page = await db.comicPages.get(pageId)
+      if (!page || !await assertRecordInScope(input.scope, 'comicPages', page, { owner: 'work' })) {
+        throw new Error('[assembleContext] comicPageIds 越过当前目标 Work')
+      }
+      if (input.adaptationProjectId != null && page.adaptationProjectId !== input.adaptationProjectId) {
+        throw new Error('[assembleContext] comicPageIds 不属于指定改编')
+      }
+    }
+  }
   // Runtime readers omit foreign sessions themselves and surface only same-scope
   // snapshot-integrity failures, preserving a fail-closed read contract.
 }
@@ -341,6 +353,7 @@ function requirementsMet(source: ContextSource, input: AssembleContextInput): bo
     || !input.adaptationSourceUnitKeys?.length
   )) return false
   if (source.requiresScreenplayScenes && (!input.adaptationProjectId || !input.screenplaySceneIds?.length)) return false
+  if (source.requiresComicPages && (!input.adaptationProjectId || !input.comicPageIds?.length)) return false
   return true
 }
 

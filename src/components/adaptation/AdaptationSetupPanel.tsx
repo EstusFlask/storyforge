@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Check, Play, Plus, Save, Sparkles, Trash2, X } from 'lucide-react'
-import type { AdaptationBriefV1, AdaptationPlanSectionV1, AdaptationPlanV1, AdaptationProject, AdaptationSourceUnit, WorkspaceScope } from '../../lib/types'
+import type { AdaptationBriefV1, AdaptationPlanSectionV1, AdaptationPlanV1, AdaptationProject, AdaptationSourceUnit, ComicGlobalVisualBibleV1, WorkspaceScope } from '../../lib/types'
 import {
   confirmAdaptationBrief,
   confirmAdaptationPlan,
+  confirmComicVisualBible,
   saveAdaptationBriefDraft,
   saveAdaptationPlanDraft,
   startAdaptationProduction,
@@ -67,18 +68,27 @@ function initialPlan(root: AdaptationProject, units: AdaptationSourceUnit[]): Ad
   }
 }
 
+function initialVisualBible(root: AdaptationProject): ComicGlobalVisualBibleV1 {
+  return root.medium === 'comic' && root.visualBible ? root.visualBible : {
+    version: 1,
+    artDirection: root.medium === 'comic' ? root.targetSpec.artStyleBrief : '',
+    linework: '', palette: [], lighting: '', periodAndMaterials: '', cameraLanguage: [], prohibitedDepictions: [],
+  }
+}
+
 export default function AdaptationSetupPanel({ scope, adaptation, sourceUnits, onChanged }: Props) {
   const [brief, setBrief] = useState(() => initialBrief(adaptation))
   const [plan, setPlan] = useState(() => initialPlan(adaptation, sourceUnits))
+  const [visualBible, setVisualBible] = useState(() => initialVisualBible(adaptation))
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
-  const [candidate, setCandidate] = useState<{ runId: number; kind: 'brief' | 'plan' } | null>(null)
+  const [candidate, setCandidate] = useState<{ runId: number; kind: 'brief' | 'plan' | 'comic-plan' } | null>(null)
   const aiConfig = useAIConfigStore(state => state.config)
-  useEffect(() => { setBrief(initialBrief(adaptation)); setPlan(initialPlan(adaptation, sourceUnits)) }, [adaptation.id, adaptation.revision, sourceUnits])
+  useEffect(() => { setBrief(initialBrief(adaptation)); setPlan(initialPlan(adaptation, sourceUnits)); setVisualBible(initialVisualBible(adaptation)) }, [adaptation, sourceUnits])
   useEffect(() => {
     let cancelled = false
     void (async () => {
-      for (const kind of ['brief', 'plan'] as const) {
+      for (const kind of (adaptation.medium === 'comic' ? ['brief', 'comic-plan'] : ['brief', 'plan']) as readonly ('brief' | 'plan' | 'comic-plan')[]) {
         const pending = await readPendingAdaptationCandidateV1({ scope, artifactKind: kind })
         if (!pending || cancelled) continue
         if (kind === 'brief') setBrief(pending.candidate.payload as AdaptationBriefV1)
@@ -88,12 +98,13 @@ export default function AdaptationSetupPanel({ scope, adaptation, sourceUnits, o
       }
     })().catch(() => undefined)
     return () => { cancelled = true }
-  }, [scope, adaptation.id])
+  }, [scope, adaptation.id, adaptation.medium])
 
   const briefSaved = useMemo(() => JSON.stringify(brief) === JSON.stringify(adaptation.brief), [adaptation.brief, brief])
   const planSaved = useMemo(() => JSON.stringify(plan) === JSON.stringify(adaptation.plan), [adaptation.plan, plan])
   const briefConfirmed = adaptation.briefSourceManifestVersion === adaptation.activeSourceManifestVersion
   const planConfirmed = adaptation.planSourceManifestVersion === adaptation.activeSourceManifestVersion
+  const visualBibleConfirmed = adaptation.medium !== 'comic' || adaptation.visualBibleSourceManifestVersion === adaptation.activeSourceManifestVersion
 
   const run = async (action: () => Promise<AdaptationProject>) => {
     if (busy) return
@@ -103,7 +114,7 @@ export default function AdaptationSetupPanel({ scope, adaptation, sourceUnits, o
 
   const patchBrief = <K extends keyof AdaptationBriefV1>(key: K, value: AdaptationBriefV1[K]) => setBrief(current => ({ ...current, [key]: value }))
   const patchSection = (index: number, patch: Partial<AdaptationPlanSectionV1>) => setPlan(current => ({ ...current, sections: current.sections.map((section, itemIndex) => itemIndex === index ? { ...section, ...patch } : section) }))
-  const generate = async (kind: Extract<AdaptationCandidateKindV1, 'brief' | 'plan'>) => {
+  const generate = async (kind: Extract<AdaptationCandidateKindV1, 'brief' | 'plan' | 'comic-plan'>) => {
     if (busy) return
     if (!isAIConfigReady(aiConfig)) { setError(getAIConfigRequiredMessage(aiConfig)); return }
     setBusy(true); setError('')
@@ -119,6 +130,7 @@ export default function AdaptationSetupPanel({ scope, adaptation, sourceUnits, o
     setBusy(true); setError('')
     try {
       if (candidate.kind === 'brief') await adoptAdaptationCandidateV1<'brief'>({ scope, runId: candidate.runId, authorPayload: brief })
+      else if (candidate.kind === 'comic-plan') await adoptAdaptationCandidateV1<'comic-plan'>({ scope, runId: candidate.runId, authorPayload: plan })
       else await adoptAdaptationCandidateV1<'plan'>({ scope, runId: candidate.runId, authorPayload: plan })
       setCandidate(null)
       const root = await db.adaptationProjects.get(adaptation.id!)
@@ -146,10 +158,15 @@ export default function AdaptationSetupPanel({ scope, adaptation, sourceUnits, o
       <div className="adapt-plan-list">{plan.sections.map((section, index) => <article key={`${section.stableKey}-${index}`}><div><label>稳定 key<input value={section.stableKey} onChange={event => patchSection(index, { stableKey: event.target.value })} /></label><label>标题<input value={section.title} onChange={event => patchSection(index, { title: event.target.value })} /></label><label>集号<input type="number" min={1} value={section.episodeNumber ?? 1} onChange={event => patchSection(index, { episodeNumber: Number(event.target.value) })} /></label><button onClick={() => setPlan(current => ({ ...current, sections: current.sections.filter((_, itemIndex) => itemIndex !== index).map((item, order) => ({ ...item, order })) }))} disabled={plan.sections.length <= 1} aria-label="删除结构段"><Trash2 className="h-4 w-4" /></button></div><label>结构段摘要<textarea value={section.summary} onChange={event => patchSection(index, { summary: event.target.value })} /></label></article>)}</div>
       <button onClick={() => setPlan(current => ({ ...current, sections: [...current.sections, { stableKey: `section-${current.sections.length + 1}`, title: `第${current.sections.length + 1}部分`, summary: '', order: current.sections.length, episodeNumber: 1, sourceUnitKeys: sourceUnits.filter(unit => unit.sourceKind === 'chapter').map(unit => unit.sourceUnitKey) }] }))}><Plus className="h-4 w-4" />增加结构段</button>
       <label>全局假设（每行一项）<textarea value={textLines(plan.globalAssumptions)} onChange={event => setPlan(current => ({ ...current, globalAssumptions: lines(event.target.value) }))} /></label>
-      {candidate?.kind === 'plan' && <div className="adapt-candidate"><Sparkles className="h-4 w-4" /><span>AI 计划候选已恢复到表单。修改后采纳会同时完成作者确认。</span><button onClick={() => void acceptCandidate()} disabled={busy}><Check className="h-4 w-4" />采纳并确认</button><button onClick={() => void rejectCandidate()} disabled={busy}><X className="h-4 w-4" />放弃</button></div>}
-      <footer><button onClick={() => void generate('plan')} disabled={busy || !briefConfirmed || !!candidate}><Sparkles className="h-4 w-4" />AI 生成候选</button><button onClick={() => void run(() => saveAdaptationPlanDraft({ adaptationProjectId: adaptation.id!, plan, expectedRevision: adaptation.revision }))} disabled={busy || !briefConfirmed || planSaved || !!candidate}><Save className="h-4 w-4" />保存计划</button><button className="primary" onClick={() => void run(() => confirmAdaptationPlan({ adaptationProjectId: adaptation.id!, expectedRevision: adaptation.revision }))} disabled={busy || !planSaved || planConfirmed || !!candidate}><Check className="h-4 w-4" />作者确认计划</button></footer>
+      {(candidate?.kind === 'plan' || candidate?.kind === 'comic-plan') && <div className="adapt-candidate"><Sparkles className="h-4 w-4" /><span>AI 计划候选已恢复到表单。修改后采纳会同时完成作者确认。</span><button onClick={() => void acceptCandidate()} disabled={busy}><Check className="h-4 w-4" />采纳并确认</button><button onClick={() => void rejectCandidate()} disabled={busy}><X className="h-4 w-4" />放弃</button></div>}
+      <footer><button onClick={() => void generate(adaptation.medium === 'comic' ? 'comic-plan' : 'plan')} disabled={busy || !briefConfirmed || !!candidate}><Sparkles className="h-4 w-4" />AI 生成候选</button><button onClick={() => void run(() => saveAdaptationPlanDraft({ adaptationProjectId: adaptation.id!, plan, expectedRevision: adaptation.revision }))} disabled={busy || !briefConfirmed || planSaved || !!candidate}><Save className="h-4 w-4" />保存计划</button><button className="primary" onClick={() => void run(() => confirmAdaptationPlan({ adaptationProjectId: adaptation.id!, expectedRevision: adaptation.revision }))} disabled={busy || !planSaved || planConfirmed || !!candidate}><Check className="h-4 w-4" />作者确认计划</button></footer>
     </section>
-    {planConfirmed && adaptation.status !== 'producing' && adaptation.status !== 'review' && <button className="adapt-start" onClick={() => void run(() => startAdaptationProduction({ adaptationProjectId: adaptation.id!, expectedRevision: adaptation.revision }))} disabled={busy}><Play className="h-4 w-4" />进入{adaptation.medium === 'screenplay' ? '场景生产' : '漫画生产'}</button>}
+    {adaptation.medium === 'comic' && planConfirmed && <section className={visualBibleConfirmed ? 'complete' : ''}>
+      <header><div><span>STEP 3</span><h3>全局视觉圣经</h3></div>{visualBibleConfirmed && <strong><Check className="h-4 w-4" />已按 v{adaptation.activeSourceManifestVersion} 确认</strong>}</header>
+      <div className="adapt-form-grid"><label>艺术指导<textarea value={visualBible.artDirection} onChange={event => setVisualBible(current => ({ ...current, artDirection: event.target.value }))} /></label><label>线条语言<textarea value={visualBible.linework} onChange={event => setVisualBible(current => ({ ...current, linework: event.target.value }))} /></label><label>光照<textarea value={visualBible.lighting} onChange={event => setVisualBible(current => ({ ...current, lighting: event.target.value }))} /></label><label>时代与材质<textarea value={visualBible.periodAndMaterials} onChange={event => setVisualBible(current => ({ ...current, periodAndMaterials: event.target.value }))} /></label><label>色板（每行一项）<textarea value={textLines(visualBible.palette)} onChange={event => setVisualBible(current => ({ ...current, palette: lines(event.target.value) }))} /></label><label>镜头语言（每行一项）<textarea value={textLines(visualBible.cameraLanguage)} onChange={event => setVisualBible(current => ({ ...current, cameraLanguage: lines(event.target.value) }))} /></label><label>禁用表现（每行一项）<textarea value={textLines(visualBible.prohibitedDepictions)} onChange={event => setVisualBible(current => ({ ...current, prohibitedDepictions: lines(event.target.value) }))} /></label></div>
+      <footer><button className="primary" onClick={() => void run(() => confirmComicVisualBible({ adaptationProjectId: adaptation.id!, visualBible, expectedRevision: adaptation.revision }))} disabled={busy || !planConfirmed}><Check className="h-4 w-4" />保存并确认视觉圣经</button></footer>
+    </section>}
+    {planConfirmed && visualBibleConfirmed && adaptation.status !== 'producing' && adaptation.status !== 'review' && <button className="adapt-start" onClick={() => void run(() => startAdaptationProduction({ adaptationProjectId: adaptation.id!, expectedRevision: adaptation.revision }))} disabled={busy}><Play className="h-4 w-4" />进入{adaptation.medium === 'screenplay' ? '场景生产' : '漫画生产'}</button>}
     {error && <p className="adapt-error" role="alert">{error}</p>}
   </div>
 }

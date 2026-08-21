@@ -22,7 +22,7 @@ export interface ScreenplaySceneDraftV1 {
   status?: ScreenplaySceneStatus
 }
 
-async function requireScreenplay(scopeInput: WorkspaceScope): Promise<{ scope: WorkspaceScope; adaptation: AdaptationProject }> {
+async function requireScreenplay(scopeInput: WorkspaceScope, requireEditable = false): Promise<{ scope: WorkspaceScope; adaptation: AdaptationProject }> {
   const scope = await resolveScope({ scope: scopeInput })
   const [work, adaptation] = await Promise.all([
     db.works.get(scope.workId),
@@ -30,6 +30,7 @@ async function requireScreenplay(scopeInput: WorkspaceScope): Promise<{ scope: W
   ])
   if (!work || effectiveWorkKind(work) !== 'screenplay' || !adaptation || adaptation.medium !== 'screenplay') throw new Error('[screenplay] 当前 Work 不是有效剧本改编')
   if (adaptation.projectId !== scope.projectId || adaptation.worldId !== scope.worldId) throw new Error('[screenplay] 改编根越过当前 scope')
+  if (requireEditable && adaptation.status === 'complete') throw new Error('[screenplay] 剧本已正式完稿；请先重新打开审校')
   return { scope, adaptation }
 }
 
@@ -48,7 +49,7 @@ export async function listScreenplayScenes(scopeInput: WorkspaceScope): Promise<
 }
 
 export async function createScreenplayScene(scopeInput: WorkspaceScope, draft: ScreenplaySceneDraftV1): Promise<ScreenplayScene> {
-  const { scope, adaptation } = await requireScreenplay(scopeInput)
+  const { scope, adaptation } = await requireScreenplay(scopeInput, true)
   const freshness = await inspectAdaptationFreshness(adaptation.id!)
   if (freshness.status !== 'unchanged') throw new Error('[screenplay] 来源已变化或缺失；可编辑旧场景，但不能创建新正式场景')
   if (!['producing', 'review'].includes(adaptation.status)) throw new Error('[screenplay] 请先确认 Brief/Plan 并开始剧本生产')
@@ -94,7 +95,7 @@ export async function updateScreenplayScene(input: {
   expectedRevision: number
   patch: Partial<Pick<ScreenplayScene, 'planSectionKey' | 'episodeNumber' | 'sceneNumber' | 'intExt' | 'location' | 'timeOfDay' | 'summary' | 'estimatedSeconds' | 'sourceUnitIds' | 'blocks' | 'status'>>
 }): Promise<ScreenplayScene> {
-  const { scope, adaptation } = await requireScreenplay(input.scope)
+  const { scope, adaptation } = await requireScreenplay(input.scope, true)
   return db.transaction('rw', scopeTransactionTables(db.screenplayScenes, db.adaptationProjects, db.adaptationSourceUnits, db.workCharacterBindings), async () => {
     const scene = await db.screenplayScenes.get(input.sceneId)
     if (!scene || !await assertRecordInScope(scope, 'screenplayScenes', scene, { owner: 'work' }) || scene.adaptationProjectId !== adaptation.id) throw new Error('[screenplay] 场景不存在或越界')
@@ -123,7 +124,7 @@ export async function setScreenplaySceneLocked(input: { scope: WorkspaceScope; s
 }
 
 export async function deleteScreenplayScene(input: { scope: WorkspaceScope; sceneId: number }): Promise<void> {
-  const { scope, adaptation } = await requireScreenplay(input.scope)
+  const { scope, adaptation } = await requireScreenplay(input.scope, true)
   await db.transaction('rw', db.screenplayScenes, async () => {
     const scene = await db.screenplayScenes.get(input.sceneId)
     if (!scene || !await assertRecordInScope(scope, 'screenplayScenes', scene, { owner: 'work' }) || scene.adaptationProjectId !== adaptation.id) throw new Error('[screenplay] 场景不存在或越界')
@@ -133,7 +134,7 @@ export async function deleteScreenplayScene(input: { scope: WorkspaceScope; scen
 }
 
 export async function reorderScreenplayScenes(input: { scope: WorkspaceScope; orderedSceneIds: number[] }): Promise<ScreenplayScene[]> {
-  const { adaptation } = await requireScreenplay(input.scope)
+  const { adaptation } = await requireScreenplay(input.scope, true)
   if (new Set(input.orderedSceneIds).size !== input.orderedSceneIds.length) throw new Error('[screenplay] 排序包含重复场景')
   return db.transaction('rw', db.screenplayScenes, async () => {
     const rows = await db.screenplayScenes.where('adaptationProjectId').equals(adaptation.id!).toArray()
@@ -183,7 +184,7 @@ export async function splitScreenplayScene(input: { scope: WorkspaceScope; scene
 }
 
 export async function mergeScreenplayScenes(input: { scope: WorkspaceScope; firstSceneId: number; secondSceneId: number; expectedFirstRevision: number; expectedSecondRevision: number }): Promise<ScreenplayScene> {
-  const { adaptation } = await requireScreenplay(input.scope)
+  const { adaptation } = await requireScreenplay(input.scope, true)
   return db.transaction('rw', scopeTransactionTables(db.screenplayScenes, db.adaptationProjects, db.adaptationSourceUnits, db.workCharacterBindings), async () => {
     const rows = await db.screenplayScenes.where('adaptationProjectId').equals(adaptation.id!).sortBy('order')
     const firstIndex = rows.findIndex(row => row.id === input.firstSceneId)

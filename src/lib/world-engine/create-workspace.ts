@@ -12,7 +12,7 @@ import type {
   WorkspaceScope,
   World,
 } from '../types'
-import { WORKSPACE_OWNERSHIP_CONTRACT_VERSION } from './ownership'
+import { nativeOwnershipReceipt, WORKSPACE_OWNERSHIP_CONTRACT_VERSION } from './ownership'
 import { scopeTransactionTables, stampNewRecord } from './scope'
 import { buildWorkRecord, projectCompatibilityMirror } from './works'
 import { deriveShortNovelStructure } from './work-kind'
@@ -106,7 +106,7 @@ export async function createWorkspace(
 ): Promise<CreatedWorkspace> {
   const now = Date.now()
   const preparedProject = projectRoot(input, now)
-  return db.transaction('rw', scopeTransactionTables(db.outlineNodes, db.chapters), async () => {
+  return db.transaction('rw', scopeTransactionTables(db.outlineNodes, db.chapters, db.ownershipMigrations), async () => {
     const projectId = await db.projects.add(preparedProject) as number
     const world: World = {
       projectId,
@@ -148,6 +148,13 @@ export async function createWorkspace(
     const createdWork = { ...work, id: workId }
     const projectPatch = projectCompatibilityMirror(createdWorld, createdWork)
     await db.projects.update(projectId, { ...projectPatch, updatedAt: now })
+    await db.ownershipMigrations.add(nativeOwnershipReceipt({
+      projectId,
+      worldId,
+      workId,
+      workspaceUid: preparedProject.workspaceUid!,
+      createdAt: now,
+    }))
     return {
       project: { ...preparedProject, ...projectPatch, id: projectId, updatedAt: now },
       world: createdWorld,

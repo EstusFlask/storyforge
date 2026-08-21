@@ -34,6 +34,13 @@ describe('PRODUCT-HUB · 世界引擎身份兼容', () => {
     expect(project?.activeWorkId).toBeDefined()
     const work = await db.works.get(project!.activeWorkId!)
     expect(work?.worldId).toBe(project?.activeWorldId)
+    expect(await db.ownershipMigrations.where('projectId').equals(id).first()).toMatchObject({
+      status: 'ready',
+      defaultWorldId: project?.activeWorldId,
+      defaultWorkId: project?.activeWorkId,
+      createdDefaultWorld: false,
+      createdDefaultWork: false,
+    })
   })
 
   it('读取旧项目时补齐世界身份但不改变旧的多世界开关', async () => {

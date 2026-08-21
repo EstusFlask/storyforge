@@ -125,6 +125,16 @@ function normalize(data: any) {
   delete data.avgPresentationModules
   delete data.narrativeSimulationModules
   delete data.openWorldModules
+  // ADAPT-CORE / SCREEN / COMIC 的项目、场景、分镜和媒体层均晚于历史 v3。
+  // 严格来源清单、闭包重映射及 Blob 往返由各专项测试和 fullcoverage 锁定。
+  delete data.adaptationProjects
+  delete data.adaptationSourceUnits
+  delete data.screenplayScenes
+  delete data.comicPages
+  delete data.comicPanels
+  delete data.comicVisualSubjects
+  delete data.comicMediaAssets
+  delete data.mediaBlobObjects
   delete data.project?._activeWorldExportId
   delete data.project?._activeWorkExportId
   for (const row of data.characters ?? []) {

@@ -11,6 +11,7 @@ export const REQUIRED_TABLES = [
   'adaptationProjects',
   'adaptationSourceUnits',
   'screenplayScenes',
+  'comicPages', 'comicPanels', 'comicVisualSubjects', 'comicMediaAssets', 'mediaBlobObjects',
   'avgMediaAssets',
   'avgMediaBlobs',
   'avgPresentationModules',

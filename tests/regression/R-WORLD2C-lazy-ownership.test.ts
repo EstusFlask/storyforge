@@ -55,6 +55,16 @@ async function createLegacyProject(name = '旧分步骤项目') {
 
 async function stripC1Roots(projectId: number) {
   // 模拟真实的 pre-C1 项目：正式游戏发布及其 World/Work 内容不可能早于根存在。
+  // 改编、剧本、漫画和共享媒体同样晚于 C1，必须连同其根一起移除；把它们只去掉
+  // owner 字段会制造历史上不可能存在的悬空 sourceWorkId，反而掩盖必填引用守卫。
+  await db.comicMediaAssets.where('projectId').equals(projectId).delete()
+  await db.mediaBlobObjects.where('projectId').equals(projectId).delete()
+  await db.comicPanels.where('projectId').equals(projectId).delete()
+  await db.comicPages.where('projectId').equals(projectId).delete()
+  await db.comicVisualSubjects.where('projectId').equals(projectId).delete()
+  await db.screenplayScenes.where('projectId').equals(projectId).delete()
+  await db.adaptationSourceUnits.where('projectId').equals(projectId).delete()
+  await db.adaptationProjects.where('projectId').equals(projectId).delete()
   await db.gameReleases.where('projectId').equals(projectId).delete()
   await db.interactionCharacterProfiles.where('projectId').equals(projectId).delete()
   await db.interactionSceneTemplates.where('projectId').equals(projectId).delete()

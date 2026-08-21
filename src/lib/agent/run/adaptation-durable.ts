@@ -8,11 +8,14 @@ import type {
   AdaptationProject,
   AIConfig,
   ChatMessage,
+  ComicPage,
+  ComicPanel,
   ScreenplayScene,
   WorkspaceScope,
 } from '../../types'
 import { readOwnedRows } from '../../world-engine/scope'
 import { adoptScreenplaySceneBatchV1, type ScreenplayCastResourceV1, type ScreenplaySceneCandidateV1 } from '../../screenplay/adoption'
+import { adoptComicStoryboardBatchV1, assertComicStoryboardCandidateV1, type ComicPageCandidateV1 } from '../../comic/adoption'
 import { assertAdaptationBriefV1, assertAdaptationPlanV1 } from '../../adaptation/contracts'
 import { createAgentSkillExecutionBindingV1 } from '../execution-binding'
 import { getAgentSkillV1 } from '../skill-registry'
@@ -27,12 +30,14 @@ import {
 import { canonicalStringify, hashCanonicalValue } from './hash'
 import { createVerificationReceiptV1 } from './verification-receipt'
 
-export type AdaptationCandidateKindV1 = 'brief' | 'plan' | 'screenplay-scenes'
+export type AdaptationCandidateKindV1 = 'brief' | 'plan' | 'comic-plan' | 'screenplay-scenes' | 'comic-storyboard'
 
 type CandidatePayloadByKindV1 = {
   brief: AdaptationBriefV1
   plan: AdaptationPlanV1
+  'comic-plan': AdaptationPlanV1
   'screenplay-scenes': ScreenplaySceneCandidateV1[]
+  'comic-storyboard': ComicPageCandidateV1[]
 }
 
 export interface AdaptationStructuredCandidateV1<K extends AdaptationCandidateKindV1 = AdaptationCandidateKindV1> {
@@ -49,6 +54,7 @@ export interface AdaptationStructuredCandidateV1<K extends AdaptationCandidateKi
   sourceManifestHash: string
   briefHash: string | null
   planHash: string | null
+  visualBibleHash: string | null
   selectedPlanSectionKeys: string[]
   contextManifestHash: string
   contextInputHash: string
@@ -100,11 +106,23 @@ const ARTIFACT_CONFIG = {
     category: 'adaptation.plan',
     verifier: 'adaptation-plan-terminal-v1',
   },
+  'comic-plan': {
+    skillId: 'outline.comic-plan',
+    stepId: 'adaptation:comic-plan',
+    category: 'adaptation.comic-plan',
+    verifier: 'comic-plan-terminal-v1',
+  },
   'screenplay-scenes': {
     skillId: 'prose.screenplay-scenes',
     stepId: 'adaptation:screenplay-scenes',
     category: 'adaptation.screenplay-scenes',
     verifier: 'screenplay-scenes-terminal-v1',
+  },
+  'comic-storyboard': {
+    skillId: 'outline.comic-storyboard',
+    stepId: 'adaptation:comic-storyboard',
+    category: 'adaptation.comic-storyboard',
+    verifier: 'comic-storyboard-terminal-v1',
   },
 } as const
 
@@ -170,10 +188,16 @@ function parseScenes(value: unknown): ScreenplaySceneCandidateV1[] {
   return structuredClone(value) as ScreenplaySceneCandidateV1[]
 }
 
+function parseComicStoryboard(value: unknown): ComicPageCandidateV1[] {
+  assertComicStoryboardCandidateV1(value)
+  return structuredClone(value)
+}
+
 function parsePayload<K extends AdaptationCandidateKindV1>(kind: K, value: unknown): CandidatePayloadByKindV1[K] {
   if (kind === 'brief') return parseBrief(value) as CandidatePayloadByKindV1[K]
-  if (kind === 'plan') return parsePlan(value) as CandidatePayloadByKindV1[K]
-  return parseScenes(value) as CandidatePayloadByKindV1[K]
+  if (kind === 'plan' || kind === 'comic-plan') return parsePlan(value) as CandidatePayloadByKindV1[K]
+  if (kind === 'screenplay-scenes') return parseScenes(value) as CandidatePayloadByKindV1[K]
+  return parseComicStoryboard(value) as CandidatePayloadByKindV1[K]
 }
 
 async function append(
@@ -204,9 +228,11 @@ function runContract(scope: WorkspaceScope, artifactKind: AdaptationCandidateKin
     version: 1 as const,
     objective: artifactKind === 'brief'
       ? '根据冻结小说来源生成改编 Brief 候选并等待作者确认'
-      : artifactKind === 'plan'
+      : artifactKind === 'plan' || artifactKind === 'comic-plan'
         ? '根据已确认 Brief 与冻结小说来源生成改编结构计划候选并等待作者确认'
-        : '根据已确认改编计划与冻结小说来源生成正规剧本场景候选并等待作者确认',
+        : artifactKind === 'screenplay-scenes'
+          ? '根据已确认改编计划与冻结小说来源生成正规剧本场景候选并等待作者确认'
+          : '根据已确认漫画计划、视觉圣经与冻结小说来源生成页格分镜候选并等待作者确认',
     workflowKind: 'plan-execute' as const,
     scope: { projectId: scope.projectId, worldGroupId: null },
     permissions: {
@@ -280,14 +306,24 @@ function promptFor<K extends AdaptationCandidateKindV1>(input: {
   if (input.kind === 'brief') {
     return [{ role: 'system', content: common.join('\n\n') }, { role: 'user', content: `生成 version=1 的改编 Brief。字段必须严格且仅为：${BRIEF_KEYS.join(', ')}。数组字段给出可执行条目；不确定内容放 unresolvedQuestions 或 assumptions。` }]
   }
-  if (input.kind === 'plan') {
+  if (input.kind === 'plan' || input.kind === 'comic-plan') {
     return [{ role: 'system', content: common.join('\n\n') }, { role: 'user', content: `生成 version=1 的改编 Plan。顶层字段严格且仅为：${PLAN_KEYS.join(', ')}。每个 sections 项字段严格且仅为：${PLAN_SECTION_KEYS.join(', ')}；stableKey 使用可移植英文键；sourceUnitKeys 只能取来源清单中的键。` }]
   }
+  if (input.kind === 'screenplay-scenes') {
+    return [{ role: 'system', content: common.join('\n\n') }, { role: 'user', content: [
+      `为计划段 ${input.selectedPlanSectionKeys.join(', ')} 生成 1～10 场正规剧本场景 JSON 数组。`,
+      `每场字段严格且仅为：${SCENE_KEYS.join(', ')}。`,
+      'blocks 类型只允许 action、character、parenthetical、dialogue、transition、shot、note。每个 block 有稳定字符串 id；普通 block 只有 id/type/text；character block 可有 characterResourceKey/name/extension/dualDialogue，不得输出 characterId。',
+      '对白顺序必须为 character → 可选 parenthetical → dialogue；双人并排对白用相邻的两组 character/dialogue，并在两个人物块标记 dualDialogue=true。',
+    ].join('\n') }]
+  }
   return [{ role: 'system', content: common.join('\n\n') }, { role: 'user', content: [
-    `为计划段 ${input.selectedPlanSectionKeys.join(', ')} 生成 1～10 场正规剧本场景 JSON 数组。`,
-    `每场字段严格且仅为：${SCENE_KEYS.join(', ')}。`,
-    'blocks 类型只允许 action、character、parenthetical、dialogue、transition、shot、note。每个 block 有稳定字符串 id；普通 block 只有 id/type/text；character block 可有 characterResourceKey/name/extension/dualDialogue，不得输出 characterId。',
-    '对白顺序必须为 character → 可选 parenthetical → dialogue；双人并排对白用相邻的两组 character/dialogue，并在两个人物块标记 dualDialogue=true。',
+    `为计划段 ${input.selectedPlanSectionKeys.join(', ')} 生成 1～12 页漫画分镜 JSON 数组。`,
+    '每页字段严格且仅为 stableKey、chapterNumber、summary、panels；每页 1～9 格，页面不得开启格重叠。',
+    '每格字段严格且仅为 stableKey、frame、shot、action、visualPrompt、negativePrompt、continuityRefs、lettering、sourceUnitKeys。frame 使用 0～1 归一化 x/y/width/height，相邻格保留至少 0.01 间隙。',
+    'shot 仅含 size、angle、movement、composition。continuityRefs 仅可引用视觉圣经中已存在的 subjectKey。sourceUnitKeys 只能取冻结来源 key。',
+    'lettering 每项严格包含 id、kind、text、frame、direction、fontFamily、fontSize、textColor、fillColor、strokeColor、strokeWidth、tail、zIndex；kind 仅 speech/thought/caption/sfx，fontFamily 仅 storyforge-sans/storyforge-serif，tail 为 null 或归一化 x/y。',
+    '图像 Prompt 必须要求无文字、无气泡、无水印；对白、旁白与拟声仅进入本地 lettering。',
   ].join('\n') }]
 }
 
@@ -328,13 +364,21 @@ export async function generateAdaptationCandidateV1<K extends AdaptationCandidat
   const freshness = await inspectAdaptationFreshness(root.id)
   if (freshness.status !== 'unchanged') throw new Error('[adaptation-run] 来源已变化或缺失，请先重新同步')
   if (input.artifactKind !== 'brief' && (!root.brief || root.briefSourceManifestVersion !== root.activeSourceManifestVersion)) throw new Error('[adaptation-run] 当前来源版本的 Brief 尚未确认')
+  if (input.artifactKind === 'plan' && root.medium !== 'screenplay') throw new Error('[adaptation-run] 剧本 Plan 候选只能用于剧本改编')
+  if (input.artifactKind === 'comic-plan' && root.medium !== 'comic') throw new Error('[adaptation-run] 漫画 Plan 候选只能用于漫画改编')
   if (input.artifactKind === 'screenplay-scenes') {
     if (root.medium !== 'screenplay') throw new Error('[adaptation-run] 只有剧本改编可生成剧本场景')
     if (!root.plan || root.planSourceManifestVersion !== root.activeSourceManifestVersion) throw new Error('[adaptation-run] 当前来源版本的 Plan 尚未确认')
     if (!['producing', 'review'].includes(root.status)) throw new Error('[adaptation-run] 请先进入剧本生产阶段')
   }
+  if (input.artifactKind === 'comic-storyboard') {
+    if (root.medium !== 'comic') throw new Error('[adaptation-run] 只有漫画改编可生成漫画分镜')
+    if (!root.plan || root.planSourceManifestVersion !== root.activeSourceManifestVersion) throw new Error('[adaptation-run] 当前来源版本的漫画 Plan 尚未确认')
+    if (!root.visualBible || root.visualBibleSourceManifestVersion !== root.activeSourceManifestVersion) throw new Error('[adaptation-run] 当前来源版本的视觉圣经尚未确认')
+    if (!['producing', 'review'].includes(root.status)) throw new Error('[adaptation-run] 请先进入漫画生产阶段')
+  }
   const selectedPlanSectionKeys = [...new Set(input.selectedPlanSectionKeys ?? [])]
-  if (input.artifactKind === 'screenplay-scenes' && !selectedPlanSectionKeys.length) throw new Error('[adaptation-run] 请至少选择一个计划段')
+  if (['screenplay-scenes', 'comic-storyboard'].includes(input.artifactKind) && !selectedPlanSectionKeys.length) throw new Error('[adaptation-run] 请至少选择一个计划段')
   const keys = await sourceKeys(root, selectedPlanSectionKeys)
   const config = ARTIFACT_CONFIG[input.artifactKind]
   const skill = getAgentSkillV1(config.skillId)
@@ -403,6 +447,7 @@ export async function generateAdaptationCandidateV1<K extends AdaptationCandidat
     sourceManifestHash: root.activeSourceManifestHash,
     briefHash: root.brief ? await hashCanonicalValue(root.brief) : null,
     planHash: root.plan ? await hashCanonicalValue(root.plan) : null,
+    visualBibleHash: root.medium === 'comic' && root.visualBible ? await hashCanonicalValue(root.visualBible) : null,
     selectedPlanSectionKeys,
     contextManifestHash: manifest.manifestHash,
     contextInputHash: await hashCanonicalValue({ text: assembled.text, sourceEvidence: assembled.sourceEvidence }),
@@ -480,11 +525,12 @@ async function assertCandidateFresh(scope: WorkspaceScope, candidate: Adaptation
   const root = await readRoot(scope, candidate.adaptationProjectId)
   const rootAtExpectedRevision = root.revision === candidate.adaptationRevision
   const briefIntermediate = candidate.artifactKind === 'brief' && root.revision === candidate.adaptationRevision + 1
-  const planIntermediate = candidate.artifactKind === 'plan' && root.revision === candidate.adaptationRevision + 1
+  const planIntermediate = (candidate.artifactKind === 'plan' || candidate.artifactKind === 'comic-plan') && root.revision === candidate.adaptationRevision + 1
   if (!rootAtExpectedRevision && !briefIntermediate && !planIntermediate) throw new Error('[adaptation-run] 改编根已变化，候选已 stale')
   if (root.activeSourceManifestVersion !== candidate.sourceManifestVersion || root.activeSourceManifestHash !== candidate.sourceManifestHash) throw new Error('[adaptation-run] 来源 manifest 已变化，候选已 stale')
   if ((root.brief ? await hashCanonicalValue(root.brief) : null) !== candidate.briefHash && !briefIntermediate) throw new Error('[adaptation-run] Brief 已变化，候选已 stale')
   if ((root.plan ? await hashCanonicalValue(root.plan) : null) !== candidate.planHash && !planIntermediate) throw new Error('[adaptation-run] Plan 已变化，候选已 stale')
+  if ((root.medium === 'comic' && root.visualBible ? await hashCanonicalValue(root.visualBible) : null) !== candidate.visualBibleHash) throw new Error('[adaptation-run] 视觉圣经已变化，候选已 stale')
   if ((await inspectAdaptationFreshness(root.id)).status !== 'unchanged') throw new Error('[adaptation-run] 来源内容已变化或缺失，候选已 stale')
   return root
 }
@@ -500,7 +546,7 @@ async function writeFormal(scope: WorkspaceScope, intent: AdaptationAdoptionInte
     if (!payloadMatches) root = await saveAdaptationBriefDraft({ adaptationProjectId: root.id, brief: payload, expectedRevision: root.revision }) as AdaptationProject & { id: number }
     return confirmAdaptationBrief({ adaptationProjectId: root.id, expectedRevision: root.revision })
   }
-  if (candidate.artifactKind === 'plan') {
+  if (candidate.artifactKind === 'plan' || candidate.artifactKind === 'comic-plan') {
     const payload = intent.authorPayload as AdaptationPlanV1
     const payloadMatches = canonicalStringify(root.plan) === canonicalStringify(payload)
     if (root.planSourceManifestVersion === root.activeSourceManifestVersion && payloadMatches) return root
@@ -509,15 +555,26 @@ async function writeFormal(scope: WorkspaceScope, intent: AdaptationAdoptionInte
     return confirmAdaptationPlan({ adaptationProjectId: root.id, expectedRevision: root.revision })
   }
   root = await assertCandidateFresh(scope, candidate)
-  return adoptScreenplaySceneBatchV1({
+  if (candidate.artifactKind === 'screenplay-scenes') {
+    return adoptScreenplaySceneBatchV1({
+      scope,
+      adaptationProjectId: root.id,
+      expectedAdaptationRevision: root.revision,
+      sourceManifestVersion: candidate.sourceManifestVersion,
+      expectedPlanHash: candidate.planHash!,
+      candidates: intent.authorPayload as ScreenplaySceneCandidateV1[],
+      castResources: intent.castResources,
+      allowReplaceReviewed: intent.allowReplaceReviewed,
+    })
+  }
+  return adoptComicStoryboardBatchV1({
     scope,
     adaptationProjectId: root.id,
     expectedAdaptationRevision: root.revision,
     sourceManifestVersion: candidate.sourceManifestVersion,
     expectedPlanHash: candidate.planHash!,
-    candidates: intent.authorPayload as ScreenplaySceneCandidateV1[],
-    castResources: intent.castResources,
-    allowReplaceReviewed: intent.allowReplaceReviewed,
+    expectedVisualBibleHash: candidate.visualBibleHash!,
+    candidates: intent.authorPayload as ComicPageCandidateV1[],
   })
 }
 
@@ -528,15 +585,29 @@ async function verifyPostState(scope: WorkspaceScope, intent: AdaptationAdoption
     if (root.briefSourceManifestVersion !== root.activeSourceManifestVersion || canonicalStringify(root.brief) !== canonicalStringify(intent.authorPayload)) throw new Error('[adaptation-run] Brief 正式状态与采纳意图不一致')
     return hashCanonicalValue({ rootRevision: root.revision, brief: root.brief, manifest: root.activeSourceManifestHash })
   }
-  if (candidate.artifactKind === 'plan') {
+  if (candidate.artifactKind === 'plan' || candidate.artifactKind === 'comic-plan') {
     if (root.planSourceManifestVersion !== root.activeSourceManifestVersion || canonicalStringify(root.plan) !== canonicalStringify(intent.authorPayload)) throw new Error('[adaptation-run] Plan 正式状态与采纳意图不一致')
     return hashCanonicalValue({ rootRevision: root.revision, plan: root.plan, manifest: root.activeSourceManifestHash })
   }
-  const expected = intent.authorPayload as ScreenplaySceneCandidateV1[]
-  const rows = await db.screenplayScenes.where('adaptationProjectId').equals(root.id).toArray()
-  const selected = expected.map(item => rows.find(row => row.stableKey === item.stableKey)).filter(Boolean) as ScreenplayScene[]
-  if (selected.length !== expected.length) throw new Error('[adaptation-run] 剧本场景正式状态缺失')
-  return hashCanonicalValue(selected.map(scene => ({ stableKey: scene.stableKey, revision: scene.revision, sourceReviewManifestVersion: scene.sourceReviewManifestVersion, blocks: scene.blocks })))
+  if (candidate.artifactKind === 'screenplay-scenes') {
+    const expected = intent.authorPayload as ScreenplaySceneCandidateV1[]
+    const rows = await db.screenplayScenes.where('adaptationProjectId').equals(root.id).toArray()
+    const selected = expected.map(item => rows.find(row => row.stableKey === item.stableKey)).filter(Boolean) as ScreenplayScene[]
+    if (selected.length !== expected.length) throw new Error('[adaptation-run] 剧本场景正式状态缺失')
+    return hashCanonicalValue(selected.map(scene => ({ stableKey: scene.stableKey, revision: scene.revision, sourceReviewManifestVersion: scene.sourceReviewManifestVersion, blocks: scene.blocks })))
+  }
+  const expected = intent.authorPayload as ComicPageCandidateV1[]
+  const pages = await db.comicPages.where('adaptationProjectId').equals(root.id).toArray()
+  const selectedPages = expected.map(item => pages.find(page => page.stableKey === item.stableKey)).filter(Boolean) as ComicPage[]
+  if (selectedPages.length !== expected.length) throw new Error('[adaptation-run] 漫画页面正式状态缺失')
+  const panels = await db.comicPanels.where('pageId').anyOf(selectedPages.map(page => page.id!)).toArray()
+  const expectedPanelKeys = new Set(expected.flatMap(page => page.panels.map(panel => panel.stableKey)))
+  const selectedPanels = panels.filter(panel => expectedPanelKeys.has(panel.stableKey)) as ComicPanel[]
+  if (selectedPanels.length !== expectedPanelKeys.size) throw new Error('[adaptation-run] 漫画格正式状态缺失')
+  return hashCanonicalValue({
+    pages: selectedPages.map(page => ({ stableKey: page.stableKey, revision: page.revision, summary: page.summary })),
+    panels: selectedPanels.map(panel => ({ stableKey: panel.stableKey, revision: panel.revision, sourceReviewManifestVersion: panel.sourceReviewManifestVersion, lettering: panel.lettering, visualPrompt: panel.visualPrompt })),
+  })
 }
 
 export async function adoptAdaptationCandidateV1<K extends AdaptationCandidateKindV1>(input: {
@@ -548,7 +619,7 @@ export async function adoptAdaptationCandidateV1<K extends AdaptationCandidateKi
   onDurableBoundary?: (boundary: AdaptationDurableBoundaryV1, snapshot: AgentRunSnapshotV1) => void | Promise<void>
 }): Promise<{ snapshot: AgentRunSnapshotV1; candidate: AdaptationStructuredCandidateV1<K>; receiptHash: string }> {
   let snapshot = await readAgentRunV1(input.scope, input.runId)
-  let state = await latestState(input.scope, input.runId)
+  const state = await latestState(input.scope, input.runId)
   const candidate = state.candidate as AdaptationStructuredCandidateV1<K>
   if (!targets(input.scope, candidate)) throw new Error('[adaptation-run] 候选越过当前 Work')
   const config = ARTIFACT_CONFIG[candidate.artifactKind]

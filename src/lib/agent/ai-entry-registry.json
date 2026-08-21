@@ -2,7 +2,6 @@
   "version": 1,
   "scope": "step-by-step-ui-direct-model-entry",
   "entries": [
-    { "file": "src/lib/agent/run/adaptation-durable.ts", "calls": 1, "status": "governed", "mechanism": "durable-run", "reason": "改编 Brief、Plan 与剧本场景共享 Run Contract、ContextManifest、检查点、作者确认、正式采纳和终验回执；组件不直接调用模型。" },
     { "file": "src/components/editor/ChapterEditor.tsx", "calls": 6, "status": "governed", "mechanism": "durable-run", "reason": "正文生成、六域整理和章节记忆已进入 GenerationNode/Run 证据链；CREL 默认正文路径不再隐藏自动复审，质量审校由 ReviewPanel 显式发起。" },
     { "file": "src/components/editor/ReviewPanel.tsx", "calls": 1, "status": "auxiliary", "mechanism": "read-only-review", "reason": "显式审校结果只展示，不直接写业务表。" },
     { "file": "src/components/geography/GeographyPanel.tsx", "calls": 1, "status": "auxiliary", "mechanism": "ephemeral-visual", "reason": "概念地图只形成当前 UI SVG，不写 Canon。" },

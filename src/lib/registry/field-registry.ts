@@ -151,6 +151,21 @@ export const FIELD_REGISTRY: FieldSpec[] = [
   arr('screenplayScenes', 'sourceUnitIds'),
   arr('screenplayScenes', 'blocks'),
 
+  // COMIC-1: only storyboard/visual content may be model-authored. Page overlap,
+  // media selection, rights, hashes, revisions and owners stay system-owned.
+  longtext('comicPages', 'summary'),
+  object('comicPanels', 'frame'),
+  object('comicPanels', 'shot'),
+  longtext('comicPanels', 'action'),
+  longtext('comicPanels', 'visualPrompt'),
+  longtext('comicPanels', 'negativePrompt'),
+  arr('comicPanels', 'continuityRefs'),
+  arr('comicPanels', 'lettering'),
+  arr('comicPanels', 'sourceUnitIds'),
+  text('comicVisualSubjects', 'label'),
+  object('comicVisualSubjects', 'design'),
+  arr('comicVisualSubjects', 'sourceUnitIds'),
+
   // HARNESS-68: AI may propose new World-owned worldGroups only through the
   // registered collection adoption boundary. Owner IDs and timestamps are stamped.
   text('worldGroups', 'name', ['世界名称']),

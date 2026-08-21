@@ -86,6 +86,11 @@ import type {
   AdaptationProject,
   AdaptationSourceUnit,
   ScreenplayScene,
+  ComicPage,
+  ComicPanel,
+  ComicVisualSubject,
+  ComicMediaAsset,
+  MediaBlobObject,
 } from '../types'
 import type { AIUsageEntry } from '../ai/usage-log'
 import type { TemporalFact } from '../types/temporal-fact'
@@ -241,6 +246,11 @@ class StoryForgeDB extends Dexie {
   adaptationProjects!: Table<AdaptationProject, number>
   adaptationSourceUnits!: Table<AdaptationSourceUnit, number>
   screenplayScenes!: Table<ScreenplayScene, number>
+  comicPages!: Table<ComicPage, number>
+  comicPanels!: Table<ComicPanel, number>
+  comicVisualSubjects!: Table<ComicVisualSubject, number>
+  comicMediaAssets!: Table<ComicMediaAsset, number>
+  mediaBlobObjects!: Table<MediaBlobObject, number>
 
   constructor() {
     super('storyforge')
@@ -655,6 +665,19 @@ class StoryForgeDB extends Dexie {
     // v64 / SCREEN-1A: structured screenplay scenes and ordered blocks.
     this.version(64).stores({
       screenplayScenes: '++id, projectId, workId, adaptationProjectId, &[adaptationProjectId+stableKey], &[adaptationProjectId+episodeNumber+sceneNumber], [adaptationProjectId+episodeNumber], order, status, updatedAt',
+    })
+
+    // v65 / COMIC-1A: structured pages, panels and visual-subject bible.
+    this.version(65).stores({
+      comicPages: '++id, projectId, workId, adaptationProjectId, &[adaptationProjectId+stableKey], &[adaptationProjectId+order], chapterNumber, status, updatedAt',
+      comicPanels: '++id, projectId, workId, pageId, &[workId+stableKey], &[pageId+order], status, updatedAt',
+      comicVisualSubjects: '++id, projectId, workId, adaptationProjectId, &[workId+stableKey], kind, characterId, locationRefKey, status, updatedAt',
+    })
+
+    // v66 / MEDIA-CORE-1 + COMIC-2: product-neutral verified blobs and comic assets.
+    this.version(66).stores({
+      comicMediaAssets: '++id, projectId, workId, adaptationProjectId, &[workId+stableKey], role, origin, panelId, subjectKey, blobObjectId, disposition, requestHash, &[workId+requestHash+candidateIndex], updatedAt',
+      mediaBlobObjects: '++id, projectId, workId, &[workId+contentHash], mimeType, disposition, updatedAt',
     })
   }
 }

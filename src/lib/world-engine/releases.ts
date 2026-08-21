@@ -14,6 +14,10 @@ import type { ProjectExportData } from '../export/json-export'
 import { deriveStrictExportProjectSnapshot } from '../export/registry-export'
 import { validateNarrativeModule } from '../narrative/blueprint'
 
+// Release snapshots are deliberately sparse world-share packages, not v6+
+// full-project backups. v5 predates mandatory adaptation-private tables.
+const WORLD_RELEASE_PORTABLE_BACKUP_VERSION = 5
+
 export const WORLD_RELEASE_SECTIONS: ReadonlyArray<{
   key: WorldReleaseSection
   label: string
@@ -110,7 +114,7 @@ async function buildPortableReleaseProject(input: {
     project[field] = workRoot[field]
   }
   const portable: Record<string, unknown> = {
-    version: backup.version,
+    version: Math.min(backup.version, WORLD_RELEASE_PORTABLE_BACKUP_VERSION),
     // Release content hashes must depend on content, not the wall clock used
     // while deriving an otherwise identical portable snapshot.
     exportedAt: 0,
@@ -118,11 +122,6 @@ async function buildPortableReleaseProject(input: {
     project,
     worlds: [clone(worldRoot)],
     works: [{ ...clone(workRoot), _activeCharacterDrivenPlanExportId: null }],
-  }
-  // 冻结发布只填充被选择的共享表，但其便携项目仍须是当前版本的完整
-  // 备份形状；私有和未选择表保持空数组。
-  for (const spec of PROJECT_TABLES) {
-    if (spec.exportable && spec.name !== 'projects' && !(spec.name in portable)) portable[spec.name] = []
   }
   const source = backup as unknown as Record<string, unknown>
   for (const tableName of input.requestedTables) {

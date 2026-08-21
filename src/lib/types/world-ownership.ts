@@ -88,8 +88,10 @@ export interface OwnershipScopeChange {
 }
 
 /**
- * Compact recovery evidence for the lazy ownership migration. It stores
- * only root/owner fields, never manuscript text or other content payloads.
+ * Compact ownership provenance and scope-change audit. Migrated workspaces
+ * retain their recovery before-image; natively created workspaces use an
+ * empty before-image and are deliberately not rollbackable. Manuscript text
+ * and other content payloads are never stored here.
  */
 export interface OwnershipMigrationReceipt {
   id?: number

@@ -24,6 +24,7 @@ import {
   assertAdaptationBriefV1,
   assertAdaptationPlanV1,
   assertAdaptationProjectInvariant,
+  assertComicGlobalVisualBibleV1,
   assertComicTargetSpecV1,
   assertScreenplayTargetSpecV1,
 } from './contracts'
@@ -774,7 +775,8 @@ export async function confirmAdaptationPlan(input: { adaptationProjectId: number
 export async function confirmComicVisualBible(input: { adaptationProjectId: number; visualBible: ComicGlobalVisualBibleV1; expectedRevision: number }): Promise<AdaptationProject> {
   return updateAdaptationRootContent(input.adaptationProjectId, input.expectedRevision, root => {
     if (root.medium !== 'comic') throw new Error('[adaptation] 只有漫画改编可确认视觉圣经')
-    if (!input.visualBible || input.visualBible.version !== 1 || JSON.stringify(input.visualBible).length > 64_000) throw new Error('[adaptation] 漫画视觉圣经非法或过大')
+    assertComicGlobalVisualBibleV1(input.visualBible)
+    if (JSON.stringify(input.visualBible).length > 64_000) throw new Error('[adaptation] 漫画视觉圣经过大')
     return { ...root, visualBible: structuredClone(input.visualBible), visualBibleSourceManifestVersion: root.activeSourceManifestVersion }
   })
 }

@@ -28,8 +28,8 @@ describe('Phase 1.1a · PROJECT_TABLES 注册表', () => {
       expect(result.ok, result.errors.join('; ')).toBe(true)
     })
 
-    it('登记了全部 82 张表', () => {
-      expect(PROJECT_TABLES.length).toBe(82)   // v62 MEMORY-1 + 六类文字游戏内容与媒资表
+    it('登记了全部 90 张表', () => {
+      expect(PROJECT_TABLES.length).toBe(90)   // v66 + 改编、剧本、漫画与共享媒资表
     })
 
     it('每张表名唯一', () => {

@@ -3,6 +3,7 @@ import type {
   AdaptationPlanV1,
   AdaptationProject,
   ComicTargetSpecV1,
+  ComicGlobalVisualBibleV1,
   ScreenplayTargetSpecV1,
   Work,
 } from '../types'
@@ -96,6 +97,17 @@ export function assertComicTargetSpecV1(spec: ComicTargetSpecV1): void {
   if (!['color', 'grayscale', 'monochrome'].includes(spec.colorMode)) throw new Error('[adaptation] 漫画色彩模式非法')
   assertText(spec.audience, 'comic.audience', 1_000)
   assertText(spec.artStyleBrief, 'comic.artStyleBrief', 8_000)
+}
+
+export function assertComicGlobalVisualBibleV1(value: ComicGlobalVisualBibleV1): void {
+  if (!value || value.version !== 1) throw new Error('[adaptation] 漫画视觉圣经版本非法')
+  assertText(value.artDirection, 'visualBible.artDirection', 8_000)
+  assertText(value.linework, 'visualBible.linework', 4_000)
+  assertText(value.lighting, 'visualBible.lighting', 4_000)
+  assertText(value.periodAndMaterials, 'visualBible.periodAndMaterials', 4_000)
+  for (const [label, values] of [['palette', value.palette], ['cameraLanguage', value.cameraLanguage], ['prohibitedDepictions', value.prohibitedDepictions]] as const) {
+    if (!Array.isArray(values) || values.length > 100 || values.some(item => typeof item !== 'string' || !item.trim() || item.length > 1_000)) throw new Error(`[adaptation] visualBible.${label} 非法`)
+  }
 }
 
 export function assertAdaptationProjectInvariant(root: AdaptationProject, targetWork?: Work, sourceWork?: Work | null): void {

@@ -95,12 +95,13 @@ import type { AssembleContextInput } from './types'
 import { readOwnedRows, resolveScope, assertRecordInScope } from '../world-engine/scope'
 import type { WorkspaceScope } from '../types/world-ownership'
 import { parseWorldGameAuthoringRequestV1 } from '../text-game/agent-contract'
-import {
-  inspectAdaptationFreshness,
-  listActiveSourceUnits,
-  readAdaptationSourceContent,
-} from '../adaptation/source-manifest'
 import type { AdaptationProject } from '../types'
+
+// 改编来源冻结会拉入完整选择、哈希和同步实现。普通首页/小说创作不需要这段代码；
+// 只有真正装配改编上下文时再加载，保持统一 CONTEXT_SOURCES 入口而不污染首屏包。
+async function loadAdaptationSourceReader() {
+  return import('../adaptation/source-manifest')
+}
 
 async function requireTargetAdaptation(input: AssembleContextInput): Promise<AdaptationProject> {
   if (input.adaptationProjectId == null || !input.scope) throw new Error('[adaptation-context] 缺少目标改编 selector')
@@ -116,6 +117,7 @@ async function requireTargetAdaptation(input: AssembleContextInput): Promise<Ada
 
 async function readAdaptationSourceManifestContext(input: AssembleContextInput): Promise<string> {
   const root = await requireTargetAdaptation(input)
+  const { inspectAdaptationFreshness, listActiveSourceUnits } = await loadAdaptationSourceReader()
   const [units, freshness] = await Promise.all([
     listActiveSourceUnits(root.id!),
     inspectAdaptationFreshness(root.id!),
@@ -134,6 +136,7 @@ async function readAdaptationSourceManifestContext(input: AssembleContextInput):
 
 async function readAdaptationSourceContentContext(input: AssembleContextInput): Promise<string> {
   const root = await requireTargetAdaptation(input)
+  const { readAdaptationSourceContent } = await loadAdaptationSourceReader()
   const slice = await readAdaptationSourceContent({
     targetScope: input.scope!,
     adaptationProjectId: root.id!,
@@ -170,6 +173,57 @@ async function readScreenplayCurrentScenesContext(input: AssembleContextInput): 
     `--- ${scene.stableKey}｜第 ${scene.episodeNumber} 集第 ${scene.sceneNumber} 场｜${scene.intExt} ${scene.location} - ${scene.timeOfDay}｜${scene.status}｜${scene.estimatedSeconds}s ---`,
     `目的：${scene.summary}`,
     ...scene.blocks.map(block => block.type === 'character' ? `${block.type}｜${block.name}${block.extension ? ` (${block.extension})` : ''}` : `${block.type}｜${block.text}`),
+  ].join('\n'))].join('\n\n')
+}
+
+async function readComicVisualBibleContext(input: AssembleContextInput): Promise<string> {
+  const root = await requireTargetAdaptation(input)
+  if (root.medium !== 'comic' || !root.visualBible || root.visualBibleSourceManifestVersion !== root.activeSourceManifestVersion) return ''
+  const [subjects, assets] = await Promise.all([
+    db.comicVisualSubjects.where('adaptationProjectId').equals(root.id!).toArray(),
+    db.comicMediaAssets.where('adaptationProjectId').equals(root.id!).toArray(),
+  ])
+  const availableKeys = new Set(assets.filter(asset => asset.disposition === 'available').map(asset => asset.stableKey))
+  return [
+    `【漫画视觉圣经｜manifest v${root.visualBibleSourceManifestVersion}】`,
+    JSON.stringify(root.visualBible),
+    '【视觉条目】',
+    ...subjects.sort((left, right) => left.stableKey.localeCompare(right.stableKey)).map(subject => JSON.stringify({
+      stableKey: subject.stableKey,
+      kind: subject.kind,
+      label: subject.label,
+      design: subject.design,
+      sourceUnitIds: subject.sourceUnitIds,
+      referenceAssetKey: subject.selectedMediaAssetKey && availableKeys.has(subject.selectedMediaAssetKey) ? subject.selectedMediaAssetKey : null,
+      status: subject.status,
+    })),
+  ].join('\n')
+}
+
+async function readComicCurrentPagesContext(input: AssembleContextInput): Promise<string> {
+  const root = await requireTargetAdaptation(input)
+  if (root.medium !== 'comic' || !input.comicPageIds?.length) return ''
+  const pages = await db.comicPages.bulkGet(input.comicPageIds)
+  if (pages.some(page => !page || page.adaptationProjectId !== root.id || page.workId !== root.workId)) throw new Error('[comic-context] 页面选择越界')
+  const pageIds = (pages as NonNullable<typeof pages[number]>[]).map(page => page.id!)
+  const panels = await db.comicPanels.where('pageId').anyOf(pageIds).toArray()
+  return ['【当前漫画页格】', ...(pages as NonNullable<typeof pages[number]>[]).map(page => [
+    `--- ${page.stableKey}｜第 ${page.chapterNumber} 章｜页序 ${page.order + 1}｜${page.status} ---`,
+    `摘要：${page.summary}`,
+    ...panels.filter(panel => panel.pageId === page.id).sort((left, right) => left.order - right.order).map(panel => JSON.stringify({
+      stableKey: panel.stableKey,
+      order: panel.order,
+      frame: panel.frame,
+      shot: panel.shot,
+      action: panel.action,
+      visualPrompt: panel.visualPrompt,
+      negativePrompt: panel.negativePrompt,
+      continuityRefs: panel.continuityRefs,
+      lettering: panel.lettering,
+      selectedMediaAssetKey: panel.selectedMediaAssetKey,
+      sourceUnitIds: panel.sourceUnitIds,
+      status: panel.status,
+    })),
   ].join('\n'))].join('\n\n')
 }
 
@@ -1243,6 +1297,29 @@ export const CONTEXT_SOURCES: ContextSource[] = [
     requiresAdaptationProjectId: true,
     requiresScreenplayScenes: true,
     read: readScreenplayCurrentScenesContext,
+  },
+  {
+    key: 'comic.visualBible',
+    label: '漫画视觉圣经与视觉条目',
+    scope: 'project',
+    layer: 'L0',
+    ownerFrom: 'work',
+    budgetTokens: 12_000,
+    protectedFromTrim: true,
+    requiresAdaptationProjectId: true,
+    read: readComicVisualBibleContext,
+  },
+  {
+    key: 'comic.currentPages',
+    label: '当前漫画页格',
+    scope: 'project',
+    layer: 'L0',
+    ownerFrom: 'work',
+    budgetTokens: 20_000,
+    protectedFromTrim: true,
+    requiresAdaptationProjectId: true,
+    requiresComicPages: true,
+    read: readComicCurrentPagesContext,
   },
   {
     key: 'worldGameAuthoring',

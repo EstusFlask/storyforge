@@ -79,8 +79,8 @@ export type AgentSkillExecutionModeV1 =
   | 'adaptation-impact'
   | 'screenplay-plan'
   | 'screenplay-scenes'
-  | 'screenplay-revise'
-  | 'screenplay-review'
+  | 'comic-plan'
+  | 'comic-storyboard'
 
 export interface AgentSkillWriteTargetV1 {
   table: string
@@ -159,7 +159,7 @@ const WORLD_GAME_CONTEXT_SOURCE_KEYS = ['worldGameAuthoring'] as const
 const ADAPTATION_BRIEF_CONTEXT_SOURCE_KEYS = ['adaptation.sourceManifest', 'adaptation.sourceContent', 'characters', 'worldview', 'creativeRules'] as const
 const ADAPTATION_PLAN_CONTEXT_SOURCE_KEYS = ['adaptation.sourceManifest', 'adaptation.sourceContent', 'adaptation.currentBrief', 'characters'] as const
 const SCREENPLAY_SCENES_CONTEXT_SOURCE_KEYS = ['adaptation.sourceManifest', 'adaptation.sourceContent', 'adaptation.currentBrief', 'adaptation.currentPlan', 'characters'] as const
-const SCREENPLAY_REVIEW_CONTEXT_SOURCE_KEYS = ['adaptation.sourceManifest', 'adaptation.currentBrief', 'adaptation.currentPlan', 'screenplay.currentScenes'] as const
+const COMIC_STORYBOARD_CONTEXT_SOURCE_KEYS = ['adaptation.sourceManifest', 'adaptation.sourceContent', 'adaptation.currentBrief', 'adaptation.currentPlan', 'comic.visualBible', 'characters'] as const
 
 const STORY_CORE_CONTEXT_SOURCE_KEYS = [
   'projectStatus',
@@ -348,16 +348,7 @@ const ADAPTATION_INPUT_POLICY: AgentSkillInputPolicyV1 = {
     complete: { handling: 'grounded-transform', instruction: '严格依据冻结来源、已确认改编约束和目标媒介合同生成可审查候选。' },
   },
 }
-const ADAPTATION_REVIEW_INPUT_POLICY: AgentSkillInputPolicyV1 = {
-  sourceKeys: ['adaptation.currentBrief', 'adaptation.currentPlan', 'screenplay.currentScenes'],
-  states: {
-    empty: { handling: 'require-upstream', instruction: '没有已确认 Brief、Plan 和目标场景时不得执行剧本审校。' },
-    partial: { handling: 'grounded-transform', instruction: '只审查已交付的确认约束和场景，明确缺失范围。' },
-    complete: { handling: 'grounded-transform', instruction: '按已确认改编约束、场景结构和来源摘要给出可核查问题，不直接改写 Canon。' },
-  },
-}
 const ADAPTATION_COMPRESSION_POLICY = compressionPolicy(['adaptation.sourceContent'])
-const SCREENPLAY_REVIEW_COMPRESSION_POLICY = compressionPolicy(['screenplay.currentScenes'])
 const FORESHADOW_SUGGESTION_COMPRESSION_POLICY = compressionPolicy(FORESHADOW_SUGGESTION_CONTEXT_SOURCE_KEYS)
 const HISTORY_AGENT_COMPRESSION_POLICY = compressionPolicy(HISTORY_AGENT_CONTEXT_SOURCE_KEYS)
 const REFERENCE_DERIVED_COMPRESSION_POLICY = compressionPolicy(REFERENCE_DERIVED_CONTEXT_SOURCE_KEYS)
@@ -1895,47 +1886,50 @@ export const AGENT_SKILLS = [
     maxOutputTokens: 14_000,
     writeTargets: [{ table: 'screenplayScenes', fields: ['planSectionKey', 'intExt', 'location', 'timeOfDay', 'summary', 'estimatedSeconds', 'sourceUnitIds', 'blocks'], adoptionExtension: 'screenplay-scene-lifecycle' }],
     lastVerifiedAt: '2026-08-22',
-    regressionTests: ['R-SCREEN1B-durable-scenes'],
+    regressionTests: ['R-ADAPTCORE1B-durable-candidates'],
   },
   {
     version: 1,
-    id: 'prose.screenplay-revise',
-    agentId: 'prose',
+    id: 'outline.comic-plan',
+    agentId: 'outline',
     defaultForAgent: false,
-    label: '选定剧本场景局部修订',
-    owner: 'prose-agent',
-    promptVersion: 'screenplay-revise-v1',
-    executionMode: 'screenplay-revise',
-    contextTaskKind: 'agent-prose',
+    label: '漫画章页节奏计划',
+    owner: 'outline-agent',
+    promptVersion: 'comic-plan-v1',
+    executionMode: 'comic-plan',
+    contextTaskKind: 'agent-outline',
     readToolNames: [],
-    contextSourceKeys: SCREENPLAY_REVIEW_CONTEXT_SOURCE_KEYS,
-    optionalContextSourceKeys: ['adaptation.sourceContent'],
-    inputPolicy: ADAPTATION_REVIEW_INPUT_POLICY,
-    contextCompression: SCREENPLAY_REVIEW_COMPRESSION_POLICY,
-    maxOutputTokens: 10_000,
-    writeTargets: [{ table: 'screenplayScenes', fields: ['planSectionKey', 'intExt', 'location', 'timeOfDay', 'summary', 'estimatedSeconds', 'sourceUnitIds', 'blocks'], adoptionExtension: 'screenplay-scene-lifecycle' }],
-    lastVerifiedAt: '2026-08-22',
-    regressionTests: ['R-SCREEN1B-durable-scenes'],
-  },
-  {
-    version: 1,
-    id: 'prose.screenplay-review',
-    agentId: 'prose',
-    defaultForAgent: false,
-    label: '剧本全局审校',
-    owner: 'prose-agent',
-    promptVersion: 'screenplay-review-v1',
-    executionMode: 'screenplay-review',
-    contextTaskKind: 'agent-prose',
-    readToolNames: [],
-    contextSourceKeys: SCREENPLAY_REVIEW_CONTEXT_SOURCE_KEYS,
+    contextSourceKeys: ADAPTATION_PLAN_CONTEXT_SOURCE_KEYS,
     optionalContextSourceKeys: [],
-    inputPolicy: ADAPTATION_REVIEW_INPUT_POLICY,
-    contextCompression: SCREENPLAY_REVIEW_COMPRESSION_POLICY,
-    maxOutputTokens: 6_000,
-    writeTargets: [],
+    inputPolicy: ADAPTATION_INPUT_POLICY,
+    contextCompression: ADAPTATION_COMPRESSION_POLICY,
+    maxOutputTokens: 8_000,
+    writeTargets: [{ table: 'adaptationProjects', fields: ['plan'] }],
     lastVerifiedAt: '2026-08-22',
-    regressionTests: ['R-SCREEN1B-durable-scenes'],
+    regressionTests: ['R-COMIC1-complete-workflow'],
+  },
+  {
+    version: 1,
+    id: 'outline.comic-storyboard',
+    agentId: 'outline',
+    defaultForAgent: false,
+    label: '漫画页格分镜批次',
+    owner: 'outline-agent',
+    promptVersion: 'comic-storyboard-v1',
+    executionMode: 'comic-storyboard',
+    contextTaskKind: 'agent-outline',
+    readToolNames: [],
+    contextSourceKeys: COMIC_STORYBOARD_CONTEXT_SOURCE_KEYS,
+    optionalContextSourceKeys: [],
+    inputPolicy: ADAPTATION_INPUT_POLICY,
+    contextCompression: ADAPTATION_COMPRESSION_POLICY,
+    maxOutputTokens: 18_000,
+    writeTargets: [
+      { table: 'comicPages', fields: ['summary'], adoptionExtension: 'comic-page-panel-lifecycle' },
+      { table: 'comicPanels', fields: ['frame', 'shot', 'action', 'visualPrompt', 'negativePrompt', 'continuityRefs', 'lettering', 'sourceUnitIds'], adoptionExtension: 'comic-panel-lifecycle' },
+    ],
+    lastVerifiedAt: '2026-08-22',
+    regressionTests: ['R-COMIC1-complete-workflow'],
   },
   {
     version: 1,
@@ -2838,8 +2832,8 @@ export function validateAgentSkillDefinitionsV1(
     'world-origin': new Set(['complete', 'worldview-field', 'world-suggest', 'worldview-expand', 'constitution-extract', 'codex-extract', 'story-core', 'creative-rules', 'locations', 'map-config', 'history-consult', 'history-storm', 'review']),
     character: new Set(['create', 'supplement', 'relationships', 'character-reply', 'memory-curator']),
     inspiration: new Set(['reference-summary', 'reference-characters', 'reverse', 'review']),
-    outline: new Set(['auto', 'story-arcs', 'foreshadow-suggestions', 'storyline-progress', 'character-driven', 'character-revision', 'world-game', 'impact-summary-regenerate', 'volumes', 'chapters', 'details', 'adaptation-brief', 'adaptation-impact', 'screenplay-plan']),
-    prose: new Set(['auto', 'generate', 'continue', 'emotion-beats', 'inventory-extraction', 'story-timeline-extraction', 'cultivation-progress-extraction', 'style-learn', 'selection-edit', 'selection-check', 'review', 'revise', 'organize', 'memory', 'consistency', 'scene-director', 'adventure-intent', 'adventure-narrator', 'simulation-briefing', 'simulation-advisor', 'simulation-narrator', 'simulation-actor-suggestion', 'open-world-expression', 'open-world-narration', 'screenplay-scenes', 'screenplay-revise', 'screenplay-review']),
+    outline: new Set(['auto', 'story-arcs', 'foreshadow-suggestions', 'storyline-progress', 'character-driven', 'character-revision', 'world-game', 'impact-summary-regenerate', 'volumes', 'chapters', 'details', 'adaptation-brief', 'adaptation-impact', 'screenplay-plan', 'comic-plan', 'comic-storyboard']),
+    prose: new Set(['auto', 'generate', 'continue', 'emotion-beats', 'inventory-extraction', 'story-timeline-extraction', 'cultivation-progress-extraction', 'style-learn', 'selection-edit', 'selection-check', 'review', 'revise', 'organize', 'memory', 'consistency', 'scene-director', 'adventure-intent', 'adventure-narrator', 'simulation-briefing', 'simulation-advisor', 'simulation-narrator', 'simulation-actor-suggestion', 'open-world-expression', 'open-world-narration', 'screenplay-scenes']),
   }
   const ids = new Set<string>()
   const defaultAgents = new Set<DomainAgentId>()

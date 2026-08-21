@@ -18,6 +18,37 @@ import {
 
 export const WORKSPACE_OWNERSHIP_CONTRACT_VERSION = 1
 
+/**
+ * Native workspaces do not pass through the legacy migration, but scope
+ * conversions still need one durable audit receipt. The missing
+ * readyFingerprint intentionally keeps migration rollback unavailable for a
+ * workspace that was born on the current ownership contract.
+ */
+export function nativeOwnershipReceipt(input: {
+  projectId: number
+  worldId: number
+  workId: number
+  workspaceUid: string
+  createdAt: number
+}): OwnershipMigrationReceipt {
+  return {
+    projectId: input.projectId,
+    contractVersion: WORKSPACE_OWNERSHIP_CONTRACT_VERSION,
+    status: 'ready',
+    sourceFingerprint: `native:${input.workspaceUid}`,
+    sourceCounts: { projects: 1, worlds: 1, works: 1 },
+    defaultWorldId: input.worldId,
+    defaultWorkId: input.workId,
+    createdDefaultWorld: false,
+    createdDefaultWork: false,
+    projectBeforeImage: {},
+    ownerBeforeImages: {},
+    preparedAt: input.createdAt,
+    completedAt: input.createdAt,
+    updatedAt: input.createdAt,
+  }
+}
+
 const PROJECT_MIRROR_FIELDS = [
   'activeWorldId',
   'activeWorkId',

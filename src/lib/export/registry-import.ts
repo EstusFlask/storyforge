@@ -30,12 +30,15 @@ import {
 import { assertStoredWorkClassification } from '../world-engine/work-kind'
 import { assertAdaptationProjectInvariant } from '../adaptation/contracts'
 import { validateScreenplayBlocksV1 } from '../screenplay/contracts'
-import type { AdaptationProject, ScreenplayBlock, Work } from '../types'
+import { assertComicLetteringV1, assertComicMediaAssetV1, assertNormalizedFrameV1, framesOverlap } from '../comic/contracts'
+import type { AdaptationProject, ComicLetteringItemV1, ComicMediaAsset, ScreenplayBlock, Work } from '../types'
 
 const PORTABLE_OWNER_VERSION = 4
 const WORK_CLASSIFICATION_VERSION = 5
 const ADAPTATION_VERSION = 6
 const SCREENPLAY_VERSION = 7
+const COMIC_STORYBOARD_VERSION = 8
+const COMIC_MEDIA_VERSION = 9
 
 function strictOwnerShadow(spec: TableSpec, row: Record<string, any>): {
   kind: 'world' | 'work' | 'instance'
@@ -101,6 +104,8 @@ function validateStrictOwnership(data: ProjectExportData): void {
   }
   if (data.version >= ADAPTATION_VERSION) validateAdaptationBackup(value)
   if (data.version >= SCREENPLAY_VERSION) validateScreenplayBackup(value)
+  if (data.version >= COMIC_STORYBOARD_VERSION) validateComicStoryboardBackup(value)
+  if (data.version >= COMIC_MEDIA_VERSION) validateComicMediaBackup(value)
   for (const spec of PROJECT_TABLES) {
     if (!spec.exportable || spec.name === 'projects' || spec.name === 'worlds' || spec.name === 'works') continue
     const rows = value[spec.name]
@@ -213,6 +218,93 @@ function validateScreenplayBackup(value: Record<string, any>): void {
     const section = root.plan?.sections?.find((item: Record<string, unknown>) => item.stableKey === row.planSectionKey)
     if (!section || root.planSourceManifestVersion !== root.activeSourceManifestVersion) throw new Error('[deriveImport] v7 剧本场景计划引用无效')
   }
+}
+
+function validateComicStoryboardBackup(value: Record<string, any>): void {
+  if (!Array.isArray(value.comicPages) || !Array.isArray(value.comicPanels) || !Array.isArray(value.comicVisualSubjects)) throw new Error('[deriveImport] v8 备份缺少漫画页格或视觉条目表')
+  const roots = new Map<number, Record<string, any>>((value.adaptationProjects ?? []).map((row: Record<string, any>) => [row._exportId, row]))
+  const units = new Map<number, Record<string, any>>((value.adaptationSourceUnits ?? []).map((row: Record<string, any>) => [row._exportId, row]))
+  const pages = new Map<number, Record<string, any>>()
+  const stablePages = new Set<string>(); const pageOrders = new Set<string>()
+  for (const page of value.comicPages as Record<string, any>[]) {
+    const root = roots.get(page._adaptationProjectExportId)
+    if (!root || root.medium !== 'comic' || page._workExportId !== root._workExportId || !Number.isInteger(page._exportId) || pages.has(page._exportId)) throw new Error('[deriveImport] v8 漫画页面 owner 或便携 ID 非法')
+    if (!/^[a-z0-9][a-z0-9._-]{0,95}$/i.test(page.stableKey) || stablePages.has(`${page._workExportId}:${page.stableKey}`) || !Number.isInteger(page.order) || page.order < 0 || pageOrders.has(`${page._adaptationProjectExportId}:${page.order}`)) throw new Error('[deriveImport] v8 漫画页面 stableKey 或顺序非法')
+    if (!Number.isInteger(page.chapterNumber) || page.chapterNumber < 1 || page.chapterNumber > root.targetSpec.chapterCount || typeof page.allowPanelOverlap !== 'boolean' || typeof page.summary !== 'string') throw new Error('[deriveImport] v8 漫画页面内容非法')
+    pages.set(page._exportId, page); stablePages.add(`${page._workExportId}:${page.stableKey}`); pageOrders.add(`${page._adaptationProjectExportId}:${page.order}`)
+  }
+  const stablePanels = new Set<string>(); const panelsByPage = new Map<number, Record<string, any>[]>()
+  for (const panel of value.comicPanels as Record<string, any>[]) {
+    const page = pages.get(panel._pageExportId); const root = page ? roots.get(page._adaptationProjectExportId) : null
+    if (!page || !root || panel._workExportId !== page._workExportId || !/^[a-z0-9][a-z0-9._-]{0,95}$/i.test(panel.stableKey) || stablePanels.has(`${panel._workExportId}:${panel.stableKey}`)) throw new Error('[deriveImport] v8 漫画格 owner 或 stableKey 非法')
+    assertNormalizedFrameV1(panel.frame, `导入格 ${panel.stableKey}`, 0.04)
+    if (!Number.isInteger(panel.order) || panel.order < 0 || !Number.isInteger(panel.sourceReviewManifestVersion) || panel.sourceReviewManifestVersion !== root.activeSourceManifestVersion || !Array.isArray(panel._sourceUnitExportIds) || !panel._sourceUnitExportIds.length || new Set(panel._sourceUnitExportIds).size !== panel._sourceUnitExportIds.length) throw new Error('[deriveImport] v8 漫画格顺序或来源版本非法')
+    for (const unitId of panel._sourceUnitExportIds) {
+      const unit = units.get(unitId)
+      if (!unit || unit._adaptationProjectExportId !== page._adaptationProjectExportId || unit.manifestVersion !== panel.sourceReviewManifestVersion) throw new Error('[deriveImport] v8 漫画格来源单元越界')
+    }
+    assertComicLetteringV1(panel.lettering as ComicLetteringItemV1[])
+    if (!Array.isArray(panel.continuityRefs) || typeof panel.action !== 'string' || !panel.action.trim() || typeof panel.visualPrompt !== 'string' || typeof panel.negativePrompt !== 'string') throw new Error('[deriveImport] v8 漫画格内容非法')
+    stablePanels.add(`${panel._workExportId}:${panel.stableKey}`)
+    const siblings = panelsByPage.get(panel._pageExportId) ?? []; siblings.push(panel); panelsByPage.set(panel._pageExportId, siblings)
+  }
+  for (const [pageId, panels] of panelsByPage) {
+    const page = pages.get(pageId)!
+    const sorted = [...panels].sort((left, right) => left.order - right.order)
+    if (sorted.some((panel, index) => panel.order !== index)) throw new Error('[deriveImport] v8 漫画格顺序必须连续')
+    if (!page.allowPanelOverlap) for (let left = 0; left < sorted.length; left++) for (let right = left + 1; right < sorted.length; right++) if (framesOverlap(sorted[left].frame, sorted[right].frame)) throw new Error('[deriveImport] v8 漫画格非法重叠')
+  }
+  const characterCount = Array.isArray(value.characters) ? value.characters.length : 0
+  const subjectKeys = new Set<string>()
+  for (const subject of value.comicVisualSubjects as Record<string, any>[]) {
+    const root = roots.get(subject._adaptationProjectExportId)
+    if (!root || root.medium !== 'comic' || subject._workExportId !== root._workExportId || !/^[a-z0-9][a-z0-9._-]{0,95}$/i.test(subject.stableKey) || subjectKeys.has(`${subject._workExportId}:${subject.stableKey}`)) throw new Error('[deriveImport] v8 视觉条目 owner 或 stableKey 非法')
+    if (subject._characterExportId != null && (!Number.isInteger(subject._characterExportId) || subject._characterExportId < 0 || subject._characterExportId >= characterCount)) throw new Error('[deriveImport] v8 视觉条目角色引用越界')
+    if (subject.characterId != null || !Array.isArray(subject._sourceUnitExportIds) || !subject._sourceUnitExportIds.length) throw new Error('[deriveImport] v8 视觉条目泄露本地 ID 或缺来源')
+    if (subject.kind === 'character' ? subject.locationRefKey != null : subject.kind === 'location' ? subject._characterExportId != null : (subject._characterExportId != null || subject.locationRefKey != null)) throw new Error('[deriveImport] v8 视觉条目 kind/ref 组合非法')
+    subjectKeys.add(`${subject._workExportId}:${subject.stableKey}`)
+  }
+  for (const panel of value.comicPanels as Record<string, any>[]) for (const ref of panel.continuityRefs) if (!subjectKeys.has(`${panel._workExportId}:${ref.subjectKey}`)) throw new Error('[deriveImport] v8 漫画格连续性引用不存在')
+}
+
+function validateComicMediaBackup(value: Record<string, any>): void {
+  if (!Array.isArray(value.comicMediaAssets) || !Array.isArray(value.mediaBlobObjects)) throw new Error('[deriveImport] v9 备份缺少漫画媒体或共享 Blob 表')
+  const blobs = new Map<number, Record<string, any>>()
+  for (const blob of value.mediaBlobObjects as Record<string, any>[]) {
+    if (!Number.isInteger(blob._exportId) || blobs.has(blob._exportId) || !/^[a-f0-9]{64}$/.test(blob.contentHash) || !['image/png', 'image/jpeg', 'image/webp'].includes(blob.mimeType) || !Number.isInteger(blob.byteSize) || blob.byteSize < 16 || typeof blob.data !== 'string') throw new Error('[deriveImport] v9 Blob 元数据或便携内容非法')
+    blobs.set(blob._exportId, blob)
+  }
+  const panels = new Map<number, Record<string, any>>((value.comicPanels ?? []).map((row: Record<string, any>) => [row._exportId, row]))
+  const subjects = new Map<string, Record<string, any>>((value.comicVisualSubjects ?? []).map((row: Record<string, any>) => [`${row._workExportId}:${row.stableKey}`, row]))
+  const assets = new Map<string, Record<string, any>>()
+  for (const row of value.comicMediaAssets as Record<string, any>[]) {
+    const key = `${row._workExportId}:${row.stableKey}`
+    if (assets.has(key) || !blobs.has(row._blobObjectExportId)) throw new Error('[deriveImport] v9 asset stableKey 重复或 Blob 引用越界')
+    assertComicMediaAssetV1({ ...row, projectId: 1, workId: row._workExportId, adaptationProjectId: row._adaptationProjectExportId, panelId: row._panelExportId ?? null, blobObjectId: row._blobObjectExportId } as ComicMediaAsset)
+    if (row.role === 'panel-render' && (!panels.has(row._panelExportId) || panels.get(row._panelExportId)!._workExportId !== row._workExportId)) throw new Error('[deriveImport] v9 panel-render owner 越界')
+    if (row.role !== 'panel-render' && !subjects.has(`${row._workExportId}:${row.subjectKey}`)) throw new Error('[deriveImport] v9 subject asset owner 越界')
+    assets.set(key, row)
+  }
+  for (const panel of value.comicPanels as Record<string, any>[]) if (panel.selectedMediaAssetKey) {
+    const asset = assets.get(`${panel._workExportId}:${panel.selectedMediaAssetKey}`)
+    if (!asset || asset.role !== 'panel-render' || asset._panelExportId !== panel._exportId) throw new Error('[deriveImport] v9 格所选 asset 不匹配')
+  }
+  for (const subject of value.comicVisualSubjects as Record<string, any>[]) if (subject.selectedMediaAssetKey) {
+    const asset = assets.get(`${subject._workExportId}:${subject.selectedMediaAssetKey}`)
+    if (!asset || asset.subjectKey !== subject.stableKey) throw new Error('[deriveImport] v9 视觉条目所选 asset 不匹配')
+  }
+  for (const [key, asset] of assets) for (const reference of asset.referenceAssetKeys ?? []) if (reference === asset.stableKey || !assets.has(`${asset._workExportId}:${reference}`)) throw new Error(`[deriveImport] v9 asset 参考引用非法：${key}`)
+  const visiting = new Set<string>(); const visited = new Set<string>()
+  const visit = (key: string) => {
+    if (visiting.has(key)) throw new Error(`[deriveImport] v9 asset 参考引用形成环：${key}`)
+    if (visited.has(key)) return
+    const asset = assets.get(key)
+    if (!asset) throw new Error(`[deriveImport] v9 asset 参考引用缺失：${key}`)
+    visiting.add(key)
+    for (const reference of asset.referenceAssetKeys ?? []) visit(`${asset._workExportId}:${reference}`)
+    visiting.delete(key); visited.add(key)
+  }
+  assets.forEach((_asset, key) => visit(key))
 }
 
 function restoreStrictOwner(
@@ -341,6 +433,13 @@ async function assertPortableBinaryIntegrity(
   data: ArrayBuffer,
 ): Promise<void> {
   const integrity = spec.portableData?.kind === 'binary-blob' ? spec.portableData.integrity : null
+  const selfIntegrity = spec.portableData?.kind === 'binary-blob' ? spec.portableData.selfIntegrity : null
+  if (selfIntegrity) {
+    if (row[selfIntegrity.sizeField] !== data.byteLength) throw new Error(`[deriveImport] ${spec.name} 二进制大小与本行元数据不一致`)
+    const digest = await Dexie.waitFor(crypto.subtle.digest('SHA-256', data))
+    const hash = Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, '0')).join('')
+    if (row[selfIntegrity.hashField] !== hash) throw new Error(`[deriveImport] ${spec.name} 二进制哈希与本行元数据不一致`)
+  }
   if (!integrity) return
   const referenceId = row[integrity.referenceField]
   const metadataTable = (db as any)[integrity.metadataTable]

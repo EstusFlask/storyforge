@@ -9,9 +9,253 @@ import { PROJECT_TABLES } from '../../src/lib/registry/project-tables'
 import { canonicalStringify, hashCanonicalValue } from '../../src/lib/agent/run/hash'
 import { replayAgentRunEventsV1, toAgentRunProjectionBodyV1 } from '../../src/lib/agent/run/projection'
 import { createNarrativeSimulationAcceptanceContent } from '../../src/lib/narrative-simulation/authoring'
-import type { AnyAgentRunEventV1 } from '../../src/lib/types'
+import {
+  confirmAdaptationBrief,
+  confirmAdaptationPlan,
+  confirmComicVisualBible,
+  createAdaptation,
+  listActiveSourceUnits,
+  saveAdaptationBriefDraft,
+  saveAdaptationPlanDraft,
+  startAdaptationProduction,
+} from '../../src/lib/adaptation/source-manifest'
+import { createScreenplayScene } from '../../src/lib/screenplay/service'
+import { createComicPage, saveComicVisualSubject } from '../../src/lib/comic/service'
+import { commitUploadedComicAssetV1 } from '../../src/lib/comic/media-service'
+import type {
+  AdaptationBriefV1,
+  AdaptationPlanV1,
+  AnyAgentRunEventV1,
+  ComicTargetSpecV1,
+  ScreenplayTargetSpecV1,
+  WorkspaceScope,
+} from '../../src/lib/types'
 
 const now = 1_700_000_000_000 // 固定时间戳,保证派生/手写两版导出可逐字段比对
+
+const adaptationBrief: AdaptationBriefV1 = {
+  version: 1,
+  coreTheme: '选择与代价',
+  dominantEmotion: '克制',
+  mustKeep: ['青云山门的抉择'],
+  mayCut: [],
+  mayMerge: [],
+  mayReorder: [],
+  allowedAdditions: [],
+  audience: '大众',
+  rating: 'PG-13',
+  targetScale: '全表往返夹具',
+  narrativePerspective: '林惊羽',
+  timeBudget: '',
+  costLimit: '',
+  deviationNotes: '',
+  unresolvedQuestions: [],
+  assumptions: [],
+}
+
+const screenplayTargetSpec: ScreenplayTargetSpecV1 = {
+  format: 'film',
+  language: 'zh-CN',
+  episodeCount: null,
+  targetMinutesPerEpisode: 90,
+  rating: 'PG-13',
+  dialogueDensity: 'balanced',
+  productionScale: 'standard',
+  preserveVoiceOver: false,
+  titlePage: {
+    creditLine: '小说改编',
+    authorDisplayName: '全量夹具',
+    contactText: '',
+    copyrightNotice: '测试用途',
+    draftLabel: '第一稿',
+  },
+  exportDefaults: ['fountain', 'fdx', 'pdf'],
+}
+
+const comicTargetSpec: ComicTargetSpecV1 = {
+  format: 'page-comic',
+  audience: '大众',
+  readingDirection: 'ltr',
+  chapterCount: 1,
+  targetPagesPerChapter: 20,
+  pageSize: { width: 1200, height: 1700, unit: 'px', bleed: 30 },
+  colorMode: 'color',
+  artStyleBrief: '清晰线稿与克制配色',
+  renderCandidatesPerPanel: 2,
+  imageCapabilityRequirement: {
+    referenceImage: false,
+    deterministicSeed: false,
+    inpainting: false,
+    commercialUseRequired: false,
+    minimumWidth: 1024,
+    minimumHeight: 1024,
+  },
+}
+
+function fixturePng(width = 1200, height = 1700): ArrayBuffer {
+  const bytes = new Uint8Array(32)
+  bytes.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])
+  const view = new DataView(bytes.buffer)
+  view.setUint32(16, width)
+  view.setUint32(20, height)
+  return bytes.buffer
+}
+
+async function seedAdaptationProducts(sourceScope: WorkspaceScope) {
+  const screenplay = await createAdaptation({
+    sourceScope,
+    sourceWorkId: sourceScope.workId,
+    title: '青云山门 · 剧本',
+    sourceSelection: { mode: 'entire-work' },
+    medium: 'screenplay',
+    targetSpec: screenplayTargetSpec,
+  })
+  const screenplayUnit = (await listActiveSourceUnits(screenplay.adaptation.id!))
+    .find(unit => unit.sourceKind === 'chapter')
+  if (!screenplayUnit?.id) throw new Error('全量夹具缺少剧本来源章节单元')
+  const screenplayPlan: AdaptationPlanV1 = {
+    version: 1,
+    premise: '林惊羽必须决定复仇还是守护。',
+    sections: [{
+      stableKey: 'act-1',
+      title: '第一幕',
+      summary: '踏入山门并遭遇抉择。',
+      order: 0,
+      episodeNumber: 1,
+      sourceUnitKeys: [screenplayUnit.sourceUnitKey],
+    }],
+    globalAssumptions: [],
+  }
+  let screenplayRoot = await saveAdaptationBriefDraft({ adaptationProjectId: screenplay.adaptation.id!, brief: adaptationBrief, expectedRevision: screenplay.adaptation.revision })
+  screenplayRoot = await confirmAdaptationBrief({ adaptationProjectId: screenplayRoot.id!, expectedRevision: screenplayRoot.revision })
+  screenplayRoot = await saveAdaptationPlanDraft({ adaptationProjectId: screenplayRoot.id!, plan: screenplayPlan, expectedRevision: screenplayRoot.revision })
+  screenplayRoot = await confirmAdaptationPlan({ adaptationProjectId: screenplayRoot.id!, expectedRevision: screenplayRoot.revision })
+  screenplayRoot = await startAdaptationProduction({ adaptationProjectId: screenplayRoot.id!, expectedRevision: screenplayRoot.revision })
+  const screenplayScene = await createScreenplayScene(screenplay.scope, {
+    stableKey: 'scene-1',
+    planSectionKey: 'act-1',
+    episodeNumber: 1,
+    sceneNumber: 1,
+    intExt: 'EXT',
+    location: '青云山门',
+    timeOfDay: '晨',
+    summary: '林惊羽踏入山门。',
+    estimatedSeconds: 45,
+    sourceUnitIds: [screenplayUnit.id],
+    blocks: [{ id: 'action-1', type: 'action', text: '云海散开，青云山门出现在林惊羽面前。' }],
+  })
+
+  const comic = await createAdaptation({
+    sourceScope,
+    sourceWorkId: sourceScope.workId,
+    title: '青云山门 · 漫画',
+    sourceSelection: { mode: 'entire-work' },
+    medium: 'comic',
+    targetSpec: comicTargetSpec,
+  })
+  const comicUnit = (await listActiveSourceUnits(comic.adaptation.id!))
+    .find(unit => unit.sourceKind === 'chapter')
+  if (!comicUnit?.id) throw new Error('全量夹具缺少漫画来源章节单元')
+  const comicPlan: AdaptationPlanV1 = {
+    version: 1,
+    premise: '用一页建立山门与人物的力量关系。',
+    sections: [{
+      stableKey: 'comic-chapter-1',
+      title: '山门',
+      summary: '主人公第一次看见青云山。',
+      order: 0,
+      episodeNumber: 1,
+      sourceUnitKeys: [comicUnit.sourceUnitKey],
+    }],
+    globalAssumptions: [],
+  }
+  let comicRoot = await saveAdaptationBriefDraft({ adaptationProjectId: comic.adaptation.id!, brief: adaptationBrief, expectedRevision: comic.adaptation.revision })
+  comicRoot = await confirmAdaptationBrief({ adaptationProjectId: comicRoot.id!, expectedRevision: comicRoot.revision })
+  comicRoot = await saveAdaptationPlanDraft({ adaptationProjectId: comicRoot.id!, plan: comicPlan, expectedRevision: comicRoot.revision })
+  comicRoot = await confirmAdaptationPlan({ adaptationProjectId: comicRoot.id!, expectedRevision: comicRoot.revision })
+  comicRoot = await confirmComicVisualBible({
+    adaptationProjectId: comicRoot.id!,
+    expectedRevision: comicRoot.revision,
+    visualBible: {
+      version: 1,
+      artDirection: '东方奇幻页漫',
+      linework: '清晰有重量的墨线',
+      palette: ['青灰', '金色'],
+      lighting: '晨雾逆光',
+      periodAndMaterials: '古典山门与石阶',
+      cameraLanguage: ['先建立镜头，再切人物近景'],
+      prohibitedDepictions: ['成图不含文字与水印'],
+    },
+  })
+  comicRoot = await startAdaptationProduction({ adaptationProjectId: comicRoot.id!, expectedRevision: comicRoot.revision })
+  const styleSubject = await saveComicVisualSubject({
+    scope: comic.scope,
+    draft: {
+      stableKey: 'fixture-style',
+      kind: 'style',
+      characterId: null,
+      locationRefKey: null,
+      label: '青云视觉风格',
+      design: {
+        description: '晨雾中的东方奇幻山门',
+        silhouette: '层叠山峰与高耸牌楼',
+        facialFeatures: '',
+        hairAndCostume: '',
+        palette: ['青灰', '金色'],
+        materials: ['青石', '木构'],
+        distinguishingMarks: ['云海金边'],
+        prohibitedChanges: ['不得改成现代建筑'],
+      },
+      sourceUnitIds: [comicUnit.id],
+      status: 'reviewed',
+    },
+  })
+  const comicPage = await createComicPage(comic.scope, {
+    stableKey: 'page-1',
+    chapterNumber: 1,
+    summary: '林惊羽踏入青云山门。',
+    panels: [{
+      stableKey: 'page-1-panel-1',
+      frame: { x: 0, y: 0, width: 1, height: 1 },
+      shot: { size: 'wide', angle: 'low', movement: 'static', composition: '人物位于山门前景下方' },
+      action: '林惊羽仰望云海中的青云山门。',
+      visualPrompt: 'eastern fantasy mountain gate in morning mist, no text',
+      negativePrompt: 'letters, watermark, logo',
+      continuityRefs: [{ subjectKey: styleSubject.stableKey, note: '保持青灰与金色主调' }],
+      lettering: [{
+        id: 'caption-1',
+        kind: 'caption',
+        text: '青云山。',
+        frame: { x: 0.05, y: 0.05, width: 0.3, height: 0.12 },
+        direction: 'horizontal',
+        fontFamily: 'storyforge-serif',
+        fontSize: 28,
+        textColor: '#111111',
+        fillColor: '#ffffff',
+        strokeColor: '#111111',
+        strokeWidth: 2,
+        tail: null,
+        zIndex: 1,
+      }],
+      sourceUnitIds: [comicUnit.id],
+    }],
+  })
+  const comicMedia = await commitUploadedComicAssetV1({
+    scope: comic.scope,
+    data: fixturePng(),
+    panelId: comicPage.panels[0].id!,
+    rights: {
+      version: 1,
+      source: 'author-upload',
+      commercialUse: 'allowed',
+      redistribution: 'allowed',
+      attribution: 'StoryForge 全量夹具',
+      declaration: '测试夹具确认拥有该测试图片的完整使用权。',
+      declaredAt: Date.now(),
+    },
+  })
+  return { screenplay, screenplayRoot, screenplayScene, comic, comicRoot, comicPage, comicMedia }
+}
 
 /** 种子:每张 exportable 表至少一行,带双世界组 + 树 + 各类外键。返回各源 id 便于断言。 */
 export async function seedFullProject() {
@@ -33,11 +277,14 @@ export async function seedFullProject() {
   const workId = await db.works.add({
     projectId,
     worldId,
+    code: 'work-full-fixture',
     title: '全量作品',
     description: '全表往返作品根',
     genres: ['fantasy'],
     status: 'drafting',
     targetWordCount: 100000,
+    kind: 'novel',
+    novelProfile: 'long',
     createdAt: now,
     updatedAt: now,
   }) as number
@@ -701,6 +948,27 @@ export async function seedFullProject() {
     }
   }
 
+  // 新媒介能力必须与历史 82 表在同一个真实项目中完成严格往返，不能只靠孤立夹具。
+  // 先完成旧记录 owner 补齐，再通过正式领域服务创建两个目标 Work 及其来源清单。
+  const adaptationProducts = await seedAdaptationProducts({ projectId, worldId, workId })
+  // createAdaptation() 模拟真实交互会切换当前 Work；全量夹具的基准身份仍是最早的
+  // 小说 Work，因此恢复指针及旧 fixture 的项目兼容镜像，不改变新增目标 Work。
+  const mirroredProject = await db.projects.get(projectId) as any
+  const restoredProject = {
+    ...mirroredProject,
+    name: '全量作品',
+    genre: 'fantasy',
+    genres: ['fantasy'],
+    description: '全表往返',
+    targetWordCount: 100000,
+    activeWorldId: worldId,
+    activeWorkId: workId,
+    activeCharacterDrivenPlanId: characterDrivenPlan,
+    updatedAt: now,
+  }
+  for (const key of ['status', 'currentWordCount', 'coverImage', 'writingStyleId', 'methodologyId', 'communityOrigin']) delete restoredProject[key]
+  await db.projects.put(restoredProject)
+
   return {
     projectId, wgA, wgB, char1, char2, vol, chapNode, chapter, temporalFact, ref1,
     cat, subCat, rootWorld, mirrorWorld, locParent, cultivationSystem, codexEntry,
@@ -708,6 +976,7 @@ export async function seedFullProject() {
     narrativeModule, worldRevision, worldRelease, gameDefinition, gameRelease,
     adventureGameDefinition, avgGameDefinition, narrativeSimulationDefinition, openWorldGameDefinition, avgMediaAsset,
     interactionCharacterProfile, interactionSceneTemplate, agentRun, agentRunCheckpoint,
+    adaptationProducts,
   }
 }
 

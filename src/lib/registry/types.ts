@@ -240,6 +240,11 @@ export type PortableDataSpec = {
     hashField: string
     sizeField: string
   }
+  /** Hash/size fields live on the binary row itself (product-neutral object store). */
+  selfIntegrity?: {
+    hashField: string
+    sizeField: string
+  }
 }
 
 /**
@@ -298,6 +303,8 @@ export interface TableSpec<T = any> {
   exportRefRemap?: ExportRefRemap[]
   /** Embedded structured data / integrity rebind behavior during export/import. */
   portableData?: PortableDataSpec
+  /** Product-neutral stable reference to a governed binary object table, used by shared GC. */
+  mediaRef?: { blobTable: string; field: string }
   /**
    * 导入兜底默认值：声明该表"非可选字段"在缺失时的默认值。
    * 导入引擎写入前做 `{ ...defaults, ...row }`,保证老数据/跨版本导入的 JSON
@@ -520,6 +527,8 @@ export interface AssembleContextInput {
   adaptationSourceUnitKeys?: string[]
   /** SCREEN-1: explicit target scene capability list for review/revision Runs. */
   screenplaySceneIds?: number[]
+  /** COMIC-1: explicit target page capability list for storyboard review Runs. */
+  comicPageIds?: number[]
   /** AGENT-1: 本地确定性项目搜索；只由 searchResults 上下文源消费。 */
   searchQuery?: string
   /** AGENT-1: 搜索最多返回 10 条短摘。 */
@@ -554,6 +563,7 @@ export interface ContextSource {
   requiresAdaptationProjectId?: boolean
   requiresAdaptationSourceUnits?: boolean
   requiresScreenplayScenes?: boolean
+  requiresComicPages?: boolean
   /** 规划尚未创建正文 Chapter 时，允许用 outlineNodeId 作为规范章序边界。 */
   acceptsOutlineNodeAsChapterBoundary?: boolean
   enabled?: (input: AssembleContextInput) => boolean | Promise<boolean>

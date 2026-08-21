@@ -101,6 +101,9 @@ const PROJECT_TABLE_REGISTRATIONS: ProjectTableRegistration[] = [
     refs: [
       { kind: 'simple', field: 'id', target: 'adaptationSourceUnits[adaptationProjectId]', onDelete: 'cascade' },
       { kind: 'simple', field: 'id', target: 'screenplayScenes[adaptationProjectId]', onDelete: 'cascade' },
+      { kind: 'simple', field: 'id', target: 'comicPages[adaptationProjectId]', onDelete: 'cascade' },
+      { kind: 'simple', field: 'id', target: 'comicVisualSubjects[adaptationProjectId]', onDelete: 'cascade' },
+      { kind: 'simple', field: 'id', target: 'comicMediaAssets[adaptationProjectId]', onDelete: 'cascade' },
     ],
     exportRemap: [
       { field: 'worldId', remapVia: 'worlds', exportAs: '_worldExportId', onUnmapped: 'require' },
@@ -146,6 +149,64 @@ const PROJECT_TABLE_REGISTRATIONS: ProjectTableRegistration[] = [
     defaults: { summary: '', sourceUnitIds: [], blocks: [], status: 'card', revision: 1 },
     note: 'SCREEN-1 结构化正规剧本场景；块级角色和不可变来源证据统一重映射' },
 
+  { table: db.comicPages, name: 'comicPages', owner: 'project', exportable: true, exportIdField: true,
+    domainOwner: { allowed: ['work'], legacyDefault: 'work', locator: { kind: 'field', owner: 'work', field: 'workId' } },
+    refs: [{ kind: 'simple', field: 'id', target: 'comicPanels[pageId]', onDelete: 'cascade' }],
+    exportRemap: [
+      { field: 'workId', remapVia: 'works', exportAs: '_workExportId', onUnmapped: 'require' },
+      { field: 'adaptationProjectId', remapVia: 'adaptationProjects', exportAs: '_adaptationProjectExportId', onUnmapped: 'require' },
+    ],
+    defaults: { allowPanelOverlap: false, summary: '', status: 'planned', revision: 1 },
+    note: 'COMIC-1 页级节奏与布局根；页面尺寸只取 AdaptationProject targetSpec' },
+
+  { table: db.comicPanels, name: 'comicPanels', owner: 'project', exportable: true, exportIdField: true,
+    domainOwner: { allowed: ['work'], legacyDefault: 'work', locator: { kind: 'field', owner: 'work', field: 'workId' } },
+    refs: [
+      { kind: 'array', field: 'sourceUnitIds', itemTarget: 'adaptationSourceUnits', onDelete: 'removeItem' },
+      { kind: 'simple', field: 'id', target: 'comicMediaAssets[panelId]', onDelete: 'cascade' },
+    ],
+    exportRemap: [
+      { field: 'workId', remapVia: 'works', exportAs: '_workExportId', onUnmapped: 'require' },
+      { field: 'pageId', remapVia: 'comicPages', exportAs: '_pageExportId', onUnmapped: 'require' },
+    ],
+    exportRefRemap: [{ field: 'sourceUnitIds', remapVia: 'adaptationSourceUnits', kind: 'id-array', exportAs: '_sourceUnitExportIds' }],
+    defaults: { sourceUnitIds: [], continuityRefs: [], lettering: [], selectedMediaAssetKey: null, status: 'draft', revision: 1 },
+    note: 'COMIC-1 可编辑格、镜头、排字与来源证据；媒体选择使用稳定字符串 key' },
+
+  { table: db.comicVisualSubjects, name: 'comicVisualSubjects', owner: 'project', exportable: true, exportIdField: true,
+    domainOwner: { allowed: ['work'], legacyDefault: 'work', locator: { kind: 'field', owner: 'work', field: 'workId' } },
+    refs: [
+      { kind: 'array', field: 'sourceUnitIds', itemTarget: 'adaptationSourceUnits', onDelete: 'removeItem' },
+    ],
+    exportRemap: [
+      { field: 'workId', remapVia: 'works', exportAs: '_workExportId', onUnmapped: 'require' },
+      { field: 'adaptationProjectId', remapVia: 'adaptationProjects', exportAs: '_adaptationProjectExportId', onUnmapped: 'require' },
+      { field: 'characterId', remapVia: 'characters', exportAs: '_characterExportId' },
+    ],
+    exportRefRemap: [{ field: 'sourceUnitIds', remapVia: 'adaptationSourceUnits', kind: 'id-array', exportAs: '_sourceUnitExportIds' }],
+    defaults: { characterId: null, locationRefKey: null, sourceUnitIds: [], selectedMediaAssetKey: null, status: 'draft', revision: 1 },
+    note: 'COMIC-1 角色/地点/道具/风格视觉条目唯一真相；外部实体删除后保留设计快照' },
+
+  { table: db.comicMediaAssets, name: 'comicMediaAssets', owner: 'project', exportable: true, exportIdField: true,
+    mediaRef: { blobTable: 'mediaBlobObjects', field: 'blobObjectId' },
+    domainOwner: { allowed: ['work'], legacyDefault: 'work', locator: { kind: 'field', owner: 'work', field: 'workId' } },
+    exportRemap: [
+      { field: 'workId', remapVia: 'works', exportAs: '_workExportId', onUnmapped: 'require' },
+      { field: 'adaptationProjectId', remapVia: 'adaptationProjects', exportAs: '_adaptationProjectExportId', onUnmapped: 'require' },
+      { field: 'panelId', remapVia: 'comicPanels', exportAs: '_panelExportId' },
+      { field: 'blobObjectId', remapVia: 'mediaBlobObjects', exportAs: '_blobObjectExportId', onUnmapped: 'require' },
+    ],
+    defaults: { panelId: null, subjectKey: null, requestHash: null, promptHash: null, referenceAssetKeys: [], providerReceipt: null, disposition: 'available' },
+    note: 'COMIC-2 媒体候选元数据、rights 与 provider receipt；选择状态只存在于 Panel/VisualSubject' },
+
+  { table: db.mediaBlobObjects, name: 'mediaBlobObjects', owner: 'project', exportable: true, exportIdField: true,
+    portableData: { kind: 'binary-blob', field: 'data', selfIntegrity: { hashField: 'contentHash', sizeField: 'byteSize' } },
+    domainOwner: { allowed: ['work'], legacyDefault: 'work', locator: { kind: 'field', owner: 'work', field: 'workId' } },
+    refs: [{ kind: 'simple', field: 'id', target: 'comicMediaAssets[blobObjectId]', onDelete: 'keep' }],
+    exportRemap: [{ field: 'workId', remapVia: 'works', exportAs: '_workExportId', onUnmapped: 'require' }],
+    defaults: { disposition: 'available', deleteRequestedAt: null, deleteReceiptHash: null },
+    note: 'MEDIA-CORE-1 产品中立、Work-owned、hash 校验二进制对象；媒体 service 负责引用计数和两阶段回收' },
+
   { table: db.workCharacterBindings, name: 'workCharacterBindings', owner: 'project', exportable: true,
     communityShare: 'world', releaseSection: 'characters',
     domainOwner: { allowed: ['work'], legacyDefault: 'work', locator: { kind: 'field', owner: 'work', field: 'workId' } },
@@ -157,7 +218,7 @@ const PROJECT_TABLE_REGISTRATIONS: ProjectTableRegistration[] = [
 
   { table: db.ownershipMigrations, name: 'ownershipMigrations', owner: 'transient', exportable: false,
     domainOwner: WORKSPACE_DOMAIN_OWNER,
-    note: 'WORLD-2C 惰性迁移的紧凑 before-image 和恢复凭证，不保存手稿正文' },
+    note: 'WORLD-2C ownership 来源、惰性迁移 before-image 与作用域变更审计，不保存手稿正文' },
 
   { table: db.workspaceDocuments, name: 'workspaceDocuments', owner: 'project', exportable: false,
     domainOwner: WORKSPACE_DOMAIN_OWNER,
@@ -306,6 +367,7 @@ const PROJECT_TABLE_REGISTRATIONS: ProjectTableRegistration[] = [
       { kind: 'simple', field: 'id', target: 'chapters[perspectiveCharacterId]', onDelete: 'setNull' },
       { kind: 'simple', field: 'id', target: 'narrativeBeats[speakerCharacterId]', onDelete: 'setNull' },
       { kind: 'simple', field: 'id', target: 'interactionCharacterProfiles[characterId]', onDelete: 'cascade' },
+      { kind: 'simple', field: 'id', target: 'comicVisualSubjects[characterId]', onDelete: 'setNull' },
       { kind: 'array', field: 'appearingCharacterIds', itemTarget: 'detailedOutlines', onDelete: 'removeItem' },
     ],
     exportRemap: [

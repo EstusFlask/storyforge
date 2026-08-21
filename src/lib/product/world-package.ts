@@ -70,6 +70,9 @@ const LICENSES = new Set<CommunityWorldLicense>([
 ])
 
 const ROOT_TABLES = ['worlds', 'works'] as const
+// 世界包只承载世界共享表，不是 v6+ 的完整项目备份。固定声明为最后一个不要求
+// 改编私有表的备份版本，避免为了满足完整备份契约而在分享包中泄露/伪造私有表键。
+const WORLD_PACKAGE_PORTABLE_BACKUP_VERSION = 5
 
 // Frozen at PLATFORM-1 v1 (commit 60df0b4). Later world-engine tables are
 // optional when importing an existing v1 package, even if current v1 exports include them.
@@ -146,14 +149,9 @@ function buildPortableProject(backup: ProjectExportData): ProjectExportData {
   root.updatedAt = Date.now()
 
   const portable: Record<string, unknown> = {
-    version: backup.version,
+    version: Math.min(backup.version, WORLD_PACKAGE_PORTABLE_BACKUP_VERSION),
     exportedAt: Date.now(),
     project: root,
-  }
-  // 世界包不携带私有作者数据，但仍必须满足它所声明备份版本的结构契约。
-  // 空表由 PROJECT_TABLES 派生，后续新增必需表时不会再次漏项。
-  for (const spec of PROJECT_TABLES) {
-    if (spec.exportable && spec.name !== 'projects') portable[spec.name] = []
   }
   if (backup.ownership) portable.ownership = cloneJson(backup.ownership)
   const backupRecord = backup as unknown as Record<string, unknown>

@@ -95,7 +95,7 @@ describe('WORLD-2C C4/C5 · strict ownership and lifecycle completion', () => {
       updatedAt: Date.now(),
     } as any)
     const backup = await exportProjectJSON(ownership.scope.projectId)
-    expect(backup.version).toBe(7)
+    expect(backup.version).toBe(9)
     const beforeProjects = await db.projects.count()
     const damaged = structuredClone(backup) as any
     damaged.storyCores[0]._workOwnerExportId = 999999
