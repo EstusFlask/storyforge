@@ -152,12 +152,14 @@ describe('MEMINT-0 · five memory planes and compaction replay contract', () => 
   it('replays a bounded compaction from checkpoint plus tail without dropping raw evidence refs', async () => {
     const fixture = await runFixture()
     const recorded = await fixture.record('{"packet":"original"}', 'context-packet')
+    const replacement = await fixture.record('{"packet":"replacement"}', 'context-packet')
+    const rawSource = await fixture.record('{"source":"raw"}', 'raw-response')
     const saved = await createWorkingContextCompactionCheckpointV1({
       scope: fixture.scope,
       runId: fixture.snapshot.run.id,
       expectedLastSequence: fixture.snapshot.projection.lastSequence,
       originalPacketHash: recorded.artifact.contentHash,
-      replacementPacketHash: HASH_B,
+      replacementPacketHash: replacement.artifact.contentHash,
       sources: [
         {
           sourceKey: 'worldview.races', sourceRevision: 'rv-7', contentHash: HASH_C,
@@ -174,7 +176,7 @@ describe('MEMINT-0 · five memory planes and compaction replay contract', () => 
       gatewayVersion: 'memint-contract-v1',
       beforeTokens: 1800,
       afterTokens: 900,
-      rawArtifactRefs: [HASH_C, recorded.artifact.contentHash],
+      rawArtifactRefs: [rawSource.artifact.contentHash, recorded.artifact.contentHash],
       now: 1_787_360_000_500,
     })
     await appendAgentRunEventV1({
@@ -195,7 +197,7 @@ describe('MEMINT-0 · five memory planes and compaction replay contract', () => 
     ])
     expect(first?.tailEvents.map(event => event.type)).toEqual(['model.responded'])
     const durableEvents = await db.agentRunEvents.where('runId').equals(saved.snapshot.run.id).toArray()
-    expect(durableEvents.filter(event => event.type === 'evidence.artifact.recorded')).toHaveLength(1)
+    expect(durableEvents.filter(event => event.type === 'evidence.artifact.recorded')).toHaveLength(3)
   })
 
   it('uses live-reference mark-and-sweep and leaves a portable tombstone for explicit pruning', async () => {

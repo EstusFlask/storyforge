@@ -998,6 +998,53 @@ if (!assembleContextSource.includes("from '../context-gateway/selector'")) {
   violations.push('[㉖唯一入口] selector 必须由现有 assembleContext 边界统一导出')
 }
 
+// ── ㉗ CTXG-6 单次 attempt 必须绑定 V3 Manifest 与可逐字回读证据 ──
+const contextManifestSource = read('src/lib/agent/run/context-manifest.ts')
+const contextAttemptEvidenceSource = read('src/lib/context-gateway/attempt-evidence.ts')
+const contextGatewayIndexSource = read('src/lib/context-gateway/index.ts')
+const memoryEngineeringTypeSource = read('src/lib/types/memory-engineering.ts')
+const eventSchemaSource = read('src/lib/agent/run/event-schema.ts')
+for (const token of [
+  'ContextManifestV3', 'v2ManifestHash', 'gatewayVersionHash', 'selectorHash',
+  'contextPacketHash', 'retrievalTrace', 'renderedRequestArtifactHash',
+  'rawResponseArtifactHash', 'packetArtifactHash', 'verifyContextManifestIntegrityV3',
+]) {
+  if (!`${agentRunTypeSource}\n${contextManifestSource}`.includes(token)) {
+    violations.push(`[㉗Manifest V3] 缺少 ${token}`)
+  }
+}
+for (const token of [
+  'recordContextGatewayPreflightEvidenceV1', 'finalizeContextGatewayAttemptEvidenceV1',
+  'verifyContextGatewayCandidateEvidenceV1', 'inspectContextGatewayManifestFreshnessV1',
+  'exportContextGatewayDiagnosticV1', 'preflight-order', 'duplicate-finalize',
+  'policyRevision', 'policyHash', 'sourceContentHash',
+]) {
+  if (!contextAttemptEvidenceSource.includes(token)) violations.push(`[㉗attempt 证据] 缺少 ${token}`)
+}
+for (const kind of [
+  'context-manifest', 'selector-result', 'context-packet', 'source-snapshot', 'tool-result', 'rendered-request', 'raw-response',
+]) {
+  if (!memoryEngineeringTypeSource.includes(`'${kind}'`)
+    || !eventSchemaSource.includes(`'${kind}'`)
+    || !artifactRecordSource.includes(`'${kind}'`)
+    || !artifactRetentionStoreSource.includes(`'${kind}'`)) {
+    violations.push(`[㉗exact artifact 闭集] ${kind} 未覆盖类型、事件、完整性与 retention`)
+  }
+}
+for (const token of [
+  'verifyAgentRunCheckpointV1', 'checkpointChainHashes',
+  'assertWorkingContextArtifactsAvailableV1', 'packet-artifact-unavailable',
+]) {
+  if (!workingContextSource.includes(token)) violations.push(`[㉗compaction 恢复] 缺少 ${token}`)
+}
+if (/\bdb\./.test(contextAttemptEvidenceSource)
+  || /contextGateway(?:Artifacts|Manifests|Traces)\s*:/.test(schemaSource)) {
+  violations.push('[㉗单一证据生命周期] Gateway attempt 必须复用 Run ledger/agentRunArtifacts，不得新建平行表')
+}
+if (!contextGatewayIndexSource.includes("from './attempt-evidence'")) {
+  violations.push('[㉗公开入口] attempt evidence API 必须从 Context Gateway headless 边界导出')
+}
+
 // ── 报告 ──
 if (violations.length) {
   console.error('[architecture] ❌ 发现反模式违规(违反 CLAUDE.md 三注册表铁律):\n')

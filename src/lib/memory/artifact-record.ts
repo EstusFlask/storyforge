@@ -9,7 +9,7 @@ import { assertExactRunArtifactBodySafeV1 } from './evidence-policy'
 
 const HASH = /^[a-f0-9]{64}$/
 const KINDS = new Set<ExactRunArtifactKindV1>([
-  'context-packet', 'source-snapshot', 'tool-result', 'rendered-request', 'raw-response',
+  'context-manifest', 'selector-result', 'context-packet', 'source-snapshot', 'tool-result', 'rendered-request', 'raw-response',
 ])
 
 function fail(message: string): never {

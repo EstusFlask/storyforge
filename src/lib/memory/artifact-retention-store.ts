@@ -12,7 +12,7 @@ import { canonicalStringify } from '../agent/run/hash'
 
 const HASH = /^[a-f0-9]{64}$/
 const KINDS = new Set<ExactRunArtifactKindV1>([
-  'context-packet', 'source-snapshot', 'tool-result', 'rendered-request', 'raw-response',
+  'context-manifest', 'selector-result', 'context-packet', 'source-snapshot', 'tool-result', 'rendered-request', 'raw-response',
 ])
 
 export class AgentRunArtifactRetentionError extends Error {

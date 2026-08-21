@@ -242,7 +242,7 @@ function parsePayload<T extends AgentRunEventTypeV1>(
       payload = {
         artifactKind: readEnum(
           record.artifactKind,
-          ['context-packet', 'source-snapshot', 'tool-result', 'rendered-request', 'raw-response'] as const,
+          ['context-manifest', 'selector-result', 'context-packet', 'source-snapshot', 'tool-result', 'rendered-request', 'raw-response'] as const,
           'event.payload(evidence.artifact.recorded).artifactKind',
         ),
         contentHash: readHash(

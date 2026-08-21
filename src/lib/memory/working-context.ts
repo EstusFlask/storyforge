@@ -8,9 +8,14 @@ import type {
 import {
   createAgentRunCheckpointV1,
   readLatestVerifiedAgentRunCheckpointV1,
+  verifyAgentRunCheckpointV1,
 } from '../agent/run/checkpoint'
 import { readAgentRunV1 } from '../agent/run/event-store'
 import { hashCanonicalValue } from '../agent/run/hash'
+import {
+  inspectAgentRunArtifactAvailabilityV1,
+  readAgentRunArtifactExactV1,
+} from './artifact-store'
 
 const HASH = /^[a-f0-9]{64}$/
 
@@ -117,6 +122,32 @@ export function parseWorkingContextCompactionCheckpointV1(
   }
 }
 
+async function assertWorkingContextArtifactsAvailableV1(
+  projectId: number,
+  payload: WorkingContextCompactionCheckpointV1,
+): Promise<void> {
+  for (const [label, contentHash] of [
+    ['originalPacketHash', payload.originalPacketHash],
+    ['replacementPacketHash', payload.replacementPacketHash],
+  ] as const) {
+    const availability = await inspectAgentRunArtifactAvailabilityV1({
+      projectId,
+      artifactKind: 'context-packet',
+      contentHash,
+    })
+    if (availability.state !== 'available') {
+      throw new WorkingContextContractError('packet-artifact-unavailable', `${label} 的 exact Context Packet 当前为 ${availability.state}`)
+    }
+    await readAgentRunArtifactExactV1({ projectId, artifactKind: 'context-packet', contentHash })
+  }
+  const available = await db.agentRunArtifacts.where('projectId').equals(projectId).toArray()
+  for (const contentHash of payload.rawArtifactRefs) {
+    if (!available.some(row => row.contentHash === contentHash && row.retentionState === 'available')) {
+      throw new WorkingContextContractError('raw-artifact-unavailable', `rawArtifactRef ${contentHash} 没有可回读的 exact body`)
+    }
+  }
+}
+
 export async function createWorkingContextCompactionCheckpointV1(input: {
   scope: WorkspaceScope
   runId: number
@@ -138,6 +169,9 @@ export async function createWorkingContextCompactionCheckpointV1(input: {
     throw new WorkingContextContractError('sequence-conflict', '运行已推进，拒绝基于旧工作上下文压缩')
   }
   const previous = await db.agentRunCheckpoints.where('runId').equals(input.runId).last()
+  if (previous?.id != null && !await verifyAgentRunCheckpointV1(input.scope, previous.id)) {
+    throw new WorkingContextContractError('broken-base-chain', '上一个 checkpoint 未通过事件 replay 校验')
+  }
   const payload = parseWorkingContextCompactionCheckpointV1({
     version: 1,
     kind: 'working-context-compaction',
@@ -155,6 +189,7 @@ export async function createWorkingContextCompactionCheckpointV1(input: {
     afterTokens: input.afterTokens,
     rawArtifactRefs: input.rawArtifactRefs,
   })
+  await assertWorkingContextArtifactsAvailableV1(input.scope.projectId, payload)
   return createAgentRunCheckpointV1({
     scope: input.scope,
     runId: input.runId,
@@ -166,6 +201,7 @@ export async function createWorkingContextCompactionCheckpointV1(input: {
 
 export async function readWorkingContextReplayV1(scope: WorkspaceScope, runId: number): Promise<null | {
   checkpointHash: string
+  checkpointChainHashes: string[]
   compaction: WorkingContextCompactionCheckpointV1
   tailEvents: AnyAgentRunEventV1[]
   replayHash: string
@@ -178,25 +214,53 @@ export async function readWorkingContextReplayV1(scope: WorkspaceScope, runId: n
   if (compaction.generation !== verified.checkpoint.generation) {
     throw new WorkingContextContractError('stale-generation', 'compaction generation 与 checkpoint 不一致')
   }
-  if (compaction.baseCheckpointHash != null) {
-    const base = await db.agentRunCheckpoints
-      .where('runId').equals(runId)
-      .filter(row => row.checkpointHash === compaction.baseCheckpointHash)
-      .first()
-    if (!base || compaction.tailFromSequence !== base.throughSequence + 2) {
+  const checkpoints = await db.agentRunCheckpoints.where('runId').equals(runId).sortBy('throughSequence')
+  const byHash = new Map(checkpoints.map(row => [row.checkpointHash, row]))
+  const checkpointChainHashes: string[] = []
+  const seen = new Set<string>()
+  let cursor = verified.checkpoint
+  while (true) {
+    if (seen.has(cursor.checkpointHash)) {
+      throw new WorkingContextContractError('broken-base-chain', 'compaction base checkpoint 链形成循环')
+    }
+    seen.add(cursor.checkpointHash)
+    checkpointChainHashes.push(cursor.checkpointHash)
+    if (!await verifyAgentRunCheckpointV1(scope, cursor.id!)) {
+      throw new WorkingContextContractError('broken-base-chain', `checkpoint ${cursor.checkpointHash} 无法通过事件 replay 校验`)
+    }
+    let payload: WorkingContextCompactionCheckpointV1
+    try {
+      payload = parseWorkingContextCompactionCheckpointV1(JSON.parse(cursor.resumePayloadJson ?? 'null'))
+    } catch (error) {
+      if (cursor.checkpointHash === verified.checkpoint.checkpointHash) throw error
+      break
+    }
+    if (payload.generation !== cursor.generation) {
+      throw new WorkingContextContractError('stale-generation', 'base compaction generation 与 checkpoint 不一致')
+    }
+    await assertWorkingContextArtifactsAvailableV1(scope.projectId, payload)
+    if (payload.baseCheckpointHash == null) {
+      if (payload.tailFromSequence !== 1) {
+        throw new WorkingContextContractError('broken-base-chain', '首个 compaction 必须从事件 1 开始 replay')
+      }
+      break
+    }
+    const base = byHash.get(payload.baseCheckpointHash)
+    if (!base || base.throughSequence >= cursor.throughSequence
+      || payload.tailFromSequence !== base.throughSequence + 2) {
       throw new WorkingContextContractError('broken-base-chain', 'base checkpoint 与 tail 边界不一致')
     }
-  } else if (compaction.tailFromSequence !== 1) {
-    throw new WorkingContextContractError('broken-base-chain', '首个 compaction 必须从事件 1 开始 replay')
+    cursor = base as typeof verified.checkpoint
   }
+  checkpointChainHashes.reverse()
   const tailEvents = verified.snapshot.events.filter(
     event => event.sequence > verified.checkpoint.throughSequence + 1,
   )
   const replayHash = await hashCanonicalValue({
     checkpointHash: verified.checkpoint.checkpointHash,
+    checkpointChainHashes,
     compaction,
     tailEvents,
   })
-  return { checkpointHash: verified.checkpoint.checkpointHash, compaction, tailEvents, replayHash }
+  return { checkpointHash: verified.checkpoint.checkpointHash, checkpointChainHashes, compaction, tailEvents, replayHash }
 }
-

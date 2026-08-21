@@ -1,4 +1,9 @@
-import type { ContextCompressionEvidenceV1 } from '../registry/types'
+import type {
+  ContextCompressionEvidenceV1,
+  ContextSufficiencyReportV1,
+  RetrievalTraceV1,
+} from '../registry/types'
+import type { ExactRunArtifactKindV1 } from './memory-engineering'
 
 export type AgentRunWorkflowKind =
   | 'direct-generation'
@@ -327,6 +332,71 @@ export interface ContextManifestV2 {
   totalInputTokens: number
   sources: ContextManifestSourceV2[]
   v1ManifestHash: string
+  manifestHash: string
+}
+
+export type ContextManifestArtifactRoleV3 =
+  | 'selector-result'
+  | 'context-packet'
+  | 'source-snapshot'
+  | 'tool-result'
+  | 'rendered-request'
+  | 'raw-response'
+
+export interface ContextManifestArtifactRefV3 {
+  role: ContextManifestArtifactRoleV3
+  artifactKind: ExactRunArtifactKindV1
+  contentHash: string
+  byteLength: number
+  sourceKey?: string
+  resourceKey?: string
+  /** Hash of the exact source body inside a source-snapshot artifact. */
+  sourceContentHash?: string
+  /** Hash of the Canon SourceRefs carried inside a source-snapshot artifact. */
+  sourceRefsHash?: string
+  toolName?: string
+  callIndex?: number
+}
+
+/** CTXG-6 immutable final evidence view for one Run step attempt. */
+export interface ContextManifestV3 {
+  version: 3
+  runId: number
+  stepId: string
+  attempt: number
+  scope: ContextManifestV2['scope']
+  inputBudget: number
+  totalInputTokens: number
+  sources: ContextManifestSourceV2[]
+  v1ManifestHash: string
+  v2ManifestHash: string
+  gateway: {
+    scopeFingerprint: string
+    gatewayVersionHash: string
+    policyHash: string
+    selectorPolicyId: string
+    selectorHash: string
+    selectorArtifactHash: string
+    inventoryHash: string
+    catalogVersion: string
+    contextPacketHash: string
+    sufficiency: ContextSufficiencyReportV1
+    retrievalTrace: RetrievalTraceV1
+  }
+  artifacts: ContextManifestArtifactRefV3[]
+  prompt: {
+    promptHash: string
+    renderedRequestArtifactHash: string
+  }
+  candidate: {
+    candidateHash: string
+    rawResponseArtifactHash: string
+  }
+  workingContext: {
+    generation: number
+    packetArtifactHash: string
+    checkpointHash: string | null
+  }
   manifestHash: string
 }
 

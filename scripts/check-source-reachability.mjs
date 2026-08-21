@@ -24,6 +24,8 @@ const entrypoints = [
   // AGENT-1 Phase 27.1-a/b is a headless public boundary for tools and the read-only AgentRunner.
   // Keep it independently testable without eagerly bundling the future copilot into the current UI.
   'src/lib/agent/index.ts',
+  // CTXG Phase 1A is a headless public Context Gateway/evidence boundary until formal Skills switch in CTXG-7.
+  'src/lib/context-gateway/index.ts',
   // FLOW-3 public domain-node boundary is exercised by regression tests and external tooling.
   'src/lib/node-authoring/index.ts',
   // HARNESS-26 is a headless offline release-evaluation boundary; production routing must not import it.

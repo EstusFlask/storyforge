@@ -257,6 +257,8 @@ export type MemoryPlaneIdV1 =
   | 'projection-recovery'
 
 export type ExactRunArtifactKindV1 =
+  | 'context-manifest'
+  | 'selector-result'
   | 'context-packet'
   | 'source-snapshot'
   | 'tool-result'

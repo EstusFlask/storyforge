@@ -730,6 +730,10 @@ export interface RetrievalDecisionV1 {
   depth: ContextResourceDepthV1
   revision: number | string
   contentHash: string
+  /** Optional for historical V1 traces; required by ContextManifestV3 evidence. */
+  policyRevision?: number
+  /** Optional for historical V1 traces; required by ContextManifestV3 evidence. */
+  policyHash?: string
   sourceRefs: ContextSourceRefV1[]
   tokenCount: number
 }
