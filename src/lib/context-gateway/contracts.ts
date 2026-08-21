@@ -324,10 +324,10 @@ export async function createContextSufficiencyReportV1(input: {
   if (new Set(obligations.map(item => item.id)).size !== obligations.length) fail('duplicate-obligation', 'Sufficiency obligation id 重复')
   const hardFailure = obligations.some(item => item.required && (item.status === 'missing' || item.status === 'conflicted'))
   const softMissing = obligations.some(item => !item.required && (item.status === 'missing' || item.status === 'conflicted'))
-  const additionalRead = hardFailure || !input.readsAllowed
+  const additionalRead = hardFailure
     ? 'forbidden' as const
     : softMissing
-      ? 'needed' as const
+      ? input.readsAllowed ? 'needed' as const : 'forbidden' as const
       : 'not-needed' as const
   const body = {
     version: 'context-sufficiency-v1' as const,

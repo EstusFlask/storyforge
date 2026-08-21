@@ -1,0 +1,65 @@
+import type { AgentSkillDefinitionV1 } from '../agent/skill-registry'
+import { AGENT_TOOL_BY_NAME } from '../agent/tool-registry'
+import { CONTEXT_SOURCE_BY_KEY } from '../registry/context-sources'
+import type { ContextAccessPolicyV1 } from '../registry/types'
+import { getContextSelectorPolicyV1 } from './selector'
+
+export class ContextGatewaySkillPolicyErrorV1 extends Error {
+  constructor(message: string) {
+    super(`[context-gateway-skill-policy] ${message}`)
+    this.name = 'ContextGatewaySkillPolicyErrorV1'
+  }
+}
+
+function fail(message: string): never {
+  throw new ContextGatewaySkillPolicyErrorV1(message)
+}
+
+export function assertAgentSkillContextGatewayPolicyV1(
+  skill: AgentSkillDefinitionV1,
+): NonNullable<AgentSkillDefinitionV1['contextGateway']> {
+  const gateway = skill.contextGateway
+  if (!gateway) fail(`Skill ${skill.id} 尚未声明 Context Gateway 权限`)
+  if (gateway.version !== 1 || !['shadow', 'required'].includes(gateway.rollout)) {
+    fail(`Skill ${skill.id} 的 Gateway version/rollout 无效`)
+  }
+  for (const sourceKey of gateway.providerSourceKeys) {
+    if (!CONTEXT_SOURCE_BY_KEY.get(sourceKey)?.resources) fail(`Skill ${skill.id} 的 ${sourceKey} 未挂 Provider`)
+  }
+  for (const name of gateway.additionalReadToolNames) {
+    const tool = AGENT_TOOL_BY_NAME.get(name)
+    if (!tool || tool.risk !== 'read' || ![
+      'list_context_catalog', 'search_context', 'read_context_resource', 'read_original_evidence',
+    ].includes(name)) {
+      fail(`Skill ${skill.id} 未获 Gateway 工具 ${name}`)
+    }
+  }
+  return gateway
+}
+
+export function createContextAccessPolicyFromSkillV1(
+  skill: AgentSkillDefinitionV1,
+): ContextAccessPolicyV1 {
+  const gateway = assertAgentSkillContextGatewayPolicyV1(skill)
+  return {
+    version: 'context-access-policy-v1',
+    policyId: `skill-${skill.id}-${skill.promptVersion}-gateway-v1`,
+    // A provider may legitimately be empty in a new project. Mandatory evidence
+    // is expressed by resource/target obligations, not provider presence.
+    mandatorySourceKeys: [],
+    allowedSourceKeys: [...gateway.providerSourceKeys],
+    allowedResourceKinds: [...gateway.allowedResourceKinds],
+    allowedDepths: [...gateway.allowedDepths],
+    selectorPolicyId: getContextSelectorPolicyV1(skill.contextTaskKind).selectorPolicyId,
+    maxReadCalls: gateway.maxReadCalls,
+    maxRetrievedTokens: gateway.maxRetrievedTokens,
+    allowOriginalRead: gateway.allowOriginalRead,
+    candidateAccess: 'forbidden',
+  }
+}
+
+export function contextGatewayAdditionalReadToolNamesForSkillV1(
+  skill: AgentSkillDefinitionV1,
+): readonly string[] {
+  return [...assertAgentSkillContextGatewayPolicyV1(skill).additionalReadToolNames]
+}

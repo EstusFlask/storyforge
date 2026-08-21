@@ -1045,6 +1045,59 @@ if (!contextGatewayIndexSource.includes("from './attempt-evidence'")) {
   violations.push('[㉗公开入口] attempt evidence API 必须从 Context Gateway headless 边界导出')
 }
 
+// ── ㉘ CTXG-7 正式 Skill/Runner 快慢路径与 V3 采纳门 ──
+const contextExecutionSource = read('src/lib/context-gateway/execution.ts')
+const contextSkillPolicySource = read('src/lib/context-gateway/skill-policy.ts')
+const agentSkillSource = read('src/lib/agent/skill-registry.ts')
+const agentProtocolSource = read('src/lib/agent/protocol.ts')
+const agentClientAdapterSource = read('src/lib/agent/client-adapter.ts')
+for (const token of [
+  'contextGateway?: AgentSkillContextGatewayPolicyV1',
+  "rollout: 'shadow' | 'required'",
+  'additionalReadToolNames', 'maxPlanningSteps', 'maxPlanningModelTokens',
+]) {
+  if (!agentSkillSource.includes(token)) violations.push(`[㉘Skill Gateway 合同] 缺少 ${token}`)
+}
+if (!agentExecutionBindingSource.includes('contextGateway: skill.contextGateway')
+  || !agentExecutionBindingSource.includes('assertFrozenGatewayPolicyV1')) {
+  violations.push('[㉘冻结权限] Skill V2 binding 必须冻结并严格校验 Gateway policy，旧 snapshot 仍可无该字段')
+}
+for (const token of [
+  'allowedToolNames', 'stopAfterToolBatch', '本次 Skill 未授权只读工具',
+  'loop_detected', 'maxToolCalls', 'maxToolResultTokens',
+]) {
+  if (!agentRunnerSource.includes(token)) violations.push(`[㉘Runner 能力闭集] 缺少 ${token}`)
+}
+if (!agentProtocolSource.includes('formatAgentToolCatalog(allowedToolNames')
+  || !agentClientAdapterSource.includes('nativeToolOptions(input.allowedToolNames)')) {
+  violations.push('[㉘双 transport 权限] 文本目录和 native tool schema 必须使用同一逐运行 allowlist')
+}
+for (const token of [
+  'executeContextGatewayV1', "'deterministic-fast'", "'bounded-additional-read'",
+  "'deterministic-fallback'", 'selector.sufficiency.additionalRead === \'needed\'',
+  'additionalPlanningModelCalls', 'additionalToolCalls', 'hard-sufficiency',
+  'assertContextGatewayCandidateAdoptableV1', 'candidate-manifest-required',
+  'verifyContextGatewayCandidateEvidenceV1', 'inspectContextGatewayManifestFreshnessV1',
+]) {
+  if (!contextExecutionSource.includes(token)) violations.push(`[㉘Gateway 执行主链] 缺少 ${token}`)
+}
+if (!contextSkillPolicySource.includes('createContextAccessPolicyFromSkillV1')
+  || !contextSkillPolicySource.includes('CONTEXT_SOURCE_BY_KEY.get(sourceKey)?.resources')
+  || !contextSkillPolicySource.includes('AGENT_TOOL_BY_NAME.get(name)')) {
+  violations.push('[㉘三注册表权限] Gateway Policy 必须从 Skill、CONTEXT_SOURCES Provider 与 Tool Registry 共同校验')
+}
+if (/\bdb\.|from ['"]\.\.\/db\//.test(contextExecutionSource)
+  || /contextGateway(?:Executions|Plans|Sessions)\s*:/.test(schemaSource)) {
+  violations.push('[㉘无平行状态] Gateway execution 不得直接访问 DB 或新增并行执行/计划表')
+}
+if (!contextAttemptEvidenceSource.includes('硬证据义务未满足')) {
+  violations.push('[㉘V3 fail-closed] forbidden 不能掩盖 mandatory/conflicted 硬证据失败')
+}
+if (!contextGatewayIndexSource.includes("from './execution'")
+  || !contextGatewayIndexSource.includes("from './skill-policy'")) {
+  violations.push('[㉘公开入口] 快慢路径与 Skill policy 必须从唯一 Context Gateway headless 边界导出')
+}
+
 // ── 报告 ──
 if (violations.length) {
   console.error('[architecture] ❌ 发现反模式违规(违反 CLAUDE.md 三注册表铁律):\n')

@@ -60,6 +60,7 @@ function contextAccessPolicyBodyV2(skill: AgentSkillDefinitionV2) {
     optionalContextSourceKeys: skill.optionalContextSourceKeys,
     inputPolicy: skill.inputPolicy,
     contextCompression: skill.contextCompression,
+    ...(skill.contextGateway ? { contextGateway: skill.contextGateway } : {}),
     writeTargets: skill.writeTargets,
   }
 }
@@ -173,6 +174,46 @@ function parseDefinitionJsonV2(binding: AgentSkillExecutionBindingV2): AgentSkil
   return definition
 }
 
+function assertFrozenGatewayPolicyV1(definition: AgentSkillDefinitionV2): void {
+  const gateway = definition.contextGateway
+  if (gateway == null) return
+  const exact = [
+    'version', 'rollout', 'providerSourceKeys', 'allowedResourceKinds', 'allowedDepths',
+    'maxReadCalls', 'maxRetrievedTokens', 'maxPlanningSteps', 'maxPlanningModelTokens',
+    'allowOriginalRead', 'additionalReadToolNames',
+  ]
+  if (Object.keys(gateway).length !== exact.length
+    || Object.keys(gateway).some(key => !exact.includes(key))
+    || gateway.version !== 1
+    || !['shadow', 'required'].includes(gateway.rollout)
+    || typeof gateway.allowOriginalRead !== 'boolean') {
+    failV2(`${definition.id} 的冻结 Context Gateway policy 结构无效`)
+  }
+  for (const [label, values] of [
+    ['providerSourceKeys', gateway.providerSourceKeys],
+    ['allowedResourceKinds', gateway.allowedResourceKinds],
+    ['allowedDepths', gateway.allowedDepths],
+    ['additionalReadToolNames', gateway.additionalReadToolNames],
+  ] as const) {
+    if (!Array.isArray(values) || values.length === 0
+      || values.some(value => typeof value !== 'string' || !value)
+      || new Set(values).size !== values.length) {
+      failV2(`${definition.id} 的冻结 Context Gateway ${label} 无效`)
+    }
+  }
+  for (const value of [
+    gateway.maxReadCalls, gateway.maxRetrievedTokens,
+    gateway.maxPlanningSteps, gateway.maxPlanningModelTokens,
+  ]) {
+    if (!Number.isSafeInteger(value) || value < 1) {
+      failV2(`${definition.id} 的冻结 Context Gateway budget 无效`)
+    }
+  }
+  if (gateway.allowedDepths.includes('original') && !gateway.allowOriginalRead) {
+    failV2(`${definition.id} 的冻结 Context Gateway original 权限冲突`)
+  }
+}
+
 function writeTargetsEqual(left: readonly AgentRunWriteTargetV1[], right: readonly AgentRunWriteTargetV1[]): boolean {
   return canonicalStringify(left) === canonicalStringify(right)
 }
@@ -187,6 +228,7 @@ export async function assertAgentSkillExecutionBindingIntegrityV2(
     failV2(`${label} tool schema 快照无效`)
   }
   const definition = parseDefinitionJsonV2(binding)
+  assertFrozenGatewayPolicyV1(definition)
   if (canonicalStringify(definition) !== binding.skillDefinitionJson) {
     failV2(`${label} Skill definition JSON 不是规范序列化`)
   }

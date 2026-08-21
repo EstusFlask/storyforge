@@ -1,6 +1,6 @@
 import { estimateTokens } from '../ai/context-budget'
 import type { ChatMessage } from '../types'
-import { executeAgentTool } from './tool-registry'
+import { AGENT_TOOL_BY_NAME, executeAgentTool } from './tool-registry'
 import {
   buildAgentProtocolSystemPrompt,
   parseAgentProtocolAction,
@@ -128,6 +128,17 @@ export interface RunReadOnlyAgentInput {
   signal?: AbortSignal
   onEvent?: (event: ReadOnlyAgentEvent) => void
   executionTrace?: ReadOnlyAgentExecutionTrace
+  /** Frozen per-run capability subset. Omitted only for legacy generic read-only runs. */
+  allowedToolNames?: readonly string[]
+  /** Deterministic host gate used by bounded retrieval to stop as soon as evidence is sufficient. */
+  stopAfterToolBatch?: (input: {
+    step: number
+    results: readonly {
+      name: string
+      arguments: Readonly<Record<string, unknown>>
+      result: AgentToolResult
+    }[]
+  }) => Promise<string | null>
 }
 
 function clampInteger(value: number | undefined, fallback: number, hardMax: number): number {
@@ -234,8 +245,20 @@ export async function runReadOnlyAgent(input: RunReadOnlyAgentInput): Promise<Re
     events.push(event)
     input.onEvent?.(event)
   }
+  const allowedToolNames = input.allowedToolNames == null
+    ? null
+    : new Set(input.allowedToolNames)
+  if (allowedToolNames && allowedToolNames.size !== input.allowedToolNames!.length) {
+    throw new Error('Agent 只读工具授权不得重复')
+  }
+  if (allowedToolNames) {
+    for (const name of allowedToolNames) {
+      const tool = AGENT_TOOL_BY_NAME.get(name)
+      if (!tool || tool.risk !== 'read') throw new Error(`Agent 未登记只读工具授权：${name}`)
+    }
+  }
   const transcript: ChatMessage[] = [
-    { role: 'system', content: input.model.systemPrompt ?? buildAgentProtocolSystemPrompt() },
+    { role: 'system', content: input.model.systemPrompt ?? buildAgentProtocolSystemPrompt(input.allowedToolNames) },
     { role: 'user', content: `【用户目标】\n${goal}` },
   ]
   let steps = 0
@@ -343,6 +366,21 @@ export async function runReadOnlyAgent(input: RunReadOnlyAgentInput): Promise<Re
       })
     }
 
+    if (allowedToolNames && action.calls.some(call => !allowedToolNames.has(call.name))) {
+      protocolErrors += 1
+      const unauthorized = action.calls.filter(call => !allowedToolNames.has(call.name)).map(call => call.name)
+      const message = `本次 Skill 未授权只读工具：${[...new Set(unauthorized)].join(', ')}`
+      emit({ type: 'protocol-error', step: steps, error: message })
+      if (protocolErrors > limits.maxProtocolErrors) {
+        return stopResult({
+          reason: 'protocol_error', steps, toolCalls, totalTokens, toolResultTokens, transcript, events, emit,
+          trace: input.executionTrace,
+        })
+      }
+      transcript.push({ role: 'user', content: `${message}。请只使用本次声明的工具，或直接给出最终答复。` })
+      continue
+    }
+
     if (toolCalls + action.calls.length > limits.maxToolCalls) {
       return stopResult({
         reason: 'max_tool_calls', steps, toolCalls, totalTokens, toolResultTokens, transcript, events, emit,
@@ -358,6 +396,11 @@ export async function runReadOnlyAgent(input: RunReadOnlyAgentInput): Promise<Re
     }
 
     const outputs = []
+    const batchResults: Array<{
+      name: string
+      arguments: Readonly<Record<string, unknown>>
+      result: AgentToolResult
+    }> = []
     for (let index = 0; index < action.calls.length; index++) {
       if (input.signal?.aborted) {
         return stopResult({
@@ -402,12 +445,20 @@ export async function runReadOnlyAgent(input: RunReadOnlyAgentInput): Promise<Re
           tokens: result.meta.totalInputTokens,
         },
       })
+      batchResults.push({ name: call.name, arguments: { ...call.arguments }, result })
       if (toolResultTokens > limits.maxToolResultTokens) {
         return stopResult({
           reason: 'tool_result_budget', steps, toolCalls, totalTokens, toolResultTokens, transcript, events, emit,
           trace: input.executionTrace,
         })
       }
+    }
+    const gatedAnswer = await input.stopAfterToolBatch?.({ step: steps, results: batchResults })
+    if (gatedAnswer != null) {
+      return stopResult({
+        reason: 'completed', answer: gatedAnswer, steps, toolCalls, totalTokens, toolResultTokens,
+        transcript, events, emit, trace: input.executionTrace,
+      })
     }
     transcript.push({
       role: 'user',

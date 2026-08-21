@@ -320,6 +320,10 @@ function category(descriptor: ContextResourceDescriptorV1): ContextSelectorCateg
   return CATEGORY_BY_KIND[descriptor.kind]
 }
 
+export function contextSelectorCategoryForKindV1(kind: ContextResourceKind): ContextSelectorCategoryV1 {
+  return CATEGORY_BY_KIND[kind]
+}
+
 function taskRank(descriptor: ContextResourceDescriptorV1, policy: ContextSelectorPolicyV1): number {
   const index = policy.coreKinds.indexOf(descriptor.kind)
   return index < 0 ? 0 : policy.coreKinds.length - index

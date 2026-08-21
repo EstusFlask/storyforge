@@ -14,7 +14,12 @@ import {
   type AgentContextInputStateV1,
   type AgentContextTaskKind,
 } from './context-policy'
-import type { AssembleContextSourceEvidence } from '../registry/types'
+import {
+  CONTEXT_RESOURCE_KINDS_V1,
+  type AssembleContextSourceEvidence,
+  type ContextResourceDepthV1,
+  type ContextResourceKind,
+} from '../registry/types'
 import { AGENT_TOOL_BY_NAME } from './tool-registry'
 
 export const DOMAIN_AGENT_IDS = ['world-origin', 'character', 'inspiration', 'outline', 'prose'] as const
@@ -104,6 +109,21 @@ export interface AgentSkillContextCompressionPolicyV1 {
   maxFullTextBudgetScale: number
 }
 
+export interface AgentSkillContextGatewayPolicyV1 {
+  version: 1
+  /** shadow is evidence-only; required makes V3 freshness an adoption precondition. */
+  rollout: 'shadow' | 'required'
+  providerSourceKeys: readonly string[]
+  allowedResourceKinds: readonly ContextResourceKind[]
+  allowedDepths: readonly ContextResourceDepthV1[]
+  maxReadCalls: number
+  maxRetrievedTokens: number
+  maxPlanningSteps: number
+  maxPlanningModelTokens: number
+  allowOriginalRead: boolean
+  additionalReadToolNames: readonly string[]
+}
+
 export interface AgentSkillDefinitionV1 {
   version: 1
   id: string
@@ -122,6 +142,8 @@ export interface AgentSkillDefinitionV1 {
   optionalContextSourceKeys: readonly string[]
   inputPolicy: AgentSkillInputPolicyV1
   contextCompression: AgentSkillContextCompressionPolicyV1
+  /** Optional until each formal domain is migrated through its phase gate. */
+  contextGateway?: AgentSkillContextGatewayPolicyV1
   maxOutputTokens: number
   writeTargets: readonly AgentSkillWriteTargetV1[]
   lastVerifiedAt: string
@@ -1192,6 +1214,26 @@ export const AGENT_SKILLS = [
     optionalContextSourceKeys: [],
     inputPolicy: WORLDVIEW_FIELD_INPUT_POLICY,
     contextCompression: WORLDVIEW_FIELD_COMPRESSION_POLICY,
+    contextGateway: {
+      version: 1,
+      rollout: 'shadow',
+      providerSourceKeys: ['ragSelection'],
+      allowedResourceKinds: [
+        'world', 'worldview-field', 'story-core-field', 'character',
+        'character-relation', 'story-arc', 'storyline-progress', 'outline-node',
+        'detailed-outline', 'chapter', 'foreshadow', 'location', 'codex-entry',
+        'world-link', 'fact', 'reference', 'narrative-blueprint',
+      ],
+      allowedDepths: ['index', 'summary', 'focused', 'full', 'original'],
+      maxReadCalls: 4,
+      maxRetrievedTokens: 24_000,
+      maxPlanningSteps: 5,
+      maxPlanningModelTokens: 24_000,
+      allowOriginalRead: true,
+      additionalReadToolNames: [
+        'list_context_catalog', 'search_context', 'read_context_resource', 'read_original_evidence',
+      ],
+    },
     maxOutputTokens: 6_000,
     writeTargets: [{
       table: 'worldviews',
@@ -2781,6 +2823,52 @@ export function validateAgentSkillDefinitionsV1(
     }
     if (!Number.isFinite(compression.maxFullTextBudgetScale) || compression.maxFullTextBudgetScale < 1) {
       throw new Error(`Agent Skill ${skill.id} 的全文回退比例无效`)
+    }
+    const gateway = skill.contextGateway
+    if (gateway) {
+      if (gateway.version !== 1 || !['shadow', 'required'].includes(gateway.rollout)) {
+        throw new Error(`Agent Skill ${skill.id} 的 Context Gateway 版本或 rollout 无效`)
+      }
+      if (!gateway.providerSourceKeys.length
+        || new Set(gateway.providerSourceKeys).size !== gateway.providerSourceKeys.length) {
+        throw new Error(`Agent Skill ${skill.id} 的 Context Gateway provider source 无效`)
+      }
+      for (const sourceKey of gateway.providerSourceKeys) {
+        if (!CONTEXT_SOURCE_BY_KEY.get(sourceKey)?.resources) {
+          throw new Error(`Agent Skill ${skill.id} 的 Context Gateway source ${sourceKey} 未挂 Provider`)
+        }
+      }
+      if (!gateway.allowedResourceKinds.length
+        || gateway.allowedResourceKinds.some(kind => !CONTEXT_RESOURCE_KINDS_V1.includes(kind))) {
+        throw new Error(`Agent Skill ${skill.id} 的 Context Gateway resource kind 无效`)
+      }
+      const depths: readonly ContextResourceDepthV1[] = ['index', 'summary', 'focused', 'full', 'original']
+      if (!gateway.allowedDepths.length || gateway.allowedDepths.some(depth => !depths.includes(depth))
+        || (gateway.allowedDepths.includes('original') && !gateway.allowOriginalRead)) {
+        throw new Error(`Agent Skill ${skill.id} 的 Context Gateway depth 无效`)
+      }
+      for (const [key, value] of Object.entries({
+        maxReadCalls: gateway.maxReadCalls,
+        maxRetrievedTokens: gateway.maxRetrievedTokens,
+        maxPlanningSteps: gateway.maxPlanningSteps,
+        maxPlanningModelTokens: gateway.maxPlanningModelTokens,
+      })) {
+        if (!Number.isSafeInteger(value) || value < 1) {
+          throw new Error(`Agent Skill ${skill.id} 的 Context Gateway ${key} 无效`)
+        }
+      }
+      if (!gateway.additionalReadToolNames.length
+        || new Set(gateway.additionalReadToolNames).size !== gateway.additionalReadToolNames.length) {
+        throw new Error(`Agent Skill ${skill.id} 的 Context Gateway 追加读取工具无效`)
+      }
+      for (const toolName of gateway.additionalReadToolNames) {
+        const tool = AGENT_TOOL_BY_NAME.get(toolName)
+        if (!tool || tool.risk !== 'read' || ![
+          'list_context_catalog', 'search_context', 'read_context_resource', 'read_original_evidence',
+        ].includes(toolName)) {
+          throw new Error(`Agent Skill ${skill.id} 的 Context Gateway 工具 ${toolName} 未登记`)
+        }
+      }
     }
     for (const target of skill.writeTargets) {
       if (!REGISTRY_BY_NAME.has(target.table)) {

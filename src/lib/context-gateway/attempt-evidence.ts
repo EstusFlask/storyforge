@@ -383,6 +383,12 @@ async function assertGatewayEvidenceCoherence(input: {
   if (input.selector.sufficiency.additionalRead === 'needed') {
     fail('insufficient-context', '充分性报告仍要求追加读取，不能 finalize')
   }
+  const unresolvedHard = input.sufficiency.obligations.find(item => (
+    item.required && (item.status === 'missing' || item.status === 'conflicted')
+  ))
+  if (unresolvedHard) {
+    fail('insufficient-context', `硬证据义务未满足：${unresolvedHard.id}`)
+  }
   const selected = new Map(input.selector.selected.map(item => [item.resourceKey, item]))
   const traced = [...input.retrievalTrace.mandatory, ...input.retrievalTrace.autoSelected]
   if (selected.size !== traced.length || traced.some(decision => {

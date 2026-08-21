@@ -72,10 +72,11 @@ export function resolveAgentToolTransportV1(input: {
     : 'text-json-v1'
 }
 
-function nativeToolOptions(): ChatRequestOptions {
+function nativeToolOptions(allowedToolNames?: readonly string[]): ChatRequestOptions {
+  const allowed = allowedToolNames == null ? null : new Set(allowedToolNames)
   return {
     toolChoice: 'auto',
-    tools: AGENT_READ_TOOLS.map(tool => ({
+    tools: AGENT_READ_TOOLS.filter(tool => allowed == null || allowed.has(tool.name)).map(tool => ({
       type: 'function' as const,
       function: {
         name: tool.name,
@@ -103,8 +104,9 @@ function clientModel(input: {
   meta?: AICallMeta
   context: RunReadOnlyAgentInput['context']
   transport: AgentModelTransportV1
+  allowedToolNames?: readonly string[]
 }): AgentModelAdapter {
-  const options = input.transport === 'native-tools-v1' ? nativeToolOptions() : undefined
+  const options = input.transport === 'native-tools-v1' ? nativeToolOptions(input.allowedToolNames) : undefined
   return {
     transport: input.transport,
     ...(options ? {
@@ -166,7 +168,10 @@ export function runReadOnlyAgentWithClient(input: RunReadOnlyAgentWithClientInpu
   const transport = resolveAgentToolTransportV1({ config: resolution.config, preference })
   return runReadOnlyAgent({
     ...runnerInput,
-    model: clientModel({ resolution, meta: requestMeta, context: input.context, transport }),
+    model: clientModel({
+      resolution, meta: requestMeta, context: input.context, transport,
+      allowedToolNames: input.allowedToolNames,
+    }),
   })
 }
 
@@ -181,7 +186,10 @@ export async function runDurableReadOnlyAgentWithClientV1(
   const capabilityProfile = getAIProviderCapabilityProfileV1(resolution.config.provider)
   return await runDurableReadOnlyAgentV1({
     ...runnerInput,
-    model: clientModel({ resolution, meta: requestMeta, context: input.context, transport }),
+    model: clientModel({
+      resolution, meta: requestMeta, context: input.context, transport,
+      allowedToolNames: input.allowedToolNames,
+    }),
     executionBinding: {
       provider: resolution.config.provider,
       model: resolution.config.model,
