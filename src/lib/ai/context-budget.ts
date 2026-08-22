@@ -85,6 +85,8 @@ export const MODEL_CONTEXT_PRESETS: Record<string, ModelContextPreset> = {
   // Agnes AI（官方模型目录 2026-07-30；2.0 的临时 1M 窗口已撤回）
   'agnes': { label: 'Agnes 默认', maxContext: 524_288, maxOutput: 65_536 },
   'agnes:agnes-2.5-flash': { label: 'Agnes 2.5 Flash', maxContext: 524_288, maxOutput: 65_536 },
+  'agnes:agnes-2.5-pro': { label: 'Agnes 2.5 Pro', maxContext: 524_288, maxOutput: 65_536 },
+  'agnes:agnes-2.5-pro-alpha': { label: 'Agnes 2.5 Pro Alpha', maxContext: 524_288, maxOutput: 65_536 },
   'agnes:agnes-1.5-flash': { label: 'Agnes 1.5 Flash', maxContext: 262_144, maxOutput: 65_536 },
   'agnes:agnes-2.0-flash': { label: 'Agnes 2.0 Flash', maxContext: 262_144, maxOutput: 65_536 },
 

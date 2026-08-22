@@ -4,7 +4,7 @@
 任务 ID：`GATE-P1B`  
 隔离分支：`refactor/world-engine-harness`  
 基线：`bd722008 test(E2E): edit structured worldview value only`  
-状态：机械门已通过；凭据已按授权复制且连接测试成功；V1/V2 失败已归档，等待 V3 sealed run
+状态：机械门已通过；凭据已按授权复制且连接测试成功；V1/V2 失败与 V3 预检失败已归档，等待 V4 sealed run
 
 ## 1. 完成边界
 
@@ -39,11 +39,11 @@
 |---|---|
 | 隔离 origin | `http://127.0.0.1:4197/storyforge/` |
 | generator | `agnes/agnes-2.5-flash`（从正式 `agent.world-foundation.worldview-field` 路由解析） |
-| blind grader | `agnes/agnes-1.5-flash`（V3；与 generator 身份不同，且已有 StoryForge 真实评测使用记录） |
+| blind grader | `agnes/agnes-2.5-pro`（V4；由实时 `/v1/models` 目录确认，与 generator 身份不同） |
 | grader temperature | `0` |
 | grader max tokens | `4096`（V2；为兼容推理型 provider 的完成预算，不改变评分阈值） |
 | 单次 grader timeout | `180000 ms` |
-| checkpoint key | `storyforge-races-gateway-eval-v3` |
+| checkpoint key | `storyforge-races-gateway-eval-v4` |
 | grader schema preflight | 矩阵前 1 次；严格闭集 JSON；证据写入 checkpoint，不参与质量计分 |
 | fixture / thresholds | 见 `RACE-6-EVAL-PROTOCOL-20260822.md`；真实结果出现后不得下调 |
 
@@ -89,6 +89,12 @@
 - 进度：`0/100`，失败样本 `empty-01`
 - 原因：`Agnes 2.0 Flash` 在 4096-token JSON-object 请求中仍返回截断的非法 JSON。
 - 处置：不重试、不续接、不查看或改动质量阈值；建立 V3，撤销 Agnes provider 级 JSON-object 过宽声明，改用 `Agnes 1.5 Flash` 独立 grader，并先执行 schema preflight。
+
+### V3 预检失败
+
+- checkpoint：无；preflight 在创建 fixture 前失败。
+- 原因：Agnes 返回 `model_not_found`，`agnes-1.5-flash` 当前无可用 distributor。
+- 处置：新增 dev-only 实时模型目录发现；`/v1/models` 返回 8 个模型，其中稳定文本评审模型为 `agnes-2.5-pro`；V4 采用该模型，未使用 alpha、未生成样本、未改阈值。
 
 ## 6. 凭据与连接回执
 

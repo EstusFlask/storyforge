@@ -187,7 +187,8 @@ describe('R-AI-CONFIG · API Key 存储策略', () => {
     expect(PROVIDER_PRESETS.agnes?.model).toBe('agnes-2.5-flash')
     expect(PROVIDER_MODELS.agnes?.map(model => model.value)).toEqual([
       'agnes-2.5-flash',
-      'agnes-1.5-flash',
+      'agnes-2.5-pro',
+      'agnes-2.5-pro-alpha',
       'agnes-2.0-flash',
     ])
 
@@ -195,6 +196,9 @@ describe('R-AI-CONFIG · API Key 存储策略', () => {
       maxContext: 524_288,
       maxOutput: 65_536,
     })
+    expect(getModelPreset('agnes', 'agnes-2.5-pro').maxContext).toBe(524_288)
+    // Historical imports remain budget-safe even after the live provider
+    // removed 1.5 from its selectable model directory.
     expect(getModelPreset('agnes', 'agnes-1.5-flash').maxContext).toBe(262_144)
     expect(getModelPreset('agnes', 'agnes-2.0-flash').maxContext).toBe(262_144)
 

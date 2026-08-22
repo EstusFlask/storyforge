@@ -2,7 +2,7 @@
 
 日期：2026-08-22  
 施工单元：RACE-6  
-状态：V3 实现完成，等待真实模型 sealed run 与 GATE-P1B
+状态：V4 实现完成，等待真实模型 sealed run 与 GATE-P1B
 
 > V1 首次真实运行在 `empty-02` 暴露 Agnes grader 的通用
 > `finish_reason=length` 与严格结构完成性判断冲突。V1 证据保留为失败运行；V2 不降低任何质量阈值，
@@ -14,6 +14,11 @@
 > `json_object` 能力从“已支持”降为“未验证”，冻结独立 grader 为既有真实评测使用过的
 > `Agnes 1.5 Flash`，并在创建任何 fixture 前执行一次严格 schema preflight。preflight 不参与质量计分，
 > 但其模型身份、输入/输出 hash、usage、finish reason 与耗时进入签名 checkpoint。
+
+> V3 schema preflight 在创建 fixture 前收到 `model_not_found`：Agnes 网关已无
+> `agnes-1.5-flash` 渠道。随后通过受治理的 `/v1/models` 实时发现确认目录包含
+> `agnes-2.5-pro` 与 `agnes-2.5-pro-alpha`。V4 冻结稳定版 `Agnes 2.5 Pro` 为 grader，
+> 不使用 alpha；设置页移除失效的 1.5 可选项，但保留历史导入的上下文预算兼容。
 
 ## 评测目标
 

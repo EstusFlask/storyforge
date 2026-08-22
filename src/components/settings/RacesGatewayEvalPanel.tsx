@@ -1,13 +1,14 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Download, LoaderCircle, Play, RotateCcw } from 'lucide-react'
+import { Download, LoaderCircle, Play, RefreshCw, RotateCcw } from 'lucide-react'
 import { type ChatResult, resolveRequestConfig } from '../../lib/ai/client'
 import { isAIConfigReady } from '../../lib/ai/config-readiness'
 import { supportsVerifiedJsonObjectResponseV1 } from '../../lib/ai/provider-capabilities'
+import { fetchOpenAIModels } from '../../lib/ai/model-list'
 import { executeRegisteredAIEntryV1 } from '../../lib/agent/formal-ai-entry'
 import { hashCanonicalValue } from '../../lib/agent/run/hash'
 import {
   buildRacesGatewayBlindGraderMessagesV1,
-  RACES_GATEWAY_BLIND_GRADER_PROMPT_VERSION_V3,
+  RACES_GATEWAY_BLIND_GRADER_PROMPT_VERSION_V4,
   RACES_GATEWAY_GRADER_PREFLIGHT_INPUT_V3,
 } from '../../lib/evals/races-gateway/protocol'
 import { parseRacesGatewayBlindGradeCompletionV2 } from '../../lib/evals/races-gateway/scoring'
@@ -44,6 +45,8 @@ export default function RacesGatewayEvalPanel() {
   const [progress, setProgress] = useState('')
   const [error, setError] = useState('')
   const [graderModel, setGraderModel] = useState('')
+  const [liveGraderModels, setLiveGraderModels] = useState<string[]>([])
+  const [discoveringModels, setDiscoveringModels] = useState(false)
 
   const generatorConfig = useMemo(() => resolveRequestConfig(
     config,
@@ -53,10 +56,14 @@ export default function RacesGatewayEvalPanel() {
     config,
     { category: 'eval.race6.blind-grader' },
   ).config, [config])
-  const graderOptions = useMemo(
-    () => PROVIDER_MODELS[graderRouteConfig.provider] ?? [],
-    [graderRouteConfig.provider],
-  )
+  const graderOptions = useMemo(() => {
+    const options = [...(PROVIDER_MODELS[graderRouteConfig.provider] ?? [])]
+    const seen = new Set(options.map(option => option.value))
+    for (const model of liveGraderModels) {
+      if (!seen.has(model)) options.push({ value: model, label: model, desc: '服务实时返回' })
+    }
+    return options
+  }, [graderRouteConfig.provider, liveGraderModels])
   const graderConfig = useMemo(() => ({
     ...graderRouteConfig,
     model: graderModel || graderRouteConfig.model,
@@ -68,7 +75,8 @@ export default function RacesGatewayEvalPanel() {
       return
     }
     const preferred = graderRouteConfig.provider === 'agnes'
-      ? graderOptions.find(option => option.value === 'agnes-1.5-flash')
+      ? graderOptions.find(option => option.value === 'agnes-2.5-pro')
+        ?? graderOptions.find(option => option.value !== generatorConfig.model)
       : graderOptions.find(option => option.value !== generatorConfig.model)
     setGraderModel(preferred?.value ?? graderRouteConfig.model)
   }, [checkpoint, generatorConfig.model, graderOptions, graderRouteConfig.model, graderRouteConfig.provider])
@@ -85,6 +93,25 @@ export default function RacesGatewayEvalPanel() {
       setProgress(`${stored.nextIndex}/100`)
     })
   }, [])
+
+  const refreshGraderModels = async () => {
+    setDiscoveringModels(true)
+    setError('')
+    try {
+      if (!isAIConfigReady(graderRouteConfig)) throw new Error('请先配置可用 API Key')
+      const models = await fetchOpenAIModels({
+        baseUrl: graderRouteConfig.baseUrl,
+        apiKey: graderRouteConfig.apiKey,
+        timeoutMs: 30_000,
+      })
+      if (!models.length) throw new Error('模型服务返回了空目录')
+      setLiveGraderModels(models)
+    } catch (value) {
+      setError(value instanceof Error ? value.message : String(value))
+    } finally {
+      setDiscoveringModels(false)
+    }
+  }
 
   const run = async () => {
     setRunning(true)
@@ -123,7 +150,7 @@ export default function RacesGatewayEvalPanel() {
               evidence: {
                 provider: graderConfig.provider,
                 model: graderConfig.model,
-                promptVersion: RACES_GATEWAY_BLIND_GRADER_PROMPT_VERSION_V3,
+                promptVersion: RACES_GATEWAY_BLIND_GRADER_PROMPT_VERSION_V4,
                 inputHash: await hashCanonicalValue(messages),
                 outputHash: await hashCanonicalValue(output),
                 inputTokens: result.usage?.inputTokens ?? null,
@@ -146,7 +173,7 @@ export default function RacesGatewayEvalPanel() {
         graderIdentity: {
           provider: graderConfig.provider,
           model: graderConfig.model,
-          promptVersion: RACES_GATEWAY_BLIND_GRADER_PROMPT_VERSION_V3,
+          promptVersion: RACES_GATEWAY_BLIND_GRADER_PROMPT_VERSION_V4,
         },
         graderPreflight,
         resumeFrom: checkpoint,
@@ -244,7 +271,18 @@ export default function RacesGatewayEvalPanel() {
       )}
       {!checkpoint && graderOptions.length > 0 && (
         <label className="mt-3 block text-[10px] text-text-muted">
-          独立盲评模型
+          <span className="flex items-center justify-between gap-2">
+            独立盲评模型
+            <button
+              type="button"
+              onClick={() => { void refreshGraderModels() }}
+              disabled={running || discoveringModels || !isAIConfigReady(graderRouteConfig)}
+              className="inline-flex items-center gap-1 rounded px-1.5 py-1 text-[10px] text-violet-400 hover:bg-violet-500/10 disabled:opacity-40"
+            >
+              <RefreshCw className={`h-3 w-3 ${discoveringModels ? 'animate-spin' : ''}`} />
+              {discoveringModels ? '刷新中' : '刷新服务模型'}
+            </button>
+          </span>
           <select
             aria-label="RACE-6 独立盲评模型"
             value={graderModel || graderRouteConfig.model}
@@ -256,6 +294,11 @@ export default function RacesGatewayEvalPanel() {
               <option key={option.value} value={option.value}>{option.label}</option>
             ))}
           </select>
+          {liveGraderModels.length > 0 && (
+            <span className="mt-1 block text-[10px] text-text-muted">
+              服务实时返回 {liveGraderModels.length} 个模型；只选择文本 chat/completions 模型。
+            </span>
+          )}
         </label>
       )}
       {score && (
