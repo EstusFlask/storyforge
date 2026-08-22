@@ -81,6 +81,7 @@ const CREATION_PREFIXES = [
   'emotion.beat',
   'simulation.',
   'inspiration.',
+  'codex.enrich',
   'node.',
   'style.calibrate',
 ]

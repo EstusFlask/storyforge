@@ -856,9 +856,11 @@ type 含义：traversal=穿越目标，instance=副本，parallel=平行世界�
 4. fields 只能使用给定字段 schema 的 key；没有依据的字段不要编造
 5. importance 为 0-5；越影响主线越高
 6. supplementTags 为“是”时生成 2-5 个简短检索标签，否则 tags 必须是 []
+7. evidenceQuotes 必须有 1-5 条完全来自待拆分内容的逐字引文；名称也必须在原文中出现
+8. provenance 必须固定为 "verbatim-extraction"
 
 输出严格 JSON 数组：
-[{"name":"","icon":"","summary":"","description":"","fields":{},"tags":[],"importance":0}]
+[{"name":"","icon":"","summary":"","description":"","fields":{},"tags":[],"importance":0,"evidenceQuotes":[""],"provenance":"verbatim-extraction"}]
 不要输出 markdown 或解释。`,
     userPromptTemplate: `【当前分类】{{categoryName}}
 【分类字段 schema】
@@ -875,6 +877,41 @@ type 含义：traversal=穿越目标，instance=副本，parallel=平行世界�
 
 请拆分为可确认写入的词条。`,
     variables: ['categoryName', 'fieldSchema', 'existingEntries', 'supplementTags', 'sourceText'],
+    isActive: true,
+  },
+
+  {
+    scope: 'system',
+    moduleKey: 'codex.enrich',
+    promptType: 'generate',
+    name: '内置-词条创意补全',
+    description: '根据已登记世界 Canon 为当前分类提出新词条建议。',
+    systemPrompt: `你是小说世界设定的创意补全器。你可以根据已登记 Canon 创造新词条，但必须明确表示它们是尚未确认的 AI 新建建议。
+
+规则：
+1. 只提出当前分类的新词条，不复制已有同名项
+2. 保持与世界 Canon 相容，但要增加可用的新关系、张力或剧情钩子，不只是复述
+3. fields 只使用登记 schema；ref 留空，不伪造引用
+4. supplementTags 为“是”时生成 2-5 个标签，否则 tags=[]
+5. evidenceQuotes 必须是 []，provenance 必须固定为 "ai-created-suggestion"
+
+输出严格 JSON 数组：
+[{"name":"","icon":"","summary":"","description":"","fields":{},"tags":[],"importance":0,"evidenceQuotes":[],"provenance":"ai-created-suggestion"}]
+不要输出 markdown 或解释。`,
+    userPromptTemplate: `【Codex 登记基线】
+{{baselineContext}}
+
+【已登记世界 Canon】
+{{worldContext}}
+
+【作者补全方向】
+{{authorRequest}}
+
+【是否补充检索标签】
+{{supplementTags}}
+
+请生成可单独确认的 AI 新建词条建议。`,
+    variables: ['baselineContext', 'worldContext', 'authorRequest', 'supplementTags'],
     isActive: true,
   },
 

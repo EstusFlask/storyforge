@@ -32,6 +32,7 @@ export type AgentSkillExecutionModeV1 =
   | 'worldview-expand'
   | 'constitution-extract'
   | 'codex-extract'
+  | 'codex-enrich'
   | 'story-core'
   | 'creative-rules'
   | 'create'
@@ -229,6 +230,9 @@ const WORLD_SUGGEST_CONTEXT_SOURCE_KEYS = [
 
 const CONSTITUTION_EXTRACT_CONTEXT_SOURCE_KEYS = ['constitutionScanSources'] as const
 const CODEX_EXTRACT_CONTEXT_SOURCE_KEYS = ['manualText', 'codexExtractionBaseline'] as const
+const CODEX_ENRICH_CONTEXT_SOURCE_KEYS = [
+  'worldview', 'storyCore', 'characters', 'storyArcs', 'codexExtractionBaseline',
+] as const
 const CULTIVATION_PROGRESS_EXTRACTION_CONTEXT_SOURCE_KEYS = [
   'chapterContent',
   'cultivationProgressExtractionBaseline',
@@ -962,6 +966,7 @@ const WORLD_SUGGEST_COMPRESSION_POLICY = compressionPolicy([
 ])
 const CONSTITUTION_EXTRACT_COMPRESSION_POLICY = compressionPolicy(['constitutionScanSources'])
 const CODEX_EXTRACT_COMPRESSION_POLICY = compressionPolicy(['manualText', 'codexExtractionBaseline'])
+const CODEX_ENRICH_COMPRESSION_POLICY = compressionPolicy(CODEX_ENRICH_CONTEXT_SOURCE_KEYS)
 const CULTIVATION_PROGRESS_EXTRACTION_COMPRESSION_POLICY = compressionPolicy(
   CULTIVATION_PROGRESS_EXTRACTION_CONTEXT_SOURCE_KEYS,
 )
@@ -1389,7 +1394,37 @@ export const AGENT_SKILLS = [
       fields: ['categoryId', 'name', 'icon', 'summary', 'description', 'fields', 'refs', 'tags', 'importance', 'order', 'worldGroupId'],
     }],
     lastVerifiedAt: '2026-08-14',
-    regressionTests: ['R-HARNESS70-codex-extraction-durable'],
+    regressionTests: ['R-HARNESS70-codex-extraction-durable', 'R-RACE5-codex-extraction-enrichment'],
+  },
+  {
+    version: 1,
+    id: 'world-origin.codex-enrich',
+    agentId: 'world-origin',
+    defaultForAgent: false,
+    label: 'Codex AI 新建词条建议',
+    owner: 'world-foundation-agent',
+    promptVersion: 'codex-enrich-v1',
+    executionMode: 'codex-enrich',
+    contextTaskKind: 'agent-world-origin',
+    readToolNames: [],
+    contextSourceKeys: CODEX_ENRICH_CONTEXT_SOURCE_KEYS,
+    optionalContextSourceKeys: [],
+    inputPolicy: {
+      sourceKeys: CODEX_ENRICH_CONTEXT_SOURCE_KEYS,
+      states: {
+        empty: { handling: 'require-upstream', instruction: '缺少世界 Canon 或分类基线时不创建建议。' },
+        partial: { handling: 'reference-and-create', instruction: '在已登记世界 Canon 范围内生成明确标记的 AI 新建建议。' },
+        complete: { handling: 'reference-and-create', instruction: '结合完整上下文创建新词条建议，不自动改写任何 Canon。' },
+      },
+    },
+    contextCompression: CODEX_ENRICH_COMPRESSION_POLICY,
+    maxOutputTokens: 4_000,
+    writeTargets: [{
+      table: 'codexEntries',
+      fields: ['categoryId', 'name', 'icon', 'summary', 'description', 'fields', 'refs', 'tags', 'importance', 'order', 'worldGroupId'],
+    }],
+    lastVerifiedAt: '2026-08-22',
+    regressionTests: ['R-RACE5-codex-extraction-enrichment'],
   },
   {
     version: 1,
@@ -2765,7 +2800,7 @@ export function validateAgentSkillDefinitionsV1(
   definitions: readonly AgentSkillDefinitionV1[],
 ): void {
   const executionModesByAgent: Record<DomainAgentId, ReadonlySet<AgentSkillExecutionModeV1>> = {
-    'world-origin': new Set(['complete', 'worldview-field', 'world-suggest', 'worldview-expand', 'constitution-extract', 'codex-extract', 'story-core', 'creative-rules', 'locations', 'map-config', 'history-consult', 'history-storm', 'review']),
+    'world-origin': new Set(['complete', 'worldview-field', 'world-suggest', 'worldview-expand', 'constitution-extract', 'codex-extract', 'codex-enrich', 'story-core', 'creative-rules', 'locations', 'map-config', 'history-consult', 'history-storm', 'review']),
     character: new Set(['create', 'supplement', 'relationships', 'character-reply', 'memory-curator']),
     inspiration: new Set(['reference-summary', 'reference-characters', 'reverse', 'review']),
     outline: new Set(['auto', 'story-arcs', 'foreshadow-suggestions', 'storyline-progress', 'character-driven', 'character-revision', 'world-game', 'impact-summary-regenerate', 'volumes', 'chapters', 'details']),

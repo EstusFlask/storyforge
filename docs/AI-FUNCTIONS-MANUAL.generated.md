@@ -8,7 +8,7 @@
 
 ## 一、Prompt 模板清单（PromptModuleKey 事实源）
 
-共 64 个唯一 moduleKey，209 条内置模板定义。
+共 65 个唯一 moduleKey，210 条内置模板定义。
 
 | moduleKey | 模板数 | 代表名称 | 说明 | 读取变量 |
 |---|---:|---|---|---|
@@ -69,6 +69,7 @@
 | `world-group.expand` | 1 | 内置-AI扩写世界 | 根据世界的草稿描述，扩展出完整的世界观设定。 | `worldName` `worldType` `draft` `otherWorlds` `storyCore` `userHint` |
 | `inventory.extract` | 1 | 内置-物品栏提取 | 从章节正文提取各角色的物品获得/消耗事件，构建按角色归属的物品栏。 | `knownItemNames` `characterNames` `chapterTitle` `chapterText` |
 | `codex.extract` | 1 | 内置-词条拆分提取 | 把整段世界观内容拆成当前分类下可确认写入的结构化词条。 | `categoryName` `fieldSchema` `existingEntries` `supplementTags` `sourceText` |
+| `codex.enrich` | 1 | 内置-词条创意补全 | 根据已登记世界 Canon 为当前分类提出新词条建议。 | `baselineContext` `worldContext` `authorRequest` `supplementTags` |
 | `location.extract` | 1 | 内置-重要地点提取 | 从已写正文中提取反复出现或推动剧情的重要地点候选。 | `existingEntries` `allowedTags` `sourceText` |
 | `story-timeline.extract` | 1 | 内置-故事年表提取 | 从章节正文提取剧情大事，构建故事进程年表（区别于世界背景历史）。 | `chapterTitle` `chapterText` |
 | `scene.verify` | 1 | 内置-场景考证 | 用户描述当前场景，AI 结合世界观/历史年表/世界规则给出符合背景的细节、时代错乱警示与情节灵感。 | `worldContext` `historyContext` `worldRulesContext` `scene` `sceneEra` `sceneLocation` |
@@ -227,8 +228,8 @@ AI 输出经 `adopt({ target, data })` 写回,只有这里登记的字段可写(
 
 ## 四、AI 调用点（消耗统计 category · 在哪触发)
 
-共 41 个 category。
-未分类调用: 0 个。动态 category 调用: 30 个。
+共 40 个 category。
+未分类调用: 0 个。动态 category 调用: 31 个。
 
 | category | 触发文件 |
 |---|---|
@@ -243,7 +244,6 @@ AI 输出经 `adopt({ target, data })` 写回,只有这里登记的字段可写(
 | `chapter.expand` | `src/components/editor/ChapterEditor.tsx:1641` |
 | `chapter.polish` | `src/components/editor/ChapterEditor.tsx:1631` |
 | `chapter.toolbar` | `src/lib/agent/run/selection-edit-durable.ts:567` |
-| `codex.extract` | `src/lib/agent/run/codex-extraction-durable.ts:627` |
 | `cultivation.progress` | `src/lib/agent/run/cultivation-progress-extraction-durable.ts:558` |
 | `detail.chapter-planning` | `src/lib/node-authoring/domain-execution.ts:371` |
 | `detail.scene` | `src/lib/ai/batch-detail-runner.ts:193` |
@@ -290,6 +290,7 @@ AI 输出经 `adopt({ target, data })` 写回,只有这里登记的字段可写(
 - `src/lib/agent/outline-copilot.ts:743 · chat`
 - `src/lib/agent/prose-copilot.ts:665 · chat`
 - `src/lib/agent/prose-copilot.ts:930 · chat`
+- `src/lib/agent/run/codex-extraction-durable.ts:685 · chat`
 - `src/lib/agent/run/history-agent-durable.ts:514 · chat`
 - `src/lib/agent/run/reference-derived-durable.ts:506 · chat`
 - `src/lib/agent/story-arc-copilot.ts:1278 · chat`
@@ -348,4 +349,4 @@ AI 输出经 `adopt({ target, data })` 写回,只有这里登记的字段可写(
 
 ---
 
-生成时间基准:commit `c709af16`
+生成时间基准:commit `d5aa9b49`

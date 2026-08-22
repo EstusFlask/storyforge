@@ -13,6 +13,10 @@ export interface ExtractedCodexEntry {
   tags: string[]
   icon: string
   importance: number
+  /** Exact source excerpts for grounded extraction; empty for AI-created enrichment. */
+  evidenceQuotes?: string[]
+  /** Keeps extraction and enrichment provenance visibly and mechanically distinct. */
+  provenance?: 'verbatim-extraction' | 'ai-created-suggestion'
 }
 
 export interface ExtractedLocation {
@@ -70,6 +74,7 @@ export function parseCodexEntries(raw: string, allowedFieldKeys: string[]): Extr
 export function parseCodexEntriesStrictV1(
   raw: string,
   allowedFields: readonly string[] | readonly CodexFieldDef[],
+  evidencePolicy: { operation: 'extract' | 'enrich'; sourceText: string },
 ): ExtractedCodexEntry[] {
   const source = raw.trim()
   let parsed: unknown
@@ -85,7 +90,10 @@ export function parseCodexEntriesStrictV1(
     const field = typeof value === 'string' ? { key: value, label: value, type: 'text' as const } : value
     fieldDefs.set(field.key, field)
   }
-  const exactKeys = ['name', 'icon', 'summary', 'description', 'fields', 'tags', 'importance'] as const
+  const exactKeys = [
+    'name', 'icon', 'summary', 'description', 'fields', 'tags', 'importance',
+    'evidenceQuotes', 'provenance',
+  ] as const
   const names = new Set<string>()
   return parsed.map((value, index) => {
     if (!value || typeof value !== 'object' || Array.isArray(value)) {
@@ -103,6 +111,9 @@ export function parseCodexEntriesStrictV1(
       || !row.fields || typeof row.fields !== 'object' || Array.isArray(row.fields)
       || !Array.isArray(row.tags) || row.tags.length > 5
       || !Number.isInteger(row.importance) || (row.importance as number) < 0 || (row.importance as number) > 5
+      || !Array.isArray(row.evidenceQuotes) || row.evidenceQuotes.length > 5
+      || row.evidenceQuotes.some(quote => typeof quote !== 'string' || !quote.trim() || quote.trim().length > 500)
+      || !['verbatim-extraction', 'ai-created-suggestion'].includes(String(row.provenance))
     ) throw new Error(`词条候选 ${index + 1} 字段类型、长度或范围无效。`)
     const normalizedName = row.name.trim().toLocaleLowerCase()
     if (names.has(normalizedName)) throw new Error(`词条候选 ${index + 1} 名称重复。`)
@@ -133,6 +144,20 @@ export function parseCodexEntriesStrictV1(
     if (new Set(tags.map(tag => tag.toLocaleLowerCase())).size !== tags.length) {
       throw new Error(`词条候选 ${index + 1} 标签重复。`)
     }
+    const evidenceQuotes = (row.evidenceQuotes as string[]).map(quote => quote.trim())
+    if (evidencePolicy.operation === 'extract') {
+      if (row.provenance !== 'verbatim-extraction' || evidenceQuotes.length < 1) {
+        throw new Error(`词条候选 ${index + 1} 缺少逐字抽取来源。`)
+      }
+      if (evidenceQuotes.some(quote => !evidencePolicy.sourceText.includes(quote))) {
+        throw new Error(`词条候选 ${index + 1} 的来源引文不存在于原文。`)
+      }
+      if (!evidencePolicy.sourceText.includes(row.name.trim())) {
+        throw new Error(`词条候选 ${index + 1} 的名称未在原文中出现。`)
+      }
+    } else if (row.provenance !== 'ai-created-suggestion' || evidenceQuotes.length !== 0) {
+      throw new Error(`词条候选 ${index + 1} 的 AI 新建 provenance 无效。`)
+    }
     return {
       name: row.name.trim(),
       icon: row.icon.trim(),
@@ -141,6 +166,8 @@ export function parseCodexEntriesStrictV1(
       fields,
       tags,
       importance: row.importance as number,
+      evidenceQuotes,
+      provenance: row.provenance as ExtractedCodexEntry['provenance'],
     }
   })
 }
@@ -152,17 +179,53 @@ export function buildCodexExtractPromptFromRegisteredContextV1(input: {
   supplementTags: boolean
 }): ChatMessage[] {
   const template = usePromptStore.getState().getActive('codex.extract')
-  return renderPrompt(template, {
+  const rendered = renderPrompt(template, {
     categoryName: input.baselineContext,
     fieldSchema: '严格使用上述登记基线中的字段 schema；select 必须取登记选项，number 必须是有限数值字符串，ref 必须留空并由作者之后关联，不得添加其它 key。',
     existingEntries: input.discoveredNames.join('、') || '登记基线之外，本轮前置分块尚无新候选。',
     supplementTags: input.supplementTags ? '是' : '否',
     sourceText: input.sourceText,
   }).messages
+  return [{
+    role: 'system',
+    content: '不可覆盖的 Harness 输出合同：每项必须且只能包含 name/icon/summary/description/fields/tags/importance/evidenceQuotes/provenance；evidenceQuotes 须为原文逐字引文，provenance="verbatim-extraction"。信息不足时返回 []，不得创造。',
+  }, ...rendered]
 }
 
 export function readCodexExtractPromptTemplateSnapshotV1() {
   const template = usePromptStore.getState().getActive('codex.extract')
+  return {
+    moduleKey: template.moduleKey,
+    systemPrompt: template.systemPrompt,
+    userPromptTemplate: template.userPromptTemplate,
+    variables: template.variables,
+    modelOverride: template.modelOverride ?? null,
+    examples: template.examples ?? null,
+    parameters: template.parameters ?? null,
+  }
+}
+
+export function buildCodexEnrichPromptFromRegisteredContextV1(input: {
+  baselineContext: string
+  worldContext: string
+  authorRequest: string
+  supplementTags: boolean
+}): ChatMessage[] {
+  const template = usePromptStore.getState().getActive('codex.enrich')
+  const rendered = renderPrompt(template, {
+    baselineContext: input.baselineContext,
+    worldContext: input.worldContext,
+    authorRequest: input.authorRequest,
+    supplementTags: input.supplementTags ? '是' : '否',
+  }).messages
+  return [{
+    role: 'system',
+    content: '不可覆盖的 Harness 输出合同：每项必须且只能包含 name/icon/summary/description/fields/tags/importance/evidenceQuotes/provenance；evidenceQuotes=[]，provenance="ai-created-suggestion"。',
+  }, ...rendered]
+}
+
+export function readCodexEnrichPromptTemplateSnapshotV1() {
+  const template = usePromptStore.getState().getActive('codex.enrich')
   return {
     moduleKey: template.moduleKey,
     systemPrompt: template.systemPrompt,

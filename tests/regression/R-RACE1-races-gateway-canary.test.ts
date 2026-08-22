@@ -135,6 +135,7 @@ describe.sequential('RACE-1 · races required Gateway canary', () => {
     })
     expect(adoption.message).toContain('种族与民族')
     expect((await db.worldviews.toCollection().first())?.races).toBe(revised.value)
+    expect(await db.codexEntries.count()).toBe(0)
   })
 
   it('已有种族正文是 mandatory 资源，Canon 改动后 V3 验鲜拒绝旧候选', async () => {

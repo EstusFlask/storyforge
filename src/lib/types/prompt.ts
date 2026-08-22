@@ -78,6 +78,7 @@ export type PromptModuleKey =
   | 'inventory.extract'
   // —— C-1/C-2 通用词条拆分 ——
   | 'codex.extract'
+  | 'codex.enrich'
   // —— C-6 重要地点提取 ——
   | 'location.extract'
   // —— Phase 25.5.2-a 故事进程年表 ——

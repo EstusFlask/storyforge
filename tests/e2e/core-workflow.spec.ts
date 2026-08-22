@@ -3083,6 +3083,8 @@ test('Codex 内容拆分刷新恢复候选，作者确认后才原子新增词�
               fields: { type: '浮空城邦', scope: '潮汐海外环', feature: '七座潮汐锚维持高度' },
               tags: ['浮空城', '潮汐锚'],
               importance: 4,
+              evidenceQuotes: ['月环城悬浮在潮汐海上空，由七座潮汐锚固定。'],
+              provenance: 'verbatim-extraction',
             }]),
           },
           finish_reason: 'stop',
