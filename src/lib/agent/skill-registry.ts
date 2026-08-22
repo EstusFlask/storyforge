@@ -1270,6 +1270,7 @@ export const AGENT_SKILLS = [
       'R-HARNESS32-worldview-panels-ui',
       'R-RACE1-races-gateway-canary',
       'R-RACE2-races-mode-length-contract',
+      'R-RACE3-worldview-candidate-review',
     ],
   },
   {

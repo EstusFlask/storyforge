@@ -211,12 +211,13 @@ describe('R-HARNESS32 · 三个世界基座面板统一进入主 Agent Harness',
     expect(host.textContent).not.toContain('正在将信仰体系拆分')
 
     const editor = host.querySelector<HTMLTextAreaElement>('textarea[aria-label="神明与信仰候选内容"]')!
-    const revised = JSON.stringify({
-      field: 'divineDesign',
-      value: { ...divineValue, divineRules: '神谕必须由两名无血缘见证者共同记录。' },
-    })
+    const revisedValue = { ...divineValue, divineRules: '神谕必须由两名无血缘见证者共同记录。' }
+    const revised = JSON.stringify(revisedValue, null, 2)
     await act(async () => setInputValue(editor, revised))
-    expect(mocks.copilot.updateCandidate).toHaveBeenCalledWith(51, revised)
+    expect(mocks.copilot.updateCandidate).toHaveBeenCalledWith(51, JSON.stringify({
+      field: 'divineDesign',
+      value: revisedValue,
+    }, null, 2))
 
     const buttons = Array.from(host.querySelectorAll('button'))
     await act(async () => buttons.find(button => button.textContent?.includes('拒绝'))!.click())

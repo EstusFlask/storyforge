@@ -3,7 +3,6 @@ import { Check, Loader2, Sparkles, Trash2 } from 'lucide-react'
 import type { PendingMasterCandidate } from '../agent/useMasterCopilot'
 import { useMasterCopilot } from '../agent/useMasterCopilot'
 import AIFieldModeTabs from '../shared/AIFieldModeTabs'
-import { CTextarea } from '../shared/CompositionInput'
 import PromptRunPanel from '../shared/PromptRunPanel'
 import {
   formatWorldviewFieldGenerationRequestV1,
@@ -15,6 +14,7 @@ import type { Project } from '../../lib/types'
 import HarnessEvidencePanel from '../agent/HarnessEvidencePanel'
 import { useAIConfigStore } from '../../stores/ai-config'
 import { getModelPreset } from '../../lib/ai/context-budget'
+import WorldviewFieldCandidateReview from './WorldviewFieldCandidateReview'
 
 export default function WorldviewAgentControls({
   field,
@@ -199,14 +199,12 @@ export default function WorldviewAgentControls({
                 : `${candidate.payload.contextSources.length} 个输入来源`}
             </span>
           </div>
-          <CTextarea
-            aria-label={`${candidate.payload.label}候选内容`}
-            value={candidate.event.content}
-            disabled={copilot.busy}
-            onChange={event => {
-              void copilot.updateCandidate(candidate.event.id!, event.target.value)
+          <WorldviewFieldCandidateReview
+            candidate={candidate}
+            busy={copilot.busy}
+            onUpdate={content => {
+              void copilot.updateCandidate(candidate.event.id!, content)
             }}
-            className="min-h-48 w-full resize-y font-mono text-xs leading-5"
           />
           <HarnessEvidencePanel
             contextEvidence={candidate.payload.contextEvidence}
