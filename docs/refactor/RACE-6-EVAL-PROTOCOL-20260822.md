@@ -2,7 +2,7 @@
 
 日期：2026-08-22  
 施工单元：RACE-6  
-状态：V11 实现完成，等待真实模型 sealed run 与 GATE-P1B
+状态：V11 已运行至 4/100；grader 因 Agnes 额度不足可恢复暂停，GATE-P1B 未通过
 
 > V1 首次真实运行在 `empty-02` 暴露 Agnes grader 的通用
 > `finish_reason=length` 与严格结构完成性判断冲突。V1 证据保留为失败运行；V2 不降低任何质量阈值，
@@ -62,6 +62,12 @@
 > 确定性语法修复器生成提案，但只接受“仅在已有双引号前插入反斜杠”这一无损子集；任何补闭括号、删除
 > 逗号、改字段、改正文或截断补全都拒绝，仍进入原有一次模型修复与 fail-closed 流程。原始文本、修复后
 > 文本和 normalization step 全部留证；未增加模型调用或放宽 schema。
+
+> V11 已完成并签名 `empty-01`～`empty-04`，包括 V7/V9 的两个历史结构失败样本；`empty-05` 的
+> generator 成功后，blind grader 收到 Agnes `insufficient_user_quota`。该失败按 `grader/provider`
+> 留入 attempt ledger，可在同一模型与协议下显式续跑，不属于产品质量失败。checkpoint
+> `d973641b2fa333378a67a22c4cb280c16f88523ca7190cb5c6cad79e7219da5f` 已通过 UI 导出；在账户额度
+> 足以完成 4096-token 预扣前不伪造完成、不降低预算、不切换有利模型。
 
 ## 评测目标
 

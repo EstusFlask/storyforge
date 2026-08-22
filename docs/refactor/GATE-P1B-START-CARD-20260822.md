@@ -4,7 +4,7 @@
 任务 ID：`GATE-P1B`  
 隔离分支：`refactor/world-engine-harness`  
 基线：`bd722008 test(E2E): edit structured worldview value only`  
-状态：机械门已通过；凭据已按授权复制且连接测试成功；V1～V10 失败已归档，等待 V11 sealed run
+状态：机械门已通过；V11 已验证前四例并在独立 grader 额度预扣处暂停，等待补足同一 Provider 额度后续跑
 
 ## 1. 完成边界
 
@@ -68,13 +68,24 @@
 | 运行时间 | 待执行 |
 | checkpoint hash | 待执行 |
 | generator / grader | 待执行 |
-| 完成样本 | 待执行 |
+| 完成样本 | V11 已完成 4/100；`empty-05` grader quota 暂停 |
 | 空态占位 / 标题过锚 / 具体设定 | 待执行 |
 | 部分态约束 / 新增信息 | 待执行 |
 | 末位 recall@20 / 实际使用 | 待执行 |
 | Mandatory 送达 / 保留 | 待执行 |
 | scope 泄漏 / 对比交付 / CAS 阻断 | 待执行 |
-| 总判定 | **未执行，门未通过** |
+| 总判定 | **运行未完成，门未通过** |
+
+### V11 可恢复暂停
+
+- checkpoint：`d973641b2fa333378a67a22c4cb280c16f88523ca7190cb5c6cad79e7219da5f`
+- 进度：`4/100` 已完成并签名；`empty-05` generator 已成功，进入 blind grader 时暂停。
+- 已验证：V9 的 `empty-03` 与 V7 的 `empty-04` 两个历史结构故障样本均在 V11 通过；当前失败尝试仅
+  1 次，阶段为 `grader`，统一分类为 Provider authorization/quota，不计入产品非 Provider 失败硬门。
+- 外部原因：Agnes 返回 `insufficient_user_quota`；账户剩余 `$0.001900`，grader 单次 4096-token
+  预扣需要 `$0.002304`。这不是刷新、网络或项目代码能够恢复的状态。
+- 恢复方式：补足同一 Agnes Key 的可用额度后，在现有页面点击“继续 4/100”；不得清理 checkpoint、
+  更换模型身份或降低 grader 输出预算来规避既有冻结协议。
 
 ### V1 失败运行
 
