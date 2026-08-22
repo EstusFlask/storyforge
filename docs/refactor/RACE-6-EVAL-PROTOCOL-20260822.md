@@ -2,12 +2,18 @@
 
 日期：2026-08-22  
 施工单元：RACE-6  
-状态：V2 实现完成，等待真实模型 sealed run 与 GATE-P1B
+状态：V3 实现完成，等待真实模型 sealed run 与 GATE-P1B
 
 > V1 首次真实运行在 `empty-02` 暴露 Agnes grader 的通用
 > `finish_reason=length` 与严格结构完成性判断冲突。V1 证据保留为失败运行；V2 不降低任何质量阈值，
 > 将 grader 输出预算提升到 4096 tokens，要求 200 字内紧凑理由，并以严格闭集 JSON 是否完整作为最终
 > 截断判据，同时把 provider finish reason 写入证据。
+
+> V2 在 `empty-01` 的 4096-token grader 请求中仍得到截断的非法 JSON，证明 `Agnes 2.0 Flash`
+> 无法稳定履行本协议，而非 V1 误判。V2 失败 checkpoint 保持只读。V3 将 provider 级 Agnes
+> `json_object` 能力从“已支持”降为“未验证”，冻结独立 grader 为既有真实评测使用过的
+> `Agnes 1.5 Flash`，并在创建任何 fixture 前执行一次严格 schema preflight。preflight 不参与质量计分，
+> 但其模型身份、输入/输出 hash、usage、finish reason 与耗时进入签名 checkpoint。
 
 ## 评测目标
 
@@ -30,7 +36,9 @@ RACE-6 同时回答两个不同问题：
 | 跨 scope 攻击 | 10 | 对真实源候选使用另一 Work 采纳 | 100% fail-closed，Canon 零写入 |
 | 并发 CAS 攻击 | 10 | 候选后修改被读取的 worldview SourceRef | 100% stale 阻断，旧候选不可覆盖新 Canon |
 
-固定总数为 100：80 次正式生成、40 次独立盲评、20 次确定性攻击。
+固定矩阵总数为 100：80 次正式生成、40 次独立盲评、20 次确定性攻击。V3 在矩阵之外固定增加
+1 次 grader schema preflight，因此完整成功运行最多发起 121 次模型调用；preflight 失败时不会创建
+或生成任何 fixture。
 
 ## 冻结阈值
 
@@ -54,6 +62,7 @@ RACE-6 同时回答两个不同问题：
 ## 模型与盲评约束
 
 - checkpoint 冻结 generator provider/model、grader provider/model 和 grader prompt version。
+- V3 checkpoint 还冻结 grader schema preflight 证据；缺失、hash 非法或模型身份不一致均验签失败。
 - UI 与底层 runner 都拒绝 generator 和 grader 使用同一模型身份，防止模型自评。
 - grader 只看标题、给定种子和候选，不读取检索 trace、期望阈值或生成模型身份。
 - grader 必须返回严格闭集 JSON；非法 JSON、额外字段和截断都令当前样本失败，不做隐藏多次重试。

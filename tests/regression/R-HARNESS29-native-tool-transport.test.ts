@@ -147,10 +147,10 @@ describe('R-HARNESS29 · provider-native read tool transport', () => {
 
   it('keeps verified JSON-object transport independent from native tool-call capability', () => {
     expect(getJsonObjectResponseCapabilityV1('openai')).toBe('supported')
-    expect(getJsonObjectResponseCapabilityV1('agnes')).toBe('supported')
+    expect(getJsonObjectResponseCapabilityV1('agnes')).toBe('unverified')
     expect(getJsonObjectResponseCapabilityV1('doubao')).toBe('supported')
     expect(getJsonObjectResponseCapabilityV1('custom')).toBe('unverified')
-    expect(supportsVerifiedJsonObjectResponseV1('agnes')).toBe(true)
+    expect(supportsVerifiedJsonObjectResponseV1('agnes')).toBe(false)
     expect(supportsVerifiedJsonObjectResponseV1('custom')).toBe(false)
     expect(getAIProviderCapabilityProfileV1('agnes').nativeToolCalls).toBe('unverified')
   })

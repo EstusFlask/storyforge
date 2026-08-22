@@ -47,6 +47,20 @@ function passingResult(index: number): RacesGatewayEvalResultV1 {
   }
 }
 
+function preflightEvidence(provider: string, model: string, promptVersion: string) {
+  return {
+    provider,
+    model,
+    promptVersion,
+    inputHash: '1'.repeat(64),
+    outputHash: '2'.repeat(64),
+    inputTokens: 10,
+    outputTokens: 10,
+    finishReason: 'stop',
+    durationMs: 1,
+  }
+}
+
 beforeEach(async () => {
   await db.delete()
   await db.open()
@@ -100,6 +114,7 @@ describe.sequential('RACE-6 · races transcript + outcome eval', () => {
     await expect(runRacesGatewayEvalV1({
       modelIdentity: { provider: 'deepseek', model: 'deepseek-chat' },
       graderIdentity: { provider: 'deepseek', model: 'deepseek-chat', promptVersion: 'test-grader-v1' },
+      graderPreflight: preflightEvidence('deepseek', 'deepseek-chat', 'test-grader-v1'),
       fixtures: [RACES_GATEWAY_EVAL_FIXTURES_V1[0]],
       grade: vi.fn(),
     })).rejects.toThrow('必须使用不同模型身份')
@@ -116,6 +131,7 @@ describe.sequential('RACE-6 · races transcript + outcome eval', () => {
     await expect(runRacesGatewayEvalV1({
       modelIdentity: { provider: 'deepseek', model: 'deepseek-chat' },
       graderIdentity: { provider: 'deepseek', model: 'deepseek-reasoner', promptVersion: 'test-grader-v2' },
+      graderPreflight: preflightEvidence('deepseek', 'deepseek-reasoner', 'test-grader-v2'),
       fixtures: [RACES_GATEWAY_EVAL_FIXTURES_V1[0]],
       grade: async () => { throw new Error('grader 输出被截断') },
     })).rejects.toThrow('empty-01 执行失败')
@@ -135,6 +151,7 @@ describe.sequential('RACE-6 · races transcript + outcome eval', () => {
     const checkpoint = await runRacesGatewayEvalV1({
       modelIdentity: { provider: 'deepseek', model: 'deepseek-chat' },
       graderIdentity: { provider: 'deepseek', model: 'deepseek-reasoner', promptVersion: 'test-grader-v1' },
+      graderPreflight: preflightEvidence('deepseek', 'deepseek-reasoner', 'test-grader-v1'),
       fixtures,
       grade: async () => ({
         grade: {
@@ -180,6 +197,7 @@ describe.sequential('RACE-6 · races transcript + outcome eval', () => {
     const checkpoint = await runRacesGatewayEvalV1({
       modelIdentity: { provider: 'deepseek', model: 'deepseek-chat' },
       graderIdentity: { provider: 'deepseek', model: 'deepseek-reasoner', promptVersion: 'test-grader-v1' },
+      graderPreflight: preflightEvidence('deepseek', 'deepseek-reasoner', 'test-grader-v1'),
       fixtures,
       grade: async () => ({
         grade: {
@@ -237,6 +255,7 @@ describe.sequential('RACE-6 · races transcript + outcome eval', () => {
     const checkpoint = await runRacesGatewayEvalV1({
       modelIdentity: { provider: 'deepseek', model: 'deepseek-chat' },
       graderIdentity: { provider: 'fixture', model: 'deterministic', promptVersion: 'test-grader-v1' },
+      graderPreflight: preflightEvidence('fixture', 'deterministic', 'test-grader-v1'),
       fixtures,
       grade: async () => ({
         grade: {

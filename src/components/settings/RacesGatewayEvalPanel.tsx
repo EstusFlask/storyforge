@@ -7,7 +7,8 @@ import { executeRegisteredAIEntryV1 } from '../../lib/agent/formal-ai-entry'
 import { hashCanonicalValue } from '../../lib/agent/run/hash'
 import {
   buildRacesGatewayBlindGraderMessagesV1,
-  RACES_GATEWAY_BLIND_GRADER_PROMPT_VERSION_V2,
+  RACES_GATEWAY_BLIND_GRADER_PROMPT_VERSION_V3,
+  RACES_GATEWAY_GRADER_PREFLIGHT_INPUT_V3,
 } from '../../lib/evals/races-gateway/protocol'
 import { parseRacesGatewayBlindGradeCompletionV2 } from '../../lib/evals/races-gateway/scoring'
 import {
@@ -67,7 +68,7 @@ export default function RacesGatewayEvalPanel() {
       return
     }
     const preferred = graderRouteConfig.provider === 'agnes'
-      ? graderOptions.find(option => option.value === 'agnes-2.0-flash')
+      ? graderOptions.find(option => option.value === 'agnes-1.5-flash')
       : graderOptions.find(option => option.value !== generatorConfig.model)
     setGraderModel(preferred?.value ?? graderRouteConfig.model)
   }, [checkpoint, generatorConfig.model, graderOptions, graderRouteConfig.model, graderRouteConfig.provider])
@@ -98,15 +99,7 @@ export default function RacesGatewayEvalPanel() {
       if (checkpoint?.status === 'completed') {
         throw new Error('当前 RACE-6 冻结运行已经完成；如需新运行，请先导出后清除。')
       }
-      const next = await runRacesGatewayEvalV1({
-        modelIdentity: { provider: generatorConfig.provider, model: generatorConfig.model },
-        graderIdentity: {
-          provider: graderConfig.provider,
-          model: graderConfig.model,
-          promptVersion: RACES_GATEWAY_BLIND_GRADER_PROMPT_VERSION_V2,
-        },
-        resumeFrom: checkpoint,
-        grade: async input => {
+      const grade = async (input: { title: string; seedText: string; candidateText: string }) => {
           const messages = buildRacesGatewayBlindGraderMessagesV1(input)
           const result: ChatResult = {}
           const controller = new AbortController()
@@ -130,7 +123,7 @@ export default function RacesGatewayEvalPanel() {
               evidence: {
                 provider: graderConfig.provider,
                 model: graderConfig.model,
-                promptVersion: RACES_GATEWAY_BLIND_GRADER_PROMPT_VERSION_V2,
+                promptVersion: RACES_GATEWAY_BLIND_GRADER_PROMPT_VERSION_V3,
                 inputHash: await hashCanonicalValue(messages),
                 outputHash: await hashCanonicalValue(output),
                 inputTokens: result.usage?.inputTokens ?? null,
@@ -142,7 +135,22 @@ export default function RacesGatewayEvalPanel() {
           } finally {
             clearTimeout(timeout)
           }
+      }
+      let graderPreflight = checkpoint?.graderPreflight
+      if (!graderPreflight) {
+        setProgress('grader schema preflight')
+        graderPreflight = (await grade(RACES_GATEWAY_GRADER_PREFLIGHT_INPUT_V3)).evidence
+      }
+      const next = await runRacesGatewayEvalV1({
+        modelIdentity: { provider: generatorConfig.provider, model: generatorConfig.model },
+        graderIdentity: {
+          provider: graderConfig.provider,
+          model: graderConfig.model,
+          promptVersion: RACES_GATEWAY_BLIND_GRADER_PROMPT_VERSION_V3,
         },
+        graderPreflight,
+        resumeFrom: checkpoint,
+        grade,
         onProgress: update => {
           setCheckpoint(update.checkpoint)
           setProgress(`${update.completed}/${update.total} · ${update.fixture.id}`)
@@ -181,7 +189,7 @@ export default function RacesGatewayEvalPanel() {
         <div>
           <h4 className="text-xs font-medium text-text-primary">RACE-6 种族与民族金切片</h4>
           <p className="mt-1 text-[10px] text-text-muted">
-            100 例冻结 transcript + outcome；80 次生成、40 次盲评、20 次确定性攻击。每例 durable 保存，可刷新继续。
+            1 次 grader schema preflight + 100 例冻结 transcript/outcome；80 次生成、40 次盲评、20 次确定性攻击。每例 durable 保存，可刷新继续。
           </p>
         </div>
         <div className="flex items-center gap-1">

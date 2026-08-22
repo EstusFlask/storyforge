@@ -4,7 +4,7 @@
 任务 ID：`GATE-P1B`  
 隔离分支：`refactor/world-engine-harness`  
 基线：`bd722008 test(E2E): edit structured worldview value only`  
-状态：机械门已通过；凭据已按授权复制且连接测试成功；V1 失败已归档，等待 V2 sealed run
+状态：机械门已通过；凭据已按授权复制且连接测试成功；V1/V2 失败已归档，等待 V3 sealed run
 
 ## 1. 完成边界
 
@@ -39,11 +39,12 @@
 |---|---|
 | 隔离 origin | `http://127.0.0.1:4197/storyforge/` |
 | generator | `agnes/agnes-2.5-flash`（从正式 `agent.world-foundation.worldview-field` 路由解析） |
-| blind grader | `agnes/agnes-2.0-flash`（从 `eval.race6.blind-grader` 路由解析） |
+| blind grader | `agnes/agnes-1.5-flash`（V3；与 generator 身份不同，且已有 StoryForge 真实评测使用记录） |
 | grader temperature | `0` |
 | grader max tokens | `4096`（V2；为兼容推理型 provider 的完成预算，不改变评分阈值） |
 | 单次 grader timeout | `180000 ms` |
-| checkpoint key | `storyforge-races-gateway-eval-v2` |
+| checkpoint key | `storyforge-races-gateway-eval-v3` |
+| grader schema preflight | 矩阵前 1 次；严格闭集 JSON；证据写入 checkpoint，不参与质量计分 |
 | fixture / thresholds | 见 `RACE-6-EVAL-PROTOCOL-20260822.md`；真实结果出现后不得下调 |
 
 如果隔离环境无法使用上述模型身份，必须在运行前修订并重新冻结协议；不能在看到结果后换模型、改 fixture 或降低阈值来伪造通过。
@@ -81,6 +82,13 @@
 - 进度：`1/100`，失败样本 `empty-02`
 - 原因：blind grader 返回 `finish_reason=length`，V1 在检查严格 JSON 完成性之前直接判截断。
 - 处置：保留 V1 失败证据；建立 V2 新 checkpoint key，不续接、不篡改 V1；阈值与 fixture 均未下调。
+
+### V2 失败运行
+
+- checkpoint：`c9fda3db4cded9b88b1e65dae4bb2788203b31a53651eb4c76a9cfed2517553f`
+- 进度：`0/100`，失败样本 `empty-01`
+- 原因：`Agnes 2.0 Flash` 在 4096-token JSON-object 请求中仍返回截断的非法 JSON。
+- 处置：不重试、不续接、不查看或改动质量阈值；建立 V3，撤销 Agnes provider 级 JSON-object 过宽声明，改用 `Agnes 1.5 Flash` 独立 grader，并先执行 schema preflight。
 
 ## 6. 凭据与连接回执
 

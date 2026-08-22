@@ -26,8 +26,8 @@ import {
 } from './archive'
 import { scoreRacesGatewayEvalV1, RACES_GATEWAY_EVAL_THRESHOLDS_V1 } from './scoring'
 import {
-  RACES_GATEWAY_EVAL_STORAGE_KEY_V2,
-  RACES_GATEWAY_EVAL_VERSION_V2,
+  RACES_GATEWAY_EVAL_STORAGE_KEY_V3,
+  RACES_GATEWAY_EVAL_VERSION_V3,
   type RacesGatewayBlindGradeV1,
   type RacesGatewayBlindGradeEvidenceV1,
   type RacesGatewayEvalCheckpointV1,
@@ -462,12 +462,18 @@ export async function verifyRacesGatewayEvalCheckpointV1(
   fixtures: readonly RacesGatewayEvalFixtureV1[] = RACES_GATEWAY_EVAL_FIXTURES_V1,
 ): Promise<boolean> {
   try {
-    if (checkpoint.version !== RACES_GATEWAY_EVAL_VERSION_V2
+    if (checkpoint.version !== RACES_GATEWAY_EVAL_VERSION_V3
       || !/^[a-f0-9]{64}$/.test(checkpoint.fixtureHash)
       || !/^[a-f0-9]{64}$/.test(checkpoint.checkpointHash)) return false
     if (await hashCanonicalValue(fixtures) !== checkpoint.fixtureHash) return false
     if (await hashCanonicalValue(checkpointBody(checkpoint)) !== checkpoint.checkpointHash) return false
     if (checkpoint.nextIndex < 0 || checkpoint.nextIndex > fixtures.length) return false
+    if (!checkpoint.graderPreflight
+      || checkpoint.graderPreflight.provider !== checkpoint.graderIdentity.provider
+      || checkpoint.graderPreflight.model !== checkpoint.graderIdentity.model
+      || checkpoint.graderPreflight.promptVersion !== checkpoint.graderIdentity.promptVersion
+      || !/^[a-f0-9]{64}$/.test(checkpoint.graderPreflight.inputHash)
+      || !/^[a-f0-9]{64}$/.test(checkpoint.graderPreflight.outputHash)) return false
     if (checkpoint.results.some((result, index) => result.fixtureId !== fixtures[index]?.id)) return false
     for (let index = 0; index < checkpoint.results.length; index += 1) {
       const result = checkpoint.results[index]
@@ -503,7 +509,7 @@ export async function verifyRacesGatewayEvalCheckpointV1(
 
 export function loadRacesGatewayEvalCheckpointV1(): RacesGatewayEvalCheckpointV1 | null {
   try {
-    const raw = localStorage.getItem(RACES_GATEWAY_EVAL_STORAGE_KEY_V2)
+    const raw = localStorage.getItem(RACES_GATEWAY_EVAL_STORAGE_KEY_V3)
     return raw ? JSON.parse(raw) as RacesGatewayEvalCheckpointV1 : null
   } catch {
     return null
@@ -511,7 +517,7 @@ export function loadRacesGatewayEvalCheckpointV1(): RacesGatewayEvalCheckpointV1
 }
 
 export function persistRacesGatewayEvalCheckpointV1(checkpoint: RacesGatewayEvalCheckpointV1): void {
-  localStorage.setItem(RACES_GATEWAY_EVAL_STORAGE_KEY_V2, JSON.stringify(checkpoint))
+  localStorage.setItem(RACES_GATEWAY_EVAL_STORAGE_KEY_V3, JSON.stringify(checkpoint))
 }
 
 export function exportRacesGatewayEvalCheckpointV1(checkpoint: RacesGatewayEvalCheckpointV1): string {
@@ -525,13 +531,14 @@ export async function cleanupRacesGatewayEvalProjectsV1(): Promise<number> {
 }
 
 export async function clearRacesGatewayEvalCheckpointV1(): Promise<void> {
-  localStorage.removeItem(RACES_GATEWAY_EVAL_STORAGE_KEY_V2)
+  localStorage.removeItem(RACES_GATEWAY_EVAL_STORAGE_KEY_V3)
   await cleanupRacesGatewayEvalProjectsV1()
 }
 
 export async function runRacesGatewayEvalV1(input: {
   modelIdentity: { provider: string; model: string }
   graderIdentity: { provider: string; model: string; promptVersion: string }
+  graderPreflight: RacesGatewayBlindGradeEvidenceV1
   grade: RacesGatewayBlindGraderV1
   fixtures?: readonly RacesGatewayEvalFixtureV1[]
   resumeFrom?: RacesGatewayEvalCheckpointV1 | null
@@ -542,6 +549,11 @@ export async function runRacesGatewayEvalV1(input: {
   if (input.modelIdentity.provider === input.graderIdentity.provider
     && input.modelIdentity.model === input.graderIdentity.model) {
     throw new Error('RACE-6 generator 与盲评 grader 必须使用不同模型身份')
+  }
+  if (input.graderPreflight.provider !== input.graderIdentity.provider
+    || input.graderPreflight.model !== input.graderIdentity.model
+    || input.graderPreflight.promptVersion !== input.graderIdentity.promptVersion) {
+    throw new Error('RACE-6 grader schema preflight 与冻结模型身份不一致')
   }
   const fixtureHash = await hashCanonicalValue(fixtures)
   let checkpoint: RacesGatewayEvalCheckpointV1
@@ -568,10 +580,11 @@ export async function runRacesGatewayEvalV1(input: {
     await cleanupRacesGatewayEvalProjectsV1()
     const now = Date.now()
     checkpoint = await sealCheckpoint({
-      version: RACES_GATEWAY_EVAL_VERSION_V2,
+      version: RACES_GATEWAY_EVAL_VERSION_V3,
       fixtureHash,
       modelIdentity: input.modelIdentity,
       graderIdentity: input.graderIdentity,
+      graderPreflight: input.graderPreflight,
       thresholds: RACES_GATEWAY_EVAL_THRESHOLDS_V1,
       nextIndex: 0,
       status: 'running',

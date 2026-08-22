@@ -54,7 +54,11 @@ const JSON_OBJECT_RESPONSE: Record<AIProvider, JsonObjectResponseCapabilityV1> =
   claude: 'unverified',
   modelscope: 'unverified',
   nvidia: 'unverified',
-  agnes: 'supported',
+  // V1/V2 RACE-6 proved the provider-level claim was too broad: Agnes 2.0
+  // accepted response_format but exhausted the output budget without a
+  // complete JSON object. Keep Agnes on strict text parsing until capability
+  // evidence is frozen per model instead of inferred from OpenAI compatibility.
+  agnes: 'unverified',
   longcat: 'unverified',
   opencode: 'unverified',
   ollama: 'unverified',
