@@ -8,12 +8,19 @@ import {
 import { commitMasterAgentCandidateAdoptionV1 } from '../../agent/run/master-adoption'
 import { parseWorldviewFieldCandidateDraft } from '../../agent/worldview-field-copilot'
 import { AgentTeamBudgetTracker } from '../../agent/team-budget'
+import { readAgentRunV1 } from '../../agent/run/event-store'
+import { classifyHarnessFailureV1 } from '../../agent/run/harness-failure'
+import {
+  parseStructuredOutputRunEvidenceV1,
+  structuredOutputFailureEvidenceV1,
+} from '../../agent/structured-output-pipeline'
 import {
   readContextGatewayManifestV3ForAttemptV1,
   verifyContextGatewayCandidateEvidenceV1,
 } from '../../context-gateway/attempt-evidence'
 import { db } from '../../db/schema'
 import { generateWorkCode, generateWorkspaceUid } from '../../memory/identity'
+import { readAgentRunArtifactExactV1 } from '../../memory/artifact-store'
 import { cascadeDeleteProject } from '../../registry/lifecycle'
 import type { ContextSourceRefV1 } from '../../registry/types'
 import type { Character, Project, WorkspaceScope, Worldview } from '../../types'
@@ -21,13 +28,14 @@ import { ensureWorkspaceOwnership } from '../../world-engine/ownership'
 import { stampNewRecord } from '../../world-engine/scope'
 import { RACES_GATEWAY_EVAL_FIXTURES_V1 } from './fixtures'
 import {
+  createRacesGatewayFailureTranscriptArchiveV2,
   createRacesGatewayTranscriptArchiveV1,
   readRacesGatewayTranscriptArchiveV1,
 } from './archive'
 import { scoreRacesGatewayEvalV1, RACES_GATEWAY_EVAL_THRESHOLDS_V1 } from './scoring'
 import {
-  RACES_GATEWAY_EVAL_STORAGE_KEY_V7,
-  RACES_GATEWAY_EVAL_VERSION_V7,
+  RACES_GATEWAY_EVAL_STORAGE_KEY_V8,
+  RACES_GATEWAY_EVAL_VERSION_V8,
   type RacesGatewayBlindGradeV1,
   type RacesGatewayBlindGradeEvidenceV1,
   type RacesGatewayEvalCheckpointV1,
@@ -176,6 +184,7 @@ async function executeModelFixture(input: {
   const startedAt = performance.now()
   let seeded: SeededRacesGatewayWorkspaceV1 | null = null
   let generatedEvidence: RacesGatewayEvalResultV1 | null = null
+  let durableRunId: number | null = null
   try {
     seeded = await seedWorkspace(input.fixture)
     const conversation = await getOrCreateAgentConversation({
@@ -191,6 +200,9 @@ async function executeModelFixture(input: {
       conversationId: conversation.id!,
       plan: planFor(input.fixture),
       budget: new AgentTeamBudgetTracker('balanced'),
+      onDurableBoundary: boundary => {
+        durableRunId = boundary.runId
+      },
     })
     const restored = await restoreMasterAgentCandidatesV1({ scope: seeded.scope, runId: run.runId })
     if (restored.candidates.length !== 1) throw new Error(`预期 1 个候选，实际 ${restored.candidates.length}`)
@@ -257,6 +269,8 @@ async function executeModelFixture(input: {
       crossScopeBlocked: null,
       grade: null,
       gradeEvidence: null,
+      failureEvidence: null,
+      structuredFailureEvidence: null,
       error: null,
       durationMs: Math.max(1, Math.round(performance.now() - startedAt)),
     }
@@ -272,6 +286,51 @@ async function executeModelFixture(input: {
     }
   } catch (error) {
     const failedProjectId = seeded?.projectId ?? null
+    const failureEvidence = await classifyHarnessFailureV1(error)
+    const structuredFailureEvidence = structuredOutputFailureEvidenceV1(error)
+    let failureArchive: RacesGatewayEvalResultV1['transcriptArchive'] = null
+    let archiveFailure = ''
+    if (seeded && durableRunId != null && !generatedEvidence) {
+      try {
+        const snapshot = await readAgentRunV1(seeded.scope, durableRunId)
+        const stepId = `master:${FIXTURE_TASK_PREFIX}${input.fixture.id}`
+        const attempt = snapshot.projection.steps[stepId]?.attempt ?? 1
+        const seen = new Set<string>()
+        const artifactRefs = snapshot.events.flatMap(event => {
+          if (event.type !== 'evidence.artifact.recorded'
+            || event.payload.stepId !== stepId
+            || event.payload.attempt !== attempt) return []
+          const key = `${event.payload.artifactKind}:${event.payload.contentHash}`
+          if (seen.has(key)) return []
+          seen.add(key)
+          return [{
+            version: 1 as const,
+            artifactKind: event.payload.artifactKind,
+            contentHash: event.payload.contentHash,
+            byteLength: event.payload.byteLength,
+            stepId,
+            attempt,
+          }]
+        })
+        const artifactBodies = Object.fromEntries(await Promise.all(artifactRefs.map(async ref => [
+          `${ref.artifactKind}:${ref.contentHash}`,
+          await readAgentRunArtifactExactV1({
+            projectId: seeded!.projectId,
+            artifactKind: ref.artifactKind,
+            contentHash: ref.contentHash,
+          }),
+        ])))
+        failureArchive = await createRacesGatewayFailureTranscriptArchiveV2({
+          runId: durableRunId,
+          stepId,
+          attempt,
+          artifactRefs,
+          artifactBodies,
+        })
+      } catch (failure) {
+        archiveFailure = `；失败证据归档失败：${safeError(failure)}`
+      }
+    }
     let cleanupFailure = ''
     if (failedProjectId != null) {
       try {
@@ -298,7 +357,9 @@ async function executeModelFixture(input: {
       crossScopeBlocked: null,
       grade: null,
       gradeEvidence: null,
-      error: `${safeError(error)}${cleanupFailure}`,
+      failureEvidence,
+      structuredFailureEvidence,
+      error: `${safeError(error)}${archiveFailure}${cleanupFailure}`,
       durationMs: Math.max(1, Math.round(performance.now() - startedAt)),
     }
     return generatedEvidence
@@ -308,10 +369,12 @@ async function executeModelFixture(input: {
           projectId: null,
           grade: null,
           gradeEvidence: null,
+          failureEvidence,
+          structuredFailureEvidence,
           error: emptyFailure.error,
           durationMs: emptyFailure.durationMs,
         }
-      : emptyFailure
+      : { ...emptyFailure, transcriptArchive: failureArchive }
   }
 }
 
@@ -368,6 +431,8 @@ async function executeCrossScopeFixture(
       expectedAnchorDelivered: null, expectedAnchorInOutcome: null, staleBlocked: null,
       crossScopeBlocked: true, grade: null, error: message || null,
       gradeEvidence: null,
+      failureEvidence: null,
+      structuredFailureEvidence: null,
       durationMs: Math.max(1, Math.round(performance.now() - startedAt)),
     }
   } catch (error) {
@@ -431,6 +496,8 @@ async function executeCasFixture(
       expectedAnchorDelivered: null, expectedAnchorInOutcome: null, staleBlocked: true,
       crossScopeBlocked: null, grade: null, error: message || null,
       gradeEvidence: null,
+      failureEvidence: null,
+      structuredFailureEvidence: null,
       durationMs: Math.max(1, Math.round(performance.now() - startedAt)),
     }
   } catch (error) {
@@ -438,11 +505,11 @@ async function executeCasFixture(
   }
 }
 
-function failedAttackResult(
+async function failedAttackResult(
   fixture: RacesGatewayEvalFixtureV1,
   error: unknown,
   startedAt: number,
-): RacesGatewayEvalResultV1 {
+): Promise<RacesGatewayEvalResultV1> {
   return {
     fixtureId: fixture.id, kind: fixture.kind, status: 'failed', projectId: null, runId: null,
     candidateEventId: null, candidateText: '', contextManifestHash: null, transcriptArchive: null,
@@ -450,7 +517,10 @@ function failedAttackResult(
     mandatoryDelivered: null, expectedAnchorDelivered: null, expectedAnchorInOutcome: null,
     staleBlocked: fixture.kind === 'concurrent-cas' ? false : null,
     crossScopeBlocked: fixture.kind === 'cross-scope-attack' ? false : null,
-    grade: null, gradeEvidence: null, error: safeError(error),
+    grade: null, gradeEvidence: null,
+    failureEvidence: await classifyHarnessFailureV1(error, { stage: 'gate' }),
+    structuredFailureEvidence: structuredOutputFailureEvidenceV1(error),
+    error: safeError(error),
     durationMs: Math.max(1, Math.round(performance.now() - startedAt)),
   }
 }
@@ -480,7 +550,7 @@ export async function verifyRacesGatewayEvalCheckpointV1(
   fixtures: readonly RacesGatewayEvalFixtureV1[] = RACES_GATEWAY_EVAL_FIXTURES_V1,
 ): Promise<boolean> {
   try {
-    if (checkpoint.version !== RACES_GATEWAY_EVAL_VERSION_V7
+    if (checkpoint.version !== RACES_GATEWAY_EVAL_VERSION_V8
       || !/^[a-f0-9]{64}$/.test(checkpoint.fixtureHash)
       || !/^[a-f0-9]{64}$/.test(checkpoint.checkpointHash)) return false
     if (await hashCanonicalValue(fixtures) !== checkpoint.fixtureHash) return false
@@ -497,12 +567,20 @@ export async function verifyRacesGatewayEvalCheckpointV1(
       const result = checkpoint.results[index]
       const fixture = fixtures[index]
       if (!fixture || result.kind !== fixture.kind) return false
+      if ((result.status === 'failed') !== (result.failureEvidence !== null)) return false
+      if (result.structuredFailureEvidence) {
+        parseStructuredOutputRunEvidenceV1(result.structuredFailureEvidence)
+      }
       if (!isModelFixture(fixture)) continue
       if (!result.transcriptArchive) {
         if (result.status === 'passed') return false
         continue
       }
       const transcript = await readRacesGatewayTranscriptArchiveV1(result.transcriptArchive)
+      if (transcript.version !== 1) {
+        if (result.status === 'passed') return false
+        continue
+      }
       if (transcript.manifest.manifestHash !== result.contextManifestHash) return false
       const roles = new Set(transcript.manifest.artifacts.map(item => item.role))
       for (const role of ['selector-result', 'context-packet', 'rendered-request', 'raw-response']) {
@@ -536,7 +614,15 @@ export async function verifyRacesGatewayEvalCheckpointV1(
       attemptCounts.set(failure.fixtureId, expectedAttempt)
       if (failure.result.transcriptArchive) {
         const transcript = await readRacesGatewayTranscriptArchiveV1(failure.result.transcriptArchive)
-        if (transcript.manifest.manifestHash !== failure.result.contextManifestHash) return false
+        if (transcript.version === 1) {
+          if (transcript.manifest.manifestHash !== failure.result.contextManifestHash) return false
+        } else {
+          const kinds = new Set(transcript.artifactRefs.map(ref => ref.artifactKind))
+          for (const kind of ['selector-result', 'context-packet', 'rendered-request']) {
+            if (!kinds.has(kind as never)) return false
+          }
+          if (failure.result.structuredFailureEvidence && !kinds.has('raw-response')) return false
+        }
       }
     }
     if (checkpoint.status === 'completed' && (checkpoint.nextIndex !== fixtures.length || !checkpoint.score)) return false
@@ -548,7 +634,7 @@ export async function verifyRacesGatewayEvalCheckpointV1(
 
 export function loadRacesGatewayEvalCheckpointV1(): RacesGatewayEvalCheckpointV1 | null {
   try {
-    const raw = localStorage.getItem(RACES_GATEWAY_EVAL_STORAGE_KEY_V7)
+    const raw = localStorage.getItem(RACES_GATEWAY_EVAL_STORAGE_KEY_V8)
     return raw ? JSON.parse(raw) as RacesGatewayEvalCheckpointV1 : null
   } catch {
     return null
@@ -556,7 +642,7 @@ export function loadRacesGatewayEvalCheckpointV1(): RacesGatewayEvalCheckpointV1
 }
 
 export function persistRacesGatewayEvalCheckpointV1(checkpoint: RacesGatewayEvalCheckpointV1): void {
-  localStorage.setItem(RACES_GATEWAY_EVAL_STORAGE_KEY_V7, JSON.stringify(checkpoint))
+  localStorage.setItem(RACES_GATEWAY_EVAL_STORAGE_KEY_V8, JSON.stringify(checkpoint))
 }
 
 export function exportRacesGatewayEvalCheckpointV1(checkpoint: RacesGatewayEvalCheckpointV1): string {
@@ -570,7 +656,7 @@ export async function cleanupRacesGatewayEvalProjectsV1(): Promise<number> {
 }
 
 export async function clearRacesGatewayEvalCheckpointV1(): Promise<void> {
-  localStorage.removeItem(RACES_GATEWAY_EVAL_STORAGE_KEY_V7)
+  localStorage.removeItem(RACES_GATEWAY_EVAL_STORAGE_KEY_V8)
   await cleanupRacesGatewayEvalProjectsV1()
 }
 
@@ -619,7 +705,7 @@ export async function runRacesGatewayEvalV1(input: {
     await cleanupRacesGatewayEvalProjectsV1()
     const now = Date.now()
     checkpoint = await sealCheckpoint({
-      version: RACES_GATEWAY_EVAL_VERSION_V7,
+      version: RACES_GATEWAY_EVAL_VERSION_V8,
       fixtureHash,
       modelIdentity: input.modelIdentity,
       graderIdentity: input.graderIdentity,
@@ -667,7 +753,12 @@ export async function runRacesGatewayEvalV1(input: {
     await save(fixture)
     await cleanupCompletedProjectsV1({ checkpoint, fixtures })
   }
-  checkpoint.score = scoreRacesGatewayEvalV1(checkpoint.results, checkpoint.thresholds, fixtures)
+  checkpoint.score = scoreRacesGatewayEvalV1(
+    checkpoint.results,
+    checkpoint.thresholds,
+    fixtures,
+    checkpoint.attemptFailures,
+  )
   checkpoint.status = 'completed'
   checkpoint = await sealCheckpoint({ ...checkpoint, updatedAt: Date.now() })
   persistRacesGatewayEvalCheckpointV1(checkpoint)

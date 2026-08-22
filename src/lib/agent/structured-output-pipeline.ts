@@ -90,6 +90,26 @@ export class StructuredOutputRepairFailedErrorV1 extends Error {
   }
 }
 
+/**
+ * Converts a thrown structured-output failure into the same exact, portable
+ * evidence contract used by successful generation runs. Durable callers can
+ * persist this before the in-memory Error object disappears on reload.
+ */
+export function structuredOutputFailureEvidenceV1(
+  error: unknown,
+): StructuredOutputRunEvidenceV1 | null {
+  if (error instanceof StructuredOutputRepairFailedErrorV1) return error.runEvidence
+  if (!(error instanceof StructuredOutputPipelineErrorV1)) return null
+  return {
+    version: 1,
+    schemaId: error.evidence.schemaId,
+    target: error.evidence.target,
+    status: error.evidence.status,
+    attempts: [{ callIndex: 1, purpose: 'generate', evidence: error.evidence }],
+    repair: null,
+  }
+}
+
 const evidenceByOutput = new WeakMap<object, StructuredOutputAttemptEvidenceV1>()
 
 function isRecord(value: unknown): value is Record<string, unknown> {

@@ -25,7 +25,10 @@ import {
 import { parseCharacterSupplementTaskInputV1 } from '../character-supplement-copilot'
 import type { AgentTeamBudgetEvidence } from '../team-budget'
 import { parseCreativeArtifactV1 } from '../creative-reliability'
-import { parseStructuredOutputRunEvidenceV1 } from '../structured-output-pipeline'
+import {
+  parseStructuredOutputRunEvidenceV1,
+  structuredOutputFailureEvidenceV1,
+} from '../structured-output-pipeline'
 import { parseNarrativeBriefV1 } from '../narrative-brief'
 import { parseInformationBoundaryManifestV1 } from '../information-boundary'
 import {
@@ -125,6 +128,7 @@ import {
 } from './context-manifest'
 import { isContextGatewayRequiredForWriteTargetV1 } from '../../context-gateway/skill-policy'
 import type { ContextManifestV2 } from '../../types/agent-run'
+import { recordAgentRunArtifactV1 } from '../../memory/artifact-store'
 
 export const MASTER_AGENT_PLAN_CHECKPOINT_KIND_V1 = 'master-agent-plan'
 export const MASTER_AGENT_PLAN_CHECKPOINT_VERSION_V1 = 1 as const
@@ -2048,6 +2052,48 @@ export async function runDurableMasterAgentPlanV1(
     },
     async contextGatewayPrepared(task, prepared) {
       const queued = gatewayPreflightQueue.then(() => recordGatewayPrepared(task, prepared))
+      gatewayPreflightQueue = queued.catch(() => undefined)
+      await queued
+    },
+    async taskFailed(task, error) {
+      const failureEvidence = structuredOutputFailureEvidenceV1(error)
+      if (!failureEvidence || !gatewayAttempts.has(task.id)) return
+      const queued = gatewayPreflightQueue.then(async () => {
+        const stepId = taskStepId(task.id)
+        const step = snapshot.projection.steps[stepId]
+        if (!step || step.status !== 'running') return
+        const alreadyResponded = snapshot.events.some(event => (
+          event.type === 'model.responded'
+          && event.payload.stepId === stepId
+          && event.payload.attempt === step.attempt
+        ))
+        if (!alreadyResponded) {
+          snapshot = await appendAgentRunEventV1({
+            scope: input.scope,
+            runId: snapshot.run.id,
+            type: 'model.responded',
+            payload: {
+              stepId,
+              attempt: step.attempt,
+              outputHash: await hashCanonicalValue(failureEvidence),
+            },
+            expectedLastSequence: snapshot.projection.lastSequence,
+            now: now(),
+          })
+          await notify(input.onDurableBoundary, 'model.responded', snapshot)
+        }
+        const recorded = await recordAgentRunArtifactV1({
+          scope: input.scope,
+          runId: snapshot.run.id,
+          artifactKind: 'raw-response',
+          content: canonicalStringify(failureEvidence),
+          stepId,
+          attempt: step.attempt,
+          expectedLastSequence: snapshot.projection.lastSequence,
+          now: now(),
+        })
+        snapshot = recorded.snapshot
+      })
       gatewayPreflightQueue = queued.catch(() => undefined)
       await queued
     },

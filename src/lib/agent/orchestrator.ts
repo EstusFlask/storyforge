@@ -324,6 +324,7 @@ export interface MasterAgentExecutionTrace {
     prepared: MasterContextGatewayPreparedV1,
   ) => Promise<void>
   candidateReady?: (task: MasterAgentTask, candidate: ExecutedMasterCandidate) => Promise<void>
+  taskFailed?: (task: MasterAgentTask, error: unknown) => Promise<void>
 }
 
 interface PlannerDependencies {
@@ -1787,6 +1788,7 @@ async function executeSequentialMasterAgentPlan(
       await input.executionTrace?.candidateReady?.(task, candidate)
       await input.onTask?.(task, 'completed')
     } catch (error) {
+      await input.executionTrace?.taskFailed?.(task, error)
       const message = error instanceof Error ? error.message : String(error)
       await input.onTask?.(task, 'failed', message)
       throw error
@@ -1847,7 +1849,14 @@ async function executeFanOutMasterAgentPlan(
           completedTaskOutputs,
           completedTaskAssumptions,
           executionTrace: input.executionTrace?.contextGatewayPrepared
-            ? { contextGatewayPrepared: input.executionTrace.contextGatewayPrepared }
+            ? {
+                contextGatewayPrepared: input.executionTrace.contextGatewayPrepared,
+                ...(input.executionTrace.taskFailed
+                  ? { taskFailed: input.executionTrace.taskFailed }
+                  : {}),
+              }
+            : input.executionTrace?.taskFailed
+              ? { taskFailed: input.executionTrace.taskFailed }
             : undefined,
           onTask: undefined,
         }, { requiredFutureModelCalls })

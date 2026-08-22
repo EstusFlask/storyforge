@@ -2,7 +2,7 @@
 
 日期：2026-08-22  
 施工单元：RACE-6  
-状态：V7 实现完成，等待真实模型 sealed run 与 GATE-P1B
+状态：V8 实现完成，等待真实模型 sealed run 与 GATE-P1B
 
 > V1 首次真实运行在 `empty-02` 暴露 Agnes grader 的通用
 > `finish_reason=length` 与严格结构完成性判断冲突。V1 证据保留为失败运行；V2 不降低任何质量阈值，
@@ -38,6 +38,13 @@
 > V7 增加签名 `attemptFailures` ledger：任何失败尝试都连同错误、耗时及已有的候选/transcript 永久保留；
 > 恢复只重跑未完成 fixture，不覆盖历史。重试仍必须由可见的“继续”触发，不新增隐藏自动重试。
 
+> V7 完成 3/100 后，`empty-04` 的首次结构化输出与唯一一次定向修复均未通过。V7 正确保留了
+> 失败尝试条目，却暴露更深的证据漏洞：候选形成前的 raw response 只存在于内存 Error，隔离项目清理后
+> checkpoint 无法说明字段/JSON 究竟错在哪里。V8 将结构化失败的 `model.responded` 与 exact
+> `raw-response` 在 durable pause 前写入运行证据，并把 preflight artifacts 与原始输出压缩进 version 2
+> failure transcript 后再清理项目。失败同时携带统一 Harness failure class；任何非 Provider 失败尝试的
+> 门槛冻结为 0，不能靠后续重试从 sealed score 中洗掉。Provider 瞬时故障保留并单独计数。
+
 ## 评测目标
 
 RACE-6 同时回答两个不同问题：
@@ -59,7 +66,7 @@ RACE-6 同时回答两个不同问题：
 | 跨 scope 攻击 | 10 | 对真实源候选使用另一 Work 采纳 | 100% fail-closed，Canon 零写入 |
 | 并发 CAS 攻击 | 10 | 候选后修改被读取的 worldview SourceRef | 100% stale 阻断，旧候选不可覆盖新 Canon |
 
-固定矩阵总数为 100：80 次正式生成、40 次独立盲评、20 次确定性攻击。V3～V7 在矩阵之外固定增加
+固定矩阵总数为 100：80 次正式生成、40 次独立盲评、20 次确定性攻击。V3～V8 在矩阵之外固定增加
 1 次 grader schema preflight，因此完整成功运行最多发起 121 次模型调用；preflight 失败时不会创建
 或生成任何 fixture。
 
@@ -79,6 +86,7 @@ RACE-6 同时回答两个不同问题：
 | 跨 scope 泄漏率 | 0% |
 | 双版本候选交付率 | 100% |
 | CAS stale 阻断率 | 100% |
+| 非 Provider 失败尝试 | 0 |
 
 阈值在真实运行前冻结。真实运行失败时只能修复原因并建立新版本评测，不能在看到结果后降低当前阈值。
 

@@ -1,5 +1,9 @@
-export const RACES_GATEWAY_EVAL_VERSION_V7 = 'races-gateway-eval-v7' as const
-export const RACES_GATEWAY_EVAL_STORAGE_KEY_V7 = 'storyforge-races-gateway-eval-v7' as const
+import type { StructuredOutputRunEvidenceV1 } from '../../agent/structured-output-pipeline'
+import type { HarnessFailureEvidenceV1 } from '../../agent/run/harness-failure'
+import type { ExactRunArtifactReferenceV1 } from '../../types'
+
+export const RACES_GATEWAY_EVAL_VERSION_V8 = 'races-gateway-eval-v8' as const
+export const RACES_GATEWAY_EVAL_STORAGE_KEY_V8 = 'storyforge-races-gateway-eval-v8' as const
 
 export type RacesGatewayEvalKindV1 =
   | 'empty'
@@ -52,6 +56,28 @@ export interface RacesGatewayTranscriptArchiveV1 {
   body: string
 }
 
+export interface RacesGatewayFailureTranscriptArchiveV2 {
+  version: 2
+  encoding: 'gzip-base64'
+  transcriptHash: string
+  uncompressedBytes: number
+  compressedBytes: number
+  body: string
+}
+
+export type RacesGatewayEvidenceArchiveV1 =
+  | RacesGatewayTranscriptArchiveV1
+  | RacesGatewayFailureTranscriptArchiveV2
+
+export interface RacesGatewayFailureTranscriptV2 {
+  version: 2
+  runId: number
+  stepId: string
+  attempt: number
+  artifactRefs: ExactRunArtifactReferenceV1[]
+  artifactBodies: Record<string, string>
+}
+
 export interface RacesGatewayEvalResultV1 {
   fixtureId: string
   kind: RacesGatewayEvalKindV1
@@ -61,7 +87,7 @@ export interface RacesGatewayEvalResultV1 {
   candidateEventId: number | null
   candidateText: string
   contextManifestHash: string | null
-  transcriptArchive: RacesGatewayTranscriptArchiveV1 | null
+  transcriptArchive: RacesGatewayEvidenceArchiveV1 | null
   selectedResourceKeys: string[]
   mandatoryDelivered: boolean | null
   expectedAnchorDelivered: boolean | null
@@ -70,6 +96,8 @@ export interface RacesGatewayEvalResultV1 {
   crossScopeBlocked: boolean | null
   grade: RacesGatewayBlindGradeV1 | null
   gradeEvidence: RacesGatewayBlindGradeEvidenceV1 | null
+  failureEvidence: HarnessFailureEvidenceV1 | null
+  structuredFailureEvidence: StructuredOutputRunEvidenceV1 | null
   error: string | null
   durationMs: number
 }
@@ -87,6 +115,7 @@ export interface RacesGatewayEvalThresholdsV1 {
   scopeLeakMax: number
   comparisonDeliveryMin: number
   casBlockMin: number
+  nonProviderAttemptFailureMax: number
 }
 
 export interface RacesGatewayEvalAttemptFailureV1 {
@@ -111,12 +140,14 @@ export interface RacesGatewayEvalScoreV1 {
   scopeLeakRate: number
   comparisonDeliveryRate: number
   casBlockRate: number
+  providerAttemptFailureCount: number
+  nonProviderAttemptFailureCount: number
   passed: boolean
   failures: string[]
 }
 
 export interface RacesGatewayEvalCheckpointV1 {
-  version: typeof RACES_GATEWAY_EVAL_VERSION_V7
+  version: typeof RACES_GATEWAY_EVAL_VERSION_V8
   fixtureHash: string
   modelIdentity: { provider: string; model: string }
   graderIdentity: { provider: string; model: string; promptVersion: string }

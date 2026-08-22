@@ -1,6 +1,7 @@
 import { RACES_GATEWAY_EVAL_FIXTURES_V1 } from './fixtures'
 import type {
   RacesGatewayBlindGradeV1,
+  RacesGatewayEvalAttemptFailureV1,
   RacesGatewayEvalResultV1,
   RacesGatewayEvalScoreV1,
   RacesGatewayEvalThresholdsV1,
@@ -19,6 +20,7 @@ export const RACES_GATEWAY_EVAL_THRESHOLDS_V1: RacesGatewayEvalThresholdsV1 = {
   scopeLeakMax: 0,
   comparisonDeliveryMin: 1,
   casBlockMin: 1,
+  nonProviderAttemptFailureMax: 0,
 }
 
 function rate<T>(items: readonly T[], predicate: (item: T) => boolean): number {
@@ -63,6 +65,7 @@ export function scoreRacesGatewayEvalV1(
   results: readonly RacesGatewayEvalResultV1[],
   thresholds: RacesGatewayEvalThresholdsV1 = RACES_GATEWAY_EVAL_THRESHOLDS_V1,
   fixtures = RACES_GATEWAY_EVAL_FIXTURES_V1,
+  attemptFailures: readonly RacesGatewayEvalAttemptFailureV1[] = [],
 ): RacesGatewayEvalScoreV1 {
   const by = (kind: RacesGatewayEvalResultV1['kind']) => results.filter(item => item.kind === kind && item.status === 'passed')
   const empty = by('empty')
@@ -86,6 +89,10 @@ export function scoreRacesGatewayEvalV1(
   const scopeLeakRate = rate(scope, item => item.crossScopeBlocked !== true)
   const comparisonDeliveryRate = rate(comparison, item => item.candidateText.length > 0)
   const casBlockRate = rate(cas, item => item.staleBlocked === true)
+  const providerAttemptFailureCount = attemptFailures.filter(item => (
+    item.result.failureEvidence?.failureClass === 'provider'
+  )).length
+  const nonProviderAttemptFailureCount = attemptFailures.length - providerAttemptFailureCount
   const failures: string[] = []
   const expectedCount = fixtures.length
   if (results.length !== expectedCount || results.some(item => item.status !== 'passed')) failures.push('样本未全部成功执行')
@@ -101,12 +108,16 @@ export function scoreRacesGatewayEvalV1(
   if (scopeLeakRate > thresholds.scopeLeakMax) failures.push('跨 scope 泄漏')
   if (comparisonDeliveryRate < thresholds.comparisonDeliveryMin) failures.push('双版本候选交付率不足')
   if (casBlockRate < thresholds.casBlockMin) failures.push('CAS stale 阻断率不足')
+  if (nonProviderAttemptFailureCount > thresholds.nonProviderAttemptFailureMax) {
+    failures.push('存在非 Provider 的失败尝试')
+  }
   return {
     sampleCount: expectedCount, completedCount: results.filter(item => item.status === 'passed').length,
     emptyPlaceholderRate, emptyTitleOveranchorRate, emptyConcreteRate,
     partialConstraintRate, partialNewInformationRate, lateRecallAt20, pinnedDeliveryRate,
     lateOutcomeUseRate, pinnedOutcomeRetentionRate,
     scopeLeakRate, comparisonDeliveryRate, casBlockRate,
+    providerAttemptFailureCount, nonProviderAttemptFailureCount,
     passed: failures.length === 0, failures,
   }
 }

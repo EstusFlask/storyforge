@@ -43,6 +43,8 @@ function passingResult(index: number): RacesGatewayEvalResultV1 {
       reason: '满足冻结标准。',
     } : null,
     gradeEvidence: null,
+    failureEvidence: null,
+    structuredFailureEvidence: null,
     error: null,
     durationMs: 1,
   }
@@ -94,6 +96,28 @@ describe.sequential('RACE-6 · races transcript + outcome eval', () => {
     expect(RACES_GATEWAY_EVAL_FIXTURES_V1.filter(item => item.kind === 'concurrent-cas')).toHaveLength(10)
     const score = scoreRacesGatewayEvalV1(RACES_GATEWAY_EVAL_FIXTURES_V1.map((_, index) => passingResult(index)))
     expect(score).toMatchObject({ sampleCount: 100, completedCount: 100, passed: true, failures: [] })
+    const structuredFailure = {
+      ...passingResult(0),
+      status: 'failed' as const,
+      failureEvidence: {
+        version: 1 as const,
+        failureClass: 'parse' as const,
+        label: '模型输出解析',
+        code: 'structured_output_repair_parse',
+        retryable: false,
+        fingerprint: 'f'.repeat(64),
+      },
+    }
+    expect(scoreRacesGatewayEvalV1(
+      RACES_GATEWAY_EVAL_FIXTURES_V1.map((_, index) => passingResult(index)),
+      undefined,
+      undefined,
+      [{ fixtureId: 'empty-01', attempt: 1, recordedAt: 1, result: structuredFailure }],
+    )).toMatchObject({
+      passed: false,
+      nonProviderAttemptFailureCount: 1,
+      failures: ['存在非 Provider 的失败尝试'],
+    })
   })
 
   it('盲评 JSON 使用严格闭集合同', () => {
@@ -183,6 +207,38 @@ describe.sequential('RACE-6 · races transcript + outcome eval', () => {
     )).toBe(true)
     expect(await db.projects.count()).toBe(0)
     expect(await cleanupRacesGatewayEvalProjectsV1()).toBe(0)
+  })
+
+  it('结构化生成与唯一修复都失败时，在清理隔离项目之前归档 exact 原始响应', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
+      choices: [{ finish_reason: 'stop', message: { content: '这不是可解析的 JSON' } }],
+      usage: { prompt_tokens: 80, completion_tokens: 20, total_tokens: 100 },
+    }), { status: 200 })))
+    const fixtures = [RACES_GATEWAY_EVAL_FIXTURES_V1[0]]
+    await expect(runRacesGatewayEvalV1({
+      modelIdentity: { provider: 'deepseek', model: 'deepseek-chat' },
+      graderIdentity: { provider: 'deepseek', model: 'deepseek-reasoner', promptVersion: 'test-grader-v2' },
+      graderPreflight: preflightEvidence('deepseek', 'deepseek-reasoner', 'test-grader-v2'),
+      fixtures,
+      grade: vi.fn(),
+    })).rejects.toThrow('empty-01 执行失败')
+    const checkpoint = loadRacesGatewayEvalCheckpointV1()!
+    const failure = checkpoint.attemptFailures[0].result
+    expect(failure).toMatchObject({
+      status: 'failed',
+      failureEvidence: { failureClass: 'parse', code: 'structured_output_repair_parse' },
+      structuredFailureEvidence: {
+        status: 'manual-repair',
+        attempts: [
+          { callIndex: 1, evidence: { originalText: '这不是可解析的 JSON' } },
+          { callIndex: 2, evidence: { originalText: '这不是可解析的 JSON' } },
+        ],
+        repair: { result: 'failed' },
+      },
+      transcriptArchive: { version: 2 },
+    })
+    expect(await verifyRacesGatewayEvalCheckpointV1(checkpoint, fixtures)).toBe(true)
+    expect(await db.projects.count()).toBe(0)
   })
 
   it('通过正式 durable races Harness 生成、保存 exact manifest，并拒绝 checkpoint 篡改', async () => {
