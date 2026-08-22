@@ -16,13 +16,20 @@ export type StructuredOutputIssueCategoryV1 =
   | 'stale'
   | 'length'
 
+export const STRUCTURED_OUTPUT_NORMALIZATION_STEPS_V1 = [
+  'remove-bom',
+  'trim-outer-whitespace',
+  'remove-single-json-fence',
+  'extract-first-balanced-json',
+  'escape-unescaped-json-quotes',
+  'insert-missing-array-commas',
+  'merge-single-allowed-object-tail',
+  'unescape-allowed-root-field',
+  'apply-registered-field-alias',
+] as const
+
 export type StructuredOutputNormalizationStepV1 =
-  | 'remove-bom'
-  | 'trim-outer-whitespace'
-  | 'remove-single-json-fence'
-  | 'extract-first-balanced-json'
-  | 'escape-unescaped-json-quotes'
-  | 'apply-registered-field-alias'
+  typeof STRUCTURED_OUTPUT_NORMALIZATION_STEPS_V1[number]
 
 export interface StructuredOutputIssueV1 {
   version: 1
@@ -229,15 +236,45 @@ function firstBalancedJson(text: string, root: StructuredOutputContractV1['root'
 }
 
 /**
- * Accept only the narrow, lossless subset of jsonrepair that inserts escape
- * characters before existing quotes. This fixes prose quotes inside JSON
- * strings without accepting truncation repair, invented delimiters, removed
- * commas, rewritten keys, or any other content-changing salvage.
+ * Prove that an insertion point is between two adjacent JSON string values in
+ * an array. Object members are deliberately excluded: inferring a missing
+ * object delimiter can change the model's intended field structure.
  */
-function onlyInsertedQuoteEscapes(original: string, repaired: string): boolean {
+function isAdjacentArrayStringBoundary(original: string, index: number): boolean {
+  if (index < 1 || original[index - 1] !== '"' || original[index] !== '"') return false
+  const stack: Array<'object' | 'array'> = []
+  let inString = false
+  let escaped = false
+  for (let cursor = 0; cursor < index; cursor += 1) {
+    const char = original[cursor]
+    if (inString) {
+      if (escaped) escaped = false
+      else if (char === '\\') escaped = true
+      else if (char === '"') inString = false
+      continue
+    }
+    if (char === '"') inString = true
+    else if (char === '{') stack.push('object')
+    else if (char === '[') stack.push('array')
+    else if (char === '}' || char === ']') stack.pop()
+  }
+  return !inString && stack[stack.length - 1] === 'array'
+}
+
+/**
+ * Accept only the narrow, lossless subset of jsonrepair that inserts escape
+ * characters before existing quotes or commas between adjacent array string
+ * values. It still rejects truncation repair, object-member delimiter repair,
+ * removed punctuation, rewritten keys, and every content-changing rewrite.
+ */
+function safeJsonRepairSteps(
+  original: string,
+  repaired: string,
+): StructuredOutputNormalizationStepV1[] | null {
   let originalIndex = 0
   let repairedIndex = 0
-  let inserted = 0
+  let insertedEscapes = 0
+  let insertedArrayCommas = 0
   while (originalIndex < original.length && repairedIndex < repaired.length) {
     if (original[originalIndex] === repaired[repairedIndex]) {
       originalIndex += 1
@@ -249,22 +286,173 @@ function onlyInsertedQuoteEscapes(original: string, repaired: string): boolean {
       && repaired[repairedIndex + 1] === '"'
       && original[originalIndex] === '"'
     ) {
-      inserted += 1
+      insertedEscapes += 1
       repairedIndex += 1
       continue
     }
-    return false
+    if (
+      repaired[repairedIndex] === ','
+      && isAdjacentArrayStringBoundary(original, originalIndex)
+    ) {
+      insertedArrayCommas += 1
+      repairedIndex += 1
+      continue
+    }
+    return null
   }
-  return inserted > 0 && originalIndex === original.length && repairedIndex === repaired.length
+  if (originalIndex !== original.length || repairedIndex !== repaired.length) return null
+  const steps: StructuredOutputNormalizationStepV1[] = []
+  if (insertedEscapes) steps.push('escape-unescaped-json-quotes')
+  if (insertedArrayCommas) steps.push('insert-missing-array-commas')
+  return steps.length ? steps : null
 }
 
-function repairUnescapedJsonQuotes(text: string): string | null {
+function repairSafeJsonSyntax(text: string): {
+  text: string
+  steps: StructuredOutputNormalizationStepV1[]
+} | null {
   try {
     const repaired = jsonrepair(text)
-    return onlyInsertedQuoteEscapes(text, repaired) ? repaired : null
+    const repairSteps = safeJsonRepairSteps(text, repaired)
+    return repairSteps ? { text: repaired, steps: repairSteps } : null
   } catch {
     return null
   }
+}
+
+/**
+ * Fallback for providers that emit many prose quotation marks and make
+ * jsonrepair lose track of the surrounding string. A quote is escaped only
+ * when it is already inside a JSON string and the following non-space token
+ * cannot legally close a JSON string value/key. Adjacent quotes remain
+ * ambiguous and are rejected so missing array commas are handled only by the
+ * narrower insertion proof above.
+ */
+function escapeObviouslyInternalJsonQuotes(text: string): string | null {
+  let output = ''
+  let inString = false
+  let escaped = false
+  let changed = false
+  for (let index = 0; index < text.length; index += 1) {
+    const char = text[index]
+    if (escaped) {
+      output += char
+      escaped = false
+      continue
+    }
+    if (char === '\\') {
+      output += char
+      if (inString) escaped = true
+      continue
+    }
+    if (char !== '"') {
+      output += char
+      continue
+    }
+    if (!inString) {
+      output += char
+      inString = true
+      continue
+    }
+    let lookahead = index + 1
+    while (/\s/.test(text[lookahead] ?? '')) lookahead += 1
+    const next = text[lookahead] ?? ''
+    if (next === '"') return null
+    if (next && ![':', ',', '}', ']'].includes(next)) {
+      output += '\\"'
+      changed = true
+      continue
+    }
+    output += char
+    inString = false
+  }
+  if (!changed || inString || escaped) return null
+  try {
+    JSON.parse(output)
+    return output
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Repair exactly one premature root-object closure when the remaining text is
+ * one new field explicitly allowed by the contract. This covers
+ * `{...},"allowed":value}` without accepting duplicate/unknown fields,
+ * multiple tails, competing roots, or truncated values.
+ */
+function mergeSingleAllowedObjectTail(
+  text: string,
+  contract: StructuredOutputContractV1,
+): string | null {
+  if (contract.root !== 'object' || !contract.allowedRootFields) return null
+  const balanced = firstBalancedJson(text, 'object')
+  if (!balanced || !text.startsWith(balanced)) return null
+  const remainder = text.slice(balanced.length)
+  const tail = /^\s*,\s*"([^"\\]+)"\s*:([\s\S]+)\}\s*$/.exec(remainder)
+  if (!tail) return null
+  const tailField = tail[1]
+  if (!contract.allowedRootFields.includes(tailField)) return null
+  try {
+    const head = JSON.parse(balanced) as Record<string, unknown>
+    if (!isRecord(head) || Object.prototype.hasOwnProperty.call(head, tailField)) return null
+    const merged = `${balanced.slice(0, -1)}${remainder}`
+    const parsed = JSON.parse(merged)
+    if (!isRecord(parsed)) return null
+    const added = Object.keys(parsed).filter(key => !Object.prototype.hasOwnProperty.call(head, key))
+    if (added.length !== 1 || added[0] !== tailField) return null
+    if (Object.keys(parsed).some(key => !contract.allowedRootFields!.includes(key))) return null
+    return merged
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Some OpenAI-compatible models over-escape a root field name as
+ * `\"allowedField\"`. Unescape only when the scanner is at the root object,
+ * the previous structural token is `{` or `,`, and the field is registered.
+ */
+function unescapeAllowedRootFields(
+  text: string,
+  contract: StructuredOutputContractV1,
+): string | null {
+  if (contract.root !== 'object' || !contract.allowedRootFields) return null
+  const stack: Array<'object' | 'array'> = []
+  let inString = false
+  let escaped = false
+  let changed = false
+  let output = ''
+  for (let index = 0; index < text.length; index += 1) {
+    const char = text[index]
+    if (inString) {
+      output += char
+      if (escaped) escaped = false
+      else if (char === '\\') escaped = true
+      else if (char === '"') inString = false
+      continue
+    }
+    if (char === '\\' && text[index + 1] === '"'
+      && stack.length === 1 && stack[0] === 'object') {
+      const match = /^\\"([^"\\]+)\\"\s*:/.exec(text.slice(index))
+      const field = match?.[1]
+      const previous = output.trimEnd().slice(-1)
+      if (match && field && (previous === '{' || previous === ',')
+        && contract.allowedRootFields.includes(field)
+        && !text.slice(0, index).includes(`"${field}"`)) {
+        output += `"${field}":`
+        index += match[0].length - 1
+        changed = true
+        continue
+      }
+    }
+    output += char
+    if (char === '"') inString = true
+    else if (char === '{') stack.push('object')
+    else if (char === '[') stack.push('array')
+    else if (char === '}' || char === ']') stack.pop()
+  }
+  return changed ? output : null
 }
 
 function fail(input: {
@@ -362,15 +550,27 @@ export function evaluateStructuredOutputV1<T>(input: {
     steps.push('remove-single-json-fence')
   }
 
+  const unescapedRootFields = unescapeAllowedRootFields(normalizedText, contract)
+  if (unescapedRootFields) {
+    normalizedText = unescapedRootFields
+    steps.push('unescape-allowed-root-field')
+  }
+
   let parsed: unknown
   try {
     parsed = JSON.parse(normalizedText)
   } catch {
-    const balanced = firstBalancedJson(normalizedText, contract.root)
+    const mergedTail = mergeSingleAllowedObjectTail(normalizedText, contract)
+    if (mergedTail) {
+      parsed = JSON.parse(mergedTail)
+      normalizedText = mergedTail
+      steps.push('merge-single-allowed-object-tail')
+    }
+    const balanced = parsed === undefined ? firstBalancedJson(normalizedText, contract.root) : null
     if (balanced && balanced !== normalizedText) {
       const balancedStart = normalizedText.indexOf(balanced)
       const remainder = `${normalizedText.slice(0, balancedStart)}${normalizedText.slice(balancedStart + balanced.length)}`
-      if (/[{[]/.test(remainder)) {
+      if (/[{[]/.test(remainder) || /^\s*,\s*"[^"\\]+"\s*:/.test(remainder)) {
         fail({
           contract, originalText, normalizedText, steps, aliases,
           issue: {
@@ -388,14 +588,22 @@ export function evaluateStructuredOutputV1<T>(input: {
       }
     }
     if (parsed === undefined) {
-      const quoteRepaired = repairUnescapedJsonQuotes(normalizedText)
-      if (quoteRepaired) {
+      const safeRepair = repairSafeJsonSyntax(normalizedText)
+      if (safeRepair) {
         try {
-          parsed = JSON.parse(quoteRepaired)
-          normalizedText = quoteRepaired
-          steps.push('escape-unescaped-json-quotes')
+          parsed = JSON.parse(safeRepair.text)
+          normalizedText = safeRepair.text
+          steps.push(...safeRepair.steps)
         } catch {
           parsed = undefined
+        }
+      }
+      if (parsed === undefined) {
+        const quoteFallback = escapeObviouslyInternalJsonQuotes(normalizedText)
+        if (quoteFallback) {
+          parsed = JSON.parse(quoteFallback)
+          normalizedText = quoteFallback
+          steps.push('escape-unescaped-json-quotes')
         }
       }
       if (parsed === undefined) {
@@ -631,15 +839,9 @@ export function parseStructuredOutputRunEvidenceV1(value: unknown): StructuredOu
         )))
       ) throw new Error(`结构化输出运行证据 attempts[${index}].contractShape 无效。`)
     }
-    const allowedSteps: StructuredOutputNormalizationStepV1[] = [
-      'remove-bom',
-      'trim-outer-whitespace',
-      'remove-single-json-fence',
-      'extract-first-balanced-json',
-      'escape-unescaped-json-quotes',
-      'apply-registered-field-alias',
-    ]
-    if (attempt.normalizationSteps.some(step => !allowedSteps.includes(step as StructuredOutputNormalizationStepV1))) {
+    if (attempt.normalizationSteps.some(step => (
+      !STRUCTURED_OUTPUT_NORMALIZATION_STEPS_V1.includes(step as StructuredOutputNormalizationStepV1)
+    ))) {
       throw new Error(`结构化输出运行证据 attempts[${index}] 包含未知 normalize 步骤。`)
     }
     if (attempt.appliedAliases.some(alias => (

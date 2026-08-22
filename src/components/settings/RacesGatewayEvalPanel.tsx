@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Download, LoaderCircle, Play, RefreshCw, RotateCcw } from 'lucide-react'
-import { type ChatResult, resolveRequestConfig } from '../../lib/ai/client'
+import { type ChatResult } from '../../lib/ai/client'
 import { isAIConfigReady } from '../../lib/ai/config-readiness'
 import { supportsVerifiedJsonObjectResponseV1 } from '../../lib/ai/provider-capabilities'
 import { fetchOpenAIModels } from '../../lib/ai/model-list'
@@ -8,8 +8,9 @@ import { executeRegisteredAIEntryV1 } from '../../lib/agent/formal-ai-entry'
 import { hashCanonicalValue } from '../../lib/agent/run/hash'
 import {
   buildRacesGatewayBlindGraderMessagesV1,
-  RACES_GATEWAY_BLIND_GRADER_PROMPT_VERSION_V12,
-  RACES_GATEWAY_GRADER_TIMEOUT_MS_V12,
+  RACES_GATEWAY_BLIND_GRADE_JSON_SCHEMA_V21,
+  RACES_GATEWAY_BLIND_GRADER_PROMPT_VERSION_V21,
+  RACES_GATEWAY_GRADER_TIMEOUT_MS_V21,
   RacesGatewayBlindGraderFailureV1,
   RACES_GATEWAY_GRADER_PREFLIGHT_INPUT_V3,
 } from '../../lib/evals/races-gateway/protocol'
@@ -21,9 +22,10 @@ import {
   runRacesGatewayEvalV1,
   verifyRacesGatewayEvalCheckpointV1,
 } from '../../lib/evals/races-gateway/runner'
+import { RACES_GATEWAY_EVAL_FIXTURES_V1 } from '../../lib/evals/races-gateway/fixtures'
 import type { RacesGatewayEvalCheckpointV1 } from '../../lib/evals/races-gateway/types'
-import { PROVIDER_MODELS } from '../../lib/types'
-import { useAIConfigStore } from '../../stores/ai-config'
+import { PROVIDER_MODELS, type AIConfig, type AIConfigPreset } from '../../lib/types'
+import { getAIConfigPresetSessionApiKey, useAIConfigStore } from '../../stores/ai-config'
 import { useDialog } from '../shared/Dialog'
 
 function rate(value: number): string {
@@ -39,49 +41,89 @@ function downloadJson(raw: string, filename: string): void {
   URL.revokeObjectURL(url)
 }
 
+function presetConfig(preset: AIConfigPreset, current: AIConfig): AIConfig {
+  const apiKey = preset.config.apiKey
+    || getAIConfigPresetSessionApiKey(preset.id)
+    || (preset.config.provider === current.provider ? current.apiKey : '')
+  return { ...preset.config, apiKey }
+}
+
+function defaultPresetId(presets: AIConfigPreset[], pattern: RegExp, exclude?: string): string {
+  return presets.find(item => item.id !== exclude && pattern.test(`${item.name} ${item.config.model}`))?.id
+    ?? presets.find(item => item.id !== exclude)?.id
+    ?? ''
+}
+
 export default function RacesGatewayEvalPanel() {
-  const config = useAIConfigStore(state => state.config)
+  const currentConfig = useAIConfigStore(state => state.config)
+  const presets = useAIConfigStore(state => state.presets)
   const dialog = useDialog()
   const [checkpoint, setCheckpoint] = useState<RacesGatewayEvalCheckpointV1 | null>(null)
   const [running, setRunning] = useState(false)
   const [progress, setProgress] = useState('')
   const [error, setError] = useState('')
+  const [generatorPresetId, setGeneratorPresetId] = useState('')
+  const [graderPresetId, setGraderPresetId] = useState('')
   const [graderModel, setGraderModel] = useState('')
   const [liveGraderModels, setLiveGraderModels] = useState<string[]>([])
   const [discoveringModels, setDiscoveringModels] = useState(false)
 
-  const generatorConfig = useMemo(() => resolveRequestConfig(
-    config,
-    { category: 'agent.world-foundation.worldview-field' },
-  ).config, [config])
-  const graderRouteConfig = useMemo(() => resolveRequestConfig(
-    config,
-    { category: 'eval.race6.blind-grader' },
-  ).config, [config])
+  useEffect(() => {
+    if (checkpoint) return
+    setGeneratorPresetId(current => current || defaultPresetId(
+      presets,
+      /agnes-2\.5-flash|agnes.*2\.5/i,
+    ))
+    setGraderPresetId(current => current || defaultPresetId(
+      presets,
+      /deepseek-v4(?:-flash)?|deepseek.*v4/i,
+      generatorPresetId,
+    ))
+  }, [checkpoint, generatorPresetId, presets])
+
+  useEffect(() => {
+    if (!checkpoint) return
+    setGeneratorPresetId(presets.find(item => (
+      item.config.provider === checkpoint.modelIdentity.provider
+      && item.config.model === checkpoint.modelIdentity.model
+    ))?.id ?? '')
+    setGraderPresetId(presets.find(item => (
+      item.config.provider === checkpoint.graderIdentity.provider
+      && item.config.model === checkpoint.graderIdentity.model
+    ))?.id ?? '')
+    setGraderModel(checkpoint.graderIdentity.model)
+  }, [checkpoint, presets])
+
+  const generatorPreset = presets.find(item => item.id === generatorPresetId) ?? null
+  const graderPreset = presets.find(item => item.id === graderPresetId) ?? null
+  const generatorConfig = useMemo(() => (
+    generatorPreset ? presetConfig(generatorPreset, currentConfig) : null
+  ), [currentConfig, generatorPreset])
+  const graderPresetConfig = useMemo(() => (
+    graderPreset ? presetConfig(graderPreset, currentConfig) : null
+  ), [currentConfig, graderPreset])
   const graderOptions = useMemo(() => {
-    const options = [...(PROVIDER_MODELS[graderRouteConfig.provider] ?? [])]
+    if (!graderPresetConfig) return []
+    const options = [...(PROVIDER_MODELS[graderPresetConfig.provider] ?? [])]
     const seen = new Set(options.map(option => option.value))
     for (const model of liveGraderModels) {
       if (!seen.has(model)) options.push({ value: model, label: model, desc: '服务实时返回' })
     }
     return options
-  }, [graderRouteConfig.provider, liveGraderModels])
-  const graderConfig = useMemo(() => ({
-    ...graderRouteConfig,
-    model: graderModel || graderRouteConfig.model,
-  }), [graderModel, graderRouteConfig])
+  }, [graderPresetConfig, liveGraderModels])
+  const graderConfig = useMemo(() => graderPresetConfig ? ({
+    ...graderPresetConfig,
+    model: graderModel || graderPresetConfig.model,
+  }) : null, [graderModel, graderPresetConfig])
 
   useEffect(() => {
     if (checkpoint) {
       setGraderModel(checkpoint.graderIdentity.model)
       return
     }
-    const preferred = graderRouteConfig.provider === 'agnes'
-      ? graderOptions.find(option => option.value === 'agnes-2.5-pro')
-        ?? graderOptions.find(option => option.value !== generatorConfig.model)
-      : graderOptions.find(option => option.value !== generatorConfig.model)
-    setGraderModel(preferred?.value ?? graderRouteConfig.model)
-  }, [checkpoint, generatorConfig.model, graderOptions, graderRouteConfig.model, graderRouteConfig.provider])
+    setGraderModel(graderPresetConfig?.model ?? '')
+    setLiveGraderModels([])
+  }, [checkpoint, graderPresetConfig])
 
   useEffect(() => {
     const stored = loadRacesGatewayEvalCheckpointV1()
@@ -100,10 +142,10 @@ export default function RacesGatewayEvalPanel() {
     setDiscoveringModels(true)
     setError('')
     try {
-      if (!isAIConfigReady(graderRouteConfig)) throw new Error('请先配置可用 API Key')
+      if (!graderConfig || !isAIConfigReady(graderConfig)) throw new Error('请先选择包含可用 API Key 的 grader 预设')
       const models = await fetchOpenAIModels({
-        baseUrl: graderRouteConfig.baseUrl,
-        apiKey: graderRouteConfig.apiKey,
+        baseUrl: graderConfig.baseUrl,
+        apiKey: graderConfig.apiKey,
         timeoutMs: 30_000,
       })
       if (!models.length) throw new Error('模型服务返回了空目录')
@@ -119,11 +161,12 @@ export default function RacesGatewayEvalPanel() {
     setRunning(true)
     setError('')
     try {
-      if (!isAIConfigReady(generatorConfig) || !isAIConfigReady(graderConfig)) {
+      if (!generatorConfig || !graderConfig
+        || !isAIConfigReady(generatorConfig) || !isAIConfigReady(graderConfig)) {
         throw new Error('RACE-6 generator 或 grader 缺少可用 API Key、Base URL 或模型')
       }
-      if (generatorConfig.provider === graderConfig.provider && generatorConfig.model === graderConfig.model) {
-        throw new Error('RACE-6 generator 与盲评 grader 必须使用不同模型身份')
+      if (generatorConfig.provider === graderConfig.provider) {
+        throw new Error('RACE-6 V21 generator 与盲评 grader 必须使用不同提供商预设')
       }
       if (checkpoint?.status === 'completed') {
         throw new Error('当前 RACE-6 冻结运行已经完成；如需新运行，请先导出后清除。')
@@ -132,7 +175,7 @@ export default function RacesGatewayEvalPanel() {
           const messages = buildRacesGatewayBlindGraderMessagesV1(input)
           const result: ChatResult = {}
           const controller = new AbortController()
-          const timeout = setTimeout(() => controller.abort(), RACES_GATEWAY_GRADER_TIMEOUT_MS_V12)
+          const timeout = setTimeout(() => controller.abort(), RACES_GATEWAY_GRADER_TIMEOUT_MS_V21)
           const startedAt = performance.now()
           try {
             const output = await executeRegisteredAIEntryV1(
@@ -142,14 +185,22 @@ export default function RacesGatewayEvalPanel() {
               { category: 'eval.race6.blind-grader', contextOverflowPolicy: 'reject' },
               controller.signal,
               result,
-              supportsVerifiedJsonObjectResponseV1(graderConfig.provider)
-                ? { responseFormat: 'json_object' }
-                : undefined,
+              graderConfig.provider === 'nvidia'
+                ? {
+                    jsonSchema: {
+                      name: 'races_gateway_blind_grade_v21',
+                      schema: RACES_GATEWAY_BLIND_GRADE_JSON_SCHEMA_V21,
+                      strict: true,
+                    },
+                  }
+                : supportsVerifiedJsonObjectResponseV1(graderConfig.provider)
+                  ? { responseFormat: 'json_object' }
+                  : undefined,
             )
             const evidence = {
                 provider: graderConfig.provider,
                 model: graderConfig.model,
-                promptVersion: RACES_GATEWAY_BLIND_GRADER_PROMPT_VERSION_V12,
+                promptVersion: RACES_GATEWAY_BLIND_GRADER_PROMPT_VERSION_V21,
                 inputHash: await hashCanonicalValue(messages),
                 outputHash: await hashCanonicalValue(output),
                 inputTokens: result.usage?.inputTokens ?? null,
@@ -168,7 +219,7 @@ export default function RacesGatewayEvalPanel() {
             }
           } catch (value) {
             if (controller.signal.aborted) {
-              throw new Error(`RACE-6 grader 超过 ${RACES_GATEWAY_GRADER_TIMEOUT_MS_V12 / 1_000} 秒未完成严格 JSON`)
+              throw new Error(`RACE-6 grader 超过 ${RACES_GATEWAY_GRADER_TIMEOUT_MS_V21 / 1_000} 秒未完成严格 JSON`)
             }
             throw value
           } finally {
@@ -182,10 +233,11 @@ export default function RacesGatewayEvalPanel() {
       }
       const next = await runRacesGatewayEvalV1({
         modelIdentity: { provider: generatorConfig.provider, model: generatorConfig.model },
+        generatorConfig,
         graderIdentity: {
           provider: graderConfig.provider,
           model: graderConfig.model,
-          promptVersion: RACES_GATEWAY_BLIND_GRADER_PROMPT_VERSION_V12,
+          promptVersion: RACES_GATEWAY_BLIND_GRADER_PROMPT_VERSION_V21,
         },
         graderPreflight,
         resumeFrom: checkpoint,
@@ -222,13 +274,16 @@ export default function RacesGatewayEvalPanel() {
   }
 
   const score = checkpoint?.score
+  const anchorMisses = checkpoint?.results.filter(result => (
+    result.expectedAnchorInOutcome === false
+  )) ?? []
   return (
     <section data-testid="race6-eval-panel" className="border-t border-border pt-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div>
           <h4 className="text-xs font-medium text-text-primary">RACE-6 种族与民族金切片</h4>
           <p className="mt-1 text-[10px] text-text-muted">
-            1 次 grader schema preflight + 100 例冻结 transcript/outcome；80 次生成、40 次盲评、20 次确定性攻击。每例 durable 保存，可刷新继续。
+            1 次 grader schema preflight + 100 例冻结 transcript/outcome；80 次生成、50 次盲评、20 次确定性攻击。每例 durable 保存，可刷新继续。
           </p>
         </div>
         <div className="flex items-center gap-1">
@@ -261,6 +316,7 @@ export default function RacesGatewayEvalPanel() {
             type="button"
             onClick={() => { void run() }}
             disabled={running || checkpoint?.status === 'completed'
+              || !generatorConfig || !graderConfig
               || !isAIConfigReady(generatorConfig) || !isAIConfigReady(graderConfig)}
             className="inline-flex items-center gap-1.5 rounded-md bg-violet-500/10 px-2.5 py-1.5 text-xs text-violet-400 hover:bg-violet-500/20 disabled:opacity-40"
           >
@@ -280,39 +336,115 @@ export default function RacesGatewayEvalPanel() {
           <p className="mt-1 break-all font-mono text-[10px] text-text-muted">
             checkpoint {checkpoint.checkpointHash}
           </p>
+          {checkpoint.attemptFailures.length > 0 && (() => {
+            const latest = checkpoint.attemptFailures[checkpoint.attemptFailures.length - 1]
+            const structured = latest.result.structuredFailureEvidence
+            const rawAttempts = structured?.attempts ?? []
+            const graderRaw = latest.result.gradeFailureEvidence?.rawOutput ?? ''
+            return (
+              <div className="mt-1 text-[10px] text-text-muted">
+                <p data-testid="race6-latest-failure">
+                  最近失败 {latest.fixtureId} · {latest.result.failureStage ?? 'unknown'}
+                  {' '}· {latest.result.failureEvidence?.failureClass ?? 'unclassified'}
+                  {latest.result.gradeFailureEvidence?.parseError
+                    ? ` · ${latest.result.gradeFailureEvidence.parseError}`
+                    : ''}
+                </p>
+                {(rawAttempts.length > 0 || graderRaw) && (
+                  <details data-testid="race6-latest-failure-evidence" className="mt-1">
+                    <summary className="cursor-pointer text-violet-400">查看最近失败的结构化证据</summary>
+                    <div className="mt-1 space-y-2 rounded border border-border bg-bg-elevated p-2">
+                      {rawAttempts.map(attempt => (
+                        <div key={attempt.callIndex}>
+                          <p>
+                            call {attempt.callIndex} · {attempt.purpose} · {attempt.evidence.status}
+                            {' '}· {attempt.evidence.issues.map(issue => `${issue.code}: ${issue.message}`).join('；')}
+                          </p>
+                          <pre className="mt-1 max-h-48 overflow-auto whitespace-pre-wrap break-all font-mono text-[9px]">
+                            {attempt.evidence.originalText.slice(0, 4_000)}
+                          </pre>
+                        </div>
+                      ))}
+                      {graderRaw && (
+                        <pre className="max-h-48 overflow-auto whitespace-pre-wrap break-all font-mono text-[9px]">
+                          {graderRaw.slice(0, 4_000)}
+                        </pre>
+                      )}
+                    </div>
+                  </details>
+                )}
+              </div>
+            )
+          })()}
         </div>
       )}
-      {!checkpoint && graderOptions.length > 0 && (
-        <label className="mt-3 block text-[10px] text-text-muted">
-          <span className="flex items-center justify-between gap-2">
-            独立盲评模型
-            <button
-              type="button"
-              onClick={() => { void refreshGraderModels() }}
-              disabled={running || discoveringModels || !isAIConfigReady(graderRouteConfig)}
-              className="inline-flex items-center gap-1 rounded px-1.5 py-1 text-[10px] text-violet-400 hover:bg-violet-500/10 disabled:opacity-40"
+      {!checkpoint && (
+        <div className="mt-3 grid gap-2 sm:grid-cols-2">
+          <label className="text-[10px] text-text-muted">
+            Generator 预设
+            <select
+              data-testid="race6-generator-preset"
+              aria-label="RACE-6 Generator 预设"
+              value={generatorPresetId}
+              onChange={event => setGeneratorPresetId(event.target.value)}
+              disabled={running}
+              className="mt-1 w-full rounded border border-border bg-bg-elevated px-2 py-1.5 text-xs text-text-primary"
             >
-              <RefreshCw className={`h-3 w-3 ${discoveringModels ? 'animate-spin' : ''}`} />
-              {discoveringModels ? '刷新中' : '刷新服务模型'}
-            </button>
-          </span>
-          <select
-            aria-label="RACE-6 独立盲评模型"
-            value={graderModel || graderRouteConfig.model}
-            onChange={event => setGraderModel(event.target.value)}
-            disabled={running}
-            className="mt-1 w-full rounded border border-border bg-bg-elevated px-2 py-1.5 text-xs text-text-primary"
-          >
-            {graderOptions.map(option => (
-              <option key={option.value} value={option.value}>{option.label}</option>
-            ))}
-          </select>
-          {liveGraderModels.length > 0 && (
-            <span className="mt-1 block text-[10px] text-text-muted">
-              服务实时返回 {liveGraderModels.length} 个模型；只选择文本 chat/completions 模型。
-            </span>
+              <option value="">请选择</option>
+              {presets.map(item => (
+                <option key={item.id} value={item.id}>{item.name} · {item.config.model}</option>
+              ))}
+            </select>
+          </label>
+          <label className="text-[10px] text-text-muted">
+            独立盲评预设
+            <select
+              data-testid="race6-grader-preset"
+              aria-label="RACE-6 独立盲评预设"
+              value={graderPresetId}
+              onChange={event => setGraderPresetId(event.target.value)}
+              disabled={running}
+              className="mt-1 w-full rounded border border-border bg-bg-elevated px-2 py-1.5 text-xs text-text-primary"
+            >
+              <option value="">请选择</option>
+              {presets.map(item => (
+                <option key={item.id} value={item.id}>{item.name} · {item.config.model}</option>
+              ))}
+            </select>
+          </label>
+          {graderConfig && graderOptions.length > 0 && (
+            <label className="text-[10px] text-text-muted sm:col-span-2">
+              <span className="flex items-center justify-between gap-2">
+                独立盲评模型
+                <button
+                  type="button"
+                  onClick={() => { void refreshGraderModels() }}
+                  disabled={running || discoveringModels || !isAIConfigReady(graderConfig)}
+                  className="inline-flex items-center gap-1 rounded px-1.5 py-1 text-[10px] text-violet-400 hover:bg-violet-500/10 disabled:opacity-40"
+                >
+                  <RefreshCw className={`h-3 w-3 ${discoveringModels ? 'animate-spin' : ''}`} />
+                  {discoveringModels ? '刷新中' : '刷新服务模型'}
+                </button>
+              </span>
+              <select
+                aria-label="RACE-6 独立盲评模型"
+                value={graderModel || graderConfig.model}
+                onChange={event => setGraderModel(event.target.value)}
+                disabled={running}
+                className="mt-1 w-full rounded border border-border bg-bg-elevated px-2 py-1.5 text-xs text-text-primary"
+              >
+                {graderOptions.map(option => (
+                  <option key={option.value} value={option.value}>{option.label}</option>
+                ))}
+              </select>
+              {liveGraderModels.length > 0 && (
+                <span className="mt-1 block text-[10px] text-text-muted">
+                  服务实时返回 {liveGraderModels.length} 个模型；只选择文本 chat/completions 模型。
+                </span>
+              )}
+            </label>
           )}
-        </label>
+        </div>
       )}
       {score && (
         <div data-testid="race6-eval-score" className="mt-3 grid grid-cols-2 gap-x-4 gap-y-1 text-[11px] text-text-secondary sm:grid-cols-3">
@@ -334,6 +466,26 @@ export default function RacesGatewayEvalPanel() {
             {score.passed ? '门禁 PASS' : `门禁 FAIL · ${score.failures.join('、')}`}
           </span>
         </div>
+      )}
+      {anchorMisses.length > 0 && (
+        <details data-testid="race6-anchor-misses" className="mt-2 text-[10px] text-text-muted">
+          <summary className="cursor-pointer text-violet-400">
+            查看语义事实保留未通过的样本（{anchorMisses.length}）
+          </summary>
+          <div className="mt-1 space-y-2 rounded border border-border bg-bg-elevated p-2">
+            {anchorMisses.slice(0, 10).map(result => {
+              const fixture = RACES_GATEWAY_EVAL_FIXTURES_V1.find(item => item.id === result.fixtureId)
+              return (
+                <div key={result.fixtureId}>
+                  <p>{result.fixtureId} · 期望：{fixture?.expectedAnchor ?? '（无）'}</p>
+                  <pre className="mt-1 max-h-40 overflow-auto whitespace-pre-wrap break-all font-mono text-[9px]">
+                    {result.candidateText.slice(0, 2_000)}
+                  </pre>
+                </div>
+              )
+            })}
+          </div>
+        </details>
       )}
       {error && <p data-testid="race6-eval-error" className="mt-2 break-words text-[11px] text-error">{error}</p>}
     </section>

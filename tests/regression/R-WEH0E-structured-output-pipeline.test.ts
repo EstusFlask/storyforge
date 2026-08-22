@@ -65,6 +65,85 @@ describe('WEH-0E structured output pipeline', () => {
     expect(explained.evidence.status).toBe('usable-with-warnings')
   })
 
+  it('只补相邻数组字符串缺失的逗号，不推断对象成员分隔符', () => {
+    const arrayContract: StructuredOutputContractV1 = {
+      ...contract,
+      allowedRootFields: ['field', 'value', 'temporaryAssumptions'],
+    }
+    const repaired = evaluateStructuredOutputV1({
+      raw: '{"field":"races","value":"潮民","temporaryAssumptions":["成年礼新增""港务共治新增""迁移历史新增"]}',
+      contract: arrayContract,
+      parse: value => value as Record<string, unknown>,
+    })
+    expect(repaired.output.temporaryAssumptions).toEqual(['成年礼新增', '港务共治新增', '迁移历史新增'])
+    expect(repaired.evidence.normalizationSteps).toContain('insert-missing-array-commas')
+
+    expect(() => evaluateStructuredOutputV1({
+      raw: '{"field":"races""value":"潮民"}',
+      contract,
+      parse: parseField,
+    })).toThrow(StructuredOutputPipelineErrorV1)
+  })
+
+  it('只合并一个注册允许且不重复的尾字段，不接受未知或重复尾字段', () => {
+    const tailContract: StructuredOutputContractV1 = {
+      ...contract,
+      allowedRootFields: ['field', 'value', 'temporaryAssumptions'],
+    }
+    const repaired = evaluateStructuredOutputV1({
+      raw: '{"field":"races","value":"潮民"},"temporaryAssumptions":["港务组织为临时假设"]}',
+      contract: tailContract,
+      parse: value => value as Record<string, unknown>,
+    })
+    expect(repaired.output.temporaryAssumptions).toEqual(['港务组织为临时假设'])
+    expect(repaired.evidence.normalizationSteps).toContain('merge-single-allowed-object-tail')
+
+    for (const raw of [
+      '{"field":"races","value":"潮民"},"writeOtherField":true}',
+      '{"field":"races","value":"潮民"},"value":"覆盖"}',
+    ]) {
+      expect(() => evaluateStructuredOutputV1({ raw, contract: tailContract, parse: parseField }))
+        .toThrow(StructuredOutputPipelineErrorV1)
+    }
+  })
+
+  it('只去除注册根字段名的多余转义，不接纳未知结构字段', () => {
+    const escapedKeyContract: StructuredOutputContractV1 = {
+      ...contract,
+      allowedRootFields: ['field', 'value', 'temporaryAssumptions'],
+    }
+    const repaired = evaluateStructuredOutputV1({
+      raw: '{"field":"races","value":"潮民",\\"temporaryAssumptions\\":["港务组织为临时假设"]}',
+      contract: escapedKeyContract,
+      parse: value => value as Record<string, unknown>,
+    })
+    expect(repaired.output.temporaryAssumptions).toEqual(['港务组织为临时假设'])
+    expect(repaired.evidence.normalizationSteps).toContain('unescape-allowed-root-field')
+
+    expect(() => evaluateStructuredOutputV1({
+      raw: '{"field":"races","value":"潮民",\\"writeOtherField\\":true}',
+      contract: escapedKeyContract,
+      parse: parseField,
+    })).toThrow(StructuredOutputPipelineErrorV1)
+  })
+
+  it('jsonrepair 失效时只转义明显属于正文的多处引号', () => {
+    const repaired = evaluateStructuredOutputV1({
+      raw: '{"field":"races","value":"潮裔以"船城"迁徙，信奉"潮约"。泊户流传："潮起时找舵母，潮落时找泊户。"\\n随后继续交易。"}',
+      contract,
+      parse: parseField,
+    })
+    expect(repaired.output.value).toContain('"船城"')
+    expect(repaired.output.value).toContain('"潮起时找舵母，潮落时找泊户。"')
+    expect(repaired.evidence.normalizationSteps).toContain('escape-unescaped-json-quotes')
+
+    expect(() => evaluateStructuredOutputV1({
+      raw: '{"field":"races","value":"潮民""钟民"}',
+      contract,
+      parse: parseField,
+    })).toThrow(StructuredOutputPipelineErrorV1)
+  })
+
   it('只应用登记 alias，alias 冲突和未知字段均 fail closed', () => {
     const aliased = evaluateStructuredOutputV1({
       raw: '{"field":"races","content":"潮民"}',

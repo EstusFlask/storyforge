@@ -1,6 +1,6 @@
 import { hashCanonicalValue } from '../../agent/run/hash'
 import { getOrCreateAgentConversation } from '../../agent/conversations'
-import type { MasterAgentPlan } from '../../agent/orchestrator'
+import { executeMasterAgentPlan, type MasterAgentPlan } from '../../agent/orchestrator'
 import {
   restoreMasterAgentCandidatesV1,
   runDurableMasterAgentPlanV1,
@@ -23,7 +23,7 @@ import { generateWorkCode, generateWorkspaceUid } from '../../memory/identity'
 import { readAgentRunArtifactExactV1 } from '../../memory/artifact-store'
 import { cascadeDeleteProject } from '../../registry/lifecycle'
 import type { ContextSourceRefV1 } from '../../registry/types'
-import type { Character, Project, WorkspaceScope, Worldview } from '../../types'
+import type { AIConfig, Character, Project, WorkspaceScope, Worldview } from '../../types'
 import { ensureWorkspaceOwnership } from '../../world-engine/ownership'
 import { stampNewRecord } from '../../world-engine/scope'
 import { RACES_GATEWAY_EVAL_FIXTURES_V1 } from './fixtures'
@@ -35,8 +35,8 @@ import {
 } from './archive'
 import { scoreRacesGatewayEvalV1, RACES_GATEWAY_EVAL_THRESHOLDS_V1 } from './scoring'
 import {
-  RACES_GATEWAY_EVAL_STORAGE_KEY_V12,
-  RACES_GATEWAY_EVAL_VERSION_V12,
+  RACES_GATEWAY_EVAL_STORAGE_KEY_V21,
+  RACES_GATEWAY_EVAL_VERSION_V21,
   type RacesGatewayBlindGradeV1,
   type RacesGatewayBlindGradeEvidenceV1,
   type RacesGatewayEvalCheckpointV1,
@@ -180,6 +180,7 @@ function includesRef(
 async function executeModelFixture(input: {
   fixture: RacesGatewayEvalFixtureV1
   modelIdentity: { provider: string; model: string }
+  generatorConfig: AIConfig
   grade: RacesGatewayBlindGraderV1
 }): Promise<RacesGatewayEvalResultV1> {
   const startedAt = performance.now()
@@ -195,16 +196,25 @@ async function executeModelFixture(input: {
       purpose: `races-gateway-eval:${input.fixture.id}`,
       title: `RACE-6 ${input.fixture.id}`,
     })
-    const run = await runDurableMasterAgentPlanV1({
-      scope: seeded.scope,
-      worldGroupId: null,
-      conversationId: conversation.id!,
-      plan: planFor(input.fixture),
-      budget: new AgentTeamBudgetTracker('balanced'),
-      onDurableBoundary: boundary => {
-        durableRunId = boundary.runId
+    const plan = planFor(input.fixture)
+    const run = await runDurableMasterAgentPlanV1(
+      {
+        scope: seeded.scope,
+        worldGroupId: null,
+        conversationId: conversation.id!,
+        plan,
+        budget: new AgentTeamBudgetTracker('balanced'),
+        onDurableBoundary: boundary => {
+          durableRunId = boundary.runId
+        },
       },
-    })
+      {
+        execute: executeInput => executeMasterAgentPlan({
+          ...executeInput,
+          taskConfigOverrides: { [plan.tasks[0].id]: input.generatorConfig },
+        }),
+      },
+    )
     const restored = await restoreMasterAgentCandidatesV1({ scope: seeded.scope, runId: run.runId })
     if (restored.candidates.length !== 1) throw new Error(`预期 1 个候选，实际 ${restored.candidates.length}`)
     const candidate = restored.candidates[0]
@@ -264,7 +274,7 @@ async function executeModelFixture(input: {
       selectedResourceKeys,
       mandatoryDelivered,
       expectedAnchorDelivered,
-      expectedAnchorInOutcome: input.fixture.kind === 'late-target' || input.fixture.kind === 'pinned-mandatory'
+      expectedAnchorInOutcome: input.fixture.kind === 'late-target'
         ? parsed.value.includes(input.fixture.expectedAnchor!)
         : null,
       staleBlocked: null,
@@ -277,12 +287,22 @@ async function executeModelFixture(input: {
       error: null,
       durationMs: Math.max(1, Math.round(performance.now() - startedAt)),
     }
-    const isQualityCase = input.fixture.kind === 'empty' || input.fixture.kind === 'partial-world'
+    const isQualityCase = input.fixture.kind === 'empty'
+      || input.fixture.kind === 'partial-world'
+      || input.fixture.kind === 'pinned-mandatory'
     const graded = isQualityCase
       ? await input.grade({ title: input.fixture.title, seedText: input.fixture.seedText, candidateText: parsed.value })
       : null
     return {
       ...generatedEvidence,
+      // Pinned Canon is a semantic preservation claim, not a character-match
+      // claim. The exact source remains frozen in the transcript and the
+      // independent grader compares it with the candidate. Late-target cases
+      // stay literal because their author request explicitly requires the
+      // precise character name.
+      expectedAnchorInOutcome: input.fixture.kind === 'pinned-mandatory'
+        ? graded?.grade.constraintsRespected ?? false
+        : generatedEvidence.expectedAnchorInOutcome,
       grade: graded?.grade ?? null,
       gradeEvidence: graded?.evidence ?? null,
       durationMs: Math.max(1, Math.round(performance.now() - startedAt)),
@@ -565,7 +585,7 @@ export async function verifyRacesGatewayEvalCheckpointV1(
   fixtures: readonly RacesGatewayEvalFixtureV1[] = RACES_GATEWAY_EVAL_FIXTURES_V1,
 ): Promise<boolean> {
   try {
-    if (checkpoint.version !== RACES_GATEWAY_EVAL_VERSION_V12
+    if (checkpoint.version !== RACES_GATEWAY_EVAL_VERSION_V21
       || !/^[a-f0-9]{64}$/.test(checkpoint.fixtureHash)
       || !/^[a-f0-9]{64}$/.test(checkpoint.checkpointHash)) return false
     if (await hashCanonicalValue(fixtures) !== checkpoint.fixtureHash) return false
@@ -615,7 +635,8 @@ export async function verifyRacesGatewayEvalCheckpointV1(
           && transcript.artifactBodies[`source-snapshot:${ref.contentHash}`] == null) return false
       }
       if (result.status !== 'passed') continue
-      if (fixture.kind === 'empty' || fixture.kind === 'partial-world') {
+      if (fixture.kind === 'empty' || fixture.kind === 'partial-world'
+        || fixture.kind === 'pinned-mandatory') {
         if (!result.grade || !result.gradeEvidence
           || result.gradeEvidence.provider !== checkpoint.graderIdentity.provider
           || result.gradeEvidence.model !== checkpoint.graderIdentity.model
@@ -656,7 +677,7 @@ export async function verifyRacesGatewayEvalCheckpointV1(
 
 export function loadRacesGatewayEvalCheckpointV1(): RacesGatewayEvalCheckpointV1 | null {
   try {
-    const raw = localStorage.getItem(RACES_GATEWAY_EVAL_STORAGE_KEY_V12)
+    const raw = localStorage.getItem(RACES_GATEWAY_EVAL_STORAGE_KEY_V21)
     return raw ? JSON.parse(raw) as RacesGatewayEvalCheckpointV1 : null
   } catch {
     return null
@@ -664,7 +685,7 @@ export function loadRacesGatewayEvalCheckpointV1(): RacesGatewayEvalCheckpointV1
 }
 
 export function persistRacesGatewayEvalCheckpointV1(checkpoint: RacesGatewayEvalCheckpointV1): void {
-  localStorage.setItem(RACES_GATEWAY_EVAL_STORAGE_KEY_V12, JSON.stringify(checkpoint))
+  localStorage.setItem(RACES_GATEWAY_EVAL_STORAGE_KEY_V21, JSON.stringify(checkpoint))
 }
 
 export function exportRacesGatewayEvalCheckpointV1(checkpoint: RacesGatewayEvalCheckpointV1): string {
@@ -678,12 +699,13 @@ export async function cleanupRacesGatewayEvalProjectsV1(): Promise<number> {
 }
 
 export async function clearRacesGatewayEvalCheckpointV1(): Promise<void> {
-  localStorage.removeItem(RACES_GATEWAY_EVAL_STORAGE_KEY_V12)
+  localStorage.removeItem(RACES_GATEWAY_EVAL_STORAGE_KEY_V21)
   await cleanupRacesGatewayEvalProjectsV1()
 }
 
 export async function runRacesGatewayEvalV1(input: {
   modelIdentity: { provider: string; model: string }
+  generatorConfig: AIConfig
   graderIdentity: { provider: string; model: string; promptVersion: string }
   graderPreflight: RacesGatewayBlindGradeEvidenceV1
   grade: RacesGatewayBlindGraderV1
@@ -693,9 +715,12 @@ export async function runRacesGatewayEvalV1(input: {
 }): Promise<RacesGatewayEvalCheckpointV1> {
   const fixtures = input.fixtures ?? RACES_GATEWAY_EVAL_FIXTURES_V1
   if (!fixtures.length) throw new Error('RACE-6 评测集不能为空')
-  if (input.modelIdentity.provider === input.graderIdentity.provider
-    && input.modelIdentity.model === input.graderIdentity.model) {
-    throw new Error('RACE-6 generator 与盲评 grader 必须使用不同模型身份')
+  if (input.generatorConfig.provider !== input.modelIdentity.provider
+    || input.generatorConfig.model !== input.modelIdentity.model) {
+    throw new Error('RACE-6 generator 配置与冻结模型身份不一致')
+  }
+  if (input.modelIdentity.provider === input.graderIdentity.provider) {
+    throw new Error('RACE-6 V21 generator 与盲评 grader 必须使用不同提供商身份')
   }
   if (input.graderPreflight.provider !== input.graderIdentity.provider
     || input.graderPreflight.model !== input.graderIdentity.model
@@ -727,7 +752,7 @@ export async function runRacesGatewayEvalV1(input: {
     await cleanupRacesGatewayEvalProjectsV1()
     const now = Date.now()
     checkpoint = await sealCheckpoint({
-      version: RACES_GATEWAY_EVAL_VERSION_V12,
+      version: RACES_GATEWAY_EVAL_VERSION_V21,
       fixtureHash,
       modelIdentity: input.modelIdentity,
       graderIdentity: input.graderIdentity,
@@ -755,7 +780,12 @@ export async function runRacesGatewayEvalV1(input: {
     let result: RacesGatewayEvalResultV1
     if (fixture.kind === 'cross-scope-attack') result = await executeCrossScopeFixture(fixture, checkpoint.results)
     else if (fixture.kind === 'concurrent-cas') result = await executeCasFixture(fixture, checkpoint.results)
-    else result = await executeModelFixture({ fixture, modelIdentity: input.modelIdentity, grade: input.grade })
+    else result = await executeModelFixture({
+      fixture,
+      modelIdentity: input.modelIdentity,
+      generatorConfig: input.generatorConfig,
+      grade: input.grade,
+    })
     checkpoint.results = [...checkpoint.results.slice(0, index), result]
     if (result.status === 'failed') {
       const attempt = checkpoint.attemptFailures

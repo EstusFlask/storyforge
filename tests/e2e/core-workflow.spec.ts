@@ -1097,12 +1097,25 @@ test('上下文窗口、四类通用任务与主 Agent 角色模型路由跨模�
   await presetName.fill('审查模型')
   await presetName.locator('xpath=..').getByRole('button', { name: '保存', exact: true }).click()
 
-  await page.getByLabel('创作生成模型预设').selectOption({ label: '创作模型 · deepseek/deepseek-chat' })
-  await page.getByLabel('结构提取模型预设').selectOption({ label: '创作模型 · deepseek/deepseek-chat' })
-  await page.getByLabel('分析总结模型预设').selectOption({ label: '审查模型 · deepseek/deepseek-review' })
-  await page.getByLabel('审查校验模型预设').selectOption({ label: '审查模型 · deepseek/deepseek-review' })
-  await page.getByLabel('主 Agent 编排模型预设').selectOption({ label: '审查模型 · deepseek/deepseek-review' })
-  await page.getByLabel('正文领域 Agent模型预设').selectOption({ label: '创作模型 · deepseek/deepseek-chat' })
+  const creationPresetId = await page
+    .getByLabel('创作生成模型预设')
+    .locator('option')
+    .filter({ hasText: '创作模型' })
+    .getAttribute('value')
+  const reviewPresetId = await page
+    .getByLabel('分析总结模型预设')
+    .locator('option')
+    .filter({ hasText: '审查模型' })
+    .getAttribute('value')
+  expect(creationPresetId).toBeTruthy()
+  expect(reviewPresetId).toBeTruthy()
+
+  await page.getByLabel('创作生成模型预设').selectOption(creationPresetId!)
+  await page.getByLabel('结构提取模型预设').selectOption(creationPresetId!)
+  await page.getByLabel('分析总结模型预设').selectOption(reviewPresetId!)
+  await page.getByLabel('审查校验模型预设').selectOption(reviewPresetId!)
+  await page.getByLabel('主 Agent 编排模型预设').selectOption(reviewPresetId!)
+  await page.getByLabel('正文领域 Agent模型预设').selectOption(creationPresetId!)
   await page.getByLabel('正文领域 Agent上下文输入档位').selectOption('lean')
   await page.getByLabel('主 Agent 团队总预算').selectOption('economy')
 

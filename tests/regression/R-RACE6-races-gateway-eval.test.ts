@@ -15,7 +15,13 @@ import {
 } from '../../src/lib/evals/races-gateway/runner'
 import type { RacesGatewayEvalResultV1 } from '../../src/lib/evals/races-gateway/types'
 import { RacesGatewayBlindGraderFailureV1 } from '../../src/lib/evals/races-gateway/protocol'
+import type { AIConfig } from '../../src/lib/types'
 import { useAIConfigStore } from '../../src/stores/ai-config'
+
+const GENERATOR_CONFIG: AIConfig = {
+  provider: 'deepseek', apiKey: 'test-key', baseUrl: 'https://example.invalid/v1',
+  model: 'deepseek-chat', temperature: 0.7, maxTokens: 0,
+}
 
 function passingResult(index: number): RacesGatewayEvalResultV1 {
   const fixture = RACES_GATEWAY_EVAL_FIXTURES_V1[index]
@@ -36,7 +42,8 @@ function passingResult(index: number): RacesGatewayEvalResultV1 {
     expectedAnchorInOutcome: fixture.kind === 'late-target' || fixture.kind === 'pinned-mandatory' ? true : null,
     staleBlocked: fixture.kind === 'concurrent-cas' ? true : null,
     crossScopeBlocked: fixture.kind === 'cross-scope-attack' ? true : null,
-    grade: fixture.kind === 'empty' || fixture.kind === 'partial-world' ? {
+    grade: fixture.kind === 'empty' || fixture.kind === 'partial-world'
+      || fixture.kind === 'pinned-mandatory' ? {
       placeholder: false,
       titleOveranchored: false,
       concrete: true,
@@ -74,10 +81,7 @@ beforeEach(async () => {
   localStorage.clear()
   sessionStorage.clear()
   useAIConfigStore.setState({
-    config: {
-      provider: 'deepseek', apiKey: 'test-key', baseUrl: 'https://example.invalid/v1',
-      model: 'deepseek-chat', temperature: 0.7, maxTokens: 0,
-    },
+    config: GENERATOR_CONFIG,
     presets: [],
     taskRoutes: {},
   })
@@ -143,11 +147,68 @@ describe.sequential('RACE-6 · races transcript + outcome eval', () => {
   it('runner 拒绝生成模型自评，不能依赖 UI 约束', async () => {
     await expect(runRacesGatewayEvalV1({
       modelIdentity: { provider: 'deepseek', model: 'deepseek-chat' },
+      generatorConfig: GENERATOR_CONFIG,
       graderIdentity: { provider: 'deepseek', model: 'deepseek-chat', promptVersion: 'test-grader-v1' },
       graderPreflight: preflightEvidence('deepseek', 'deepseek-chat', 'test-grader-v1'),
       fixtures: [RACES_GATEWAY_EVAL_FIXTURES_V1[0]],
       grade: vi.fn(),
-    })).rejects.toThrow('必须使用不同模型身份')
+    })).rejects.toThrow('必须使用不同提供商身份')
+  })
+
+  it('冻结 generator 预设贯穿 durable 执行并保留 V20 历史 key', async () => {
+    const frozenGenerator: AIConfig = {
+      provider: 'agnes', apiKey: 'agnes-test', baseUrl: 'https://agnes.invalid/v1',
+      model: 'agnes-2.5-flash', temperature: 0.7, maxTokens: 0,
+    }
+    const routedElsewhere: AIConfig = {
+      provider: 'deepseek', apiKey: 'routed-test', baseUrl: 'https://routed.invalid/v1',
+      model: 'deepseek-v4-flash', temperature: 0.7, maxTokens: 0,
+    }
+    useAIConfigStore.setState({
+      config: routedElsewhere,
+      presets: [{ id: 'routed-elsewhere', name: '错误路由', config: routedElsewhere }],
+      taskRoutes: { 'agent-world-origin': 'routed-elsewhere' },
+    })
+    localStorage.setItem('storyforge-races-gateway-eval-v20', 'archived-v20')
+    const requestedModels: string[] = []
+    vi.stubGlobal('fetch', vi.fn(async (_url: string, init?: RequestInit) => {
+      requestedModels.push(JSON.parse(String(init?.body)).model)
+      return new Response(JSON.stringify({
+        choices: [{ finish_reason: 'stop', message: { content: JSON.stringify({
+          field: 'races',
+          value: '潮岸民以盐誓确认亲缘，塔城迁民以钟谱登记身份；双方围绕航道裁决形成长期冲突。',
+        }) } }],
+        usage: { prompt_tokens: 80, completion_tokens: 60, total_tokens: 140 },
+      }), { status: 200 })
+    }))
+    const fixture = RACES_GATEWAY_EVAL_FIXTURES_V1[0]
+    const checkpoint = await runRacesGatewayEvalV1({
+      modelIdentity: { provider: frozenGenerator.provider, model: frozenGenerator.model },
+      generatorConfig: frozenGenerator,
+      graderIdentity: { provider: 'nvidia', model: 'mistralai/mistral-nemotron', promptVersion: 'test-grader-v13' },
+      graderPreflight: preflightEvidence('nvidia', 'mistralai/mistral-nemotron', 'test-grader-v13'),
+      fixtures: [fixture],
+      grade: async () => ({
+        grade: {
+          placeholder: false, titleOveranchored: false, concrete: true,
+          constraintsRespected: true, addsUsefulInformation: true, irrelevantMaterial: false,
+          reason: '满足冻结标准。',
+        },
+        evidence: {
+          provider: 'nvidia', model: 'mistralai/mistral-nemotron', promptVersion: 'test-grader-v13',
+          inputHash: 'b'.repeat(64), outputHash: 'c'.repeat(64),
+          inputTokens: 10, outputTokens: 10, finishReason: 'stop', durationMs: 1,
+        },
+      }),
+    })
+
+    expect(requestedModels).toEqual(['agnes-2.5-flash'])
+    expect(checkpoint).toMatchObject({
+      version: 'races-gateway-eval-v21',
+      modelIdentity: { provider: 'agnes', model: 'agnes-2.5-flash' },
+    })
+    expect(localStorage.getItem('storyforge-races-gateway-eval-v20')).toBe('archived-v20')
+    expect(localStorage.getItem('storyforge-races-gateway-eval-v21')).toContain('races-gateway-eval-v21')
   })
 
   it('真实 grader 失败时签名失败 checkpoint，并立即清理当前隔离项目', async () => {
@@ -160,13 +221,14 @@ describe.sequential('RACE-6 · races transcript + outcome eval', () => {
     }), { status: 200 })))
     await expect(runRacesGatewayEvalV1({
       modelIdentity: { provider: 'deepseek', model: 'deepseek-chat' },
-      graderIdentity: { provider: 'deepseek', model: 'deepseek-reasoner', promptVersion: 'test-grader-v2' },
-      graderPreflight: preflightEvidence('deepseek', 'deepseek-reasoner', 'test-grader-v2'),
+      generatorConfig: GENERATOR_CONFIG,
+      graderIdentity: { provider: 'nvidia', model: 'mistralai/mistral-nemotron', promptVersion: 'test-grader-v2' },
+      graderPreflight: preflightEvidence('nvidia', 'mistralai/mistral-nemotron', 'test-grader-v2'),
       fixtures: [RACES_GATEWAY_EVAL_FIXTURES_V1[0]],
       grade: async () => {
         const rawOutput = '{"placeholder":false'
         throw new RacesGatewayBlindGraderFailureV1({
-          provider: 'deepseek', model: 'deepseek-reasoner', promptVersion: 'test-grader-v2',
+          provider: 'nvidia', model: 'mistralai/mistral-nemotron', promptVersion: 'test-grader-v2',
           inputHash: 'a'.repeat(64), outputHash: await hashCanonicalValue(rawOutput),
           inputTokens: 10, outputTokens: 10, finishReason: 'length', durationMs: 1,
           rawOutput, parseError: 'grader 输出被截断',
@@ -199,8 +261,9 @@ describe.sequential('RACE-6 · races transcript + outcome eval', () => {
     )).toBe(true)
     const resumed = await runRacesGatewayEvalV1({
       modelIdentity: { provider: 'deepseek', model: 'deepseek-chat' },
-      graderIdentity: { provider: 'deepseek', model: 'deepseek-reasoner', promptVersion: 'test-grader-v2' },
-      graderPreflight: preflightEvidence('deepseek', 'deepseek-reasoner', 'test-grader-v2'),
+      generatorConfig: GENERATOR_CONFIG,
+      graderIdentity: { provider: 'nvidia', model: 'mistralai/mistral-nemotron', promptVersion: 'test-grader-v2' },
+      graderPreflight: preflightEvidence('nvidia', 'mistralai/mistral-nemotron', 'test-grader-v2'),
       fixtures: [RACES_GATEWAY_EVAL_FIXTURES_V1[0]],
       resumeFrom: checkpoint,
       grade: async () => ({
@@ -210,7 +273,7 @@ describe.sequential('RACE-6 · races transcript + outcome eval', () => {
           reason: '显式继续后完成。',
         },
         evidence: {
-          provider: 'deepseek', model: 'deepseek-reasoner', promptVersion: 'test-grader-v2',
+          provider: 'nvidia', model: 'mistralai/mistral-nemotron', promptVersion: 'test-grader-v2',
           inputHash: 'b'.repeat(64), outputHash: 'c'.repeat(64),
           inputTokens: 10, outputTokens: 10, finishReason: 'stop', durationMs: 1,
         },
@@ -235,8 +298,9 @@ describe.sequential('RACE-6 · races transcript + outcome eval', () => {
     const fixtures = [RACES_GATEWAY_EVAL_FIXTURES_V1[0]]
     await expect(runRacesGatewayEvalV1({
       modelIdentity: { provider: 'deepseek', model: 'deepseek-chat' },
-      graderIdentity: { provider: 'deepseek', model: 'deepseek-reasoner', promptVersion: 'test-grader-v2' },
-      graderPreflight: preflightEvidence('deepseek', 'deepseek-reasoner', 'test-grader-v2'),
+      generatorConfig: GENERATOR_CONFIG,
+      graderIdentity: { provider: 'nvidia', model: 'mistralai/mistral-nemotron', promptVersion: 'test-grader-v2' },
+      graderPreflight: preflightEvidence('nvidia', 'mistralai/mistral-nemotron', 'test-grader-v2'),
       fixtures,
       grade: vi.fn(),
     })).rejects.toThrow('empty-01 执行失败')
@@ -271,8 +335,9 @@ describe.sequential('RACE-6 · races transcript + outcome eval', () => {
     const fixtures = [RACES_GATEWAY_EVAL_FIXTURES_V1[0]]
     const checkpoint = await runRacesGatewayEvalV1({
       modelIdentity: { provider: 'deepseek', model: 'deepseek-chat' },
-      graderIdentity: { provider: 'deepseek', model: 'deepseek-reasoner', promptVersion: 'test-grader-v1' },
-      graderPreflight: preflightEvidence('deepseek', 'deepseek-reasoner', 'test-grader-v1'),
+      generatorConfig: GENERATOR_CONFIG,
+      graderIdentity: { provider: 'nvidia', model: 'mistralai/mistral-nemotron', promptVersion: 'test-grader-v1' },
+      graderPreflight: preflightEvidence('nvidia', 'mistralai/mistral-nemotron', 'test-grader-v1'),
       fixtures,
       grade: async () => ({
         grade: {
@@ -281,7 +346,7 @@ describe.sequential('RACE-6 · races transcript + outcome eval', () => {
           reason: '有可用于故事的族群差异和冲突。',
         },
         evidence: {
-          provider: 'deepseek', model: 'deepseek-reasoner', promptVersion: 'test-grader-v1',
+          provider: 'nvidia', model: 'mistralai/mistral-nemotron', promptVersion: 'test-grader-v1',
           inputHash: 'b'.repeat(64), outputHash: 'c'.repeat(64),
           inputTokens: 10, outputTokens: 10, finishReason: 'stop', durationMs: 1,
         },
@@ -317,8 +382,9 @@ describe.sequential('RACE-6 · races transcript + outcome eval', () => {
     ]
     const checkpoint = await runRacesGatewayEvalV1({
       modelIdentity: { provider: 'deepseek', model: 'deepseek-chat' },
-      graderIdentity: { provider: 'deepseek', model: 'deepseek-reasoner', promptVersion: 'test-grader-v1' },
-      graderPreflight: preflightEvidence('deepseek', 'deepseek-reasoner', 'test-grader-v1'),
+      generatorConfig: GENERATOR_CONFIG,
+      graderIdentity: { provider: 'nvidia', model: 'mistralai/mistral-nemotron', promptVersion: 'test-grader-v1' },
+      graderPreflight: preflightEvidence('nvidia', 'mistralai/mistral-nemotron', 'test-grader-v1'),
       fixtures,
       grade: async () => ({
         grade: {
@@ -327,7 +393,7 @@ describe.sequential('RACE-6 · races transcript + outcome eval', () => {
           reason: '满足约束。',
         },
         evidence: {
-          provider: 'deepseek', model: 'deepseek-reasoner', promptVersion: 'test-grader-v1',
+          provider: 'nvidia', model: 'mistralai/mistral-nemotron', promptVersion: 'test-grader-v1',
           inputHash: 'b'.repeat(64), outputHash: 'c'.repeat(64),
           inputTokens: 10, outputTokens: 10, finishReason: 'stop', durationMs: 1,
         },
@@ -348,6 +414,7 @@ describe.sequential('RACE-6 · races transcript + outcome eval', () => {
       const prompt = body.messages.map(message => message.content).join('\n')
       const late = /末位航契守卫\d+/.exec(prompt)?.[0]
       const pinned = /已确认成年仪式\d+/.exec(prompt)?.[0]
+      const semanticPinned = pinned ? `${pinned.replace('已确认', '')}（已确认）` : undefined
       const retreat = /潮民以第\s*\d+\s*次退潮为成年界线，与钟民共用一座港口。/.exec(prompt)?.[0]
       const partial = [
         '这个世界的海水会记住死者最后一句话。',
@@ -356,7 +423,7 @@ describe.sequential('RACE-6 · races transcript + outcome eval', () => {
         '魔法只能改变已经被人记录的事物。',
         '所有河流都从内陆流向天空。',
       ].find(item => prompt.includes(item))
-      const anchor = late ?? pinned ?? retreat ?? partial ?? ''
+      const anchor = late ?? semanticPinned ?? retreat ?? partial ?? ''
       const value = `${anchor}${anchor ? ' ' : ''}潮岸民以航季区分共同体，钟塔迁民以师徒谱登记身份；两群共享盐港，却因通行权、继承与司法证言形成可推动人物选择的长期冲突。`
       return new Response(JSON.stringify({
         choices: [{ finish_reason: 'stop', message: { content: JSON.stringify({ field: 'races', value }) } }],
@@ -375,6 +442,7 @@ describe.sequential('RACE-6 · races transcript + outcome eval', () => {
     ]
     const checkpoint = await runRacesGatewayEvalV1({
       modelIdentity: { provider: 'deepseek', model: 'deepseek-chat' },
+      generatorConfig: GENERATOR_CONFIG,
       graderIdentity: { provider: 'fixture', model: 'deterministic', promptVersion: 'test-grader-v1' },
       graderPreflight: preflightEvidence('fixture', 'deterministic', 'test-grader-v1'),
       fixtures,
@@ -394,6 +462,10 @@ describe.sequential('RACE-6 · races transcript + outcome eval', () => {
     expect(checkpoint.results).toHaveLength(8)
     expect(checkpoint.score).toMatchObject({ passed: true, completedCount: 8 })
     expect(checkpoint.results.filter(item => item.kind === 'late-target' && item.expectedAnchorDelivered)).toHaveLength(1)
+    const pinnedResult = checkpoint.results.find(item => item.kind === 'pinned-mandatory')!
+    const pinnedFixture = fixtures.find(item => item.kind === 'pinned-mandatory')!
+    expect(pinnedResult.candidateText).not.toContain(pinnedFixture.expectedAnchor)
+    expect(pinnedResult.expectedAnchorInOutcome).toBe(true)
     expect(checkpoint.results.filter(item => item.kind === 'late-target')
       .every(item => item.selectedResourceKeys.length <= 20)).toBe(true)
     expect(checkpoint.results.filter(item => item.kind === 'cross-scope-attack' && item.crossScopeBlocked)).toHaveLength(1)

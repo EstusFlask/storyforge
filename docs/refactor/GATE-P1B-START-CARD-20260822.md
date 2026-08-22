@@ -4,7 +4,7 @@
 任务 ID：`GATE-P1B`  
 隔离分支：`refactor/world-engine-harness`  
 基线：`bd722008 test(E2E): edit structured worldview value only`  
-状态：⛔ V12 机械门已通过；真实 grader preflight 连续因同一 Agnes quota 拒绝，等待外部额度变化
+状态：✅ 2026-08-23 已签收；V21 真实矩阵、CI 与隔离 E2E 全部通过
 
 ## 1. 完成边界
 
@@ -24,35 +24,35 @@
 | 证据 | 当前结果 |
 |---|---|
 | RACE-1～5 实现 | 提交 `4e6b1bae`、`bf552116`、`c709af16`、`d5aa9b49`、`9cf4d1b8` |
-| RACE-6 Harness | 提交 `88432a28`；100 个冻结 fixture、80 次生成、40 次盲评、20 次确定性攻击 |
+| RACE-6 Harness | 100 个冻结 fixture、80 次生成、50 次盲评、20 次确定性攻击（攻击复用候选）；V21 已完成 |
 | Phase gate 回归修复 | 提交 `17447e1d`；自动资源硬上限、V2 selector policy、author-edit canonical hash、bundle 拆分 |
 | 真实结构化 UI E2E 修复 | 提交 `bd722008`；value-only 编辑器不再写入外层 wrapper |
-| 完整 CI | V12：463 files / 2203 tests；依赖 0 漏洞；lint、TypeScript、build、bundle gate 全通过 |
-| 完整 E2E | V12：隔离端口 4198，Chromium 53/53 通过（5.3 分钟） |
+| 完整 CI | V21：464 files / 2214 tests；依赖 0 漏洞；lint、TypeScript、build、bundle gate 全通过 |
+| 完整 E2E | V21：隔离端口 4198，Chromium 53/53 通过（4.8 分钟） |
 | 生命周期 | checkpoint 每例签名落盘；项目清理由 `PROJECT_TABLES` 派生的 `cascadeDeleteProject()` 完成 |
 
-以上只能证明 Harness 编排与机械不变量，不能替代真实生成质量结果。
+以上机械证据与下方 V21 真实模型质量结果共同构成本门签收依据。
 
 ## 3. 冻结真实运行配置
 
 | 项目 | 冻结值 |
 |---|---|
-| 隔离 origin | `http://127.0.0.1:4197/storyforge/` |
-| generator | `agnes/agnes-2.5-flash`（从正式 `agent.world-foundation.worldview-field` 路由解析） |
-| blind grader | `agnes/agnes-2.5-pro`（V12；由实时 `/v1/models` 目录确认，与 generator 身份不同） |
+| 隔离 origin | `http://127.0.0.1:4178/storyforge/` |
+| generator | `agnes/agnes-2.5-flash`（独立保存的 generator 预设；仍走正式 `agent.world-foundation.worldview-field` 入口） |
+| blind grader | `deepseek/deepseek-v4-flash`（V21；与 generator 跨 provider） |
 | grader temperature | `0` |
 | grader max tokens | `4096`（V2；为兼容推理型 provider 的完成预算，不改变评分阈值） |
-| 单次 grader timeout | `600000 ms`（V12；等待预算，不改变输出 token 或质量阈值） |
-| checkpoint key | `storyforge-races-gateway-eval-v12` |
+| 单次 grader timeout | `60000 ms`（V21；等待预算，不改变输出 token 或质量阈值） |
+| checkpoint key | `storyforge-races-gateway-eval-v21` |
 | grader schema preflight | 矩阵前 1 次；严格闭集 JSON；证据写入 checkpoint，不参与质量计分 |
 | fixture / thresholds | 见 `RACE-6-EVAL-PROTOCOL-20260822.md`；真实结果出现后不得下调 |
 
-如果隔离环境无法使用上述模型身份，必须在运行前修订并重新冻结协议；不能在看到结果后换模型、改 fixture 或降低阈值来伪造通过。
+如果隔离环境无法使用上述模型身份，必须在任何 fixture 结果出现前修订并重新冻结协议；不能在看到结果后换模型、改 fixture 或降低阈值来伪造通过。
 
 ## 4. 执行步骤
 
 1. 用户明确确认后，仅通过设置 UI 把 4178 origin 中已配置的凭据复制到 4197 origin；不读取、不记录、不输出明文。
-2. 在 4197 设置页确认 generator/provider/base URL 可用，并选择不同身份的 blind grader。
+2. 在 4178 设置页确认 generator/provider/base URL 可用，并选择不同 provider 的 blind grader 预设。
 3. 确认当前不存在旧 RACE-6 checkpoint；若存在，先导出，再通过 UI 显式清理。
 4. 点击“运行冻结矩阵”。运行中每例必须先持久化并签名，再清理可释放的隔离项目。
 5. 网络中断或页面刷新后，只从验签成功且模型身份完全一致的 checkpoint 继续；不得跳过失败样本。
@@ -65,16 +65,17 @@
 
 | 字段 | 结果 |
 |---|---|
-| 运行时间 | 待执行 |
-| checkpoint hash | 待执行 |
-| generator / grader | 待执行 |
-| 完成样本 | V11 已完成 4/100；`empty-05` grader quota 暂停 |
-| 空态占位 / 标题过锚 / 具体设定 | 待执行 |
-| 部分态约束 / 新增信息 | 待执行 |
-| 末位 recall@20 / 实际使用 | 待执行 |
-| Mandatory 送达 / 保留 | 待执行 |
-| scope 泄漏 / 对比交付 / CAS 阻断 | 待执行 |
-| 总判定 | **运行未完成，门未通过** |
+| 运行时间 | 2026-08-23 |
+| checkpoint hash | `d2f7a083a002f4f6592ffcf97f16c99ae4fa09a0c3a64cf9ace290197061821e` |
+| generator / grader | `agnes/agnes-2.5-flash` / `deepseek/deepseek-v4-flash` |
+| 完成样本 | 100/100；50/50 应盲评样本最终获得严格闭集判定 |
+| 空态占位 / 标题过锚 / 具体设定 | 0% / 0% / 100% |
+| 部分态约束 / 新增信息 | 95% / 100% |
+| 末位 recall@20 / 实际使用 | 100% / 100% |
+| Mandatory 送达 / 语义保留 | 100% / 100% |
+| scope 泄漏 / 对比交付 / CAS 阻断 | 0% / 100% / 100% |
+| 失败尝试 | generator provider 0；产品 non-provider 0；grader 格式失败 4（留证后显式续跑） |
+| 总判定 | **`score.passed=true`，GATE-P1B 通过** |
 
 ### V11 额度暂停归档
 

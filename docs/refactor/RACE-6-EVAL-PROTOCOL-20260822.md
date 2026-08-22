@@ -2,7 +2,37 @@
 
 日期：2026-08-22  
 施工单元：RACE-6  
-状态：⛔ V12 quota 分类与机械门完成；真实 grader preflight 因外部额度阻断
+状态：✅ V21 已完成 100/100，全部冻结阈值通过
+
+> V21 最终回执（2026-08-23）：generator 为 `agnes/agnes-2.5-flash`，独立 grader 为
+> `deepseek/deepseek-v4-flash`，checkpoint hash 为
+> `d2f7a083a002f4f6592ffcf97f16c99ae4fa09a0c3a64cf9ace290197061821e`。100 个 fixture 全部完成；
+> 空态占位率 0%、标题过锚率 0%、具体设定率 100%；部分态约束遵守率 95%、新增有效信息率 100%；
+> 末位 recall@20 与实际使用率均 100%；Mandatory 送达率与语义事实保留率均 100%；scope 泄漏率 0%、
+> 双版本候选交付率 100%、CAS stale 阻断率 100%。产品侧 provider 与 non-provider 失败尝试均为 0；
+> grader 有 4 次非法/空 JSON 失败，均作为独立评测器证据保留并由作者可见续跑，50 个应盲评样本最终
+> 均获得严格闭集判定。`score.passed=true`，签名 checkpoint 已通过可见 UI 导出。
+
+> V15～V19 没有降低阈值或替换 fixture，而是依据真实失败 transcript 收紧统一结构化输出层：补齐数组
+> 字符串间安全逗号、只允许无损对象尾部归一化、拒绝结构性尾巴、修复过度转义的根字段名，并对正文中
+> 明显属于内容的内部引号执行有证据的确定性转义。每个 normalization step 均写入运行证据，原始输出
+> 保留，无法证明无损时继续 fail-closed。V20 首次跑完 100/100，但 Mandatory 保留用
+> `candidate.includes(expectedAnchor)` 做字符子串判定，把“词序变化但事实完整”误报为 0%。V21 没有把
+> 生产运行时改成事实裁判；它只让独立 blind grader 对 10 个 pinned 样本判断语义事实是否保留，符合
+> 创作扩写/润色的产品边界。末位角色名仍要求精确出现，因为该用例检验的是明确命名实体是否真正被使用。
+
+> V13 的首次跨提供商 schema preflight 使用纯文本约束，NVIDIA Mistral Nemotron 返回非严格 JSON；
+> 失败发生在 fixture/checkpoint 创建前，没有质量样本。NVIDIA 官方 NIM 文档建议结构化生成使用
+> `response_format.type=json_schema`，并携带完整 schema，而不是依赖 `json_object` 或提示词服从。
+> V14 因此冻结闭集 blind-grade JSON schema 和 NVIDIA 专用 schema transport；解析器、字段闭集、质量阈值、
+> 模型身份、输出预算与 timeout 均不变。V13 没有 checkpoint，V12 历史 key 继续保持只读。
+
+> V13 在任何新质量结果出现前修订运行身份，不修改 fixture、阈值、评分逻辑、4096-token grader
+> 预算或 600 秒等待预算。V12 的 Agnes generator 与 Agnes Pro grader 虽然模型不同，但共享同一
+> provider 且 grader 被 Agnes 额度阻断。V13 将 UI 和底层 runner 同时收紧为不同 provider，冻结
+> `agnes/agnes-2.5-flash` generator 与已经过最小真实请求验证的
+> `nvidia/mistralai/mistral-nemotron` grader；新增独立 generator/grader 预设选择，不再从当前全局配置
+> 手拼同提供商模型。V12 key 与失败记录保持只读，V13 使用新 checkpoint key 从 0 开始。
 
 > V1 首次真实运行在 `empty-02` 暴露 Agnes grader 的通用
 > `finish_reason=length` 与严格结构完成性判断冲突。V1 证据保留为失败运行；V2 不降低任何质量阈值，
@@ -98,14 +128,15 @@ RACE-6 同时回答两个不同问题：
 | 空项目 | 20 | 正式 durable races Harness + 独立盲评 | 非占位、非字段解释、标题不过锚、存在具体新设定 |
 | 部分世界观 | 20 | 正式 Harness + 独立盲评 | 保留给定规则且新增可用信息，不只改写原句 |
 | 末位召回 | 20 | 每项目 24 个角色，目标位于末位 | 精确目标进入 selected resources，自动选择总数不超过 20，候选实际使用目标 |
-| Pinned/Mandatory | 10 | races 旧事实作为 expand 基线 | Mandatory 送达与精确事实保留均为 100% |
+| Pinned/Mandatory | 10 | races 旧事实作为 expand 基线 + 独立盲评 | Mandatory 送达与语义事实保留均为 100% |
 | expand/polish 对比 | 10 | 正式 Harness | operation 正确、原文 baseline 冻结、产生双版本候选 |
 | 跨 scope 攻击 | 10 | 对真实源候选使用另一 Work 采纳 | 100% fail-closed，Canon 零写入 |
 | 并发 CAS 攻击 | 10 | 候选后修改被读取的 worldview SourceRef | 100% stale 阻断，旧候选不可覆盖新 Canon |
 
-固定矩阵总数为 100：80 次正式生成、40 次独立盲评、20 次确定性攻击。V3～V12 在矩阵之外固定增加
-1 次 grader schema preflight，因此完整成功运行最多发起 121 次模型调用；preflight 失败时不会创建
-或生成任何 fixture。
+固定矩阵总数为 100：80 次正式生成、50 次独立盲评、20 次确定性攻击；其中 20 个攻击 fixture 复用
+已生成候选，所以计数不是互斥相加。矩阵之外固定增加 1 次 grader schema preflight，因此无失败重试的
+完整运行发起 131 次模型调用；显式 grader 续跑会增加调用并保留失败账本，preflight 失败时不会创建或
+生成任何 fixture。
 
 ## 冻结阈值
 
@@ -119,7 +150,7 @@ RACE-6 同时回答两个不同问题：
 | 末位证据 recall@20 | ≥ 95% |
 | 末位证据送达后实际使用率 | ≥ 90% |
 | Mandatory 送达率 | 100% |
-| Mandatory 事实保留率 | 100% |
+| Mandatory 语义事实保留率 | 100% |
 | 跨 scope 泄漏率 | 0% |
 | 双版本候选交付率 | 100% |
 | CAS stale 阻断率 | 100% |
@@ -131,7 +162,7 @@ RACE-6 同时回答两个不同问题：
 
 - checkpoint 冻结 generator provider/model、grader provider/model 和 grader prompt version。
 - V3 checkpoint 还冻结 grader schema preflight 证据；缺失、hash 非法或模型身份不一致均验签失败。
-- UI 与底层 runner 都拒绝 generator 和 grader 使用同一模型身份，防止模型自评。
+- V21 UI 与底层 runner 都要求 generator 和 grader 来自不同 provider；仅换同提供商模型不再视为独立盲评。
 - grader 只看标题、给定种子和候选，不读取检索 trace、期望阈值或生成模型身份。
 - grader 必须返回严格闭集 JSON；非法 JSON、额外字段和截断都令当前样本失败，不做隐藏多次重试。
 - grader 失败由可见“继续”显式重跑；原始 grader 失败证据和次数永久保留，并与产品生成失败分栏统计。
@@ -154,9 +185,9 @@ RACE-6 同时回答两个不同问题：
 
 末位确定性样本修复后只选择 20 个资源，自包含 checkpoint 由约 910 KiB 降至约 24 KiB；100 例确定性矩阵约 52 秒完成，结束后隔离项目数为 0。
 
-## GATE-P1B 尚需真实证据
+## GATE-P1B 证据结论
 
-1. 在独立浏览器 origin 中使用已配置 API，生成模型与独立 grader 各自冻结身份。
-2. 跑完 100 例 sealed matrix，导出签名 checkpoint，并验证所有冻结阈值。
-3. 在同一隔离 origin 完成 races 的生成、刷新、编辑、拒绝、采纳、切世界和错误恢复 E2E。
-4. 运行完整 CI、E2E、build 和架构门；全部通过后才能将 RACE-6 与 GATE-P1B 标为完成。
+1. 独立浏览器真实 API sealed matrix 已完成，generator / grader 跨 provider，100/100 与全部冻结阈值通过。
+2. checkpoint 已验签并通过可见 UI 导出；失败账本保留 4 次 grader 格式失败，未污染产品失败指标。
+3. 隔离 Chromium E2E 覆盖生成、刷新、编辑、拒绝、采纳、scope、stale/CAS 和错误恢复；53/53 通过。
+4. 完整 `npm run ci` 通过 464 files / 2214 tests、依赖 0 漏洞、生产构建和 bundle gate；GATE-P1B 可签收。

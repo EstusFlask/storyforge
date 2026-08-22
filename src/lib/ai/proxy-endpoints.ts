@@ -11,6 +11,7 @@ export const AI_PROXY_ENDPOINTS: Partial<Record<AIProvider, AIProxyEndpoint>> = 
   kimi: { proxy: '/kimi-proxy/v1', direct: 'https://api.moonshot.cn/v1' },
   claude: { proxy: '/claude-proxy/v1', direct: 'https://api.anthropic.com/v1' },
   nvidia: { proxy: '/nvidia-proxy/v1', direct: 'https://integrate.api.nvidia.com/v1' },
+  gemini: { proxy: '/gemini-proxy/v1beta/openai', direct: 'https://generativelanguage.googleapis.com/v1beta/openai' },
   doubao: { proxy: '/doubao-proxy/api/v3', direct: 'https://ark.cn-beijing.volces.com/api/v3' },
   agnes: { proxy: '/agnes-proxy/v1', direct: 'https://apihub.agnes-ai.com/v1' },
   longcat: { proxy: '/longcat-proxy/openai/v1', direct: 'https://api.longcat.chat/openai/v1' },

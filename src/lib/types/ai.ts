@@ -85,14 +85,15 @@ export const PROVIDER_MODELS: Record<string, { value: string; label: string; des
     { value: 'deepseek-v4-pro-260425', label: 'DeepSeek V4 Pro', desc: '火山方舟·高质量文本推理' },
     { value: 'deepseek-v4-flash-260425', label: 'DeepSeek V4 Flash', desc: '火山方舟·文本推理' },
   ],
-  // Gemini 模型列表（2026-05-11 通过 Google API 实际拉取校验）
+  // Gemini 模型列表（官方 OpenAI compatibility / model catalog，2026-08-22 复核）
   gemini: [
-    { value: 'gemini-2.5-flash', label: 'Gemini 2.5 Flash ⭐', desc: '推荐，稳定且免费额度高' },
+    { value: 'gemini-3.5-flash', label: 'Gemini 3.5 Flash ⭐', desc: '稳定版·1M 上下文·65K 输出' },
+    { value: 'gemini-3.5-flash-lite', label: 'Gemini 3.5 Flash-Lite', desc: '高吞吐轻量版' },
+    { value: 'gemini-3.7-flash', label: 'Gemini 3.7 Flash', desc: '官方当前新一代 Flash；使用前先做任务预检' },
+    { value: 'gemini-2.5-flash', label: 'Gemini 2.5 Flash', desc: '历史稳定版' },
     { value: 'gemini-2.5-flash-lite', label: 'Gemini 2.5 Flash-Lite', desc: '轻量稳定版' },
     { value: 'gemini-2.5-pro', label: 'Gemini 2.5 Pro', desc: '最强稳定版，支持思考' },
-    { value: 'gemini-3-flash-preview', label: 'Gemini 3 Flash (Preview)', desc: '⚠️ 预览版，高峰期可能 503' },
     { value: 'gemini-3.1-flash-lite', label: 'Gemini 3.1 Flash-Lite', desc: '⚠️ 预览版' },
-    { value: 'gemini-3-pro-preview', label: 'Gemini 3 Pro (Preview)', desc: '⚠️ 预览版，可能不稳定' },
     { value: 'gemini-3.1-pro-preview', label: 'Gemini 3.1 Pro (Preview)', desc: '⚠️ 预览版，可能不稳定' },
     { value: 'gemini-2.0-flash', label: 'Gemini 2.0 Flash', desc: '老版' },
   ],
@@ -105,13 +106,12 @@ export const PROVIDER_MODELS: Record<string, { value: string; label: string; des
     { value: 'GLM-5.1-FM', label: 'GLM 5.1 FM' },
   ],
   nvidia: [
-    { value: 'meta/llama-3.3-70b-instruct', label: 'Llama 3.3 70B', desc: '最新 Llama，推荐' },
-    { value: 'meta/llama-3.1-405b-instruct', label: 'Llama 3.1 405B', desc: '最强开源模型' },
+    { value: 'mistralai/mistral-nemotron', label: 'Mistral Nemotron ⭐', desc: 'NVIDIA 托管文本端点·当前实测低延迟' },
+    { value: 'deepseek-ai/deepseek-v4-flash-0731', label: 'DeepSeek V4 Flash 0731', desc: 'NVIDIA 托管目录当前 V4 端点；可能冷启动或长时间排队' },
+    { value: 'minimaxai/minimax-m3', label: 'MiniMax M3', desc: 'NVIDIA 托管目录当前文本端点·推理与 Agent' },
+    { value: 'meta/llama-3.3-70b-instruct', label: 'Llama 3.3 70B', desc: 'NVIDIA 当前 Llama 文本端点' },
     { value: 'meta/llama-3.1-70b-instruct', label: 'Llama 3.1 70B', desc: '高性能' },
-    { value: 'deepseek-ai/deepseek-r1', label: 'DeepSeek R1', desc: '推理模型' },
-    { value: 'qwen/qwen2.5-72b-instruct', label: 'Qwen 2.5 72B', desc: '通义千问' },
-    { value: 'google/gemma-2-27b-it', label: 'Gemma 2 27B', desc: 'Google 开源' },
-    { value: 'mistralai/mistral-large-2-instruct', label: 'Mistral Large 2', desc: 'Mistral 旗舰' },
+    { value: 'meta/llama-3.1-8b-instruct', label: 'Llama 3.1 8B', desc: '低延迟兼容端点' },
   ],
   modelscope: [
     { value: 'Qwen/Qwen3-235B-A22B', label: 'Qwen3 235B A22B', desc: '最强 MoE 模型' },
@@ -170,7 +170,7 @@ export const PROVIDER_PRESETS: Record<string, Partial<AIConfig>> = {
   },
   gemini: {
     baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai',
-    model: 'gemini-2.5-flash',
+    model: 'gemini-3.5-flash',
   },
   poe: {
     baseUrl: 'https://api.poe.com/v1',
@@ -190,7 +190,7 @@ export const PROVIDER_PRESETS: Record<string, Partial<AIConfig>> = {
   },
   nvidia: {
     baseUrl: 'https://integrate.api.nvidia.com/v1',
-    model: 'meta/llama-3.3-70b-instruct',
+    model: 'mistralai/mistral-nemotron',
   },
   modelscope: {
     baseUrl: 'https://api-inference.modelscope.cn/v1',
@@ -216,6 +216,18 @@ export const PROVIDER_PRESETS: Record<string, Partial<AIConfig>> = {
 }
 
 const PROVIDER_MODEL_ALIASES: Partial<Record<AIProvider, ReadonlyMap<string, string>>> = {
+  deepseek: new Map([
+    ['deepseek-chat', 'deepseek-v4-flash'],
+    ['deepseek-reasoner', 'deepseek-v4-flash'],
+    ['deepseek-v4-flash', 'deepseek-v4-flash'],
+    ['deepseek-v4-pro', 'deepseek-v4-pro'],
+  ]),
+  gemini: new Map([
+    ['gemini-3-flash-preview', 'gemini-3.5-flash'],
+    ['gemini-3.5-flash', 'gemini-3.5-flash'],
+    ['gemini-3.5-flash-lite', 'gemini-3.5-flash-lite'],
+    ['gemini-3.7-flash', 'gemini-3.7-flash'],
+  ]),
   agnes: new Map([
     ['agnes-1.5-flash', 'agnes-1.5-flash'],
     ['agnes-2.0-flash', 'agnes-2.0-flash'],

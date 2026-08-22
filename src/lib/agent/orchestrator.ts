@@ -24,6 +24,7 @@ import { adopt } from '../registry/adopt'
 import {
   parseAgentEventPayload,
   type AgentEvent,
+  type AIConfig,
   type InspirationResultMode,
   type WorkspaceScope,
 } from '../types'
@@ -876,6 +877,8 @@ export interface ExecuteMasterAgentPlanInput {
   signal?: AbortSignal
   completedTaskOutputs?: Readonly<Record<string, string>>
   completedTaskAssumptions?: Readonly<Record<string, readonly CreativeAssumptionV1[]>>
+  /** Ephemeral, caller-authorized connection freeze; never persisted in the plan or RunContract. */
+  taskConfigOverrides?: Readonly<Record<string, AIConfig>>
   executionTrace?: MasterAgentExecutionTrace
   onTask?: (
     task: MasterAgentTask,
@@ -964,6 +967,7 @@ async function executeSequentialMasterAgentPlan(
             routingCategory: `${AGENT_ROLE_CATEGORIES['world-origin']}.worldview-field`,
             contextProfile,
             contextCompressionRuntime,
+            configOverride: input.taskConfigOverrides?.[task.id],
             promptExecution: task.promptExecution,
             signal: input.signal,
           })

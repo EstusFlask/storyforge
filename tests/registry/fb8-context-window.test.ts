@@ -32,9 +32,9 @@ describe('FB-8 · 上下文窗口可配置', () => {
     expect(withWin.overBudget).toBe(false)  // 修复:填了真实窗口后不再超
   })
 
-  it('已知模型不传 override → 行为不变(不影响现状)', () => {
+  it('已知模型不传 override → 使用当前官方窗口预设', () => {
     const b1 = calculateBudget('deepseek' as any, 'deepseek-chat', [seg(100)])
-    expect(b1.maxContext).toBe(64000) // deepseek 预设
+    expect(b1.maxContext).toBe(1_000_000) // DeepSeek V4 历史别名已迁移到当前窗口
   })
 
   it('override=0/undefined → 回退预设(留空等于用预设)', () => {

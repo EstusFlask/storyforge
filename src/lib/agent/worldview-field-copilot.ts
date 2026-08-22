@@ -931,6 +931,14 @@ export function createWorldviewFieldCopilotNode(
       category: input.routingCategory,
       projectId: input.projectId,
       configOverrides: {
+        // prepareWorldviewFieldCopilot has already resolved or explicitly
+        // frozen the connection. Re-assert it at execution so a later task
+        // route change cannot switch provider/model between prepare and run.
+        provider: input.config.provider,
+        apiKey: input.config.apiKey,
+        baseUrl: input.config.baseUrl,
+        model: input.config.model,
+        contextWindow: input.config.contextWindow,
         maxTokens: input.outputBudget?.effectiveMaxTokens
           ?? WORLDVIEW_FIELD_DEFAULT_OUTPUT_TOKENS_V1,
         temperature: input.generationOverrides?.temperature ?? 0.5,

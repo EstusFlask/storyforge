@@ -132,6 +132,12 @@ export default defineConfig({
         rewrite: (path: string) => path.replace(/^\/nvidia-proxy/, ''),
         secure: true,
       },
+      '/gemini-proxy': {
+        target: 'https://generativelanguage.googleapis.com',
+        changeOrigin: true,
+        rewrite: (path: string) => path.replace(/^\/gemini-proxy/, ''),
+        secure: true,
+      },
       '/doubao-proxy': {
         target: 'https://ark.cn-beijing.volces.com',
         changeOrigin: true,

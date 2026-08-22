@@ -29,13 +29,17 @@ export interface ModelContextPreset {
  */
 export const MODEL_CONTEXT_PRESETS: Record<string, ModelContextPreset> = {
   // DeepSeek
-  'deepseek': { label: 'DeepSeek 默认', maxContext: 64_000, maxOutput: 8_192 },
-  'deepseek:deepseek-v4-flash': { label: 'DeepSeek V4 Flash', maxContext: 128_000, maxOutput: 8_192 },
-  'deepseek:deepseek-v4-pro': { label: 'DeepSeek V4 Pro', maxContext: 128_000, maxOutput: 16_384 },
-  'deepseek:deepseek-chat': { label: 'DeepSeek Chat', maxContext: 64_000, maxOutput: 8_192 },
+  'deepseek': { label: 'DeepSeek V4 默认', maxContext: 1_000_000, maxOutput: 384_000 },
+  'deepseek:deepseek-v4-flash': { label: 'DeepSeek V4 Flash', maxContext: 1_000_000, maxOutput: 384_000 },
+  'deepseek:deepseek-v4-pro': { label: 'DeepSeek V4 Pro', maxContext: 1_000_000, maxOutput: 384_000 },
+  'deepseek:deepseek-chat': { label: 'DeepSeek 历史别名', maxContext: 1_000_000, maxOutput: 384_000 },
+  'deepseek:deepseek-reasoner': { label: 'DeepSeek 历史推理别名', maxContext: 1_000_000, maxOutput: 384_000 },
 
   // Gemini
-  'gemini': { label: 'Gemini 默认', maxContext: 1_000_000, maxOutput: 8_192 },
+  'gemini': { label: 'Gemini 默认', maxContext: 1_048_576, maxOutput: 65_536 },
+  'gemini:gemini-3.5-flash': { label: 'Gemini 3.5 Flash', maxContext: 1_048_576, maxOutput: 65_536 },
+  'gemini:gemini-3.5-flash-lite': { label: 'Gemini 3.5 Flash-Lite', maxContext: 1_048_576, maxOutput: 65_536 },
+  'gemini:gemini-3.7-flash': { label: 'Gemini 3.7 Flash', maxContext: 1_048_576, maxOutput: 65_536 },
   'gemini:gemini-2.5-flash': { label: 'Gemini 2.5 Flash', maxContext: 1_000_000, maxOutput: 65_536 },
   'gemini:gemini-2.5-pro': { label: 'Gemini 2.5 Pro', maxContext: 1_000_000, maxOutput: 65_536 },
   'gemini:gemini-2.0-flash': { label: 'Gemini 2.0 Flash', maxContext: 1_000_000, maxOutput: 8_192 },
@@ -76,6 +80,9 @@ export const MODEL_CONTEXT_PRESETS: Record<string, ModelContextPreset> = {
 
   // NVIDIA NIM
   'nvidia': { label: 'NVIDIA NIM 默认', maxContext: 128_000, maxOutput: 4_096 },
+  'nvidia:deepseek-ai/deepseek-v4-flash-0731': { label: 'NVIDIA DeepSeek V4 Flash 0731', maxContext: 1_000_000, maxOutput: 384_000 },
+  'nvidia:minimaxai/minimax-m3': { label: 'NVIDIA MiniMax M3', maxContext: 1_000_000, maxOutput: 16_384 },
+  'nvidia:mistralai/mistral-nemotron': { label: 'NVIDIA Mistral Nemotron', maxContext: 128_000, maxOutput: 4_096 },
   'nvidia:meta/llama-3.1-8b-instruct':   { label: 'Llama 3.1 8B',   maxContext: 128_000, maxOutput: 4_096 },
   'nvidia:meta/llama-3.1-70b-instruct':  { label: 'Llama 3.1 70B',  maxContext: 128_000, maxOutput: 4_096 },
   'nvidia:meta/llama-3.3-70b-instruct':  { label: 'Llama 3.3 70B',  maxContext: 128_000, maxOutput: 4_096 },
