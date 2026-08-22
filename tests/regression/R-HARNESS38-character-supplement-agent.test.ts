@@ -25,7 +25,9 @@ import { getOrCreateAgentConversation } from '../../src/lib/agent/conversations'
 import { AgentTeamBudgetTracker } from '../../src/lib/agent/team-budget'
 import { db } from '../../src/lib/db/schema'
 import { useAIConfigStore } from '../../src/stores/ai-config'
-import type { WorkspaceScope } from '../../src/lib/types'
+import { generateWorkspaceUid } from '../../src/lib/memory/identity'
+import { ensureWorkspaceOwnership } from '../../src/lib/world-engine/ownership'
+import { stampNewRecord } from '../../src/lib/world-engine/scope'
 
 const now = 1_910_000_000_000
 
@@ -49,6 +51,7 @@ function candidate(): CharacterSupplementCandidateV1 {
 
 async function seedWorkspace() {
   const projectId = await db.projects.add({
+    workspaceUid: generateWorkspaceUid(),
     name: '角色补全作品',
     genre: 'fantasy',
     genres: ['fantasy'],
@@ -61,46 +64,25 @@ async function seedWorkspace() {
     createdAt: now,
     updatedAt: now,
   } as any) as number
-  const worldId = await db.worlds.add({
-    projectId,
-    code: 'harness38-world',
-    name: '潮门世界',
-    currentVersion: 1,
-    createdAt: now,
-    updatedAt: now,
-  } as any) as number
-  const workId = await db.works.add({
-    projectId,
-    worldId,
-    title: '潮门纪事',
-    genres: ['fantasy'],
-    status: 'drafting',
-    targetWordCount: 100_000,
-    createdAt: now,
-    updatedAt: now,
-  } as any) as number
-  const scope: WorkspaceScope = { projectId, worldId, workId }
-  await db.projects.update(projectId, {
-    activeWorldId: worldId,
-    activeWorkId: workId,
-    ownershipSchemaVersion: 1,
-  })
-  await db.worldviews.add({
+  const owned = await ensureWorkspaceOwnership(projectId)
+  const { scope } = owned
+  const { worldId, workId } = scope
+  await db.worldviews.add(stampNewRecord(scope, 'worldviews', {
     projectId,
     worldId,
     worldGroupId: null,
     worldOrigin: '潮门每逢月蚀开启，守门人不得离岗。',
     createdAt: now,
     updatedAt: now,
-  } as any)
-  await db.storyCores.add({
+  }, { owner: 'world' }) as any)
+  await db.storyCores.add(stampNewRecord(scope, 'storyCores', {
     projectId,
     workId,
     mainPlot: '查清旧港沉没与潮门契约的关系。',
     createdAt: now,
     updatedAt: now,
-  } as any)
-  const characterId = await db.characters.add({
+  }, { owner: 'work' }) as any)
+  const characterId = await db.characters.add(stampNewRecord(scope, 'characters', {
     projectId,
     worldId,
     homeWorldGroupId: null,
@@ -121,7 +103,7 @@ async function seedWorkspace() {
     goals: '',
     createdAt: now,
     updatedAt: now,
-  } as any) as number
+  }, { owner: 'world' }) as any) as number
   return { projectId, worldId, workId, scope, characterId }
 }
 
@@ -181,8 +163,9 @@ describe('R-HARNESS38 · 已有角色补全领域契约', () => {
       },
     })
     expect(prepared.contextEvidence.sourceEvidence?.every(source => source.sourceHash)).toBe(true)
-    expect(prepared.contextEvidence.sourceEvidence?.map(source => source.key)).not.toContain('characterFacts')
-    expect(prepared.contextEvidence.sourceEvidence?.map(source => source.key)).not.toContain('characterPassages')
+    expect(prepared.contextEvidence.sourceEvidence?.map(source => source.key)).toEqual(['ragSelection'])
+    expect(prepared.contextGatewayExecution?.session.policy.allowedResourceKinds).not.toContain('chapter')
+    expect(prepared.contextGatewayExecution?.session.policy.allowedResourceKinds).not.toContain('fact')
 
     const generated = await runGenerationNode(prepared.node, prepared.prepared)
     expect(generated.output).toEqual(candidate())
@@ -198,8 +181,8 @@ describe('R-HARNESS38 · 已有角色补全领域契约', () => {
       authorRequest: '结合已写剧情补全性格与目标',
       configOverride: useAIConfigStore.getState().config,
     })
-    expect(evidencePrepared.contextEvidence.sourceEvidence?.map(source => source.key))
-      .toEqual(expect.arrayContaining(['characterFacts', 'characterPassages']))
+    expect(evidencePrepared.contextGatewayExecution?.session.policy.allowedResourceKinds).toContain('chapter')
+    expect(evidencePrepared.contextGatewayExecution?.session.policy.allowedResourceKinds).toContain('fact')
   })
 
   it('任一已读取来源变化都会使旧候选过期，且不会发生业务写入', async () => {

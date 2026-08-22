@@ -23,6 +23,7 @@ import {
   type MasterCandidatePayload,
 } from '../orchestrator'
 import { parseCharacterSupplementTaskInputV1 } from '../character-supplement-copilot'
+import { parseCharacterLifecycleTaskInputV1 } from '../character-lifecycle-copilot'
 import type { AgentTeamBudgetEvidence } from '../team-budget'
 import { parseCreativeArtifactV1 } from '../creative-reliability'
 import {
@@ -409,6 +410,27 @@ function readOptionalCharacterSupplementRequest(
   }
 }
 
+function readOptionalCharacterLifecycleRequest(
+  value: Record<string, unknown>,
+  agentId: DomainAgentId,
+  skillId: AgentSkillId | undefined,
+  label: string,
+) {
+  const present = Object.prototype.hasOwnProperty.call(value, 'characterLifecycleRequest')
+  if (!present) {
+    if (skillId === 'character.lifecycle') fail(label + '.characterLifecycleRequest 缺失')
+    return undefined
+  }
+  if (agentId !== 'character' || skillId !== 'character.lifecycle') {
+    fail(label + '.characterLifecycleRequest 无效')
+  }
+  try {
+    return parseCharacterLifecycleTaskInputV1(value.characterLifecycleRequest)
+  } catch (error) {
+    fail(`${label}.characterLifecycleRequest 无效：${error instanceof Error ? error.message : String(error)}`)
+  }
+}
+
 function readOptionalStorylineProgressChapterId(
   value: Record<string, unknown>,
   agentId: DomainAgentId,
@@ -438,7 +460,7 @@ function readOptionalSkillId(
   const skill = getAgentSkillV1(value.skillId, agentId)
   const allowedModes: Record<DomainAgentId, ReadonlySet<string>> = {
     'world-origin': new Set(['complete', 'worldview-field', 'story-core', 'creative-rules']),
-    character: new Set(['create', 'supplement']),
+    character: new Set(['create', 'supplement', 'lifecycle']),
     inspiration: new Set(['reverse']),
     outline: new Set(['auto', 'story-arcs', 'storyline-progress', 'character-driven', 'character-revision', 'world-game', 'volumes', 'chapters']),
     prose: new Set(['auto', 'generate', 'continue']),
@@ -491,7 +513,7 @@ export function parseMasterAgentPlanV1(value: unknown): MasterAgentPlan {
     assertKeysWithOptional(
       item,
       ['id', 'agentId', 'instruction', 'dependsOn'],
-      ['perspectiveCharacterId', 'skillId', 'inspirationFragmentIds', 'characterDrivenPlanId', 'characterRevisionRequest', 'characterSupplementRequest', 'storylineProgressChapterId', 'promptExecution'],
+      ['perspectiveCharacterId', 'skillId', 'inspirationFragmentIds', 'characterDrivenPlanId', 'characterRevisionRequest', 'characterSupplementRequest', 'characterLifecycleRequest', 'storylineProgressChapterId', 'promptExecution'],
       '主 Agent 计划任务 ' + (index + 1),
     )
     const id = readString(item.id, `主 Agent 计划任务 ${index + 1}.id`, MAX_TASK_ID_CHARS)
@@ -536,6 +558,12 @@ export function parseMasterAgentPlanV1(value: unknown): MasterAgentPlan {
       skillId,
       '主 Agent 计划任务 ' + id,
     )
+    const characterLifecycleRequest = readOptionalCharacterLifecycleRequest(
+      item,
+      agentId,
+      skillId,
+      '主 Agent 计划任务 ' + id,
+    )
     const storylineProgressChapterId = readOptionalStorylineProgressChapterId(
       item,
       agentId,
@@ -559,6 +587,7 @@ export function parseMasterAgentPlanV1(value: unknown): MasterAgentPlan {
       ...(characterDrivenPlanId !== undefined ? { characterDrivenPlanId } : {}),
       ...(characterRevisionRequest !== undefined ? { characterRevisionRequest } : {}),
       ...(characterSupplementRequest !== undefined ? { characterSupplementRequest } : {}),
+      ...(characterLifecycleRequest !== undefined ? { characterLifecycleRequest } : {}),
       ...(storylineProgressChapterId !== undefined ? { storylineProgressChapterId } : {}),
       ...(promptExecution !== undefined ? { promptExecution } : {}),
     }
@@ -642,6 +671,12 @@ function requiredContextGatewayWriteTargetForTaskV1(task: MasterAgentTask): stri
       ? `storyCores.${resolveStoryCoreFieldV1(task.instruction)}`
       : skill.executionMode === 'story-arcs'
         ? 'storyArcs.name'
+      : task.agentId === 'character' && skill.executionMode === 'create'
+        ? 'characters.name'
+      : task.agentId === 'character' && skill.executionMode === 'supplement'
+        ? `characters.${task.characterSupplementRequest?.dimensions[0] ?? 'shortDescription'}`
+      : task.agentId === 'character' && skill.executionMode === 'lifecycle'
+        ? 'characters.narrativeStatus'
     : undefined
   return isContextGatewayRequiredForWriteTargetV1(skill, writeTarget) ? writeTarget : undefined
 }
@@ -837,6 +872,8 @@ function sameTaskIdentity(left: MasterAgentTask, right: MasterAgentTask): boolea
       === JSON.stringify(right.characterRevisionRequest ?? null)
     && JSON.stringify(left.characterSupplementRequest ?? null)
       === JSON.stringify(right.characterSupplementRequest ?? null)
+    && JSON.stringify(left.characterLifecycleRequest ?? null)
+      === JSON.stringify(right.characterLifecycleRequest ?? null)
     && (left.storylineProgressChapterId ?? null) === (right.storylineProgressChapterId ?? null)
 }
 
@@ -1289,6 +1326,13 @@ function parseCandidatePayload(value: unknown, label: string): MasterCandidatePa
       fail(`${label} characterSupplementRequest 无效：${error instanceof Error ? error.message : String(error)}`)
     }
   }
+  if (payload.characterLifecycleRequest !== undefined) {
+    try {
+      payload.characterLifecycleRequest = parseCharacterLifecycleTaskInputV1(payload.characterLifecycleRequest)
+    } catch (error) {
+      fail(`${label} characterLifecycleRequest 无效：${error instanceof Error ? error.message : String(error)}`)
+    }
+  }
   budgetEvidence(payload.teamBudgetEvidence, `${label} payload teamBudgetEvidence`)
   return payload
 }
@@ -1371,6 +1415,15 @@ function assertCandidateMatchesTaskSkill(
     taskSkill.executionMode !== 'supplement'
     && payload.characterSupplementRequest !== undefined
   ) fail(`${label} 不得携带角色补全请求`)
+  if (
+    taskSkill.executionMode === 'lifecycle'
+    && JSON.stringify(payload.characterLifecycleRequest ?? null)
+      !== JSON.stringify(task.characterLifecycleRequest ?? null)
+  ) fail(`${label} 的角色状态请求与 Skill 计划不一致`)
+  if (
+    taskSkill.executionMode !== 'lifecycle'
+    && payload.characterLifecycleRequest !== undefined
+  ) fail(`${label} 不得携带角色状态请求`)
   if (
     task.agentId === 'prose'
     && (taskSkill.executionMode === 'generate' || taskSkill.executionMode === 'continue')

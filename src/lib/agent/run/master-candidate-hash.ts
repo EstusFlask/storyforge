@@ -7,6 +7,15 @@ export function masterCandidateWriteTargetV1(payload: MasterCandidatePayload): s
   if (payload.skillId === 'world-origin.worldview-field' && payload.worldviewField) {
     return `worldviews.${payload.worldviewField}`
   }
+  if (payload.skillId === 'world-origin.story-core' && payload.storyCoreField) {
+    return `storyCores.${payload.storyCoreField}`
+  }
+  if (payload.skillId === 'outline.story-arcs') return 'storyArcs.name'
+  if (payload.skillId === 'character.create') return 'characters.name'
+  if (payload.skillId === 'character.supplement') {
+    return `characters.${payload.characterSupplementRequest?.dimensions[0] ?? 'shortDescription'}`
+  }
+  if (payload.skillId === 'character.lifecycle') return 'characters.narrativeStatus'
   return undefined
 }
 

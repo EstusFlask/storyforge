@@ -102,6 +102,9 @@ async function buildReport(
   if (payload.skillId === 'character.supplement') {
     report.changed.id = payload.characterSupplementRequest?.characterId ?? null
   }
+  if (payload.skillId === 'character.lifecycle') {
+    report.changed.id = payload.characterLifecycleRequest?.characterId ?? null
+  }
 
   if (agentId !== 'prose' || payload.proseOutlineNodeId == null) {
     return report

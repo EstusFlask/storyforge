@@ -11,6 +11,7 @@ import CharacterAxesPicker from './CharacterAxesPicker'
 import CharacterDimensionFields from './CharacterDimensionFields'
 import CharacterStatusPanel from './CharacterStatusPanel'
 import CharacterSupplementAction from './CharacterSupplementAction'
+import CharacterLifecycleAction from './CharacterLifecycleAction'
 import CharacterWorldAffiliations from './CharacterWorldAffiliations'
 
 interface Props {
@@ -19,6 +20,7 @@ interface Props {
   project: Project
   multiWorld?: boolean
   worldGroups?: WorldGroup[]
+  activeWorldGroupId?: number | null
   onUpdateField: (field: keyof Character, value: string) => void
   onPatch: (patch: Partial<Character>) => void
   onReload: () => void
@@ -31,6 +33,7 @@ export default function CharacterDetailCard({
   project,
   multiWorld,
   worldGroups = [],
+  activeWorldGroupId = null,
   onUpdateField,
   onPatch,
   onReload,
@@ -97,10 +100,16 @@ export default function CharacterDetailCard({
         </div>
 
         <div className="flex items-center gap-1 shrink-0">
+          <CharacterLifecycleAction
+            character={char}
+            project={project}
+            worldGroupId={char.isCrossWorld ? activeWorldGroupId : (char.homeWorldGroupId ?? null)}
+            onDone={onReload}
+          />
           <CharacterSupplementAction
             character={char}
             project={project}
-            worldGroupId={char.homeWorldGroupId ?? null}
+            worldGroupId={char.isCrossWorld ? activeWorldGroupId : (char.homeWorldGroupId ?? null)}
             onDone={onReload}
           />
           <button

@@ -23,6 +23,8 @@ export interface StoryStage {
 export interface StoryArc {
   id?: number
   projectId: number
+  /** 多世界作用域；null 表示单世界/默认主世界。 */
+  worldGroupId?: number | null
   name: string            // "主线" / "感情线" / "复仇线"
   type: StoryArcType
   /** JSON 序列化的 StoryStage[] */

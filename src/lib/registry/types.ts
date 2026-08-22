@@ -173,6 +173,11 @@ export interface ExportRemapField {
   /** 是否树形自引用(parentId) */
   selfTree?: boolean
   /**
+   * 可空反向引用允许先导入当前行、最后统一回填，用于解除两个内容表之间
+   * 合法的可空拓扑环。必填或 onUnmapped=drop 的引用不得设为 deferred。
+   */
+  deferred?: true
+  /**
    * 导出后该字段在 JSON 里的名字(历史命名,毫无规律,必须逐字段声明以逐字节兼容旧备份)。
    * 例:worldGroupId → '_worldGroupExportId'、outlineNodeId → '_outlineExportId'、
    *     fromCharacterId → '_fromCharacterIndex'。

@@ -73,6 +73,8 @@ export interface ContextSelectorInputV1 {
   descriptors: readonly ContextResourceDescriptorV1[]
   budgetTokens: number
   mandatoryResourceKeys?: readonly string[]
+  /** Mandatory whole-resource reads. Unlike original reads, this may bind multiple source refs. */
+  mandatoryFullResourceKeys?: readonly string[]
   mandatoryOriginalResourceKeys?: readonly string[]
   targetResourceKeys?: readonly string[]
   entityKeys?: readonly string[]
@@ -414,11 +416,16 @@ export async function selectContextResourcesV1(input: ContextSelectorInputV1): P
   }
   const selectorPolicy = getContextSelectorPolicyV1(input.taskKind)
   const mandatoryKeys = sortedKeys(input.mandatoryResourceKeys, 'mandatoryResourceKeys')
+  const mandatoryFullKeys = sortedKeys(input.mandatoryFullResourceKeys, 'mandatoryFullResourceKeys')
   const mandatoryOriginalKeys = sortedKeys(input.mandatoryOriginalResourceKeys, 'mandatoryOriginalResourceKeys')
+  if (mandatoryFullKeys.some(key => !mandatoryKeys.includes(key))) {
+    fail('full-not-mandatory', 'mandatoryFullResourceKeys 必须同时属于 mandatoryResourceKeys')
+  }
   if (mandatoryOriginalKeys.some(key => !mandatoryKeys.includes(key))) {
     fail('original-not-mandatory', 'mandatoryOriginalResourceKeys 必须同时属于 mandatoryResourceKeys')
   }
   const mandatoryOriginalSet = new Set(mandatoryOriginalKeys)
+  const mandatoryFullSet = new Set(mandatoryFullKeys)
   const targetKeys = sortedKeys(input.targetResourceKeys, 'targetResourceKeys')
   const entityKeys = sortedKeys(input.entityKeys, 'entityKeys')
   const arcKeys = sortedKeys(input.storyArcKeys, 'storyArcKeys')
@@ -555,7 +562,12 @@ export async function selectContextResourcesV1(input: ContextSelectorInputV1): P
     ].includes(reason))
     const depth = mandatoryOriginalSet.has(entry.descriptor.resourceKey)
       ? 'original'
+      : mandatoryFullSet.has(entry.descriptor.resourceKey)
+        ? 'full'
       : selectDepth(entry.descriptor, input.accessPolicy, focused)
+    if (depth === 'full' && !entry.descriptor.availableDepths.includes('full')) {
+      fail('full-forbidden', `${entry.descriptor.resourceKey} 不支持完整资源读取`)
+    }
     if (depth === 'original' && (
       !input.accessPolicy.allowOriginalRead
       || !input.accessPolicy.allowedDepths.includes('original')

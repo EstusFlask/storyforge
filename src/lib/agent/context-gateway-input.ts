@@ -57,6 +57,10 @@ export function contextGatewayInputStateSourceKeysV1(
   const available = new Set(execution.contextPacket.sourceRefs
     .map(ref => INPUT_SOURCE_BY_TABLE[ref.table])
     .filter((key): key is string => Boolean(key)))
+  if (
+    skill.inputPolicy.sourceKeys.includes('targetCharacter')
+    && execution.contextPacket.sourceRefs.some(ref => ref.table === 'characters')
+  ) available.add('targetCharacter')
   return skill.inputPolicy.sourceKeys.filter(key => available.has(key))
 }
 

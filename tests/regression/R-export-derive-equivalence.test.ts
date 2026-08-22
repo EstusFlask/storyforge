@@ -131,7 +131,15 @@ function normalize(data: any) {
   for (const row of data.characters ?? []) {
     delete row._raceEntryExportId
     delete row._cultivationSystemExportId
+    delete row._powerSystemExportId
+    delete row._importantLocationExportId
+    delete row._statusEvidenceChapterExportId
+    delete row._statusEvidenceStoryArcExportId
     delete row.cultivationStageId
+  }
+  for (const row of data.storyArcs ?? []) {
+    delete row._sourceStoryCoreExportId
+    delete row._producerRunExportId
   }
   for (const row of data.codexEntries ?? []) {
     delete row._cultivationSystemExportId

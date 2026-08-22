@@ -1,7 +1,7 @@
 import type { AgentSkillDefinitionV1 } from '../agent/skill-registry'
 import { AGENT_TOOL_BY_NAME } from '../agent/tool-registry'
 import { CONTEXT_SOURCE_BY_KEY } from '../registry/context-sources'
-import type { ContextAccessPolicyV1 } from '../registry/types'
+import type { ContextAccessPolicyV1, ContextResourceKind } from '../registry/types'
 import { getContextSelectorPolicyV1 } from './selector'
 
 export class ContextGatewaySkillPolicyErrorV1 extends Error {
@@ -76,6 +76,22 @@ export function createContextAccessPolicyFromSkillV1(
     maxRetrievedTokens: gateway.maxRetrievedTokens,
     allowOriginalRead: gateway.allowOriginalRead,
     candidateAccess: 'forbidden',
+  }
+}
+
+/** Rebuild the exact runtime policy used by a Gateway execution. Callers may
+ * only narrow the Skill-declared resource kinds; they cannot grant themselves
+ * an undeclared kind. Adoption uses this same function so a legitimate
+ * narrowed run is not mistaken for a policy change after refresh. */
+export function createContextAccessPolicyForExecutionV1(
+  skill: AgentSkillDefinitionV1,
+  excludedResourceKinds: readonly ContextResourceKind[] = [],
+): ContextAccessPolicyV1 {
+  const declared = createContextAccessPolicyFromSkillV1(skill)
+  const excluded = new Set(excludedResourceKinds)
+  return {
+    ...declared,
+    allowedResourceKinds: declared.allowedResourceKinds.filter(kind => !excluded.has(kind)),
   }
 }
 

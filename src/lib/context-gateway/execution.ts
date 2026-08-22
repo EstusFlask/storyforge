@@ -46,7 +46,7 @@ import {
 import {
   assertAgentSkillContextGatewayPolicyV1,
   contextGatewayAdditionalReadToolNamesForSkillV1,
-  createContextAccessPolicyFromSkillV1,
+  createContextAccessPolicyForExecutionV1,
   isContextGatewayRequiredForWriteTargetV1,
 } from './skill-policy'
 
@@ -65,6 +65,8 @@ export interface ExecuteContextGatewayInputV1 {
   query?: string
   budgetTokens?: number
   mandatoryResourceKeys?: readonly string[]
+  /** Mandatory whole-resource reads; supports aggregate resources with multiple source refs. */
+  mandatoryFullResourceKeys?: readonly string[]
   /**
    * Mandatory target resources whose exact source value must be delivered.
    * This is a deterministic escalation for known edit targets, not an Agent
@@ -75,6 +77,8 @@ export interface ExecuteContextGatewayInputV1 {
   entityKeys?: readonly string[]
   storyArcKeys?: readonly string[]
   timeRange?: ContextTimeRangeV1
+  /** Runtime narrowing only; callers cannot add kinds not declared by the Skill. */
+  excludedResourceKinds?: readonly ContextResourceDescriptorV1['kind'][]
   /** Omit to disable extra planning calls while preserving deterministic selection. */
   additionalReadModel?: AgentModelAdapter
   additionalReadsEnabled?: boolean
@@ -330,7 +334,10 @@ export async function executeContextGatewayV1(
   input: ExecuteContextGatewayInputV1,
 ): Promise<ContextGatewayExecutionV1> {
   const gatewayPolicy = assertAgentSkillContextGatewayPolicyV1(input.skill)
-  const accessPolicy = createContextAccessPolicyFromSkillV1(input.skill)
+  const accessPolicy = createContextAccessPolicyForExecutionV1(
+    input.skill,
+    input.excludedResourceKinds,
+  )
   const session = await createContextGatewayToolSessionV1({ scope: frozenScope(input), policy: accessPolicy })
   const catalog = await collectCatalog(session)
   const readsAllowed = input.additionalReadsEnabled !== false
@@ -343,6 +350,7 @@ export async function executeContextGatewayV1(
     descriptors: catalog.descriptors,
     budgetTokens: Math.min(input.budgetTokens ?? session.policy.maxRetrievedTokens, session.policy.maxRetrievedTokens),
     mandatoryResourceKeys: input.mandatoryResourceKeys,
+    mandatoryFullResourceKeys: input.mandatoryFullResourceKeys,
     mandatoryOriginalResourceKeys: input.mandatoryOriginalResourceKeys,
     targetResourceKeys: input.targetResourceKeys,
     entityKeys: input.entityKeys,
@@ -626,6 +634,7 @@ export async function assertContextGatewayCandidateAdoptableV1(input: {
   attempt: number
   candidateHash: string
   contextManifestHash?: string
+  excludedResourceKinds?: readonly ContextResourceDescriptorV1['kind'][]
 }): Promise<{ mode: 'legacy-or-shadow' } | { mode: 'required'; manifestHash: string; freshnessHash: string }> {
   if (!isContextGatewayRequiredForWriteTargetV1(input.skill, input.writeTarget)) {
     return { mode: 'legacy-or-shadow' }
@@ -648,7 +657,7 @@ export async function assertContextGatewayCandidateAdoptableV1(input: {
       workId: input.scope.workId,
       worldGroupId: input.worldGroupId ?? null,
     },
-    policy: createContextAccessPolicyFromSkillV1(input.skill),
+    policy: createContextAccessPolicyForExecutionV1(input.skill, input.excludedResourceKinds),
   })
   const freshness = await inspectContextGatewayManifestFreshnessV1({ manifest: verified.manifest, session })
   if (freshness.status !== 'fresh') fail('candidate-context-stale', freshness.reasonCodes.join(','))

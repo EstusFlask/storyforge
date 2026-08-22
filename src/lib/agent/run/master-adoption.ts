@@ -43,6 +43,10 @@ import {
   type CharacterSupplementCopilotSnapshotV1,
 } from '../character-supplement-copilot'
 import {
+  parseCharacterLifecycleCandidateV1,
+  type CharacterLifecycleSnapshotV1,
+} from '../character-lifecycle-copilot'
+import {
   parseStoryCoreCandidateDraft,
   storyCoreCandidateMatchesRowV1,
 } from '../story-core-copilot'
@@ -168,6 +172,10 @@ async function assertRequiredContextGatewayFresh(
     attempt: resolved.snapshot.projection.steps[resolved.stepId].attempt,
     candidateHash: payload.candidateHash!,
     contextManifestHash: payload.contextManifestHash,
+    excludedResourceKinds: payload.skillId === 'character.supplement'
+      && payload.characterSupplementRequest?.useEvidence === false
+      ? ['chapter', 'fact', 'foreshadow']
+      : undefined,
   })
 }
 
@@ -483,6 +491,17 @@ async function businessAlreadyMatches(
     return (row?.worldOrigin ?? '') === candidate.draft.trim()
   }
   if (agentId === 'character') {
+    if (candidate.payload.skillId === 'character.lifecycle') {
+      const snapshot = candidate.payload.baseSnapshot as CharacterLifecycleSnapshotV1
+      const parsed = parseCharacterLifecycleCandidateV1(candidate.draft, snapshot)
+      const row = (await readOwnedRows<any>(input.scope, 'characters', { owner: 'world' }))
+        .find(item => item.id === parsed.characterId)
+      return Boolean(row
+        && row.narrativeStatus === parsed.targetStatus
+        && row.statusReason === parsed.reason
+        && (row.statusEvidenceChapterId ?? null) === snapshot.request.evidenceChapterId
+        && (row.statusEvidenceStoryArcId ?? null) === snapshot.request.evidenceStoryArcId)
+    }
     if (candidate.payload.skillId === 'character.supplement') {
       return characterSupplementCandidateMatchesBusinessStateV1({
         scope: input.scope,

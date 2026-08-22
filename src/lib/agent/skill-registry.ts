@@ -41,6 +41,7 @@ export type AgentSkillExecutionModeV1 =
   | 'creative-rules'
   | 'create'
   | 'supplement'
+  | 'lifecycle'
   | 'relationships'
   | 'locations'
   | 'map-config'
@@ -1496,11 +1497,32 @@ export const AGENT_SKILLS = [
     promptVersion: 'character-copilot-v1',
     executionMode: 'create',
     contextTaskKind: 'agent-character',
-    readToolNames: ['read_worldview', 'read_story_core', 'read_characters', 'read_world_rules', 'read_history'],
-    contextSourceKeys: [],
+    readToolNames: [],
+    contextSourceKeys: [...CHARACTER_INPUT_POLICY.sourceKeys],
     optionalContextSourceKeys: [],
     inputPolicy: CHARACTER_INPUT_POLICY,
     contextCompression: CHARACTER_COMPRESSION_POLICY,
+    contextGateway: {
+      version: 1,
+      rollout: 'required',
+      requiredWriteTargets: ['characters.name'],
+      providerSourceKeys: ['ragSelection'],
+      allowedResourceKinds: [
+        'world', 'worldview-field', 'story-core-field', 'character',
+        'character-relation', 'story-arc', 'storyline-progress', 'outline-node',
+        'detailed-outline', 'chapter', 'foreshadow', 'location', 'codex-entry',
+        'world-link', 'fact', 'reference', 'narrative-blueprint',
+      ],
+      allowedDepths: ['index', 'summary', 'focused', 'full', 'original'],
+      maxReadCalls: 5,
+      maxRetrievedTokens: 32_000,
+      maxPlanningSteps: 6,
+      maxPlanningModelTokens: 32_000,
+      allowOriginalRead: true,
+      additionalReadToolNames: [
+        'list_context_catalog', 'search_context', 'read_context_resource', 'read_original_evidence',
+      ],
+    },
     maxOutputTokens: 6_000,
     writeTargets: [{
       table: 'characters',
@@ -1620,6 +1642,27 @@ export const AGENT_SKILLS = [
     optionalContextSourceKeys: CHARACTER_SUPPLEMENT_OPTIONAL_CONTEXT_SOURCE_KEYS,
     inputPolicy: CHARACTER_SUPPLEMENT_INPUT_POLICY,
     contextCompression: CHARACTER_SUPPLEMENT_COMPRESSION_POLICY,
+    contextGateway: {
+      version: 1,
+      rollout: 'required',
+      requiredWriteTargets: CHARACTER_DIMENSIONS.map(dimension => `characters.${dimension.key}`),
+      providerSourceKeys: ['ragSelection'],
+      allowedResourceKinds: [
+        'world', 'worldview-field', 'story-core-field', 'character',
+        'character-relation', 'story-arc', 'storyline-progress', 'outline-node',
+        'detailed-outline', 'chapter', 'foreshadow', 'location', 'codex-entry',
+        'world-link', 'fact', 'reference', 'narrative-blueprint',
+      ],
+      allowedDepths: ['index', 'summary', 'focused', 'full', 'original'],
+      maxReadCalls: 5,
+      maxRetrievedTokens: 48_000,
+      maxPlanningSteps: 6,
+      maxPlanningModelTokens: 48_000,
+      allowOriginalRead: true,
+      additionalReadToolNames: [
+        'list_context_catalog', 'search_context', 'read_context_resource', 'read_original_evidence',
+      ],
+    },
     maxOutputTokens: 8_000,
     writeTargets: [{
       table: 'characters',
@@ -1627,6 +1670,59 @@ export const AGENT_SKILLS = [
     }],
     lastVerifiedAt: '2026-08-09',
     regressionTests: ['R-HARNESS38-character-supplement-agent', 'R-HARNESS38-character-supplement-ui'],
+  },
+  {
+    version: 1,
+    id: 'character.lifecycle',
+    agentId: 'character',
+    defaultForAgent: false,
+    label: '角色状态演化与退场',
+    owner: 'character-agent',
+    promptVersion: 'character-lifecycle-copilot-v1',
+    executionMode: 'lifecycle',
+    contextTaskKind: 'agent-character',
+    readToolNames: [],
+    contextSourceKeys: CHARACTER_SUPPLEMENT_CONTEXT_SOURCE_KEYS,
+    optionalContextSourceKeys: CHARACTER_SUPPLEMENT_OPTIONAL_CONTEXT_SOURCE_KEYS,
+    inputPolicy: CHARACTER_SUPPLEMENT_INPUT_POLICY,
+    contextCompression: CHARACTER_SUPPLEMENT_COMPRESSION_POLICY,
+    contextGateway: {
+      version: 1,
+      rollout: 'required',
+      requiredWriteTargets: [
+        'characters.narrativeStatus', 'characters.statusEvidenceChapterId',
+        'characters.statusEvidenceStoryArcId', 'characters.statusReason',
+        'characters.exitChapterId', 'characters.ending', 'characters.activeChapterRange',
+        'characters.statusProducerContractHash', 'characters.statusProducerCandidateHash',
+      ],
+      providerSourceKeys: ['ragSelection'],
+      allowedResourceKinds: [
+        'world', 'worldview-field', 'story-core-field', 'character',
+        'character-relation', 'story-arc', 'storyline-progress', 'outline-node',
+        'detailed-outline', 'chapter', 'foreshadow', 'location', 'codex-entry',
+        'world-link', 'fact', 'narrative-blueprint',
+      ],
+      allowedDepths: ['index', 'summary', 'focused', 'full', 'original'],
+      maxReadCalls: 5,
+      maxRetrievedTokens: 48_000,
+      maxPlanningSteps: 6,
+      maxPlanningModelTokens: 48_000,
+      allowOriginalRead: true,
+      additionalReadToolNames: [
+        'list_context_catalog', 'search_context', 'read_context_resource', 'read_original_evidence',
+      ],
+    },
+    maxOutputTokens: 4_000,
+    writeTargets: [{
+      table: 'characters',
+      fields: [
+        'narrativeStatus', 'statusEvidenceChapterId', 'statusEvidenceStoryArcId',
+        'statusReason', 'exitChapterId', 'ending', 'activeChapterRange',
+        'statusProducerContractHash', 'statusProducerCandidateHash',
+      ],
+    }],
+    lastVerifiedAt: '2026-08-23',
+    regressionTests: ['R-CHAR1-character-lifecycle-candidate'],
   },
   {
     version: 1,
@@ -2837,7 +2933,7 @@ export function validateAgentSkillDefinitionsV1(
 ): void {
   const executionModesByAgent: Record<DomainAgentId, ReadonlySet<AgentSkillExecutionModeV1>> = {
     'world-origin': new Set(['complete', 'worldview-field', 'world-suggest', 'worldview-expand', 'constitution-extract', 'codex-extract', 'codex-enrich', 'story-core', 'creative-rules', 'locations', 'map-config', 'history-consult', 'history-storm', 'review']),
-    character: new Set(['create', 'supplement', 'relationships', 'character-reply', 'memory-curator']),
+    character: new Set(['create', 'supplement', 'lifecycle', 'relationships', 'character-reply', 'memory-curator']),
     inspiration: new Set(['reference-summary', 'reference-characters', 'reverse', 'review']),
     outline: new Set(['auto', 'story-arcs', 'foreshadow-suggestions', 'storyline-progress', 'character-driven', 'character-revision', 'world-game', 'impact-summary-regenerate', 'volumes', 'chapters', 'details']),
     prose: new Set(['auto', 'generate', 'continue', 'emotion-beats', 'inventory-extraction', 'story-timeline-extraction', 'cultivation-progress-extraction', 'style-learn', 'selection-edit', 'selection-check', 'review', 'revise', 'organize', 'memory', 'consistency', 'scene-director', 'adventure-intent', 'adventure-narrator', 'simulation-briefing', 'simulation-advisor', 'simulation-narrator', 'simulation-actor-suggestion', 'open-world-expression', 'open-world-narration']),

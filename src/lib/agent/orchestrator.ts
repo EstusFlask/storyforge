@@ -115,6 +115,15 @@ import {
   type CharacterSupplementTaskInputV1,
 } from './character-supplement-copilot'
 import {
+  adoptRestoredCharacterLifecycleCandidateV1,
+  parseCharacterLifecycleCandidateV1,
+  parseCharacterLifecycleTaskInputV1,
+  prepareCharacterLifecycleCopilotV1,
+  serializeCharacterLifecycleCandidateV1,
+  type CharacterLifecycleSnapshotV1,
+  type CharacterLifecycleTaskInputV1,
+} from './character-lifecycle-copilot'
+import {
   adoptRestoredStorylineProgressCandidateV1,
   parseStorylineProgressCandidateDraftV1,
   prepareStorylineProgressCopilotV1,
@@ -217,6 +226,8 @@ export interface MasterAgentTask {
   characterRevisionRequest?: CharacterRevisionTaskInputV1
   /** 已有角色补全面板冻结的目标角色、字段闭集与剧情证据开关。 */
   characterSupplementRequest?: CharacterSupplementTaskInputV1
+  /** 角色状态变化/退场冻结的目标状态与触发证据。 */
+  characterLifecycleRequest?: CharacterLifecycleTaskInputV1
   /** 故事线进度映射固定的已写章节。 */
   storylineProgressChapterId?: number
   /** New formal plans freeze the selected PromptTemplate and run options here. */
@@ -262,6 +273,7 @@ export interface MasterCandidatePayload {
   characterDrivenPlanId?: number
   characterRevisionRequest?: CharacterRevisionTaskInputV1
   characterSupplementRequest?: CharacterSupplementTaskInputV1
+  characterLifecycleRequest?: CharacterLifecycleTaskInputV1
   outlineMode?: OutlineCopilotMode
   outlineParentId?: number | null
   storyArcKind?: StoryArcRequestKind
@@ -341,6 +353,7 @@ export interface PinnedMasterAgentTaskV1 {
   characterDrivenPlanId?: number
   characterRevisionRequest?: CharacterRevisionTaskInputV1
   characterSupplementRequest?: CharacterSupplementTaskInputV1
+  characterLifecycleRequest?: CharacterLifecycleTaskInputV1
   storylineProgressChapterId?: number
   promptExecution?: PromptExecutionRequestV1
   id?: string
@@ -607,6 +620,13 @@ export async function createMasterAgentPlan(input: {
       throw new Error('角色补全 Skill 必须固定角色补全请求。')
     }
     if (
+      pinned.characterLifecycleRequest !== undefined
+      && (pinned.agentId !== 'character' || pinned.skillId !== 'character.lifecycle')
+    ) throw new Error('只有角色状态 Skill 可以固定生命周期请求。')
+    if (pinned.skillId === 'character.lifecycle' && pinned.characterLifecycleRequest === undefined) {
+      throw new Error('角色状态 Skill 必须固定生命周期请求。')
+    }
+    if (
       pinned.storylineProgressChapterId !== undefined
       && (pinned.agentId !== 'outline' || pinned.skillId !== 'outline.storyline-progress')
     ) throw new Error('只有故事线进度 Skill 可以固定映射章节。')
@@ -622,6 +642,9 @@ export async function createMasterAgentPlan(input: {
     const characterSupplementRequest = pinned.characterSupplementRequest === undefined
       ? undefined
       : parseCharacterSupplementTaskInputV1(pinned.characterSupplementRequest)
+    const characterLifecycleRequest = pinned.characterLifecycleRequest === undefined
+      ? undefined
+      : parseCharacterLifecycleTaskInputV1(pinned.characterLifecycleRequest)
     const instruction = pinned.instruction.trim()
     if (instruction.length > 8_000) {
       throw new Error('固定领域任务的作者要求超过 8000 字符；已在模型调用前阻止，请缩短后重试。')
@@ -646,6 +669,9 @@ export async function createMasterAgentPlan(input: {
         : {}),
       ...(characterSupplementRequest !== undefined
         ? { characterSupplementRequest }
+        : {}),
+      ...(characterLifecycleRequest !== undefined
+        ? { characterLifecycleRequest }
         : {}),
       ...(pinned.storylineProgressChapterId !== undefined
         ? { storylineProgressChapterId: pinned.storylineProgressChapterId }
@@ -1215,7 +1241,61 @@ async function executeSequentialMasterAgentPlan(
           outputs.set(task.id, draft)
         }
       } else if (task.agentId === 'character') {
-        if (skill.executionMode === 'supplement') {
+        if (skill.executionMode === 'lifecycle') {
+          if (!task.characterLifecycleRequest) throw new Error('角色状态任务缺少冻结目标与证据。')
+          const prepared = await prepareCharacterLifecycleCopilotV1({
+            projectId: input.projectId,
+            scope,
+            worldGroupId: input.worldGroupId,
+            request: task.characterLifecycleRequest,
+            authorRequest: task.instruction,
+            skillId: skill.id as AgentSkillId,
+            contextProfile,
+            signal: input.signal,
+          })
+          await input.executionTrace?.contextGatewayPrepared?.(task, {
+            execution: prepared.contextGatewayExecution,
+            assembled: prepared.input.assembled,
+            renderedRequest: prepared.prepared.messages,
+          })
+          const result = await runBudgetedGenerationNode({
+            node: prepared.node,
+            prepared: prepared.prepared,
+            budget,
+            callLabel: '角色状态演化 Skill',
+            maxOutputTokens: skill.maxOutputTokens,
+          })
+          const draft = serializeCharacterLifecycleCandidateV1(result.output, prepared.snapshot)
+          candidates.push({
+            payload: {
+              version: 1,
+              taskId: task.id,
+              agentId: task.agentId,
+              skillId: skill.id as AgentSkillId,
+              executionBinding,
+              label: prepared.label,
+              contextSources: prepared.contextSources,
+              contextEvidence: prepared.contextEvidence,
+              baseSnapshot: prepared.snapshot,
+              workspaceScope: scope,
+              characterLifecycleRequest: task.characterLifecycleRequest,
+              dependsOnTaskIds: task.dependsOn,
+              dependencyBindings,
+              generator: prepared.modelIdentity,
+              structuredOutputEvidence: result.structuredOutputEvidence,
+            },
+            draft,
+            runtimeNode: prepared.node,
+            runtimeOutput: result.output,
+            contextGatewayRuntime: {
+              execution: prepared.contextGatewayExecution,
+              assembled: prepared.input.assembled,
+              renderedRequest: prepared.prepared.messages,
+              rawResponse: result.structuredOutputEvidence ?? result.output,
+            },
+          })
+          outputs.set(task.id, draft)
+        } else if (skill.executionMode === 'supplement') {
           if (!task.characterSupplementRequest) throw new Error('角色补全任务缺少固定目标与字段。')
           const prepared = await prepareCharacterSupplementCopilotV1({
             projectId: input.projectId,
@@ -1229,6 +1309,13 @@ async function executeSequentialMasterAgentPlan(
             contextCompressionRuntime,
             signal: input.signal,
           })
+          if (prepared.contextGatewayExecution) {
+            await input.executionTrace?.contextGatewayPrepared?.(task, {
+              execution: prepared.contextGatewayExecution,
+              assembled: prepared.input.assembled,
+              renderedRequest: prepared.prepared.messages,
+            })
+          }
           const result = await runBudgetedGenerationNode({
             node: prepared.node,
             prepared: prepared.prepared,
@@ -1255,11 +1342,20 @@ async function executeSequentialMasterAgentPlan(
               characterSupplementRequest: task.characterSupplementRequest,
               dependsOnTaskIds: task.dependsOn,
               dependencyBindings,
+              generator: prepared.modelIdentity,
               structuredOutputEvidence: result.structuredOutputEvidence,
             },
             draft,
             runtimeNode: prepared.node,
             runtimeOutput: result.output,
+            ...(prepared.contextGatewayExecution ? {
+              contextGatewayRuntime: {
+                execution: prepared.contextGatewayExecution,
+                assembled: prepared.input.assembled,
+                renderedRequest: prepared.prepared.messages,
+                rawResponse: result.structuredOutputEvidence ?? result.output,
+              },
+            } : {}),
           })
           outputs.set(task.id, draft)
         } else {
@@ -1276,6 +1372,13 @@ async function executeSequentialMasterAgentPlan(
             promptExecution: task.promptExecution,
             signal: input.signal,
           })
+          if (prepared.contextGatewayExecution) {
+            await input.executionTrace?.contextGatewayPrepared?.(task, {
+              execution: prepared.contextGatewayExecution,
+              assembled: prepared.input.assembled,
+              renderedRequest: prepared.prepared.messages,
+            })
+          }
           const result = await runBudgetedGenerationNode({
             node: prepared.node,
             prepared: prepared.prepared,
@@ -1298,12 +1401,21 @@ async function executeSequentialMasterAgentPlan(
               workspaceScope: scope,
               dependsOnTaskIds: task.dependsOn,
               dependencyBindings,
+              generator: prepared.modelIdentity,
               structuredOutputEvidence: result.structuredOutputEvidence,
               promptExecutionEvidence: prepared.promptExecutionEvidence,
             },
             draft,
             runtimeNode: prepared.node,
             runtimeOutput: result.output,
+            ...(prepared.contextGatewayExecution ? {
+              contextGatewayRuntime: {
+                execution: prepared.contextGatewayExecution,
+                assembled: prepared.input.assembled,
+                renderedRequest: prepared.prepared.messages,
+                rawResponse: result.structuredOutputEvidence ?? result.output,
+              },
+            } : {}),
           })
           outputs.set(task.id, draft)
         }
@@ -2135,7 +2247,22 @@ export async function adoptMasterCandidate(input: {
   assertMasterCreativeArtifactAdoptableV1(input.payload)
   const scope = await resolveCandidateScope(input)
   await assertMasterCandidateDependenciesAdoptedV1(input.event, input.payload, scope)
-  if (input.payload.skillId === 'outline.story-arcs') {
+  if (input.payload.skillId === 'character.lifecycle') {
+    if (!input.payload.characterLifecycleRequest) {
+      throw new Error('角色状态候选缺少冻结目标与证据，请重新生成。')
+    }
+    await adoptRestoredCharacterLifecycleCandidateV1({
+      projectId: input.projectId,
+      scope,
+      worldGroupId: input.worldGroupId,
+      snapshot: input.payload.baseSnapshot as CharacterLifecycleSnapshotV1,
+      draft: input.draft,
+      producerRunContractHash: input.payload.runId == null
+        ? null
+        : (await db.agentRuns.get(input.payload.runId))?.contractHash ?? null,
+      producerCandidateHash: input.payload.candidateHash ?? null,
+    })
+  } else if (input.payload.skillId === 'outline.story-arcs') {
     await adoptRestoredStoryArcCandidate({
       projectId: input.projectId,
       scope,
@@ -2358,7 +2485,12 @@ export async function adoptMasterCandidate(input: {
       ? `创作规则“${input.payload.label}”已写入项目。`
       : '世界来源已写入项目。'
     : input.payload.agentId === 'character'
-      ? input.payload.skillId === 'character.supplement'
+      ? input.payload.skillId === 'character.lifecycle'
+        ? `角色状态已更新为 ${(parseCharacterLifecycleCandidateV1(
+            input.draft,
+            input.payload.baseSnapshot as CharacterLifecycleSnapshotV1,
+          )).targetStatus}。`
+      : input.payload.skillId === 'character.supplement'
         ? `角色设定已补全 ${input.payload.characterSupplementRequest?.dimensions.length ?? 0} 个字段。`
         : `角色“${(parseCharacterCandidateDraft(input.draft) as CharacterCopilotCandidate).name}”已加入项目。`
       : input.payload.agentId === 'inspiration'

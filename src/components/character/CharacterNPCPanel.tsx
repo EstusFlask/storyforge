@@ -5,6 +5,8 @@ import type { Project, Character } from '../../lib/types'
 import { filterCharactersByRoleWeight } from '../../lib/character/character-axes'
 import CharacterDimensionFields from './CharacterDimensionFields'
 import CharacterSupplementAction from './CharacterSupplementAction'
+import CharacterLifecycleAction from './CharacterLifecycleAction'
+import { useWorldGroupStore } from '../../stores/world-group'
 import { filledDimensions } from '../../lib/character/character-dimensions'
 import { CInput } from '../shared/CompositionInput'
 
@@ -15,6 +17,7 @@ interface Props {
 /** v3 §2.1 — NPC（紧凑列表视图 + 可展开完整设定） */
 export default function CharacterNPCPanel({ project }: Props) {
   const { characters, loadAll, addCharacter, updateCharacter, deleteCharacter } = useCharacterStore()
+  const activeGroupId = useWorldGroupStore(state => state.activeGroupId)
   const [expanded, setExpanded] = useState<Set<number>>(new Set())
 
   useEffect(() => { loadAll(project.id!) }, [project.id, loadAll])
@@ -99,7 +102,14 @@ export default function CharacterNPCPanel({ project }: Props) {
                 <CharacterSupplementAction
                   character={c}
                   project={project}
-                  worldGroupId={c.homeWorldGroupId ?? null}
+                  worldGroupId={c.isCrossWorld ? activeGroupId : (c.homeWorldGroupId ?? null)}
+                  onDone={() => loadAll(project.id!)}
+                  compact
+                />
+                <CharacterLifecycleAction
+                  character={c}
+                  project={project}
+                  worldGroupId={c.isCrossWorld ? activeGroupId : (c.homeWorldGroupId ?? null)}
                   onDone={() => loadAll(project.id!)}
                   compact
                 />

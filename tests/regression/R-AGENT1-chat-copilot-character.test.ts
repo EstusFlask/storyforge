@@ -16,6 +16,9 @@ import {
 } from '../../src/lib/generation/generation-node'
 import type { Character } from '../../src/lib/types'
 import { useAIConfigStore } from '../../src/stores/ai-config'
+import { generateWorkspaceUid } from '../../src/lib/memory/identity'
+import { ensureWorkspaceOwnership } from '../../src/lib/world-engine/ownership'
+import { resolveScopeLike, stampNewRecord } from '../../src/lib/world-engine/scope'
 
 function candidate(patch: Partial<CharacterCopilotCandidate> = {}): CharacterCopilotCandidate {
   return {
@@ -35,7 +38,8 @@ function candidate(patch: Partial<CharacterCopilotCandidate> = {}): CharacterCop
 
 async function addProject(enableMultiWorld = false): Promise<number> {
   const now = Date.now()
-  return await db.projects.add({
+  const projectId = await db.projects.add({
+    workspaceUid: generateWorkspaceUid(),
     name: enableMultiWorld ? '群界灯塔' : '潮汐纪元',
     genre: 'fantasy',
     genres: ['fantasy'],
@@ -46,6 +50,8 @@ async function addProject(enableMultiWorld = false): Promise<number> {
     createdAt: now,
     updatedAt: now,
   }) as number
+  await ensureWorkspaceOwnership(projectId)
+  return projectId
 }
 
 async function addCharacter(
@@ -55,7 +61,7 @@ async function addCharacter(
   patch: Partial<Character> = {},
 ): Promise<number> {
   const now = Date.now()
-  return await db.characters.add({
+  return await db.characters.add(stampNewRecord(await resolveScopeLike(projectId), 'characters', {
     projectId,
     name,
     role: 'protagonist',
@@ -75,7 +81,7 @@ async function addCharacter(
     createdAt: now,
     updatedAt: now,
     ...patch,
-  }) as number
+  }, { owner: 'world' })) as number
 }
 
 function nodeInput(
@@ -88,6 +94,8 @@ function nodeInput(
     genres: 'fantasy',
     worldGroupId: null,
     authorRequest: '设计一名守灯钟匠',
+    inputGuidance: '',
+    assembled: { text: '', segments: [], included: [], omitted: [], trimmed: [], totalInputTokens: 0, inputBudget: 1, overBudgetBeforeTrim: false, overBudgetAfterTrim: false },
     worldContext: '【世界观】盐海每十年退潮一次。',
     characterContext: '【角色档案】陆潮（主要）',
     contextSources: ['worldview', 'characters'],
@@ -108,29 +116,30 @@ describe('AGENT-1 27.1-d · ChatCopilot 角色生成闭环', () => {
   it('prepare 只经正式工具读取当前世界可见角色，并冻结零写入名单快照', async () => {
     const projectId = await addProject(true)
     const now = Date.now()
-    const worldA = await db.worldGroups.add({
+    const scope = await resolveScopeLike(projectId)
+    const worldA = await db.worldGroups.add(stampNewRecord(scope, 'worldGroups', {
       projectId,
       name: '盐海界',
       type: 'primary',
       order: 0,
       createdAt: now,
       updatedAt: now,
-    }) as number
-    const worldB = await db.worldGroups.add({
+    }, { owner: 'world' })) as number
+    const worldB = await db.worldGroups.add(stampNewRecord(scope, 'worldGroups', {
       projectId,
       name: '雾港界',
       type: 'parallel',
       order: 1,
       createdAt: now,
       updatedAt: now,
-    }) as number
-    await db.worldviews.add({
+    }, { owner: 'world' })) as number
+    await db.worldviews.add(stampNewRecord(scope, 'worldviews', {
       projectId,
       worldGroupId: worldA,
       worldOrigin: '盐海退潮后，第一座灯塔城从海床升起。',
       createdAt: now,
       updatedAt: now,
-    } as never)
+    }, { owner: 'world' }) as never)
     await addCharacter(projectId, '陆潮', worldA)
     await addCharacter(projectId, '雾隐', worldB)
     await addCharacter(projectId, '界行者', null, { isCrossWorld: true })
@@ -138,13 +147,16 @@ describe('AGENT-1 27.1-d · ChatCopilot 角色生成闭环', () => {
 
     const prepared = await prepareCharacterCopilot({
       projectId,
+      scope,
       worldGroupId: worldA,
       authorRequest: '设计一名守灯钟匠',
     })
     const prompt = prepared.prepared.messages.map(message => message.content).join('\n')
 
-    expect(prepared.contextSources).toContain('worldview')
-    expect(prepared.contextSources).toContain('characters')
+    expect(prepared.contextSources).toEqual(['ragSelection'])
+    expect(prepared.contextGatewayExecution?.retrievalTrace.mandatory.length).toBeGreaterThan(0)
+    expect(prepared.contextGatewayExecution?.contextPacket.sourceRefs.some(ref => ref.table === 'worldviews')).toBe(true)
+    expect(prepared.contextGatewayExecution?.contextPacket.sourceRefs.some(ref => ref.table === 'characters')).toBe(true)
     expect(prepared.contextEvidence.inputState).toMatchObject({
       state: 'partial',
       handling: 'reference-and-create',

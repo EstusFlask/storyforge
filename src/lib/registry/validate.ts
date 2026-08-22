@@ -123,6 +123,9 @@ export function checkRegistry(): RegistryValidationResult {
       if (!REGISTRY_BY_NAME.has(rm.remapVia)) {
         errors.push(`${spec.name}.exportRemap 指向不存在的表: ${rm.remapVia}`)
       }
+      if (rm.deferred && (rm.selfTree || rm.onUnmapped === 'drop' || rm.onUnmapped === 'require')) {
+        errors.push(`${spec.name}.exportRemap deferred 只允许可空的非树引用: ${rm.field}`)
+      }
     }
   }
 

@@ -379,6 +379,7 @@ export default function CharacterPanel({ project, view = 'generator', initialCha
                 onDelete={() => { deleteCharacter(selectedChar.id!); setSelected(null) }}
                 multiWorld={!!project.enableMultiWorld}
                 worldGroups={groups}
+                activeWorldGroupId={activeGroupId}
               />
             ) : (
               <div className="flex items-center justify-center h-64 text-text-muted text-sm">

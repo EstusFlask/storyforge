@@ -10,7 +10,6 @@ import {
   type PreparedGenerationNode,
 } from '../generation/generation-node'
 import { adopt } from '../registry/adopt'
-import { assembleContext } from '../registry/assemble-context'
 import type { AssembleContextResult } from '../registry/types'
 import type { AIConfig, Character, ChatMessage, WorkspaceScope } from '../types'
 import {
@@ -20,21 +19,30 @@ import {
 } from '../world-engine/scope'
 import {
   attachAgentContextInputStateV1,
-  mergeContextEvidence,
+  evidenceFromContextResult,
   resolveAgentContextPolicy,
   type AgentContextEvidence,
   type AgentContextProfile,
 } from './context-policy'
-import {
-  createAgentContextCompressionSessionV1,
-  type AgentContextCompressionRuntimeV1,
-} from './context-compression'
+import type { AgentContextCompressionRuntimeV1 } from './context-compression'
 import {
   buildAgentSkillInputGuidanceV1,
-  resolveAgentSkillInputStateV1,
   resolveAgentSkillV1,
   type AgentSkillId,
 } from './skill-registry'
+import {
+  executeContextGatewayV1,
+  type ContextGatewayExecutionV1,
+} from '../context-gateway/execution'
+import { isContextGatewayRequiredForWriteTargetV1 } from '../context-gateway/skill-policy'
+import {
+  assembleContextGatewayPacketV1,
+  contextGatewayInputStateSourceKeysV1,
+  projectContextGatewayInputStateV1,
+} from './context-gateway-input'
+import type { MasterCandidateModelIdentityV1 } from './master-candidate-semantic-review'
+import { hashCanonicalValue } from './run/hash'
+import { CANON_RESOURCE_PROVIDER_V1 } from '../context-gateway/canon-provider'
 import { parseStructuredOutputV1 } from './structured-output-pipeline'
 
 const MAX_CANDIDATE_CHARS = 240_000
@@ -93,6 +101,8 @@ export interface PreparedCharacterSupplementCopilotV1 {
   contextEvidence: AgentContextEvidence
   snapshot: CharacterSupplementCopilotSnapshotV1
   label: string
+  modelIdentity: MasterCandidateModelIdentityV1
+  contextGatewayExecution?: ContextGatewayExecutionV1
 }
 
 interface CharacterSupplementCopilotDependenciesV1 {
@@ -199,28 +209,85 @@ export function serializeCharacterSupplementCandidateV1(
   return JSON.stringify(parsed, null, 2)
 }
 
-function selectedSourceKeys(
-  skill: ReturnType<typeof resolveAgentSkillV1>,
-  useEvidence: boolean,
-): string[] {
-  return [
-    ...skill.contextSourceKeys,
-    ...(useEvidence ? skill.optionalContextSourceKeys : []),
-  ]
+async function gatewayDecisionHash(input: {
+  resourceKey: string
+  contentRevision: number | string
+  contentHash: string
+  policyRevision: number
+  policyHash: string
+  sourceRefs: unknown
+}): Promise<string> {
+  return hashCanonicalValue({
+    version: 1,
+    resourceKey: input.resourceKey,
+    contentRevision: input.contentRevision,
+    contentHash: input.contentHash,
+    policyRevision: input.policyRevision,
+    policyHash: input.policyHash,
+    sourceRefs: input.sourceRefs,
+  })
 }
 
-function sourceBindings(
-  assembled: AssembleContextResult,
-  sourceKeys: readonly string[],
-): CharacterSupplementSourceBindingV1[] {
-  const byKey = new Map((assembled.sourceEvidence ?? []).map(evidence => [evidence.key, evidence]))
-  return sourceKeys.map(key => {
-    const evidence = byKey.get(key)
-    if (!evidence?.sourceHash || !/^[a-f0-9]{64}$/.test(evidence.sourceHash)) {
-      throw new Error(`角色补全上下文来源 ${key} 缺少原始内容哈希。`)
+async function gatewaySourceBindings(
+  execution: ContextGatewayExecutionV1,
+): Promise<CharacterSupplementSourceBindingV1[]> {
+  const decisions = [
+    ...execution.retrievalTrace.mandatory,
+    ...execution.retrievalTrace.autoSelected,
+    ...execution.retrievalTrace.agentReads,
+  ]
+  return Promise.all([...decisions]
+    .sort((left, right) => left.resourceKey.localeCompare(right.resourceKey))
+    .map(async decision => ({
+      key: decision.resourceKey,
+      sourceHash: await gatewayDecisionHash({
+        resourceKey: decision.resourceKey,
+        contentRevision: decision.revision,
+        contentHash: decision.contentHash,
+        policyRevision: decision.policyRevision ?? 0,
+        policyHash: decision.policyHash ?? '',
+        sourceRefs: decision.sourceRefs,
+      }),
+    })))
+}
+
+async function currentGatewaySourceBindings(input: {
+  scope: WorkspaceScope
+  worldGroupId: number | null
+  expected: readonly CharacterSupplementSourceBindingV1[]
+}): Promise<CharacterSupplementSourceBindingV1[]> {
+  const wanted = new Set(input.expected.map(binding => binding.key))
+  const found = new Map<string, CharacterSupplementSourceBindingV1>()
+  let cursor: string | undefined
+  do {
+    const page = await CANON_RESOURCE_PROVIDER_V1.listMetadata({
+      scope: {
+        projectId: input.scope.projectId,
+        worldId: input.scope.worldId,
+        workId: input.scope.workId,
+        worldGroupId: input.worldGroupId,
+      },
+      kinds: [...CANON_RESOURCE_PROVIDER_V1.kinds],
+      limit: 100,
+      cursor,
+    })
+    for (const descriptor of page.items) {
+      if (!wanted.has(descriptor.resourceKey)) continue
+      found.set(descriptor.resourceKey, {
+        key: descriptor.resourceKey,
+        sourceHash: await gatewayDecisionHash({
+          resourceKey: descriptor.resourceKey,
+          contentRevision: descriptor.contentRevision,
+          contentHash: descriptor.contentHash,
+          policyRevision: descriptor.policyRevision,
+          policyHash: descriptor.policyHash,
+          sourceRefs: descriptor.sourceRefs,
+        }),
+      })
     }
-    return { key, sourceHash: evidence.sourceHash }
-  })
+    cursor = page.nextCursor ?? undefined
+  } while (cursor && found.size < wanted.size)
+  return input.expected.map(binding => found.get(binding.key) ?? { key: binding.key, sourceHash: 'missing' })
 }
 
 function buildSnapshot(
@@ -269,34 +336,6 @@ async function readTargetCharacter(
     && (character.homeWorldGroupId ?? null) !== worldGroupId
   ) throw new Error('目标角色不属于本次执行世界。')
   return character
-}
-
-async function assembleSupplementContext(input: {
-  projectId: number
-  scope?: WorkspaceScope
-  worldGroupId: number | null
-  character: Character
-  request: CharacterSupplementTaskInputV1
-  sourceKeys: string[]
-  provider?: AIConfig['provider']
-  model?: string
-  inputBudgetMaxTokens?: number
-  sourceBudgetScale?: number
-  sourceTransformer?: Parameters<typeof assembleContext>[0]['sourceTransformer']
-}): Promise<AssembleContextResult> {
-  return assembleContext({
-    projectId: input.projectId,
-    scope: input.scope,
-    worldGroupId: input.worldGroupId,
-    characterId: input.request.characterId,
-    subjectCharacterName: input.character.name,
-    sourceKeys: input.sourceKeys,
-    provider: input.provider,
-    model: input.model,
-    inputBudgetMaxTokens: input.inputBudgetMaxTokens,
-    sourceBudgetScale: input.sourceBudgetScale,
-    sourceTransformer: input.sourceTransformer,
-  })
 }
 
 function buildMessages(input: CharacterSupplementCopilotInputV1): ChatMessage[] {
@@ -358,22 +397,15 @@ async function applyCandidate(input: {
   const currentBindings = input.readCurrentSourceBindings
     ? await input.readCurrentSourceBindings()
     : await (async () => {
-        const skill = resolveAgentSkillV1('character', 'character.supplement')
-        const character = await readTargetCharacter(
-          input.projectId,
-          input.scope,
-          input.worldGroupId,
-          snapshot.request.characterId,
-        )
-        const assembled = await assembleSupplementContext({
-          projectId: input.projectId,
-          scope: input.scope,
+        const resolved = input.scope ?? await resolveReadScopeLike(input.projectId)
+        if (isLegacyReadScope(resolved)) {
+          throw new Error('角色补全 required Gateway 候选缺少稳定 WorkspaceScope。')
+        }
+        return currentGatewaySourceBindings({
+          scope: resolved,
           worldGroupId: input.worldGroupId,
-          character,
-          request: snapshot.request,
-          sourceKeys: selectedSourceKeys(skill, snapshot.request.useEvidence),
+          expected: snapshot.sourceBindings,
         })
-        return sourceBindings(assembled, selectedSourceKeys(skill, snapshot.request.useEvidence))
       })()
   if (JSON.stringify(currentBindings) !== JSON.stringify(snapshot.sourceBindings)) {
     throw new CharacterSupplementCopilotStaleError()
@@ -461,43 +493,60 @@ export async function prepareCharacterSupplementCopilotV1(
   ).config
   const contextProfile = input.contextProfile ?? 'balanced'
   const contextPolicy = resolveAgentContextPolicy(skill.contextTaskKind, contextProfile)
-  const compression = input.contextCompressionRuntime
-    ? createAgentContextCompressionSessionV1({
-        policy: skill.contextCompression,
-        config,
-        projectId: input.projectId,
-        authorRequest,
-        routingCategory,
+  const writeTarget = `characters.${request.dimensions[0]}`
+  const gatewayRequired = isContextGatewayRequiredForWriteTargetV1(skill, writeTarget)
+  if (gatewayRequired && !scope) {
+    throw new Error('角色补全 Gateway required 入口需要稳定 WorkspaceScope，旧项目必须先完成所有权迁移。')
+  }
+  if (!character.ragDocumentId) {
+    throw new Error('目标角色缺少 portable resource UID，必须先完成角色资料身份迁移。')
+  }
+  const targetResourceKey = `character:${character.ragDocumentId}`
+  const contextGatewayExecution = gatewayRequired
+    ? await executeContextGatewayV1({
+        skill,
+        scope: scope!,
+        worldGroupId: project.enableMultiWorld ? input.worldGroupId : null,
+        budgetTokens: Math.min(contextPolicy.maxInputTokens, skill.contextGateway!.maxRetrievedTokens),
+        query: [
+          `补全目标角色“${character.name}”的字段：${request.dimensions.join('、')}。`,
+          '按关系选择其他角色、种族词条、地点、力量体系、故事线和世界设定。',
+          request.useEvidence
+            ? '允许读取与目标角色直接相关的已确认事实、认知事件和正文表现。'
+            : '不读取正文表现；只依据角色与世界/故事规划资料。',
+          authorRequest,
+        ].join('\n'),
+        mandatoryResourceKeys: [targetResourceKey],
+        mandatoryFullResourceKeys: [targetResourceKey],
+        targetResourceKeys: [targetResourceKey],
+        entityKeys: [targetResourceKey],
+        ...(request.useEvidence ? {} : {
+          excludedResourceKinds: ['chapter', 'fact', 'foreshadow'] as const,
+        }),
+        additionalReadsEnabled: false,
         signal: input.signal,
-        runtime: input.contextCompressionRuntime,
       })
     : undefined
-  const sourceKeys = selectedSourceKeys(skill, request.useEvidence)
-  const assembled = await assembleSupplementContext({
-    projectId: input.projectId,
-    scope,
-    worldGroupId: project.enableMultiWorld ? input.worldGroupId : null,
-    character,
-    request,
-    sourceKeys,
-    provider: config.provider,
-    model: config.model,
-    inputBudgetMaxTokens: contextPolicy.maxInputTokens,
-    sourceBudgetScale: contextPolicy.sourceBudgetScale,
-    sourceTransformer: compression?.sourceTransformer,
-  })
-  const inputState = resolveAgentSkillInputStateV1(skill, [assembled])
+  if (!contextGatewayExecution) {
+    throw new Error('角色补全正式入口缺少 required Context Gateway。')
+  }
+  const assembled = assembleContextGatewayPacketV1(
+    contextGatewayExecution,
+    contextPolicy.maxInputTokens,
+  )
+  const inputState = projectContextGatewayInputStateV1(skill, contextGatewayExecution, assembled)
   if (inputState.state === 'empty') throw new Error(inputState.handling === 'require-author-input'
     ? inputState.missingSourceKeys.includes('targetCharacter')
       ? '目标角色不存在或不属于当前世界。'
       : '角色补全缺少作者输入。'
     : '角色补全上下文不可用。')
-  const bindings = sourceBindings(assembled, sourceKeys)
+  const bindings = await gatewaySourceBindings(contextGatewayExecution)
   const snapshot = buildSnapshot(request, bindings)
   const contextEvidence = attachAgentContextInputStateV1(
-    mergeContextEvidence(contextProfile, [assembled]),
+    evidenceFromContextResult(contextProfile, assembled),
     inputState,
   )
+  contextEvidence.inputStateSourceKeys = contextGatewayInputStateSourceKeysV1(skill, contextGatewayExecution)
   const nodeInput: CharacterSupplementCopilotInputV1 = {
     projectId: input.projectId,
     scope,
@@ -521,6 +570,8 @@ export async function prepareCharacterSupplementCopilotV1(
     contextEvidence,
     snapshot,
     label: `补全角色“${character.name}”的 ${request.dimensions.length} 个字段`,
+    modelIdentity: { provider: config.provider, model: config.model },
+    contextGatewayExecution,
   }
 }
 

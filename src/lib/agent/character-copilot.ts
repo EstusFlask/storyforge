@@ -19,6 +19,7 @@ import type {
 import { prepareGenerationNode } from '../generation/generation-node'
 import { adopt } from '../registry/adopt'
 import type { AdoptResult } from '../registry/types'
+import type { AssembleContextResult } from '../registry/types'
 import type {
   AIConfig,
   Character,
@@ -36,23 +37,28 @@ import {
 } from '../world-engine/scope'
 import {
   attachAgentContextInputStateV1,
-  mergeContextEvidence,
+  evidenceFromContextResult,
   resolveAgentContextPolicy,
-  splitAgentContextPolicy,
   type AgentContextEvidence,
   type AgentContextProfile,
 } from './context-policy'
-import {
-  createAgentContextCompressionSessionV1,
-  type AgentContextCompressionRuntimeV1,
-} from './context-compression'
-import { AGENT_TOOL_BY_NAME, executeAgentTool } from './tool-registry'
+import type { AgentContextCompressionRuntimeV1 } from './context-compression'
 import {
   buildAgentSkillInputGuidanceV1,
-  resolveAgentSkillInputStateV1,
   resolveAgentSkillV1,
   type AgentSkillId,
 } from './skill-registry'
+import {
+  executeContextGatewayV1,
+  type ContextGatewayExecutionV1,
+} from '../context-gateway/execution'
+import { isContextGatewayRequiredForWriteTargetV1 } from '../context-gateway/skill-policy'
+import {
+  assembleContextGatewayPacketV1,
+  contextGatewayInputStateSourceKeysV1,
+  projectContextGatewayInputStateV1,
+} from './context-gateway-input'
+import type { MasterCandidateModelIdentityV1 } from './master-candidate-semantic-review'
 import { parseStructuredOutputV1 } from './structured-output-pipeline'
 import {
   renderFrozenPromptExecutionV1,
@@ -87,6 +93,7 @@ export interface CharacterCopilotInput {
   worldGroupId: number | null
   authorRequest: string
   inputGuidance: string
+  assembled: AssembleContextResult
   worldContext: string
   characterContext: string
   contextSources: string[]
@@ -102,10 +109,13 @@ export interface CharacterCopilotInput {
 export interface PreparedCharacterCopilot {
   node: GenerationNode<CharacterCopilotInput, CharacterCopilotCandidate, AdoptResult>
   prepared: PreparedGenerationNode
+  input: CharacterCopilotInput
   contextSources: string[]
   snapshot: CharacterRosterSnapshot
   contextEvidence: AgentContextEvidence
+  modelIdentity: MasterCandidateModelIdentityV1
   promptExecutionEvidence?: PromptExecutionEvidenceV1
+  contextGatewayExecution?: ContextGatewayExecutionV1
 }
 
 interface CharacterCopilotDependencies {
@@ -355,50 +365,42 @@ export async function prepareCharacterCopilot(input: {
   const contextProfile = input.contextProfile ?? 'full'
   const skill = resolveAgentSkillV1('character', input.skillId)
   const authorRequest = assertAuthorRequest(input.authorRequest)
-  const compression = input.contextCompressionRuntime
-    ? createAgentContextCompressionSessionV1({
-        policy: skill.contextCompression,
-        config,
-        projectId: input.projectId,
-        authorRequest,
-        routingCategory,
+  const contextPolicy = resolveAgentContextPolicy(skill.contextTaskKind, contextProfile)
+  const gatewayRequired = isContextGatewayRequiredForWriteTargetV1(skill, 'characters.name')
+  if (gatewayRequired && !scope) {
+    throw new Error('角色创建 Gateway required 入口需要稳定 WorkspaceScope，旧项目必须先完成所有权迁移。')
+  }
+  const contextGatewayExecution = gatewayRequired
+    ? await executeContextGatewayV1({
+        skill,
+        scope: scope!,
+        worldGroupId,
+        budgetTokens: Math.min(contextPolicy.maxInputTokens, skill.contextGateway!.maxRetrievedTokens),
+        query: [
+          '创建一名与现有世界、故事核心、故事线和角色关系兼容但不重复的新角色。',
+          '按任务选择相关种族、地点、力量体系和角色认知证据，不要围绕已有材料复述。',
+          authorRequest,
+        ].join('\n'),
+        additionalReadsEnabled: false,
         signal: input.signal,
-        runtime: input.contextCompressionRuntime,
       })
     : undefined
-  const tools = skill.readToolNames.map(name => AGENT_TOOL_BY_NAME.get(name)!)
-  if (tools.length < 2 || tools.some(tool => !tool)) {
-    throw new Error(`Agent Skill ${skill.id} 的只读工具契约无效`)
+  if (!contextGatewayExecution) {
+    throw new Error('角色创建正式入口缺少 required Context Gateway。')
   }
-  const contextPolicy = resolveAgentContextPolicy(skill.contextTaskKind, contextProfile)
-  const toolPolicies = splitAgentContextPolicy(
-    contextPolicy,
-    tools.map(tool => tool.inputBudgetTokens),
+  const assembled = assembleContextGatewayPacketV1(
+    contextGatewayExecution,
+    contextPolicy.maxInputTokens,
   )
-  const executionContext = {
-    projectId: input.projectId,
-    worldGroupId,
-    provider: config.provider,
-    model: config.model,
-    sourceTransformer: compression?.sourceTransformer,
-  }
-  const toolResults = await Promise.all(tools.map((tool, index) => (
-    executeAgentTool(tool.name, { ...executionContext, contextPolicy: toolPolicies[index] }, {})
-  )))
-  const failed = toolResults.find(result => !result.ok)
-  if (failed && !failed.ok) throw new Error(failed.error || '无法读取角色生成所需的正式上下文。')
-  const charactersIndex = tools.findIndex(tool => tool.name === 'read_characters')
-  const characters = charactersIndex >= 0 ? toolResults[charactersIndex] : null
-  if (!characters?.ok) throw new Error('角色 Skill 缺少 read_characters 正式来源。')
   const afterRead = await readCharacterRosterSnapshot(input.projectId, worldGroupId, scope)
   if (beforeRead.serialized !== afterRead.serialized) throw new CharacterCopilotStaleError()
 
-  const contextResults = toolResults.map(result => result.meta)
-  const inputState = resolveAgentSkillInputStateV1(skill, contextResults)
+  const inputState = projectContextGatewayInputStateV1(skill, contextGatewayExecution, assembled)
   const contextEvidence = attachAgentContextInputStateV1(
-    mergeContextEvidence(contextProfile, contextResults),
+    evidenceFromContextResult(contextProfile, assembled),
     inputState,
   )
+  contextEvidence.inputStateSourceKeys = contextGatewayInputStateSourceKeysV1(skill, contextGatewayExecution)
   const inputGuidance = buildAgentSkillInputGuidanceV1(skill, inputState)
   const nodeInput: CharacterCopilotInput = {
     projectId: input.projectId,
@@ -408,16 +410,15 @@ export async function prepareCharacterCopilot(input: {
     worldGroupId,
     authorRequest,
     inputGuidance,
+    assembled,
     worldContext: [
-      ...toolResults
-        .filter((_, index) => index !== charactersIndex)
-        .map(result => result.content),
+      assembled.text,
       input.supplementalContext?.trim()
         ? `【本轮上游候选（尚未采纳，不属于 Canon）】\n${input.supplementalContext.trim()}`
         : '',
     ].filter(Boolean).join('\n\n'),
-    characterContext: characters.content,
-    contextSources: [...new Set(toolResults.flatMap(result => result.meta.included))],
+    characterContext: '',
+    contextSources: assembled.included,
     snapshot: afterRead,
     config,
     generationOverrides: input.generationOverrides,
@@ -463,10 +464,13 @@ export async function prepareCharacterCopilot(input: {
   return {
     node,
     prepared: prepareGenerationNode(node, nodeInput),
+    input: nodeInput,
     contextSources: nodeInput.contextSources,
     snapshot: afterRead,
     contextEvidence,
+    modelIdentity: { provider: config.provider, model: config.model },
     promptExecutionEvidence: nodeInput.promptExecutionEvidence,
+    contextGatewayExecution,
   }
 }
 

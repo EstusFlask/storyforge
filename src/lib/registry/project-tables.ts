@@ -177,6 +177,7 @@ const PROJECT_TABLE_REGISTRATIONS: ProjectTableRegistration[] = [
     domainOwner: LEGACY_WORLD_OWNER,
     worldDomains: ['foundation'],
     exportable: true,
+    refs: [{ kind: 'simple', field: 'id', target: 'characters[powerSystemId]', onDelete: 'setNull' }],
     exportRemap: [{ field: 'worldGroupId', remapVia: 'worldGroups', exportAs: '_worldGroupExportId' }] },
 
   { table: db.cultivationSystems, name: 'cultivationSystems', owner: 'project', worldScoped: true, communityShare: 'world', releaseSection: 'foundation',
@@ -259,6 +260,7 @@ const PROJECT_TABLE_REGISTRATIONS: ProjectTableRegistration[] = [
     worldDomains: ['foundation', 'assets'],
     refs: [
       { kind: 'simple', field: 'id', target: 'codexEntries[importantLocationId]', onDelete: 'setNull' },
+      { kind: 'simple', field: 'id', target: 'characters[importantLocationId]', onDelete: 'setNull' },
     ],
     exportRemap: [{ field: 'parentId', remapVia: 'importantLocations', selfTree: true, exportAs: '_parentExportId' }],
     note: '⚠️ 无 worldGroupId,当前全局注入写作上下文；城池词条可通过 importantLocationId 建立软引用' },
@@ -277,6 +279,7 @@ const PROJECT_TABLE_REGISTRATIONS: ProjectTableRegistration[] = [
     domainOwner: LEGACY_WORLD_OWNER,
     exportable: true, communityShare: 'world', releaseSection: 'characters',
     worldDomains: ['assets'],
+    defaults: { narrativeStatus: 'active' },
     refs: [
       // 删角色 → 关系级联删 + 细纲数组引用清理
       { kind: 'simple', field: 'id', target: 'characterRelations[fromCharacterId]', onDelete: 'cascade' },
@@ -290,6 +293,10 @@ const PROJECT_TABLE_REGISTRATIONS: ProjectTableRegistration[] = [
       { field: 'homeWorldGroupId', remapVia: 'worldGroups', exportAs: '_homeWorldGroupExportId' },
       { field: 'raceEntryId', remapVia: 'codexEntries', exportAs: '_raceEntryExportId' },
       { field: 'cultivationSystemId', remapVia: 'cultivationSystems', exportAs: '_cultivationSystemExportId' },
+      { field: 'powerSystemId', remapVia: 'powerSystems', exportAs: '_powerSystemExportId' },
+      { field: 'importantLocationId', remapVia: 'importantLocations', exportAs: '_importantLocationExportId' },
+      { field: 'statusEvidenceChapterId', remapVia: 'chapters', exportAs: '_statusEvidenceChapterExportId', deferred: true },
+      { field: 'statusEvidenceStoryArcId', remapVia: 'storyArcs', exportAs: '_statusEvidenceStoryArcExportId', deferred: true },
     ] },
 
   { table: db.characterRelations, name: 'characterRelations', owner: 'project',
@@ -333,6 +340,7 @@ const PROJECT_TABLE_REGISTRATIONS: ProjectTableRegistration[] = [
     selfIdPaths: ['continuityHandoff.chapterId', 'planReconciliation.chapterId'],
     refs: [
       { kind: 'simple', field: 'id', target: 'emotionBeatCards[chapterId]', onDelete: 'cascade' },
+      { kind: 'simple', field: 'id', target: 'characters[statusEvidenceChapterId]', onDelete: 'setNull' },
       // 软引用:itemLedger/storyTimelineEvents 的 chapterId 保留(独立产物,见 chapter store 注释)
     ],
     exportRemap: [
@@ -379,6 +387,7 @@ const PROJECT_TABLE_REGISTRATIONS: ProjectTableRegistration[] = [
       { kind: 'simple', field: 'id', target: 'storylineProgress[arcId]', onDelete: 'cascade' },
       { kind: 'simple', field: 'id', target: 'storylineCrossings[arcIdA]', onDelete: 'cascade' },
       { kind: 'simple', field: 'id', target: 'storylineCrossings[arcIdB]', onDelete: 'cascade' },
+      { kind: 'simple', field: 'id', target: 'characters[statusEvidenceStoryArcId]', onDelete: 'setNull' },
     ],
     exportRemap: [
       { field: 'sourceStoryCoreId', remapVia: 'storyCores', exportAs: '_sourceStoryCoreExportId' },
