@@ -10,6 +10,10 @@ import type {
 import { prepareGenerationNode } from '../generation/generation-node'
 import { adopt } from '../registry/adopt'
 import { assembleContext } from '../registry/assemble-context'
+import {
+  STORY_CORE_GENERATABLE_FIELD_SPECS,
+  type StoryCoreGeneratableField,
+} from '../registry/field-registry'
 import type { AdoptResult, AssembleContextResult } from '../registry/types'
 import type { AIConfig, ChatMessage, StoryCore } from '../types'
 import type { WorkspaceScope } from '../types/world-ownership'
@@ -38,6 +42,16 @@ import {
   resolveAgentSkillV1,
   type AgentSkillId,
 } from './skill-registry'
+import {
+  executeContextGatewayV1,
+  type ContextGatewayExecutionV1,
+} from '../context-gateway/execution'
+import { isContextGatewayRequiredForWriteTargetV1 } from '../context-gateway/skill-policy'
+import {
+  assembleContextGatewayPacketV1,
+  contextGatewayInputStateSourceKeysV1,
+  projectContextGatewayInputStateV1,
+} from './context-gateway-input'
 import { parseStructuredOutputV1 } from './structured-output-pipeline'
 import {
   renderFrozenPromptExecutionV1,
@@ -45,17 +59,10 @@ import {
   type PromptExecutionOptionsV1,
 } from './prompt-execution'
 
-export const STORY_CORE_FIELDS = [
-  'logline',
-  'concept',
-  'theme',
-  'centralConflict',
-  'plotPattern',
-  'mainPlot',
-  'subPlots',
-] as const
+export const STORY_CORE_FIELDS = STORY_CORE_GENERATABLE_FIELD_SPECS.map(spec => spec.field)
 
-export type StoryCoreField = typeof STORY_CORE_FIELDS[number]
+export type StoryCoreField = StoryCoreGeneratableField
+export type StoryCoreFieldOperationV1 = 'create' | FieldGenerationMode
 
 export interface StoryCoreCopilotCandidate {
   field: StoryCoreField
@@ -64,6 +71,7 @@ export interface StoryCoreCopilotCandidate {
 
 export interface StoryCoreCopilotSnapshot {
   id: number | null
+  ragDocumentId: string | null
   updatedAt: number | null
   serialized: string
   values: Record<StoryCoreField, string>
@@ -71,13 +79,14 @@ export interface StoryCoreCopilotSnapshot {
 
 export interface StoryCoreCopilotInput {
   projectId: number
+  projectName: string
   scope?: WorkspaceScope
   worldGroupId: number | null
   authorRequest: string
   supplementalContext: string
   inputGuidance: string
   targetField: StoryCoreField
-  mode: FieldGenerationMode
+  mode: StoryCoreFieldOperationV1
   assembled: AssembleContextResult
   snapshot: StoryCoreCopilotSnapshot
   config: AIConfig
@@ -99,6 +108,7 @@ export interface PreparedStoryCoreCopilot {
   label: string
   modelIdentity: MasterCandidateModelIdentityV1
   promptExecutionEvidence?: PromptExecutionEvidenceV1
+  contextGatewayExecution?: ContextGatewayExecutionV1
 }
 
 interface StoryCoreCopilotDependencies {
@@ -107,27 +117,16 @@ interface StoryCoreCopilotDependencies {
   adoptOutput?: (candidate: StoryCoreCopilotCandidate) => Promise<AdoptResult>
 }
 
-const FIELD_LABELS: Record<StoryCoreField, string> = {
-  logline: '一句话故事',
-  concept: '故事概念',
-  theme: '故事主题',
-  centralConflict: '核心冲突',
-  plotPattern: '故事模式',
-  mainPlot: '故事主线',
-  subPlots: '故事复线',
-}
+export const STORY_CORE_FIELD_CAPABILITIES = new Map(
+  STORY_CORE_GENERATABLE_FIELD_SPECS.map(spec => [spec.field, spec.aiGeneration]),
+) as ReadonlyMap<StoryCoreField, typeof STORY_CORE_GENERATABLE_FIELD_SPECS[number]['aiGeneration']>
 
-const FIELD_MAX_CHARS: Record<StoryCoreField, number> = {
-  logline: 1_000,
-  concept: 4_000,
-  theme: 4_000,
-  centralConflict: 12_000,
-  plotPattern: 4_000,
-  mainPlot: 30_000,
-  subPlots: 30_000,
-}
+export const STORY_CORE_FIELD_LABELS = Object.fromEntries(
+  STORY_CORE_GENERATABLE_FIELD_SPECS.map(spec => [spec.field, spec.aiGeneration.label]),
+) as Record<StoryCoreField, string>
 
-const MODE_INSTRUCTIONS: Record<FieldGenerationMode, string> = {
+const MODE_INSTRUCTIONS: Record<StoryCoreFieldOperationV1, string> = {
+  create: '目标字段为空：创建可直接审阅的作者意图摘要，不得返回占位说明。',
   expand: '保留目标字段当前已有事实和方向，在其基础上补足因果、约束与具体性。',
   rewrite: '允许重写目标字段，但必须遵守其他已确认字段和正式上下文，不得顺手改写它们。',
   polish: '只优化目标字段的表达、逻辑顺序和可读性，除非作者明确要求，不新增重大设定。',
@@ -160,8 +159,14 @@ function snapshotOf(row: StoryCore | null): StoryCoreCopilotSnapshot {
   const values = valuesOf(row)
   return {
     id: row?.id ?? null,
+    ragDocumentId: row?.ragDocumentId ?? null,
     updatedAt: row?.updatedAt ?? null,
-    serialized: JSON.stringify({ id: row?.id ?? null, updatedAt: row?.updatedAt ?? null, values }),
+    serialized: JSON.stringify({
+      id: row?.id ?? null,
+      ragDocumentId: row?.ragDocumentId ?? null,
+      updatedAt: row?.updatedAt ?? null,
+      values,
+    }),
     values,
   }
 }
@@ -233,8 +238,9 @@ export function parseStoryCoreCandidateDraft(draft: string): StoryCoreCopilotCan
         throw new Error(`故事核心候选 ${field}.value 至少需要 2 个字符。`)
       }
       const fieldValue = source.value.trim()
-      if (fieldValue.length > FIELD_MAX_CHARS[field]) {
-        throw new Error(`故事核心候选 ${field}.value 超过 ${FIELD_MAX_CHARS[field]} 字符。`)
+      const capability = STORY_CORE_FIELD_CAPABILITIES.get(field)!
+      if (fieldValue.length > capability.maxChars) {
+        throw new Error(`故事核心候选 ${field}.value 超过 ${capability.maxChars} 字符。`)
       }
       return { field, value: fieldValue }
     },
@@ -271,11 +277,13 @@ function storyCoreHardSystem(input: StoryCoreCopilotInput): string {
   return `你是 StoryForge 世界基座 Agent，当前执行 story-core Skill。你只为作者生成一个故事核心字段的可确认候选。
 
 硬性要求：
-1. 本轮目标字段是 ${input.targetField}（${FIELD_LABELS[input.targetField]}），只允许生成这个字段。
+1. 本轮目标字段是 ${input.targetField}（${STORY_CORE_FIELD_LABELS[input.targetField]}），只允许生成这个字段。
 2. ${MODE_INSTRUCTIONS[input.mode]}
 3. 正式上下文是约束；缺失内容可以为本字段做最小候选补全，但不得声称它已成为 Canon。
 4. 角色、故事线和既有大纲属于下游证据：上游缺失时可以据此反推当前目标字段，上游已有内容时用于核对兼容；不得借反推偷偷覆盖其他故事核心字段。
-5. 只输出严格 JSON 对象，不输出 Markdown、解释或额外字段：
+5. storyCore.mainPlot/subPlots 是作者意图摘要，不是可执行 StoryArc；不得在本轮自动创建、改写或废弃故事线。
+6. 当前字段的直接依赖为 ${STORY_CORE_FIELD_CAPABILITIES.get(input.targetField)!.directDependencies.join('、') || '无'}；缺失依赖不允许顺写其它字段。
+7. 只输出严格 JSON 对象，不输出 Markdown、解释或额外字段：
 {"field":"${input.targetField}","value":"候选正文"}`
 }
 
@@ -292,6 +300,7 @@ function buildStoryCoreMessages(input: StoryCoreCopilotInput): ChatMessage[] {
     content: [
       input.inputGuidance,
       `【作者要求】\n${input.authorRequest}${supplemental}`,
+      `【低权重灵感：作品名】\n${input.projectName}`,
       `【正式上下文】\n${input.assembled.text || '（当前没有已填写的正式设定）'}`,
     ].join('\n\n'),
   }]
@@ -386,6 +395,13 @@ export async function prepareStoryCoreCopilot(
   const readScope = input.scope ?? await resolveReadScopeLike(input.projectId)
   const scope = isLegacyReadScope(readScope) ? undefined : readScope
   const before = await readSnapshot(input.projectId, scope)
+  const targetField = resolveStoryCoreFieldV1(request)
+  const capability = STORY_CORE_FIELD_CAPABILITIES.get(targetField)
+  if (!capability) throw new Error(`故事核心字段 ${targetField} 缺少可生成能力声明。`)
+  const requestedMode = resolveStoryCoreModeV1(request)
+  if (!capability.modes.includes(requestedMode)) {
+    throw new Error(`故事核心字段 ${targetField} 不支持 ${requestedMode} 模式。`)
+  }
   const routingCategory = input.routingCategory ?? 'agent.world-foundation.story-core'
   const config = input.configOverride ?? resolveRequestConfig(
     useAIConfigStore.getState().config,
@@ -404,34 +420,64 @@ export async function prepareStoryCoreCopilot(
         runtime: input.contextCompressionRuntime,
       })
     : undefined
-  const assembled = await assembleContext({
-    projectId: input.projectId,
-    scope,
-    worldGroupId,
-    provider: config.provider,
-    model: config.model,
-    sourceKeys: [...skill.contextSourceKeys],
-    inputBudgetMaxTokens: contextPolicy.maxInputTokens,
-    sourceBudgetScale: contextPolicy.sourceBudgetScale,
-    sourceTransformer: compression?.sourceTransformer,
-  })
+  const gatewayRequired = isContextGatewayRequiredForWriteTargetV1(skill, `storyCores.${targetField}`)
+  if (gatewayRequired && !scope) {
+    throw new Error('故事核心 Gateway required 字段需要稳定 WorkspaceScope，旧项目必须先完成所有权迁移。')
+  }
+  const targetResourceKey = before.values[targetField].trim() && before.ragDocumentId
+    ? `story-core-field:${before.ragDocumentId}:field:${targetField}`
+    : undefined
+  const contextGatewayExecution = gatewayRequired
+    ? await executeContextGatewayV1({
+        skill,
+        scope: scope!,
+        worldGroupId,
+        budgetTokens: Math.min(contextPolicy.maxInputTokens, skill.contextGateway!.maxRetrievedTokens),
+        query: `${STORY_CORE_FIELD_LABELS[targetField]} ${requestedMode}；检查已有世界观、角色、故事线和大纲作为兼容或反推证据。\n${request}`,
+        ...(targetResourceKey ? {
+          mandatoryResourceKeys: [targetResourceKey],
+          mandatoryOriginalResourceKeys: [targetResourceKey],
+          targetResourceKeys: [targetResourceKey],
+        } : {}),
+        additionalReadsEnabled: false,
+        signal: input.signal,
+      })
+    : undefined
+  const assembled = contextGatewayExecution
+    ? assembleContextGatewayPacketV1(contextGatewayExecution, contextPolicy.maxInputTokens)
+    : await assembleContext({
+        projectId: input.projectId,
+        scope,
+        worldGroupId,
+        provider: config.provider,
+        model: config.model,
+        sourceKeys: [...skill.contextSourceKeys],
+        inputBudgetMaxTokens: contextPolicy.maxInputTokens,
+        sourceBudgetScale: contextPolicy.sourceBudgetScale,
+        sourceTransformer: compression?.sourceTransformer,
+      })
   const snapshot = await readSnapshot(input.projectId, scope)
   if (before.serialized !== snapshot.serialized) throw new StoryCoreCopilotStaleError()
-  const inputState = resolveAgentSkillInputStateV1(skill, [assembled])
+  const inputState = contextGatewayExecution
+    ? projectContextGatewayInputStateV1(skill, contextGatewayExecution, assembled)
+    : resolveAgentSkillInputStateV1(skill, [assembled])
   const contextEvidence = attachAgentContextInputStateV1(
     evidenceFromContextResult(contextProfile, assembled),
     inputState,
   )
-  const targetField = resolveStoryCoreFieldV1(request)
+  if (contextGatewayExecution) {
+    contextEvidence.inputStateSourceKeys = contextGatewayInputStateSourceKeysV1(skill, contextGatewayExecution)
+  }
   const nodeInput: StoryCoreCopilotInput = {
     projectId: input.projectId,
+    projectName: project.name,
     scope,
     worldGroupId,
     authorRequest: request,
     supplementalContext: input.supplementalContext ?? '',
     inputGuidance: buildAgentSkillInputGuidanceV1(skill, inputState),
     targetField,
-    mode: resolveStoryCoreModeV1(request),
+    mode: snapshot.values[targetField].trim() ? requestedMode : 'create',
     assembled,
     snapshot,
     config,
@@ -445,7 +491,7 @@ export async function prepareStoryCoreCopilot(
       context: {
         projectName: project.name,
         genres: project.genres?.join('/') || project.genre || '',
-        dimension: FIELD_LABELS[targetField],
+        dimension: STORY_CORE_FIELD_LABELS[targetField],
         worldContext: assembled.text || '（当前没有已填写的正式设定）',
         storyCore: assembled.text || '',
         currentValue: snapshot.values[targetField],
@@ -488,9 +534,10 @@ export async function prepareStoryCoreCopilot(
     contextEvidence,
     snapshot,
     targetField,
-    label: FIELD_LABELS[targetField],
+    label: STORY_CORE_FIELD_LABELS[targetField],
     modelIdentity: { provider: config.provider, model: config.model },
     promptExecutionEvidence: nodeInput.promptExecutionEvidence,
+    contextGatewayExecution,
   }
 }
 

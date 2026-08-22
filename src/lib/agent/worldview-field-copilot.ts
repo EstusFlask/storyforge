@@ -54,6 +54,11 @@ import {
   type ContextGatewayExecutionV1,
 } from '../context-gateway/execution'
 import { isContextGatewayRequiredForWriteTargetV1 } from '../context-gateway/skill-policy'
+import {
+  assembleContextGatewayPacketV1,
+  contextGatewayInputStateSourceKeysV1,
+  projectContextGatewayInputStateV1,
+} from './context-gateway-input'
 
 export const WORLDVIEW_AGENT_FIELDS = WORLDVIEW_GENERATABLE_FIELD_SPECS
   .map(spec => spec.field) as readonly WorldviewGeneratableField[]
@@ -605,74 +610,6 @@ function buildWorldviewFieldMessages(input: WorldviewFieldCopilotInput): ChatMes
   }]
 }
 
-function worldviewGatewayAssemblyV1(
-  execution: ContextGatewayExecutionV1,
-  inputBudget: number,
-): AssembleContextResult {
-  const content = execution.contextPacket.content
-  const included = content.trim() ? ['ragSelection'] : []
-  const omitted = included.length ? [] : ['ragSelection']
-  return {
-    text: content,
-    segments: included.length ? [{
-      label: 'Context Gateway 精确选取资料',
-      layer: 'L0',
-      content,
-      tokens: execution.contextPacket.tokenCount,
-      trimmable: false,
-    }] : [],
-    included,
-    omitted,
-    trimmed: [],
-    sourceEvidence: [{
-      key: 'ragSelection',
-      status: included.length ? 'included' : 'omitted',
-      delivery: included.length ? 'full' : 'none',
-      sourceHash: execution.contextPacket.contentHash,
-      originalCharacters: content.length,
-      inputCharacters: content.length,
-      originalTokens: execution.contextPacket.tokenCount,
-      inputTokens: execution.contextPacket.tokenCount,
-    }],
-    totalInputTokens: execution.contextPacket.tokenCount,
-    inputBudget,
-    overBudgetBeforeTrim: false,
-    overBudgetAfterTrim: false,
-  }
-}
-
-const GATEWAY_INPUT_SOURCE_BY_TABLE: Readonly<Record<string, string>> = {
-  worldviews: 'worldview',
-  storyCores: 'storyCore',
-  characters: 'characters',
-  storyArcs: 'storyArcs',
-}
-
-function worldviewGatewayInputStateSourceKeysV1(
-  skill: ReturnType<typeof resolveAgentSkillV1>,
-  execution: ContextGatewayExecutionV1,
-): string[] {
-  const available = new Set(execution.contextPacket.sourceRefs
-    .map(ref => GATEWAY_INPUT_SOURCE_BY_TABLE[ref.table])
-    .filter((key): key is string => Boolean(key)))
-  return skill.inputPolicy.sourceKeys.filter(key => available.has(key))
-}
-
-function worldviewGatewayInputStateProjectionV1(
-  skill: ReturnType<typeof resolveAgentSkillV1>,
-  execution: ContextGatewayExecutionV1,
-  assembled: AssembleContextResult,
-) {
-  const available = new Set(worldviewGatewayInputStateSourceKeysV1(skill, execution))
-  return resolveAgentSkillInputStateV1(skill, [{
-    included: skill.inputPolicy.sourceKeys.filter(key => available.has(key)),
-    omitted: skill.inputPolicy.sourceKeys.filter(key => !available.has(key)),
-    trimmed: [],
-    totalInputTokens: assembled.totalInputTokens,
-    inputBudget: assembled.inputBudget,
-  }])
-}
-
 async function adoptCandidate(input: {
   projectId: number
   scope?: WorkspaceScope
@@ -823,7 +760,7 @@ export async function prepareWorldviewFieldCopilot(
       })
     : undefined
   const assembled = contextGatewayExecution
-    ? worldviewGatewayAssemblyV1(contextGatewayExecution, contextPolicy.maxInputTokens)
+    ? assembleContextGatewayPacketV1(contextGatewayExecution, contextPolicy.maxInputTokens)
     : await assembleContext({
         projectId: input.projectId,
         scope,
@@ -838,14 +775,14 @@ export async function prepareWorldviewFieldCopilot(
   const snapshot = await readSnapshot(input.projectId, worldGroupId, scope)
   if (before.serialized !== snapshot.serialized) throw new WorldviewFieldCopilotStaleError()
   const inputState = contextGatewayExecution
-    ? worldviewGatewayInputStateProjectionV1(skill, contextGatewayExecution, assembled)
+    ? projectContextGatewayInputStateV1(skill, contextGatewayExecution, assembled)
     : resolveAgentSkillInputStateV1(skill, [assembled])
   const contextEvidence = attachAgentContextInputStateV1(
     evidenceFromContextResult(contextProfile, assembled),
     inputState,
   )
   if (contextGatewayExecution) {
-    contextEvidence.inputStateSourceKeys = worldviewGatewayInputStateSourceKeysV1(
+    contextEvidence.inputStateSourceKeys = contextGatewayInputStateSourceKeysV1(
       skill,
       contextGatewayExecution,
     )

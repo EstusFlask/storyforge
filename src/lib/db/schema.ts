@@ -646,6 +646,19 @@ class StoryForgeDB extends Dexie {
     this.version(63).stores({
       agentRunArtifacts: '++id, projectId, &[projectId+artifactKind+contentHash], contentHash, retentionState, createdAt',
     })
+
+    // v64 / STORY-1: storyArcs are executable projections of StoryCore intent.
+    // Existing author-created arcs remain manual/active; no source lineage is
+    // guessed. The two new indexes are required by registered setNull lifecycle
+    // references and portable import/export remapping.
+    this.version(64).stores({
+      storyArcs: '++id, projectId, type, sourceStoryCoreId, producerRunId',
+    }).upgrade(async tx => {
+      await tx.table('storyArcs').toCollection().modify(arc => {
+        if (!Object.prototype.hasOwnProperty.call(arc, 'origin')) arc.origin = 'manual'
+        if (!Object.prototype.hasOwnProperty.call(arc, 'status')) arc.status = 'active'
+      })
+    })
   }
 }
 

@@ -41,6 +41,9 @@ import {
 import { AgentTeamBudgetTracker } from '../../src/lib/agent/team-budget'
 import { hashCanonicalValue } from '../../src/lib/agent/run/hash'
 import { db } from '../../src/lib/db/schema'
+import { generateWorkspaceUid } from '../../src/lib/memory/identity'
+import { ensureWorkspaceOwnership } from '../../src/lib/world-engine/ownership'
+import { stampNewRecord } from '../../src/lib/world-engine/scope'
 import {
   adoptGenerationNodeOutput,
   runGenerationNode,
@@ -75,60 +78,33 @@ const directWorkflow = {
 async function createWorkspace(): Promise<{ project: Project; scope: WorkspaceScope }> {
   const now = Date.now()
   const projectId = await db.projects.add({
+    workspaceUid: generateWorkspaceUid(),
     name: '潮汐纪元',
     genre: 'fantasy',
     genres: ['fantasy'],
     description: '',
     status: 'drafting',
     targetWordCount: 100_000,
-    worldCode: 'harness-30-world',
-    worldVersion: 1,
     createdAt: now,
     updatedAt: now,
   } as Project) as number
-  const worldId = await db.worlds.add({
+  const { scope } = await ensureWorkspaceOwnership(projectId)
+  await db.worldviews.add(stampNewRecord(scope, 'worldviews', {
     projectId,
-    code: 'harness-30-world',
-    name: '潮汐世界',
-    description: '',
-    currentVersion: 1,
-    createdAt: now,
-    updatedAt: now,
-  }) as number
-  const workId = await db.works.add({
-    projectId,
-    worldId,
-    title: '潮汐纪元',
-    description: '',
-    genres: ['fantasy'],
-    status: 'drafting',
-    targetWordCount: 100_000,
-    createdAt: now,
-    updatedAt: now,
-  }) as number
-  await db.projects.update(projectId, {
-    activeWorldId: worldId,
-    activeWorkId: workId,
-    ownershipSchemaVersion: 1,
-  })
-  await db.worldviews.add({
-    projectId,
-    worldId,
     worldOrigin: '盐海每十年退潮一次，海床会升起一座浮空城。',
     createdAt: now,
     updatedAt: now,
-  } as never)
-  await db.storyCores.add({
+  }, { owner: 'world' }) as never)
+  await db.storyCores.add(stampNewRecord(scope, 'storyCores', {
     projectId,
-    workId,
     theme: '记忆与责任',
     centralConflict: '守灯人必须决定是否敲响会抹除全城记忆的潮汐钟。',
     createdAt: now,
     updatedAt: now,
-  } as never)
+  }, { owner: 'work' }) as never)
   const project = await db.projects.get(projectId)
   if (!project) throw new Error('测试项目创建失败')
-  return { project, scope: { projectId, worldId, workId } }
+  return { project, scope }
 }
 
 function mainArc(name = '潮汐钟主线'): StoryArcCopilotCandidate {
@@ -206,7 +182,11 @@ describe.sequential('R-HARNESS30 · 故事线 Agent Skill 与受治理采纳', (
       promptVersion: 'story-arc-copilot-v6',
       writeTargets: [{
         table: 'storyArcs',
-        fields: ['name', 'type', 'stages', 'description'],
+        fields: [
+          'name', 'type', 'stages', 'description', 'origin', 'status',
+          'sourceStoryCoreId', 'sourceStoryCoreRevision', 'sourceStoryCoreHash',
+          'lastAlignedHash', 'producerRunId', 'producerCandidateHash',
+        ],
       }],
     })
   })
@@ -249,7 +229,6 @@ describe.sequential('R-HARNESS30 · 故事线 Agent Skill 与受治理采纳', (
       workspaceScope: scope,
       narrativeBrief: {
         creativeGoal: '依据现有设定生成一条主线故事线',
-        obstacle: '守灯人必须决定是否敲响会抹除全城记忆的潮汐钟。',
       },
       creativeArtifact: {
         status: 'ready',
@@ -380,7 +359,9 @@ describe.sequential('R-HARNESS30 · 故事线 Agent Skill 与受治理采纳', (
     )
 
     expect(generated.gate?.status).toBe('pass')
-    expect(prepared.contextSources).toEqual(expect.arrayContaining(['worldview', 'storyCore']))
+    expect(prepared.contextSources).toEqual(['ragSelection'])
+    expect(prepared.contextEvidence.inputStateSourceKeys)
+      .toEqual(expect.arrayContaining(['worldview', 'storyCore']))
     expect(prepared.contextEvidence.inputState).toMatchObject({
       state: 'partial',
       handling: 'reference-and-create',
@@ -848,6 +829,13 @@ describe.sequential('R-HARNESS30 · 故事线 Agent Skill 与受治理采纳', (
         authorRequest: task.instruction,
         skillId: task.skillId,
       }, { runAI: async () => JSON.stringify({ storyArcs: [mainArc()] }) })
+      if (prepared.contextGatewayExecution) {
+        await options.executionTrace?.contextGatewayPrepared?.(task, {
+          execution: prepared.contextGatewayExecution,
+          assembled: prepared.input.assembled,
+          renderedRequest: prepared.prepared.messages,
+        })
+      }
       const generated = await runGenerationNode(prepared.node, prepared.prepared)
       const candidate: ExecutedMasterCandidate = {
         payload: {
@@ -867,6 +855,14 @@ describe.sequential('R-HARNESS30 · 故事线 Agent Skill 与受治理采纳', (
         draft: JSON.stringify(generated.output, null, 2),
         runtimeNode: prepared.node,
         runtimeOutput: generated.output,
+        ...(prepared.contextGatewayExecution ? {
+          contextGatewayRuntime: {
+            execution: prepared.contextGatewayExecution,
+            assembled: prepared.input.assembled,
+            renderedRequest: prepared.prepared.messages,
+            rawResponse: generated.output,
+          },
+        } : {}),
       }
       await options.executionTrace?.candidateReady?.(task, candidate)
       return [candidate]
@@ -923,6 +919,13 @@ describe.sequential('R-HARNESS30 · 故事线 Agent Skill 与受治理采纳', (
         authorRequest: task.instruction,
         skillId: task.skillId,
       }, { runAI: async () => JSON.stringify({ storyArcs: [mainArc('不可篡改主线')] }) })
+      if (prepared.contextGatewayExecution) {
+        await options.executionTrace?.contextGatewayPrepared?.(task, {
+          execution: prepared.contextGatewayExecution,
+          assembled: prepared.input.assembled,
+          renderedRequest: prepared.prepared.messages,
+        })
+      }
       const generated = await runGenerationNode(prepared.node, prepared.prepared)
       await options.executionTrace?.candidateReady?.(task, {
         payload: {
@@ -942,6 +945,14 @@ describe.sequential('R-HARNESS30 · 故事线 Agent Skill 与受治理采纳', (
         draft: JSON.stringify(generated.output, null, 2),
         runtimeNode: prepared.node,
         runtimeOutput: generated.output,
+        ...(prepared.contextGatewayExecution ? {
+          contextGatewayRuntime: {
+            execution: prepared.contextGatewayExecution,
+            assembled: prepared.input.assembled,
+            renderedRequest: prepared.prepared.messages,
+            rawResponse: generated.output,
+          },
+        } : {}),
       })
       return []
     }

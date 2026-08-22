@@ -5,6 +5,8 @@
 
 /** 故事线类型 */
 export type StoryArcType = 'main' | 'sub'
+export type StoryArcOrigin = 'manual' | 'ai' | 'import'
+export type StoryArcStatus = 'active' | 'deprecated'
 
 /** 故事阶段 */
 export interface StoryStage {
@@ -26,6 +28,15 @@ export interface StoryArc {
   /** JSON 序列化的 StoryStage[] */
   stages: string
   description?: string    // 故事线整体描述
+  /** STORY-1: this record is a one-way executable projection, never the story intent itself. */
+  origin?: StoryArcOrigin
+  status?: StoryArcStatus
+  sourceStoryCoreId?: number
+  sourceStoryCoreRevision?: number
+  sourceStoryCoreHash?: string
+  lastAlignedHash?: string
+  producerRunId?: number
+  producerCandidateHash?: string
   createdAt: number
   updatedAt: number
 }

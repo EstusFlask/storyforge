@@ -85,7 +85,6 @@ import {
 } from './worldview-field-copilot'
 import {
   adoptRestoredStoryArcCandidate,
-  parseStoryArcCandidateDraft,
   prepareStoryArcCopilot,
   runStoryArcCreativeReliabilityV1,
   type StoryArcCopilotSnapshot,
@@ -1034,6 +1033,13 @@ async function executeSequentialMasterAgentPlan(
             promptExecution: task.promptExecution,
             signal: input.signal,
           })
+          if (prepared.contextGatewayExecution) {
+            await input.executionTrace?.contextGatewayPrepared?.(task, {
+              execution: prepared.contextGatewayExecution,
+              assembled: prepared.input.assembled,
+              renderedRequest: prepared.prepared.messages,
+            })
+          }
           const result = await runBudgetedGenerationNode({
             node: prepared.node,
             prepared: prepared.prepared,
@@ -1064,6 +1070,14 @@ async function executeSequentialMasterAgentPlan(
             draft,
             runtimeNode: prepared.node,
             runtimeOutput: result.output,
+            ...(prepared.contextGatewayExecution ? {
+              contextGatewayRuntime: {
+                execution: prepared.contextGatewayExecution,
+                assembled: prepared.input.assembled,
+                renderedRequest: prepared.prepared.messages,
+                rawResponse: result.structuredOutputEvidence ?? result.output,
+              },
+            } : {}),
           })
           outputs.set(task.id, draft)
         } else if (skill.executionMode === 'creative-rules') {
@@ -1509,6 +1523,13 @@ async function executeSequentialMasterAgentPlan(
             creativeReliabilityEnabled,
             signal: input.signal,
           })
+          if (prepared.contextGatewayExecution) {
+            await input.executionTrace?.contextGatewayPrepared?.(task, {
+              execution: prepared.contextGatewayExecution,
+              assembled: prepared.input.assembled,
+              renderedRequest: prepared.prepared.messages,
+            })
+          }
           if (creativeReliabilityEnabled) {
             const result = await runStoryArcCreativeReliabilityV1({
               prepared,
@@ -1543,6 +1564,14 @@ async function executeSequentialMasterAgentPlan(
               draft,
               runtimeNode: prepared.node,
               runtimeOutput: result.output,
+              ...(prepared.contextGatewayExecution ? {
+                contextGatewayRuntime: {
+                  execution: prepared.contextGatewayExecution,
+                  assembled: prepared.input.assembled,
+                  renderedRequest: prepared.prepared.messages,
+                  rawResponse: result.artifact,
+                },
+              } : {}),
             })
             outputs.set(task.id, draft)
           } else {
@@ -1580,6 +1609,14 @@ async function executeSequentialMasterAgentPlan(
               draft,
               runtimeNode: prepared.node,
               runtimeOutput: result.output,
+              ...(prepared.contextGatewayExecution ? {
+                contextGatewayRuntime: {
+                  execution: prepared.contextGatewayExecution,
+                  assembled: prepared.input.assembled,
+                  renderedRequest: prepared.prepared.messages,
+                  rawResponse: result.structuredOutputEvidence ?? result.output,
+                },
+              } : {}),
             })
             outputs.set(task.id, draft)
           }
@@ -2098,7 +2135,17 @@ export async function adoptMasterCandidate(input: {
   assertMasterCreativeArtifactAdoptableV1(input.payload)
   const scope = await resolveCandidateScope(input)
   await assertMasterCandidateDependenciesAdoptedV1(input.event, input.payload, scope)
-  if (input.runtime) {
+  if (input.payload.skillId === 'outline.story-arcs') {
+    await adoptRestoredStoryArcCandidate({
+      projectId: input.projectId,
+      scope,
+      worldGroupId: input.worldGroupId,
+      snapshot: input.payload.baseSnapshot as StoryArcCopilotSnapshot,
+      draft: input.draft,
+      producerRunId: input.payload.runId,
+      producerCandidateHash: input.payload.candidateHash,
+    })
+  } else if (input.runtime) {
     const output = input.payload.skillId === 'world-origin.worldview-field'
       ? parseWorldviewFieldCandidateDraft(input.draft)
       : input.payload.skillId === 'world-origin.story-core'
@@ -2107,8 +2154,6 @@ export async function adoptMasterCandidate(input: {
       ? parseCreativeRulesCandidateDraftV1(input.draft)
       : input.payload.skillId === 'outline.storyline-progress'
       ? parseStorylineProgressCandidateDraftV1(input.draft)
-      : input.payload.skillId === 'outline.story-arcs'
-      ? parseStoryArcCandidateDraft(input.draft)
       : input.payload.skillId === 'outline.character-driven'
       ? parseCharacterDrivenCandidateDraftV1(input.draft)
       : input.payload.skillId === 'outline.character-revision'
@@ -2255,14 +2300,6 @@ export async function adoptMasterCandidate(input: {
         scope,
         planId: input.payload.characterDrivenPlanId,
         snapshot: input.payload.baseSnapshot as CharacterDrivenCopilotSnapshotV1,
-        draft: input.draft,
-      })
-    } else if (input.payload.skillId === 'outline.story-arcs') {
-      await adoptRestoredStoryArcCandidate({
-        projectId: input.projectId,
-        scope,
-        worldGroupId: input.worldGroupId,
-        snapshot: input.payload.baseSnapshot as StoryArcCopilotSnapshot,
         draft: input.draft,
       })
     } else if (input.payload.skillId === 'outline.storyline-progress') {

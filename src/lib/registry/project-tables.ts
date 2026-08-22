@@ -167,6 +167,9 @@ const PROJECT_TABLE_REGISTRATIONS: ProjectTableRegistration[] = [
       dependencyEmitter: 'work-semantic-impact-v1', schemaVersion: 1,
     },
     worldDomains: ['narrative'],
+    refs: [
+      { kind: 'simple', field: 'id', target: 'storyArcs[sourceStoryCoreId]', onDelete: 'setNull' },
+    ],
     note: '每个 Work 一份故事核心；旧 project/world 兼容行在所有权迁移时归入明确 Work' },
 
   { table: db.powerSystems, name: 'powerSystems', owner: 'project', worldScoped: true, communityShare: 'world', releaseSection: 'foundation',
@@ -376,7 +379,12 @@ const PROJECT_TABLE_REGISTRATIONS: ProjectTableRegistration[] = [
       { kind: 'simple', field: 'id', target: 'storylineProgress[arcId]', onDelete: 'cascade' },
       { kind: 'simple', field: 'id', target: 'storylineCrossings[arcIdA]', onDelete: 'cascade' },
       { kind: 'simple', field: 'id', target: 'storylineCrossings[arcIdB]', onDelete: 'cascade' },
-    ] },
+    ],
+    exportRemap: [
+      { field: 'sourceStoryCoreId', remapVia: 'storyCores', exportAs: '_sourceStoryCoreExportId' },
+      { field: 'producerRunId', remapVia: 'agentRuns', exportAs: '_producerRunExportId' },
+    ],
+    defaults: { origin: 'manual', status: 'active' } },
 
   { table: db.narrativeModules, name: 'narrativeModules', owner: 'project', exportable: true, exportIdField: true,
     resourceIdentity: RESOURCE_IDENTITY('narrative-module', 'narrative-blueprint', '叙事蓝图'),
@@ -744,6 +752,7 @@ const PROJECT_TABLE_REGISTRATIONS: ProjectTableRegistration[] = [
       { kind: 'simple', field: 'id', target: 'agentRunEvents[runId]', onDelete: 'cascade' },
       { kind: 'simple', field: 'id', target: 'agentRunCheckpoints[runId]', onDelete: 'cascade' },
       { kind: 'simple', field: 'id', target: 'agentEvents[durableRunId]', onDelete: 'setNull' },
+      { kind: 'simple', field: 'id', target: 'storyArcs[producerRunId]', onDelete: 'setNull' },
     ],
     exportRemap: [
       { field: 'parentRunId', remapVia: 'agentRuns', selfTree: true, exportAs: '_parentExportId' },

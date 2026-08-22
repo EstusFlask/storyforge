@@ -352,7 +352,7 @@ export interface FieldSpec {
    */
   aiGeneration?: {
     version: 1
-    domain: 'worldview-foundation'
+    domain: 'worldview-foundation' | 'story-intent'
     label: string
     kind: 'text' | 'divine-design' | 'natural-resources'
     directDependencies: readonly string[]

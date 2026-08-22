@@ -7,12 +7,18 @@ import { db } from '../lib/db/schema'
 import type { StoryArc } from '../lib/types'
 import { parseStages, stringifyStages, type StoryStage } from '../lib/types/story-arc'
 import { deleteStoryArcLifecycle, updateStoryArcStagesLifecycle } from '../lib/storyline/lifecycle'
+import {
+  readStoryCoreIntentSnapshotV1,
+  storyArcIntentAlignmentV1,
+  type StoryArcIntentAlignmentV1,
+} from '../lib/storyline/intent-projection'
 import { assertRecordInScope, readOwnedRows, resolveScopeLike, stampNewRecord, type WorkspaceScopeLike } from '../lib/world-engine/scope'
 
 const now = () => Date.now()
 
 interface StoryArcStore {
   arcs: StoryArc[]
+  intentAlignmentByArcId: Record<number, StoryArcIntentAlignmentV1>
   activeArcId: number | null
   loading: boolean
 
@@ -37,6 +43,7 @@ interface StoryArcStore {
 
 export const useStoryArcStore = create<StoryArcStore>((set, get) => ({
   arcs: [],
+  intentAlignmentByArcId: {},
   activeArcId: null,
   loading: false,
 
@@ -44,8 +51,14 @@ export const useStoryArcStore = create<StoryArcStore>((set, get) => ({
     set({ loading: true })
     try {
       const scope = await resolveScopeLike(scopeInput)
-      const arcs = await readOwnedRows<StoryArc>(scope, 'storyArcs', { owner: 'work' })
-      set({ arcs, loading: false })
+      const [arcs, storyIntent] = await Promise.all([
+        readOwnedRows<StoryArc>(scope, 'storyArcs', { owner: 'work' }),
+        readStoryCoreIntentSnapshotV1(scope),
+      ])
+      const intentAlignmentByArcId = Object.fromEntries(arcs.flatMap(arc => (
+        arc.id == null ? [] : [[arc.id, storyArcIntentAlignmentV1(arc, storyIntent)]]
+      )))
+      set({ arcs, intentAlignmentByArcId, loading: false })
       // 默认选中主线
       if (arcs.length > 0 && !get().activeArcId) {
         const main = arcs.find(a => a.type === 'main')
@@ -63,7 +76,7 @@ export const useStoryArcStore = create<StoryArcStore>((set, get) => ({
     const newArc = stampNewRecord(
       await resolveScopeLike(arc.projectId),
       'storyArcs',
-      { ...arc, createdAt: now(), updatedAt: now() } as StoryArc,
+      { ...arc, origin: 'manual', status: 'active', createdAt: now(), updatedAt: now() } as StoryArc,
       { owner: 'work' },
     ) as StoryArc
     const id = await db.storyArcs.add(newArc) as number
@@ -111,7 +124,7 @@ export const useStoryArcStore = create<StoryArcStore>((set, get) => ({
   },
 
   buildStoryArcContext: (currentChapterOrder?: number) => {
-    const { arcs } = get()
+    const arcs = get().arcs.filter(arc => arc.status !== 'deprecated')
     if (!arcs.length) return ''
 
     const parts: string[] = ['【全局故事线】']

@@ -35,7 +35,17 @@ interface Props {
 
 export default function StoryArcPanel({ project, worldGroupId, initialRecordTarget }: Props) {
   const dialog = useDialog()
-  const { arcs, activeArcId, loadAll, setActiveArc, addArc, updateArc, deleteArc, updateStages } = useStoryArcStore()
+  const {
+    arcs,
+    activeArcId,
+    intentAlignmentByArcId,
+    loadAll,
+    setActiveArc,
+    addArc,
+    updateArc,
+    deleteArc,
+    updateStages,
+  } = useStoryArcStore()
   const copilot = useMasterCopilot({ project, worldGroupId })
   const [genType, setGenType] = useState<StoryArcType>('main')
 
@@ -44,6 +54,9 @@ export default function StoryArcPanel({ project, worldGroupId, initialRecordTarg
   }, [project.id, loadAll])
 
   const activeArc = arcs.find(a => a.id === activeArcId)
+  const activeIntentAlignment = activeArc?.id == null
+    ? undefined
+    : intentAlignmentByArcId[activeArc.id]
   const activeStages = activeArc ? parseStages(activeArc.stages) : []
   const initialArcId = initialRecordTarget?.table === 'storyArcs'
     ? initialRecordTarget.recordId
@@ -112,6 +125,9 @@ export default function StoryArcPanel({ project, worldGroupId, initialRecordTarg
           >
             <span className={`w-2 h-2 rounded-full ${arc.type === 'main' ? 'bg-amber-400' : 'bg-blue-400'}`} />
             {arc.name}
+            {arc.id != null && intentAlignmentByArcId[arc.id] === 'stale' && (
+              <span title="故事核心意图已变化，当前故事线不会被自动覆盖">意图已变</span>
+            )}
           </button>
         ))}
 
@@ -160,6 +176,12 @@ export default function StoryArcPanel({ project, worldGroupId, initialRecordTarg
         <p className="mb-4 rounded border border-error/30 bg-error/5 px-3 py-2 text-xs text-error">
           {copilot.error}
         </p>
+      )}
+
+      {activeIntentAlignment === 'stale' && (
+        <div className="mb-4 rounded border border-warning/40 bg-warning/5 px-3 py-2 text-xs text-text-secondary">
+          故事核心意图已在这条故事线生成后变化。系统不会自动覆盖现有故事线；请保留当前版本，另行生成并确认重规划候选。
+        </div>
       )}
 
       {hasOtherPendingCandidates && (

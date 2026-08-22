@@ -13,6 +13,7 @@ import type {
 import { prepareGenerationNode } from '../generation/generation-node'
 import { adopt } from '../registry/adopt'
 import { assembleContext } from '../registry/assemble-context'
+import type { AssembleContextResult } from '../registry/types'
 import type { AIConfig, ChatMessage, StoryArc, StoryArcType, WorkspaceScope } from '../types'
 import { parseStages, stringifyStages, type StoryStage } from '../types/story-arc'
 import {
@@ -60,6 +61,22 @@ import {
 } from './narrative-brief'
 import { hashCanonicalValue } from './run/hash'
 import type { AgentTeamBudgetTracker } from './team-budget'
+import {
+  executeContextGatewayV1,
+  type ContextGatewayExecutionV1,
+} from '../context-gateway/execution'
+import { isContextGatewayRequiredForWriteTargetV1 } from '../context-gateway/skill-policy'
+import {
+  assembleContextGatewayPacketV1,
+  contextGatewayInputStateSourceKeysV1,
+  projectContextGatewayInputStateV1,
+} from './context-gateway-input'
+import {
+  STORY_INTENT_FIELDS_V1,
+  readStoryCoreIntentSnapshotV1,
+  storyArcIntentProjectionMetadataV1,
+  type StoryCoreIntentSnapshotV1,
+} from '../storyline/intent-projection'
 
 export type StoryArcRequestKind = 'main' | 'sub' | 'mixed'
 
@@ -82,6 +99,7 @@ export interface StoryArcCopilotCandidate {
 export interface StoryArcCopilotSnapshot {
   serialized: string
   existingNames: string[]
+  storyIntent: StoryCoreIntentSnapshotV1
 }
 
 export interface StoryArcCopilotInput {
@@ -92,7 +110,7 @@ export interface StoryArcCopilotInput {
   supplementalContext: string
   inputGuidance: string
   kind: StoryArcRequestKind
-  assembled: Awaited<ReturnType<typeof assembleContext>>
+  assembled: AssembleContextResult
   narrativeBrief: NarrativeBriefV1
   creativeReliabilityEnabled?: boolean
   snapshot: StoryArcCopilotSnapshot
@@ -116,6 +134,7 @@ export interface PreparedStoryArcCopilot {
   kind: StoryArcRequestKind
   label: string
   modelIdentity: { provider: string; model: string }
+  contextGatewayExecution?: ContextGatewayExecutionV1
   runRaw: (messages: ChatMessage[]) => Promise<StoryArcRawModelResultV1>
 }
 
@@ -159,7 +178,10 @@ function normalizeIdentity(value: string): string {
   return value.normalize('NFKC').trim().toLocaleLowerCase('zh-CN')
 }
 
-function snapshotOf(rows: StoryArc[]): StoryArcCopilotSnapshot {
+async function snapshotOf(
+  rows: StoryArc[],
+  storyIntent: StoryCoreIntentSnapshotV1,
+): Promise<StoryArcCopilotSnapshot> {
   const ordered = rows
     .map(row => ({
       id: row.id ?? null,
@@ -171,8 +193,9 @@ function snapshotOf(rows: StoryArc[]): StoryArcCopilotSnapshot {
     }))
     .sort((left, right) => (left.id ?? 0) - (right.id ?? 0))
   return {
-    serialized: JSON.stringify(ordered),
+    serialized: JSON.stringify({ arcs: ordered, storyIntent }),
     existingNames: ordered.map(row => normalizeIdentity(row.name)),
+    storyIntent,
   }
 }
 
@@ -181,7 +204,11 @@ async function readSnapshot(
   scope?: WorkspaceScope,
 ): Promise<StoryArcCopilotSnapshot> {
   const resolved = scope ?? await resolveReadScopeLike(projectId)
-  return snapshotOf(await readOwnedRows<StoryArc>(resolved, 'storyArcs', { owner: 'work' }))
+  const [rows, storyIntent] = await Promise.all([
+    readOwnedRows<StoryArc>(resolved, 'storyArcs', { owner: 'work' }),
+    readStoryCoreIntentSnapshotV1(resolved),
+  ])
+  return snapshotOf(rows, storyIntent)
 }
 
 function assertAuthorRequest(value: string): string {
@@ -1068,15 +1095,16 @@ function buildStoryArcMessages(input: StoryArcCopilotInput): ChatMessage[] {
 
 硬性要求：
 1. ${kindInstruction}
-2. 默认生成紧凑但完整的 3-5 个因果递进阶段；每阶段包含标题、一到两句描述和 1-3 个关键事件，每个事件用一句话表达。不要为了填满上限重复、拆碎或扩写同一事件。
-3. 每条故事线顶层只能有 name/type/description/stages 四个字段。turningPoint、startVolume、endVolume 只能放在 stages 数组内的阶段对象上，绝不能放在故事线顶层；只有确有卷级依据时才同时填写 startVolume/endVolume，均为从 1 开始的整数。
-4. 已有设定是硬约束；不得改变既定时限、能力、代价、因果或实体身份，也不得为未命名人物擅自命名。设定缺失时只做不与现有事实冲突的候选补全，不声称它已经成为 Canon。
-5. 避免复制已有故事线；支线必须有独立目标，也要说明与主线的因果交汇。
-6. 只输出一个严格 JSON 对象，不输出 Markdown、解释或额外字段。顶层${input.creativeReliabilityEnabled !== false ? '必须有 storyArcs，可选 assumptions' : '只能有 storyArcs'}；最小结构严格使用：
+2. storyCore.mainPlot/subPlots 是作者意图摘要，本轮输出是其 1:N 可执行投影。只能新增候选，绝不能反向改写故事核心，也不能把一条意图强制覆盖成一条同名故事线。
+3. 默认生成紧凑但完整的 3-5 个因果递进阶段；每阶段包含标题、一到两句描述和 1-3 个关键事件，每个事件用一句话表达。不要为了填满上限重复、拆碎或扩写同一事件。
+4. 每条故事线顶层只能有 name/type/description/stages 四个字段。turningPoint、startVolume、endVolume 只能放在 stages 数组内的阶段对象上，绝不能放在故事线顶层；只有确有卷级依据时才同时填写 startVolume/endVolume，均为从 1 开始的整数。
+5. 已有设定是硬约束；不得改变既定时限、能力、代价、因果或实体身份，也不得为未命名人物擅自命名。设定缺失时只做不与现有事实冲突的候选补全，不声称它已经成为 Canon。
+6. 避免复制已有故事线；支线必须有独立目标，也要说明与主线的因果交汇。
+7. 只输出一个严格 JSON 对象，不输出 Markdown、解释或额外字段。顶层${input.creativeReliabilityEnabled !== false ? '必须有 storyArcs，可选 assumptions' : '只能有 storyArcs'}；最小结构严格使用：
 {"storyArcs":[{"name":"名称","type":"main|sub","description":"整体描述","stages":[{"title":"阶段标题","description":"阶段描述","keyEvents":["事件"]}]}]}
-7. 阶段对象内的 turningPoint、startVolume、endVolume 都是可选字段；turningPoint 如填写必须是描述转折的字符串，绝不能写 true/false；startVolume/endVolume 只有在两者都有明确卷级依据时才成对填写整数。没有明确依据就省略，不要输出占位值。
+8. 阶段对象内的 turningPoint、startVolume、endVolume 都是可选字段；turningPoint 如填写必须是描述转折的字符串，绝不能写 true/false；startVolume/endVolume 只有在两者都有明确卷级依据时才成对填写整数。没有明确依据就省略，不要输出占位值。
 ${input.creativeReliabilityEnabled !== false
-  ? '8. 若你为“开放创作空间”补充了会被下游依赖、但正式上下文没有确认的事实，可增加 assumptions 字符串数组，最多 7 项；不要把故事线本身重复抄入 assumptions。'
+  ? '9. 若你为“开放创作空间”补充了会被下游依赖、但正式上下文没有确认的事实，可增加 assumptions 字符串数组，最多 7 项；不要把故事线本身重复抄入 assumptions。'
   : ''}`,
   }, {
     role: 'user' as const,
@@ -1110,9 +1138,11 @@ async function adoptCandidates(input: {
   worldGroupId: number | null
   snapshot: StoryArcCopilotSnapshot
   candidates: StoryArcCopilotCandidate[]
+  producerRunId?: number
+  producerCandidateHash?: string
 }): Promise<{ writtenCount: number; ids: number[] }> {
   const scope = await resolveScope({ projectId: input.projectId, scope: input.scope })
-  return db.transaction('rw', scopeTransactionTables(db.storyArcs), async () => {
+  return db.transaction('rw', scopeTransactionTables(db.storyArcs, db.storyCores, db.agentRuns), async () => {
     const current = await readSnapshot(input.projectId, scope)
     if (current.serialized !== input.snapshot.serialized) throw new StoryArcCopilotStaleError()
     const issues = candidateIssues(input.candidates, current, 'mixed')
@@ -1129,6 +1159,11 @@ async function adoptCandidates(input: {
         type: candidate.type,
         description: candidate.description,
         stages: stringifyStages(toStoredStages(candidate)),
+        ...storyArcIntentProjectionMetadataV1({
+          intent: input.snapshot.storyIntent,
+          producerRunId: input.producerRunId,
+          producerCandidateHash: input.producerCandidateHash,
+        }),
       })),
     })
     if (
@@ -1148,6 +1183,8 @@ export async function adoptRestoredStoryArcCandidate(input: {
   worldGroupId: number | null
   snapshot: StoryArcCopilotSnapshot
   draft: string
+  producerRunId?: number
+  producerCandidateHash?: string
 }): Promise<{ writtenCount: number; ids: number[] }> {
   return adoptCandidates({
     ...input,
@@ -1227,24 +1264,56 @@ export async function prepareStoryArcCopilot(
         runtime: input.contextCompressionRuntime,
       })
     : undefined
-  const assembled = await assembleContext({
-    projectId: input.projectId,
-    scope,
-    worldGroupId,
-    provider: config.provider,
-    model: config.model,
-    sourceKeys: [...skill.contextSourceKeys],
-    inputBudgetMaxTokens: contextPolicy.maxInputTokens,
-    sourceBudgetScale: contextPolicy.sourceBudgetScale,
-    sourceTransformer: compression?.sourceTransformer,
-  })
+  const gatewayRequired = isContextGatewayRequiredForWriteTargetV1(skill, 'storyArcs.name')
+  if (gatewayRequired && !scope) {
+    throw new Error('故事线 Gateway required 写入需要稳定 WorkspaceScope，旧项目必须先完成所有权迁移。')
+  }
+  const mandatoryIntentResourceKeys = before.storyIntent.ragDocumentId
+    ? STORY_INTENT_FIELDS_V1
+        .filter(field => before.storyIntent.values[field].trim())
+        .map(field => `story-core-field:${before.storyIntent.ragDocumentId}:field:${field}`)
+    : []
+  const contextGatewayExecution = gatewayRequired
+    ? await executeContextGatewayV1({
+        skill,
+        scope: scope!,
+        worldGroupId,
+        budgetTokens: Math.min(contextPolicy.maxInputTokens, skill.contextGateway!.maxRetrievedTokens),
+        query: `把故事意图投影为可执行故事线，不得反向覆盖故事核心。\n${request}`,
+        ...(mandatoryIntentResourceKeys.length ? {
+          mandatoryResourceKeys: mandatoryIntentResourceKeys,
+          mandatoryOriginalResourceKeys: mandatoryIntentResourceKeys,
+          targetResourceKeys: mandatoryIntentResourceKeys,
+        } : {}),
+        additionalReadsEnabled: false,
+        signal: input.signal,
+      })
+    : undefined
+  const assembled = contextGatewayExecution
+    ? assembleContextGatewayPacketV1(contextGatewayExecution, contextPolicy.maxInputTokens)
+    : await assembleContext({
+        projectId: input.projectId,
+        scope,
+        worldGroupId,
+        provider: config.provider,
+        model: config.model,
+        sourceKeys: [...skill.contextSourceKeys],
+        inputBudgetMaxTokens: contextPolicy.maxInputTokens,
+        sourceBudgetScale: contextPolicy.sourceBudgetScale,
+        sourceTransformer: compression?.sourceTransformer,
+      })
   const snapshot = await readSnapshot(input.projectId, scope)
   if (before.serialized !== snapshot.serialized) throw new StoryArcCopilotStaleError()
-  const inputState = resolveAgentSkillInputStateV1(skill, [assembled])
+  const inputState = contextGatewayExecution
+    ? projectContextGatewayInputStateV1(skill, contextGatewayExecution, assembled)
+    : resolveAgentSkillInputStateV1(skill, [assembled])
   const contextEvidence = attachAgentContextInputStateV1(
     evidenceFromContextResult(contextProfile, assembled),
     inputState,
   )
+  if (contextGatewayExecution) {
+    contextEvidence.inputStateSourceKeys = contextGatewayInputStateSourceKeysV1(skill, contextGatewayExecution)
+  }
   const kind = resolveStoryArcRequestKindV1(request)
   const narrativeBrief = buildNarrativeBriefV1({
     authorRequest: request,
@@ -1306,6 +1375,7 @@ export async function prepareStoryArcCopilot(
     kind,
     label: kind === 'main' ? '主线故事线' : kind === 'sub' ? '支线故事线' : '主线与支线',
     modelIdentity: { provider: config.provider, model: config.model },
+    contextGatewayExecution,
     runRaw,
   }
 }

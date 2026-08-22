@@ -97,7 +97,7 @@ import {
   runMasterCandidateSemanticReviewWithClientV1,
   verifyMasterCandidateSemanticReviewArtifactV1,
 } from '../master-candidate-semantic-review'
-import { STORY_CORE_FIELDS } from '../story-core-copilot'
+import { STORY_CORE_FIELDS, resolveStoryCoreFieldV1 } from '../story-core-copilot'
 import { CREATIVE_RULES_FIELDS } from '../creative-rules-copilot'
 import {
   WORLDVIEW_AGENT_FIELDS,
@@ -638,6 +638,10 @@ function requiredContextGatewayWriteTargetForTaskV1(task: MasterAgentTask): stri
   const skill = resolveAgentSkillV1(task.agentId, task.skillId)
   const writeTarget = skill.executionMode === 'worldview-field'
     ? `worldviews.${resolveWorldviewAgentFieldV1(task.instruction)}`
+    : skill.executionMode === 'story-core'
+      ? `storyCores.${resolveStoryCoreFieldV1(task.instruction)}`
+      : skill.executionMode === 'story-arcs'
+        ? 'storyArcs.name'
     : undefined
   return isContextGatewayRequiredForWriteTargetV1(skill, writeTarget) ? writeTarget : undefined
 }

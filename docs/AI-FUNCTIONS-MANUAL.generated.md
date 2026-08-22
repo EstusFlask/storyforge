@@ -189,8 +189,7 @@ AI 输出经 `adopt({ target, data })` 写回,只有这里登记的字段可写(
 | `referenceChunkAnalysis` | `analysisRunId` `characterCraft` `chunkIndex` `climaxDesign` `conflictEscalation` `dailyLife` `dialogueTechnique` `emotionalBeats` `endOffset` `foreshadowing` `historicalContext` `label` `languageCustoms` `materialCulture` `narrativeStyle` `openingTechnique` `otherTechniques` `pacingControl` `plotStructure` `proseStyle` `rawExcerpt` `referenceId` `socialInstitutions` `startOffset` `worldBuilding` |
 | `references` | `analysisDepth` `analysisError` `analysisProgress` `analysisStatus` `analysisSummary` `fileHash` `genre` `importSessionId` `mergedCharacters` `totalChars` |
 | `stateCards` | `category` `entityName` `fields` `lastChapterId` |
-| `storyArcs` | `description` `name` `stages` `type` |
-| `storyCores` | `centralConflict` `concept` `logline` `mainPlot` `plotPattern` `subPlots` `theme` |
+| `storyArcs` | `description` `lastAlignedHash` `name` `origin` `producerCandidateHash` `producerRunId` `sourceStoryCoreHash` `sourceStoryCoreId` `sourceStoryCoreRevision` `stages` `status` `type` |
 | `storyTimelineEvents` | `chapterId` `chapterTitle` `description` `importance` `order` `storyTime` `title` |
 | `storylineCrossings` | `arcIdA` `arcIdB` `chapterId` `chapterTitle` `evidenceQuote` `note` |
 | `storylineProgress` | `arcId` `currentStageId` `evidenceQuote` `involvedEntities` `lastActiveChapterId` `lastActiveChapterTitle` `progressNote` `status` |
@@ -233,8 +232,8 @@ AI 输出经 `adopt({ target, data })` 写回,只有这里登记的字段可写(
 
 | category | 触发文件 |
 |---|---|
-| `agent.orchestrator` | `src/lib/agent/orchestrator.ts:720` |
-| `agent.orchestrator.replan` | `src/lib/agent/orchestrator.ts:807` |
+| `agent.orchestrator` | `src/lib/agent/orchestrator.ts:719` |
+| `agent.orchestrator.replan` | `src/lib/agent/orchestrator.ts:806` |
 | `agent.readonly` | `src/lib/agent/client-adapter.ts:118` |
 | `canon.setting.extract` | `src/lib/agent/run/constitution-extraction-durable.ts:508` |
 | `chapter.content` | `src/lib/generation/chapter-generation-node.ts:23` |
@@ -293,13 +292,13 @@ AI 输出经 `adopt({ target, data })` 写回,只有这里登记的字段可写(
 - `src/lib/agent/run/codex-extraction-durable.ts:685 · chat`
 - `src/lib/agent/run/history-agent-durable.ts:514 · chat`
 - `src/lib/agent/run/reference-derived-durable.ts:506 · chat`
-- `src/lib/agent/story-arc-copilot.ts:1278 · chat`
-- `src/lib/agent/story-arc-copilot.ts:1325 · chat`
-- `src/lib/agent/story-core-copilot.ts:509 · chat`
+- `src/lib/agent/story-arc-copilot.ts:1347 · chat`
+- `src/lib/agent/story-arc-copilot.ts:1395 · chat`
+- `src/lib/agent/story-core-copilot.ts:556 · chat`
 - `src/lib/agent/storyline-progress-copilot.ts:375 · chat`
 - `src/lib/agent/world-game-copilot.ts:295 · chat`
 - `src/lib/agent/world-origin-copilot.ts:255 · chat`
-- `src/lib/agent/worldview-field-copilot.ts:952 · chat`
+- `src/lib/agent/worldview-field-copilot.ts:889 · chat`
 - `src/lib/character-interaction/harness.ts:396 · chat`
 - `src/lib/evals/agent-harness/story-arc-main-path-browser.ts:97 · chat`
 - `src/lib/evals/creative-reliability/browser.ts:88 · chat`
@@ -350,4 +349,4 @@ AI 输出经 `adopt({ target, data })` 写回,只有这里登记的字段可写(
 
 ---
 
-生成时间基准:commit `0dac1ab5`
+生成时间基准:commit `ce347212`

@@ -196,6 +196,40 @@ export const WORLDVIEW_GENERATABLE_FIELD_SPECS = [
 
 export type WorldviewGeneratableField = typeof WORLDVIEW_GENERATABLE_FIELD_SPECS[number]['field']
 
+/** STORY-1 single source for the seven author intent fields. */
+export const STORY_CORE_GENERATABLE_FIELD_SPECS = [
+  {
+    target: 'storyCores', field: 'logline', type: 'longtext', aliases: ['一句话故事'], sanitize: trimString,
+    aiGeneration: { version: 1, domain: 'story-intent', label: '一句话故事', kind: 'text', directDependencies: ['concept', 'centralConflict', 'mainPlot'], modes: ALL_WORLDVIEW_FIELD_MODES, outputSchemaId: 'story-core-field.text.v1', maxChars: 1_000, temporaryAssumptions: 'forbidden' },
+  },
+  {
+    target: 'storyCores', field: 'concept', type: 'longtext', aliases: ['故事概念'], sanitize: trimString,
+    aiGeneration: { version: 1, domain: 'story-intent', label: '故事概念', kind: 'text', directDependencies: [], modes: ALL_WORLDVIEW_FIELD_MODES, outputSchemaId: 'story-core-field.text.v1', maxChars: 4_000, temporaryAssumptions: 'forbidden' },
+  },
+  {
+    target: 'storyCores', field: 'theme', type: 'longtext', aliases: ['主题'], sanitize: trimString,
+    aiGeneration: { version: 1, domain: 'story-intent', label: '故事主题', kind: 'text', directDependencies: ['concept'], modes: ALL_WORLDVIEW_FIELD_MODES, outputSchemaId: 'story-core-field.text.v1', maxChars: 4_000, temporaryAssumptions: 'forbidden' },
+  },
+  {
+    target: 'storyCores', field: 'centralConflict', type: 'longtext', aliases: ['conflict', '核心冲突'], sanitize: trimString,
+    aiGeneration: { version: 1, domain: 'story-intent', label: '核心冲突', kind: 'text', directDependencies: ['concept', 'theme'], modes: ALL_WORLDVIEW_FIELD_MODES, outputSchemaId: 'story-core-field.text.v1', maxChars: 12_000, temporaryAssumptions: 'forbidden' },
+  },
+  {
+    target: 'storyCores', field: 'plotPattern', type: 'longtext', aliases: ['pattern', '情节模式'], sanitize: trimString,
+    aiGeneration: { version: 1, domain: 'story-intent', label: '故事模式', kind: 'text', directDependencies: ['centralConflict'], modes: ALL_WORLDVIEW_FIELD_MODES, outputSchemaId: 'story-core-field.text.v1', maxChars: 4_000, temporaryAssumptions: 'forbidden' },
+  },
+  {
+    target: 'storyCores', field: 'mainPlot', type: 'longtext', aliases: ['storyLines', 'plot', '主线', '故事主线'], sanitize: trimString,
+    aiGeneration: { version: 1, domain: 'story-intent', label: '故事主线意图', kind: 'text', directDependencies: ['centralConflict', 'plotPattern'], modes: ALL_WORLDVIEW_FIELD_MODES, outputSchemaId: 'story-core-field.text.v1', maxChars: 30_000, temporaryAssumptions: 'forbidden' },
+  },
+  {
+    target: 'storyCores', field: 'subPlots', type: 'longtext', aliases: ['subplots', '复线'], sanitize: trimString,
+    aiGeneration: { version: 1, domain: 'story-intent', label: '故事复线意图', kind: 'text', directDependencies: ['mainPlot', 'centralConflict'], modes: ALL_WORLDVIEW_FIELD_MODES, outputSchemaId: 'story-core-field.text.v1', maxChars: 30_000, temporaryAssumptions: 'forbidden' },
+  },
+] as const satisfies readonly FieldSpec[]
+
+export type StoryCoreGeneratableField = typeof STORY_CORE_GENERATABLE_FIELD_SPECS[number]['field']
+
 export const FIELD_REGISTRY: FieldSpec[] = [
   // MEMORY-5: author-edited workspace roots. Stable identities, owner IDs,
   // active pointers and derived counters remain outside the editable surface.
@@ -265,14 +299,8 @@ export const FIELD_REGISTRY: FieldSpec[] = [
   json('powerSystems', 'levels', ['力量层级']),
   longtext('powerSystems', 'rules', ['力量体系规则']),
 
-  // storyCores: storyLines 作为旧字段别名归一到 mainPlot。
-  longtext('storyCores', 'theme', ['主题']),
-  longtext('storyCores', 'centralConflict', ['conflict', '核心冲突']),
-  longtext('storyCores', 'plotPattern', ['pattern', '情节模式']),
-  longtext('storyCores', 'logline', ['一句话故事']),
-  longtext('storyCores', 'concept', ['故事概念']),
-  longtext('storyCores', 'mainPlot', ['storyLines', 'plot', '主线', '故事主线']),
-  longtext('storyCores', 'subPlots', ['subplots', '复线']),
+  // storyCores: 七个意图字段及生成能力共用同一注册声明。
+  ...STORY_CORE_GENERATABLE_FIELD_SPECS,
 
   // characters
   text('characters', 'name', ['姓名', '角色名']),
@@ -436,6 +464,14 @@ export const FIELD_REGISTRY: FieldSpec[] = [
   enumeration('storyArcs', 'type', ['main', 'sub'], { 主线: 'main', 支线: 'sub', 复线: 'sub' }),
   json('storyArcs', 'stages', ['阶段']),
   longtext('storyArcs', 'description', ['描述']),
+  enumeration('storyArcs', 'origin', ['manual', 'ai', 'import']),
+  enumeration('storyArcs', 'status', ['active', 'deprecated']),
+  num('storyArcs', 'sourceStoryCoreId'),
+  num('storyArcs', 'sourceStoryCoreRevision'),
+  text('storyArcs', 'sourceStoryCoreHash'),
+  text('storyArcs', 'lastAlignedHash'),
+  num('storyArcs', 'producerRunId'),
+  text('storyArcs', 'producerCandidateHash'),
 
   // Phase 39：作者确认的动态故事线投影与交汇
   num('storylineProgress', 'arcId', ['故事线ID']),

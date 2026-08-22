@@ -2,6 +2,7 @@ import { CHARACTER_DIMENSIONS } from '../character/character-dimensions'
 import { CONTEXT_SOURCE_BY_KEY } from '../registry/context-sources'
 import {
   FIELD_BY_TARGET,
+  STORY_CORE_GENERATABLE_FIELD_SPECS,
   WORLDVIEW_GENERATABLE_FIELD_SPECS,
 } from '../registry/field-registry'
 import { ADOPTION_EXTENSIONS } from '../registry/adoption-schema'
@@ -1427,12 +1428,33 @@ export const AGENT_SKILLS = [
     optionalContextSourceKeys: [],
     inputPolicy: STORY_CORE_INPUT_POLICY,
     contextCompression: STORY_CORE_COMPRESSION_POLICY,
+    contextGateway: {
+      version: 1,
+      rollout: 'required',
+      requiredWriteTargets: STORY_CORE_GENERATABLE_FIELD_SPECS.map(spec => `storyCores.${spec.field}`),
+      providerSourceKeys: ['ragSelection'],
+      allowedResourceKinds: [
+        'world', 'worldview-field', 'story-core-field', 'character',
+        'character-relation', 'story-arc', 'storyline-progress', 'outline-node',
+        'detailed-outline', 'chapter', 'foreshadow', 'location', 'codex-entry',
+        'world-link', 'fact', 'reference', 'narrative-blueprint',
+      ],
+      allowedDepths: ['index', 'summary', 'focused', 'full', 'original'],
+      maxReadCalls: 4,
+      maxRetrievedTokens: 24_000,
+      maxPlanningSteps: 5,
+      maxPlanningModelTokens: 24_000,
+      allowOriginalRead: true,
+      additionalReadToolNames: [
+        'list_context_catalog', 'search_context', 'read_context_resource', 'read_original_evidence',
+      ],
+    },
     maxOutputTokens: 6_000,
     writeTargets: [{
       table: 'storyCores',
-      fields: ['logline', 'concept', 'theme', 'centralConflict', 'plotPattern', 'mainPlot', 'subPlots'],
+      fields: STORY_CORE_GENERATABLE_FIELD_SPECS.map(spec => spec.field),
     }],
-    lastVerifiedAt: '2026-08-09',
+    lastVerifiedAt: '2026-08-23',
     regressionTests: [
       'R-HARNESS31-story-core-agent',
       'R-HARNESS31-story-core-panel-ui',
@@ -1730,9 +1752,37 @@ export const AGENT_SKILLS = [
     optionalContextSourceKeys: [],
     inputPolicy: OUTLINE_STORY_ARC_INPUT_POLICY,
     contextCompression: OUTLINE_STORY_ARC_COMPRESSION_POLICY,
+    contextGateway: {
+      version: 1,
+      rollout: 'required',
+      requiredWriteTargets: ['storyArcs.name', 'storyArcs.type', 'storyArcs.stages', 'storyArcs.description'],
+      providerSourceKeys: ['ragSelection'],
+      allowedResourceKinds: [
+        'world', 'worldview-field', 'story-core-field', 'character',
+        'character-relation', 'story-arc', 'storyline-progress', 'outline-node',
+        'detailed-outline', 'chapter', 'foreshadow', 'location', 'codex-entry',
+        'world-link', 'fact', 'reference', 'narrative-blueprint',
+      ],
+      allowedDepths: ['index', 'summary', 'focused', 'full', 'original'],
+      maxReadCalls: 5,
+      maxRetrievedTokens: 48_000,
+      maxPlanningSteps: 6,
+      maxPlanningModelTokens: 48_000,
+      allowOriginalRead: true,
+      additionalReadToolNames: [
+        'list_context_catalog', 'search_context', 'read_context_resource', 'read_original_evidence',
+      ],
+    },
     maxOutputTokens: 10_000,
-    writeTargets: [{ table: 'storyArcs', fields: ['name', 'type', 'stages', 'description'] }],
-    lastVerifiedAt: '2026-08-09',
+    writeTargets: [{
+      table: 'storyArcs',
+      fields: [
+        'name', 'type', 'stages', 'description', 'origin', 'status',
+        'sourceStoryCoreId', 'sourceStoryCoreRevision', 'sourceStoryCoreHash',
+        'lastAlignedHash', 'producerRunId', 'producerCandidateHash',
+      ],
+    }],
+    lastVerifiedAt: '2026-08-23',
     regressionTests: [
       'R-HARNESS30-story-arc-agent',
       'R-HARNESS30-story-arc-panel-ui',

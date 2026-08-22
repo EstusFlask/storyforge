@@ -127,9 +127,13 @@ export function checkRegistry(): RegistryValidationResult {
   }
 
   const fieldKeys = new Set<string>()
-  const generatableWorldviewFields = new Set(FIELD_REGISTRY
-    .filter(field => field.aiGeneration?.domain === 'worldview-foundation')
-    .map(field => field.field))
+  const generatableFieldsByDomain = new Map<string, Set<string>>()
+  for (const field of FIELD_REGISTRY.filter(item => item.aiGeneration)) {
+    const domain = field.aiGeneration!.domain
+    const fields = generatableFieldsByDomain.get(domain) ?? new Set<string>()
+    fields.add(field.field)
+    generatableFieldsByDomain.set(domain, fields)
+  }
   for (const field of FIELD_REGISTRY) {
     if (!REGISTRY_BY_NAME.has(field.target)) {
       errors.push(`FIELD_REGISTRY 指向不存在的表: ${field.target}.${field.field}`)
@@ -142,8 +146,9 @@ export function checkRegistry(): RegistryValidationResult {
     }
     if (field.aiGeneration) {
       const capability = field.aiGeneration
-      if (field.target !== 'worldviews' || capability.domain !== 'worldview-foundation') {
-        errors.push(`FIELD_REGISTRY 世界基座生成能力挂载到错误目标: ${key}`)
+      const expectedTarget = capability.domain === 'worldview-foundation' ? 'worldviews' : 'storyCores'
+      if (field.target !== expectedTarget) {
+        errors.push(`FIELD_REGISTRY ${capability.domain} 生成能力挂载到错误目标: ${key}`)
       }
       if (!capability.label.trim() || !capability.outputSchemaId.trim() || capability.maxChars < 2) {
         errors.push(`FIELD_REGISTRY 生成能力 label/schema/maxChars 无效: ${key}`)
@@ -158,30 +163,32 @@ export function checkRegistry(): RegistryValidationResult {
         errors.push(`FIELD_REGISTRY 生成能力 modes 为空或重复: ${key}`)
       }
       for (const dependency of capability.directDependencies) {
-        if (dependency === field.field || !generatableWorldviewFields.has(dependency)) {
+        if (dependency === field.field || !generatableFieldsByDomain.get(capability.domain)?.has(dependency)) {
           errors.push(`FIELD_REGISTRY 生成能力直接依赖无效: ${key} -> ${dependency}`)
         }
       }
     }
   }
 
-  const dependencyGraph = new Map(FIELD_REGISTRY
-    .filter(field => field.aiGeneration?.domain === 'worldview-foundation')
-    .map(field => [field.field, [...field.aiGeneration!.directDependencies]]))
-  const visiting = new Set<string>()
-  const visited = new Set<string>()
-  const visit = (field: string): void => {
-    if (visiting.has(field)) {
-      errors.push(`FIELD_REGISTRY 世界基座生成能力依赖成环: ${field}`)
-      return
+  for (const domain of generatableFieldsByDomain.keys()) {
+    const dependencyGraph = new Map(FIELD_REGISTRY
+      .filter(field => field.aiGeneration?.domain === domain)
+      .map(field => [field.field, [...field.aiGeneration!.directDependencies]]))
+    const visiting = new Set<string>()
+    const visited = new Set<string>()
+    const visit = (field: string): void => {
+      if (visiting.has(field)) {
+        errors.push(`FIELD_REGISTRY ${domain} 生成能力依赖成环: ${field}`)
+        return
+      }
+      if (visited.has(field)) return
+      visiting.add(field)
+      for (const dependency of dependencyGraph.get(field) ?? []) visit(dependency)
+      visiting.delete(field)
+      visited.add(field)
     }
-    if (visited.has(field)) return
-    visiting.add(field)
-    for (const dependency of dependencyGraph.get(field) ?? []) visit(dependency)
-    visiting.delete(field)
-    visited.add(field)
+    for (const field of dependencyGraph.keys()) visit(field)
   }
-  for (const field of dependencyGraph.keys()) visit(field)
 
   const adoptionTargets = new Set<string>()
   for (const schema of ADOPTION_SCHEMAS) {
