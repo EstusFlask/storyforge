@@ -50,7 +50,7 @@ function policy(): ContextAccessPolicyV1 {
     allowedSourceKeys: ['ragSelection'],
     allowedResourceKinds: ['worldview-field'],
     allowedDepths: ['index', 'summary', 'focused', 'full'],
-    selectorPolicyId: 'selector-world-origin-v1',
+    selectorPolicyId: 'selector-world-origin-v2',
     maxReadCalls: 12,
     maxRetrievedTokens: 10_000,
     allowOriginalRead: false,

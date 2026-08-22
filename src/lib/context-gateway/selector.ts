@@ -59,6 +59,8 @@ export interface ContextSelectorPolicyV1 {
   coreKinds: readonly ContextResourceKind[]
   categoryShares: Readonly<Record<ContextSelectorCategoryV1, number>>
   highRiskRelations: readonly ContextResourceDescriptorV1['relations'][number]['kind'][]
+  /** Maximum non-hard resources admitted before bounded tool reads take over. */
+  maxAutomaticResources: number
   maxOneHopResources: number
   maxEarlyAnchors: number
   maxRecentChanges: number
@@ -165,55 +167,60 @@ function shares(input: Partial<Record<ContextSelectorCategoryV1, number>>): Reco
 export const CONTEXT_SELECTOR_POLICIES_V1: Readonly<Record<AgentContextTaskKind, ContextSelectorPolicyV1>> = {
   'agent-world-origin': {
     version: CONTEXT_SELECTOR_VERSION_V1,
-    selectorPolicyId: 'selector-world-origin-v1',
+    selectorPolicyId: 'selector-world-origin-v2',
     taskKind: 'agent-world-origin',
     coreKinds: ['world', 'worldview-field', 'story-core-field', 'world-link'],
     categoryShares: shares({ world: 0.5, character: 0.12, 'story-planning': 0.22, 'prose-fact': 0.08, reference: 0.08 }),
     highRiskRelations: DEFAULT_HIGH_RISK_RELATIONS,
+    maxAutomaticResources: 20,
     maxOneHopResources: 12,
     maxEarlyAnchors: 2,
     maxRecentChanges: 2,
   },
   'agent-character': {
     version: CONTEXT_SELECTOR_VERSION_V1,
-    selectorPolicyId: 'selector-character-v1',
+    selectorPolicyId: 'selector-character-v2',
     taskKind: 'agent-character',
     coreKinds: ['character', 'character-relation', 'worldview-field', 'story-core-field'],
     categoryShares: shares({ world: 0.24, character: 0.44, 'story-planning': 0.18, 'prose-fact': 0.08, reference: 0.06 }),
     highRiskRelations: DEFAULT_HIGH_RISK_RELATIONS,
+    maxAutomaticResources: 28,
     maxOneHopResources: 16,
     maxEarlyAnchors: 2,
     maxRecentChanges: 3,
   },
   'agent-inspiration': {
     version: CONTEXT_SELECTOR_VERSION_V1,
-    selectorPolicyId: 'selector-inspiration-v1',
+    selectorPolicyId: 'selector-inspiration-v2',
     taskKind: 'agent-inspiration',
     coreKinds: ['reference', 'worldview-field', 'story-core-field'],
     categoryShares: shares({ world: 0.28, character: 0.12, 'story-planning': 0.2, 'prose-fact': 0.1, reference: 0.3 }),
     highRiskRelations: DEFAULT_HIGH_RISK_RELATIONS,
+    maxAutomaticResources: 20,
     maxOneHopResources: 8,
     maxEarlyAnchors: 1,
     maxRecentChanges: 2,
   },
   'agent-outline': {
     version: CONTEXT_SELECTOR_VERSION_V1,
-    selectorPolicyId: 'selector-outline-v1',
+    selectorPolicyId: 'selector-outline-v2',
     taskKind: 'agent-outline',
     coreKinds: ['story-core-field', 'story-arc', 'outline-node', 'narrative-blueprint', 'character', 'worldview-field'],
     categoryShares: shares({ world: 0.24, character: 0.22, 'story-planning': 0.34, 'prose-fact': 0.14, reference: 0.06 }),
     highRiskRelations: DEFAULT_HIGH_RISK_RELATIONS,
+    maxAutomaticResources: 36,
     maxOneHopResources: 20,
     maxEarlyAnchors: 3,
     maxRecentChanges: 4,
   },
   'agent-prose': {
     version: CONTEXT_SELECTOR_VERSION_V1,
-    selectorPolicyId: 'selector-prose-v1',
+    selectorPolicyId: 'selector-prose-v2',
     taskKind: 'agent-prose',
     coreKinds: ['narrative-blueprint', 'detailed-outline', 'outline-node', 'story-arc', 'character', 'fact', 'foreshadow', 'chapter'],
     categoryShares: shares({ world: 0.18, character: 0.24, 'story-planning': 0.26, 'prose-fact': 0.28, reference: 0.04 }),
     highRiskRelations: DEFAULT_HIGH_RISK_RELATIONS,
+    maxAutomaticResources: 48,
     maxOneHopResources: 24,
     maxEarlyAnchors: 4,
     maxRecentChanges: 5,
@@ -382,6 +389,9 @@ function assertSelectorPolicy(policy: ContextSelectorPolicyV1, taskKind: AgentCo
   }
   const share = CONTEXT_SELECTOR_CATEGORIES_V1.reduce((sum, item) => sum + policy.categoryShares[item], 0)
   if (Math.abs(share - 1) > 0.000_001) fail('invalid-selector-policy', `${policy.selectorPolicyId} category shares 总和必须为 1`)
+  if (!Number.isSafeInteger(policy.maxAutomaticResources) || policy.maxAutomaticResources < 1) {
+    fail('invalid-selector-policy', `${policy.selectorPolicyId} maxAutomaticResources 非法`)
+  }
 }
 
 export function getContextSelectorPolicyV1(taskKind: AgentContextTaskKind): ContextSelectorPolicyV1 {
@@ -558,6 +568,8 @@ export async function selectContextResourcesV1(input: ContextSelectorInputV1): P
       current.reasons.add(reason)
       return true
     }
+    const automaticCount = [...selected.values()].filter(entry => !entry.hard).length
+    if (automaticCount >= selectorPolicy.maxAutomaticResources) return false
     const depth = selectDepth(descriptor, input.accessPolicy)
     const tokens = estimatedTokens(descriptor, depth)
     if (selectedTokens + tokens > input.budgetTokens) return false

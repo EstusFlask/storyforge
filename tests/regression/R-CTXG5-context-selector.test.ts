@@ -91,6 +91,7 @@ describe('R-CTXG5 Context Gateway deterministic selector', () => {
       const policy = getContextSelectorPolicyV1(taskKind)
       expect(policy.taskKind).toBe(taskKind)
       expect(Object.values(policy.categoryShares).reduce((sum, value) => sum + value, 0)).toBeCloseTo(1)
+      expect(policy.maxAutomaticResources).toBeGreaterThan(0)
     }
   })
 
@@ -146,6 +147,29 @@ describe('R-CTXG5 Context Gateway deterministic selector', () => {
       const budget = result.categoryBudgets.find(item => item.category === category)!
       expect(budget.selectedResourceCount).toBeGreaterThan(0)
     }
+  })
+
+  it('caps automatic disclosure while keeping an exact-query late resource inside the world-origin top 20', async () => {
+    const resources = Array.from({ length: 60 }, (_, index) => descriptor({
+      key: `character:w:${index + 1}`,
+      kind: 'character',
+      title: index === 59 ? '末位航契守卫' : `目录角色 ${index + 1}`,
+      tokens: 20,
+      revision: index + 1,
+    }))
+    const result = await selectContextResourcesV1({
+      taskKind: 'agent-world-origin',
+      accessPolicy: accessPolicy('agent-world-origin'),
+      scope,
+      descriptors: resources,
+      budgetTokens: 24_000,
+      query: '为末位航契守卫设计种族关系',
+      readsAllowed: false,
+    })
+    expect(result.selected.filter(item => !item.hardRequirement)).toHaveLength(20)
+    expect(result.selected.map(item => item.resourceKey)).toContain('character:w:60')
+    expect(result.omitted).toHaveLength(39)
+    expect(result.overBudget).toBe(false)
   })
 
   it('adds only one-hop high-risk relations and keeps relevant early anchors plus recent changes', async () => {
