@@ -29,6 +29,7 @@
 | 记忆工程、硬盘映像、人工自检、双向同步 | `MEMORY-*`、`MEMORY-CLOSE-*`、documentId、baseline、projection、folder handle、sync receipt | 新收口任务先读 `MEMORY-ENGINEERING-CLOSURE-CHARTER-20260817.md`；追溯 MEMORY-0～10 再读原施工方案对应阶段；用户操作/恢复/隐私读 `MEMORY-WORKSPACE-GUIDE.md`；再读 `project-tables.ts`、目标领域表/field/context 登记、folder storage、Harness ledger/post-adoption 与相关测试 | 完整 Harness 历史完成卡、未命中的 CREL 评测、整份 Blueprint |
 | schema、迁移、删除、合并、导入导出 | 表名、owner、refs、world scope、迁移版本 | `project-tables.ts`、`schema.ts`、相关 lifecycle 实现、迁移/往返/删除测试；Blueprint 对应数据段 | 其它 Phase、历史完成流水 |
 | 新体系或完整功能 | 稳定 ID、唯一归属、前置依赖 | 路线图中对应体系、能力基线同名章节、关联设计文档；若有 Blueprint ID，仅读该 ID 的“前置/改法/验证/完成判据” | 路线图其它体系、完整 Blueprint |
+| 从世界引擎派生或扩展上层产品 | `WorldRelease`、产品世界数据需求、`SourceSelection`、产品 owner | 先读 `WORLD-ENGINE-TO-PRODUCT-DEVELOPMENT-CHARTER.md`；再读该产品能力基线、设计文档、来源适配器和三注册表命中片段 | 其它产品的完整生产/媒资实现、假设中的跨产品公共层 |
 | PR、合并、发布、跨模型交接 | branch/commit/PR/check 状态 | `COLLAB-WORKFLOW.md` 相关流程、PR diff、受影响测试 | 全部协作日志 |
 | 历史追溯、来源审计 | 任务 ID、commit、文件名 | `git log` / `git blame` / `rg` 命中；必要时读 `ROADMAP-LEGACY.md` 或 `COLLAB-LOG.md` 邻近片段 | 历史文档全文 |
 | 宪法冲突或新增架构规则 | 冲突的注册表/红线条款 | `CLAUDE.md` 对应章节、架构检查器和当前代码证据 | 与冲突无关的设计文档 |
