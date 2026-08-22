@@ -677,6 +677,7 @@ export function useMasterCopilot(input: {
           runId: persistedCandidate.payload.runId!,
           candidateEventId: persistedCandidate.event.id!,
           runtime: runtimeCandidates.current.get(persistedCandidate.event.id!),
+          worldGroupId,
         })
         message = adoption.message
         const pendingLifecycle = buildPendingHarnessLifecycleEvidenceV1({
@@ -727,6 +728,7 @@ export function useMasterCopilot(input: {
           scope: workspaceScope!,
           runId: persistedCandidate.payload.runId!,
           candidateEventId: persistedCandidate.event.id!,
+          worldGroupId,
         })
       } else if (decision === 'adopted') {
         message = await adoptMasterCandidate({

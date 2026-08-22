@@ -113,6 +113,12 @@ async function resolveCandidate(
   if (restored.snapshot.run.conversationId !== candidate.event.conversationId) {
     throw new Error('主 Agent durable 候选与运行对话不一致')
   }
+  if (
+    input.worldGroupId !== undefined
+    && (restored.snapshot.run.worldGroupId ?? null) !== input.worldGroupId
+  ) {
+    throw new Error('主 Agent durable 候选与当前世界组不一致，切换世界后不能继续操作旧候选')
+  }
   return { snapshot: restored.snapshot, candidate, stepId }
 }
 
