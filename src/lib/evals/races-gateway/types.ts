@@ -1,5 +1,5 @@
-export const RACES_GATEWAY_EVAL_VERSION_V1 = 'races-gateway-eval-v1' as const
-export const RACES_GATEWAY_EVAL_STORAGE_KEY_V1 = 'storyforge-races-gateway-eval-v1' as const
+export const RACES_GATEWAY_EVAL_VERSION_V2 = 'races-gateway-eval-v2' as const
+export const RACES_GATEWAY_EVAL_STORAGE_KEY_V2 = 'storyforge-races-gateway-eval-v2' as const
 
 export type RacesGatewayEvalKindV1 =
   | 'empty'
@@ -39,6 +39,7 @@ export interface RacesGatewayBlindGradeEvidenceV1 {
   outputHash: string
   inputTokens: number | null
   outputTokens: number | null
+  finishReason: string | null
   durationMs: number
 }
 
@@ -108,7 +109,7 @@ export interface RacesGatewayEvalScoreV1 {
 }
 
 export interface RacesGatewayEvalCheckpointV1 {
-  version: typeof RACES_GATEWAY_EVAL_VERSION_V1
+  version: typeof RACES_GATEWAY_EVAL_VERSION_V2
   fixtureHash: string
   modelIdentity: { provider: string; model: string }
   graderIdentity: { provider: string; model: string; promptVersion: string }

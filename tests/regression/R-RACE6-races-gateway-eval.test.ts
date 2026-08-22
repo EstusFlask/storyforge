@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { db } from '../../src/lib/db/schema'
 import { RACES_GATEWAY_EVAL_FIXTURES_V1 } from '../../src/lib/evals/races-gateway/fixtures'
 import {
+  parseRacesGatewayBlindGradeCompletionV2,
   parseRacesGatewayBlindGradeV1,
   scoreRacesGatewayEvalV1,
 } from '../../src/lib/evals/races-gateway/scoring'
@@ -90,6 +91,9 @@ describe.sequential('RACE-6 · races transcript + outcome eval', () => {
     expect(() => parseRacesGatewayBlindGradeV1(valid.slice(0, -1))).toThrow('非法 JSON')
     expect(() => parseRacesGatewayBlindGradeV1(JSON.stringify({ ...JSON.parse(valid), extra: true })))
       .toThrow('字段不在闭集')
+    expect(parseRacesGatewayBlindGradeCompletionV2(valid, 'length').concrete).toBe(true)
+    expect(() => parseRacesGatewayBlindGradeCompletionV2(valid.slice(0, -1), 'length'))
+      .toThrow('grader 输出被截断')
   })
 
   it('runner 拒绝生成模型自评，不能依赖 UI 约束', async () => {
@@ -99,6 +103,24 @@ describe.sequential('RACE-6 · races transcript + outcome eval', () => {
       fixtures: [RACES_GATEWAY_EVAL_FIXTURES_V1[0]],
       grade: vi.fn(),
     })).rejects.toThrow('必须使用不同模型身份')
+  })
+
+  it('真实 grader 失败时签名失败 checkpoint，并立即清理当前隔离项目', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
+      choices: [{ finish_reason: 'stop', message: { content: JSON.stringify({
+        field: 'races',
+        value: '潮岸民以盐誓登记亲属，钟港民以师徒谱继承身份；双方共享航道，却长期争夺司法证言权。',
+      }) } }],
+      usage: { prompt_tokens: 80, completion_tokens: 60, total_tokens: 140 },
+    }), { status: 200 })))
+    await expect(runRacesGatewayEvalV1({
+      modelIdentity: { provider: 'deepseek', model: 'deepseek-chat' },
+      graderIdentity: { provider: 'deepseek', model: 'deepseek-reasoner', promptVersion: 'test-grader-v2' },
+      fixtures: [RACES_GATEWAY_EVAL_FIXTURES_V1[0]],
+      grade: async () => { throw new Error('grader 输出被截断') },
+    })).rejects.toThrow('empty-01 执行失败')
+    expect(await db.projects.count()).toBe(0)
+    expect(await cleanupRacesGatewayEvalProjectsV1()).toBe(0)
   })
 
   it('通过正式 durable races Harness 生成、保存 exact manifest，并拒绝 checkpoint 篡改', async () => {
@@ -123,7 +145,7 @@ describe.sequential('RACE-6 · races transcript + outcome eval', () => {
         evidence: {
           provider: 'deepseek', model: 'deepseek-reasoner', promptVersion: 'test-grader-v1',
           inputHash: 'b'.repeat(64), outputHash: 'c'.repeat(64),
-          inputTokens: 10, outputTokens: 10, durationMs: 1,
+          inputTokens: 10, outputTokens: 10, finishReason: 'stop', durationMs: 1,
         },
       }),
     })
@@ -168,7 +190,7 @@ describe.sequential('RACE-6 · races transcript + outcome eval', () => {
         evidence: {
           provider: 'deepseek', model: 'deepseek-reasoner', promptVersion: 'test-grader-v1',
           inputHash: 'b'.repeat(64), outputHash: 'c'.repeat(64),
-          inputTokens: 10, outputTokens: 10, durationMs: 1,
+          inputTokens: 10, outputTokens: 10, finishReason: 'stop', durationMs: 1,
         },
       }),
     })
@@ -225,7 +247,7 @@ describe.sequential('RACE-6 · races transcript + outcome eval', () => {
         evidence: {
           provider: 'fixture', model: 'deterministic', promptVersion: 'test-grader-v1',
           inputHash: 'd'.repeat(64), outputHash: 'e'.repeat(64),
-          inputTokens: 1, outputTokens: 1, durationMs: 1,
+          inputTokens: 1, outputTokens: 1, finishReason: 'stop', durationMs: 1,
         },
       }),
     })

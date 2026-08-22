@@ -2,7 +2,12 @@
 
 日期：2026-08-22  
 施工单元：RACE-6  
-状态：实现完成，等待真实模型 sealed run 与 GATE-P1B
+状态：V2 实现完成，等待真实模型 sealed run 与 GATE-P1B
+
+> V1 首次真实运行在 `empty-02` 暴露 Agnes grader 的通用
+> `finish_reason=length` 与严格结构完成性判断冲突。V1 证据保留为失败运行；V2 不降低任何质量阈值，
+> 将 grader 输出预算提升到 4096 tokens，要求 200 字内紧凑理由，并以严格闭集 JSON 是否完整作为最终
+> 截断判据，同时把 provider finish reason 写入证据。
 
 ## 评测目标
 
@@ -52,6 +57,7 @@ RACE-6 同时回答两个不同问题：
 - UI 与底层 runner 都拒绝 generator 和 grader 使用同一模型身份，防止模型自评。
 - grader 只看标题、给定种子和候选，不读取检索 trace、期望阈值或生成模型身份。
 - grader 必须返回严格闭集 JSON；非法 JSON、额外字段和截断都令当前样本失败，不做隐藏多次重试。
+- provider 返回 `length/max_tokens` 但响应仍是完整严格闭集 JSON 时允许验收；若严格解析失败，按截断失败。两种情况都记录原始 finish reason。
 - 每个盲评保存输入/输出 hash、token、耗时和模型身份，不保存 API Key、认证头或隐藏推理。
 
 ## 证据、恢复与生命周期
@@ -76,4 +82,3 @@ RACE-6 同时回答两个不同问题：
 2. 跑完 100 例 sealed matrix，导出签名 checkpoint，并验证所有冻结阈值。
 3. 在同一隔离 origin 完成 races 的生成、刷新、编辑、拒绝、采纳、切世界和错误恢复 E2E。
 4. 运行完整 CI、E2E、build 和架构门；全部通过后才能将 RACE-6 与 GATE-P1B 标为完成。
-

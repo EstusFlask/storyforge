@@ -42,6 +42,23 @@ export function parseRacesGatewayBlindGradeV1(raw: string): RacesGatewayBlindGra
   return row as unknown as RacesGatewayBlindGradeV1
 }
 
+export function parseRacesGatewayBlindGradeCompletionV2(
+  raw: string,
+  finishReason: string | null | undefined,
+): RacesGatewayBlindGradeV1 {
+  try {
+    // A provider finish_reason is advisory. A complete strict closed-schema JSON
+    // object is stronger evidence than a generic `length` marker.
+    return parseRacesGatewayBlindGradeV1(raw)
+  } catch (error) {
+    if (/^(length|max_tokens)$/i.test(finishReason?.trim() ?? '')) {
+      const detail = error instanceof Error ? error.message : String(error)
+      throw new Error(`RACE-6 grader 输出被截断：${detail}`)
+    }
+    throw error
+  }
+}
+
 export function scoreRacesGatewayEvalV1(
   results: readonly RacesGatewayEvalResultV1[],
   thresholds: RacesGatewayEvalThresholdsV1 = RACES_GATEWAY_EVAL_THRESHOLDS_V1,

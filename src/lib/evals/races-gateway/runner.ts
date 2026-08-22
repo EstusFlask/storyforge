@@ -26,8 +26,8 @@ import {
 } from './archive'
 import { scoreRacesGatewayEvalV1, RACES_GATEWAY_EVAL_THRESHOLDS_V1 } from './scoring'
 import {
-  RACES_GATEWAY_EVAL_STORAGE_KEY_V1,
-  RACES_GATEWAY_EVAL_VERSION_V1,
+  RACES_GATEWAY_EVAL_STORAGE_KEY_V2,
+  RACES_GATEWAY_EVAL_VERSION_V2,
   type RacesGatewayBlindGradeV1,
   type RacesGatewayBlindGradeEvidenceV1,
   type RacesGatewayEvalCheckpointV1,
@@ -264,11 +264,20 @@ async function executeModelFixture(input: {
       durationMs: Math.max(1, Math.round(performance.now() - startedAt)),
     }
   } catch (error) {
+    const failedProjectId = seeded?.projectId ?? null
+    let cleanupFailure = ''
+    if (failedProjectId != null) {
+      try {
+        if (await db.projects.get(failedProjectId)) await cascadeDeleteProject(failedProjectId)
+      } catch (cleanupError) {
+        cleanupFailure = `；隔离项目清理失败：${safeError(cleanupError)}`
+      }
+    }
     return {
       fixtureId: input.fixture.id,
       kind: input.fixture.kind,
       status: 'failed',
-      projectId: seeded?.projectId ?? null,
+      projectId: null,
       runId: null,
       candidateEventId: null,
       candidateText: '',
@@ -282,7 +291,7 @@ async function executeModelFixture(input: {
       crossScopeBlocked: null,
       grade: null,
       gradeEvidence: null,
-      error: safeError(error),
+      error: `${safeError(error)}${cleanupFailure}`,
       durationMs: Math.max(1, Math.round(performance.now() - startedAt)),
     }
   }
@@ -453,7 +462,7 @@ export async function verifyRacesGatewayEvalCheckpointV1(
   fixtures: readonly RacesGatewayEvalFixtureV1[] = RACES_GATEWAY_EVAL_FIXTURES_V1,
 ): Promise<boolean> {
   try {
-    if (checkpoint.version !== RACES_GATEWAY_EVAL_VERSION_V1
+    if (checkpoint.version !== RACES_GATEWAY_EVAL_VERSION_V2
       || !/^[a-f0-9]{64}$/.test(checkpoint.fixtureHash)
       || !/^[a-f0-9]{64}$/.test(checkpoint.checkpointHash)) return false
     if (await hashCanonicalValue(fixtures) !== checkpoint.fixtureHash) return false
@@ -494,7 +503,7 @@ export async function verifyRacesGatewayEvalCheckpointV1(
 
 export function loadRacesGatewayEvalCheckpointV1(): RacesGatewayEvalCheckpointV1 | null {
   try {
-    const raw = localStorage.getItem(RACES_GATEWAY_EVAL_STORAGE_KEY_V1)
+    const raw = localStorage.getItem(RACES_GATEWAY_EVAL_STORAGE_KEY_V2)
     return raw ? JSON.parse(raw) as RacesGatewayEvalCheckpointV1 : null
   } catch {
     return null
@@ -502,7 +511,7 @@ export function loadRacesGatewayEvalCheckpointV1(): RacesGatewayEvalCheckpointV1
 }
 
 export function persistRacesGatewayEvalCheckpointV1(checkpoint: RacesGatewayEvalCheckpointV1): void {
-  localStorage.setItem(RACES_GATEWAY_EVAL_STORAGE_KEY_V1, JSON.stringify(checkpoint))
+  localStorage.setItem(RACES_GATEWAY_EVAL_STORAGE_KEY_V2, JSON.stringify(checkpoint))
 }
 
 export function exportRacesGatewayEvalCheckpointV1(checkpoint: RacesGatewayEvalCheckpointV1): string {
@@ -516,7 +525,7 @@ export async function cleanupRacesGatewayEvalProjectsV1(): Promise<number> {
 }
 
 export async function clearRacesGatewayEvalCheckpointV1(): Promise<void> {
-  localStorage.removeItem(RACES_GATEWAY_EVAL_STORAGE_KEY_V1)
+  localStorage.removeItem(RACES_GATEWAY_EVAL_STORAGE_KEY_V2)
   await cleanupRacesGatewayEvalProjectsV1()
 }
 
@@ -554,9 +563,12 @@ export async function runRacesGatewayEvalV1(input: {
       score: null,
     }
   } else {
+    // A new protocol run may follow a failed older checkpoint. Evaluation
+    // workspaces are disposable and must never become invisible orphans.
+    await cleanupRacesGatewayEvalProjectsV1()
     const now = Date.now()
     checkpoint = await sealCheckpoint({
-      version: RACES_GATEWAY_EVAL_VERSION_V1,
+      version: RACES_GATEWAY_EVAL_VERSION_V2,
       fixtureHash,
       modelIdentity: input.modelIdentity,
       graderIdentity: input.graderIdentity,

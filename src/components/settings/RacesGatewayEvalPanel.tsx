@@ -7,9 +7,9 @@ import { executeRegisteredAIEntryV1 } from '../../lib/agent/formal-ai-entry'
 import { hashCanonicalValue } from '../../lib/agent/run/hash'
 import {
   buildRacesGatewayBlindGraderMessagesV1,
-  RACES_GATEWAY_BLIND_GRADER_PROMPT_VERSION_V1,
+  RACES_GATEWAY_BLIND_GRADER_PROMPT_VERSION_V2,
 } from '../../lib/evals/races-gateway/protocol'
-import { parseRacesGatewayBlindGradeV1 } from '../../lib/evals/races-gateway/scoring'
+import { parseRacesGatewayBlindGradeCompletionV2 } from '../../lib/evals/races-gateway/scoring'
 import {
   clearRacesGatewayEvalCheckpointV1,
   exportRacesGatewayEvalCheckpointV1,
@@ -103,7 +103,7 @@ export default function RacesGatewayEvalPanel() {
         graderIdentity: {
           provider: graderConfig.provider,
           model: graderConfig.model,
-          promptVersion: RACES_GATEWAY_BLIND_GRADER_PROMPT_VERSION_V1,
+          promptVersion: RACES_GATEWAY_BLIND_GRADER_PROMPT_VERSION_V2,
         },
         resumeFrom: checkpoint,
         grade: async input => {
@@ -116,7 +116,7 @@ export default function RacesGatewayEvalPanel() {
             const output = await executeRegisteredAIEntryV1(
               'eval.races-gateway.grader',
               messages,
-              { ...graderConfig, temperature: 0, maxTokens: 1_200 },
+              { ...graderConfig, temperature: 0, maxTokens: 4_096 },
               { category: 'eval.race6.blind-grader', contextOverflowPolicy: 'reject' },
               controller.signal,
               result,
@@ -124,19 +124,18 @@ export default function RacesGatewayEvalPanel() {
                 ? { responseFormat: 'json_object' }
                 : undefined,
             )
-            if (/length|max_tokens/i.test(result.finishReason ?? '')) {
-              throw new Error('RACE-6 grader 输出被截断')
-            }
+            const grade = parseRacesGatewayBlindGradeCompletionV2(output, result.finishReason)
             return {
-              grade: parseRacesGatewayBlindGradeV1(output),
+              grade,
               evidence: {
                 provider: graderConfig.provider,
                 model: graderConfig.model,
-                promptVersion: RACES_GATEWAY_BLIND_GRADER_PROMPT_VERSION_V1,
+                promptVersion: RACES_GATEWAY_BLIND_GRADER_PROMPT_VERSION_V2,
                 inputHash: await hashCanonicalValue(messages),
                 outputHash: await hashCanonicalValue(output),
                 inputTokens: result.usage?.inputTokens ?? null,
                 outputTokens: result.usage?.outputTokens ?? null,
+                finishReason: result.finishReason ?? null,
                 durationMs: Math.max(1, Math.round(performance.now() - startedAt)),
               },
             }

@@ -1,7 +1,7 @@
 import type { ChatMessage } from '../../types'
 
-export const RACES_GATEWAY_BLIND_GRADER_PROMPT_VERSION_V1 =
-  'races-gateway-blind-grader-v1' as const
+export const RACES_GATEWAY_BLIND_GRADER_PROMPT_VERSION_V2 =
+  'races-gateway-blind-grader-v2' as const
 
 export function buildRacesGatewayBlindGraderMessagesV1(input: {
   title: string
@@ -12,7 +12,7 @@ export function buildRacesGatewayBlindGraderMessagesV1(input: {
     {
       role: 'system',
       content: [
-        `你是小说世界观候选的盲评员。协议版本：${RACES_GATEWAY_BLIND_GRADER_PROMPT_VERSION_V1}。`,
+        `你是小说世界观候选的盲评员。协议版本：${RACES_GATEWAY_BLIND_GRADER_PROMPT_VERSION_V2}。`,
         '你不知道候选来自哪种实现，也不得推测实现。只根据输入判断。',
         'placeholder：候选主要是占位、说明任务、复述要求或解释“种族与民族”概念。',
         'titleOveranchored：候选把作品名当成必须解释的概念，或大部分设定只是标题的同义扩写；仅把标题作为轻微意象不算。',
@@ -20,7 +20,7 @@ export function buildRacesGatewayBlindGraderMessagesV1(input: {
         'constraintsRespected：若已有设定非空，候选没有否定或遗忘它；若为空则应为 true。',
         'addsUsefulInformation：候选不是围绕已有设定转述，而是增加可推动人物、冲突或情节的新信息。',
         'irrelevantMaterial：存在大量与种族民族格局无关的解释、元话语或跑题内容。',
-        '只返回一个 JSON 对象，不要 Markdown。字段必须且只能是 placeholder、titleOveranchored、concrete、constraintsRespected、addsUsefulInformation、irrelevantMaterial、reason。前六项是 boolean，reason 是不超过 500 字的中文理由。',
+        '直接返回一个紧凑 JSON 对象，不要思考过程、解释前缀或 Markdown。字段必须且只能是 placeholder、titleOveranchored、concrete、constraintsRespected、addsUsefulInformation、irrelevantMaterial、reason。前六项是 boolean，reason 是不超过 200 字的中文理由。',
       ].join('\n'),
     },
     {
