@@ -26,8 +26,8 @@ import {
 } from './archive'
 import { scoreRacesGatewayEvalV1, RACES_GATEWAY_EVAL_THRESHOLDS_V1 } from './scoring'
 import {
-  RACES_GATEWAY_EVAL_STORAGE_KEY_V6,
-  RACES_GATEWAY_EVAL_VERSION_V6,
+  RACES_GATEWAY_EVAL_STORAGE_KEY_V7,
+  RACES_GATEWAY_EVAL_VERSION_V7,
   type RacesGatewayBlindGradeV1,
   type RacesGatewayBlindGradeEvidenceV1,
   type RacesGatewayEvalCheckpointV1,
@@ -480,7 +480,7 @@ export async function verifyRacesGatewayEvalCheckpointV1(
   fixtures: readonly RacesGatewayEvalFixtureV1[] = RACES_GATEWAY_EVAL_FIXTURES_V1,
 ): Promise<boolean> {
   try {
-    if (checkpoint.version !== RACES_GATEWAY_EVAL_VERSION_V6
+    if (checkpoint.version !== RACES_GATEWAY_EVAL_VERSION_V7
       || !/^[a-f0-9]{64}$/.test(checkpoint.fixtureHash)
       || !/^[a-f0-9]{64}$/.test(checkpoint.checkpointHash)) return false
     if (await hashCanonicalValue(fixtures) !== checkpoint.fixtureHash) return false
@@ -522,6 +522,23 @@ export async function verifyRacesGatewayEvalCheckpointV1(
           || result.gradeEvidence.promptVersion !== checkpoint.graderIdentity.promptVersion) return false
       }
     }
+    const attemptCounts = new Map<string, number>()
+    for (const failure of checkpoint.attemptFailures) {
+      const fixture = fixtures.find(item => item.id === failure.fixtureId)
+      const expectedAttempt = (attemptCounts.get(failure.fixtureId) ?? 0) + 1
+      if (!fixture
+        || failure.attempt !== expectedAttempt
+        || !Number.isInteger(failure.recordedAt)
+        || failure.recordedAt < checkpoint.startedAt
+        || failure.result.fixtureId !== fixture.id
+        || failure.result.kind !== fixture.kind
+        || failure.result.status !== 'failed') return false
+      attemptCounts.set(failure.fixtureId, expectedAttempt)
+      if (failure.result.transcriptArchive) {
+        const transcript = await readRacesGatewayTranscriptArchiveV1(failure.result.transcriptArchive)
+        if (transcript.manifest.manifestHash !== failure.result.contextManifestHash) return false
+      }
+    }
     if (checkpoint.status === 'completed' && (checkpoint.nextIndex !== fixtures.length || !checkpoint.score)) return false
     return true
   } catch {
@@ -531,7 +548,7 @@ export async function verifyRacesGatewayEvalCheckpointV1(
 
 export function loadRacesGatewayEvalCheckpointV1(): RacesGatewayEvalCheckpointV1 | null {
   try {
-    const raw = localStorage.getItem(RACES_GATEWAY_EVAL_STORAGE_KEY_V6)
+    const raw = localStorage.getItem(RACES_GATEWAY_EVAL_STORAGE_KEY_V7)
     return raw ? JSON.parse(raw) as RacesGatewayEvalCheckpointV1 : null
   } catch {
     return null
@@ -539,7 +556,7 @@ export function loadRacesGatewayEvalCheckpointV1(): RacesGatewayEvalCheckpointV1
 }
 
 export function persistRacesGatewayEvalCheckpointV1(checkpoint: RacesGatewayEvalCheckpointV1): void {
-  localStorage.setItem(RACES_GATEWAY_EVAL_STORAGE_KEY_V6, JSON.stringify(checkpoint))
+  localStorage.setItem(RACES_GATEWAY_EVAL_STORAGE_KEY_V7, JSON.stringify(checkpoint))
 }
 
 export function exportRacesGatewayEvalCheckpointV1(checkpoint: RacesGatewayEvalCheckpointV1): string {
@@ -553,7 +570,7 @@ export async function cleanupRacesGatewayEvalProjectsV1(): Promise<number> {
 }
 
 export async function clearRacesGatewayEvalCheckpointV1(): Promise<void> {
-  localStorage.removeItem(RACES_GATEWAY_EVAL_STORAGE_KEY_V6)
+  localStorage.removeItem(RACES_GATEWAY_EVAL_STORAGE_KEY_V7)
   await cleanupRacesGatewayEvalProjectsV1()
 }
 
@@ -602,7 +619,7 @@ export async function runRacesGatewayEvalV1(input: {
     await cleanupRacesGatewayEvalProjectsV1()
     const now = Date.now()
     checkpoint = await sealCheckpoint({
-      version: RACES_GATEWAY_EVAL_VERSION_V6,
+      version: RACES_GATEWAY_EVAL_VERSION_V7,
       fixtureHash,
       modelIdentity: input.modelIdentity,
       graderIdentity: input.graderIdentity,
@@ -611,6 +628,7 @@ export async function runRacesGatewayEvalV1(input: {
       nextIndex: 0,
       status: 'running',
       results: [],
+      attemptFailures: [],
       score: null,
       startedAt: now,
       updatedAt: now,
@@ -632,6 +650,14 @@ export async function runRacesGatewayEvalV1(input: {
     else result = await executeModelFixture({ fixture, modelIdentity: input.modelIdentity, grade: input.grade })
     checkpoint.results = [...checkpoint.results.slice(0, index), result]
     if (result.status === 'failed') {
+      const attempt = checkpoint.attemptFailures
+        .filter(item => item.fixtureId === fixture.id).length + 1
+      checkpoint.attemptFailures = [...checkpoint.attemptFailures, {
+        fixtureId: fixture.id,
+        attempt,
+        recordedAt: Date.now(),
+        result,
+      }]
       checkpoint.status = 'failed'
       checkpoint.nextIndex = index
       await save(fixture)

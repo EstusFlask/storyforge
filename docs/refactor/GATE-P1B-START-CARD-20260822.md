@@ -4,7 +4,7 @@
 任务 ID：`GATE-P1B`  
 隔离分支：`refactor/world-engine-harness`  
 基线：`bd722008 test(E2E): edit structured worldview value only`  
-状态：机械门已通过；凭据已按授权复制且连接测试成功；V1～V5 失败已归档，等待 V6 sealed run
+状态：机械门已通过；凭据已按授权复制且连接测试成功；V1～V6 失败已归档，等待 V7 sealed run
 
 ## 1. 完成边界
 
@@ -39,11 +39,11 @@
 |---|---|
 | 隔离 origin | `http://127.0.0.1:4197/storyforge/` |
 | generator | `agnes/agnes-2.5-flash`（从正式 `agent.world-foundation.worldview-field` 路由解析） |
-| blind grader | `agnes/agnes-2.5-pro`（V6；由实时 `/v1/models` 目录确认，与 generator 身份不同） |
+| blind grader | `agnes/agnes-2.5-pro`（V7；由实时 `/v1/models` 目录确认，与 generator 身份不同） |
 | grader temperature | `0` |
 | grader max tokens | `4096`（V2；为兼容推理型 provider 的完成预算，不改变评分阈值） |
-| 单次 grader timeout | `600000 ms`（V6；等待预算，不改变输出 token 或质量阈值） |
-| checkpoint key | `storyforge-races-gateway-eval-v6` |
+| 单次 grader timeout | `600000 ms`（V7；等待预算，不改变输出 token 或质量阈值） |
+| checkpoint key | `storyforge-races-gateway-eval-v7` |
 | grader schema preflight | 矩阵前 1 次；严格闭集 JSON；证据写入 checkpoint，不参与质量计分 |
 | fixture / thresholds | 见 `RACE-6-EVAL-PROTOCOL-20260822.md`；真实结果出现后不得下调 |
 
@@ -114,6 +114,14 @@
 - 处置：V6 将单次 grader 等待预算冻结为 600 秒，并显式分类超时；同时在 blind grade 前归档
   generator 候选、manifest 和 transcript，防止 grader 故障抹掉已成功的生成证据。模型、fixture、
   输出 token 上限与质量阈值均未改变。
+
+### V6 失败运行
+
+- checkpoint：`9603d86bc197e07b36b2c7c567f3d252c1602d25faa804a70340b1e6dbbf7ccd`
+- 进度：`2/100`，失败样本 `empty-03`；前两例及各自盲评均完成。
+- 原因：Agnes 上游返回 HTTP 500 `do_request_failed`，属于外部传输失败，不是质量判定。
+- 处置：V7 新增签名 `attemptFailures` ledger；显式继续时保留失败尝试、错误、耗时和已有 transcript，
+  不再由 results 切片抹掉历史。仍不做隐藏重试，模型、fixture、Prompt 判据和质量阈值均未改变。
 
 ## 6. 凭据与连接回执
 

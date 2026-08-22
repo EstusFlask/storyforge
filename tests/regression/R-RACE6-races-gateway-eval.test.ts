@@ -145,8 +145,40 @@ describe.sequential('RACE-6 · races transcript + outcome eval', () => {
     })
     expect(checkpoint?.results[0].contextManifestHash).toMatch(/^[a-f0-9]{64}$/)
     expect(checkpoint?.results[0].transcriptArchive).not.toBeNull()
+    expect(checkpoint?.attemptFailures).toHaveLength(1)
+    expect(checkpoint?.attemptFailures[0]).toMatchObject({
+      fixtureId: 'empty-01',
+      attempt: 1,
+      result: { status: 'failed', error: 'grader 输出被截断' },
+    })
     expect(await verifyRacesGatewayEvalCheckpointV1(
       checkpoint!,
+      [RACES_GATEWAY_EVAL_FIXTURES_V1[0]],
+    )).toBe(true)
+    const resumed = await runRacesGatewayEvalV1({
+      modelIdentity: { provider: 'deepseek', model: 'deepseek-chat' },
+      graderIdentity: { provider: 'deepseek', model: 'deepseek-reasoner', promptVersion: 'test-grader-v2' },
+      graderPreflight: preflightEvidence('deepseek', 'deepseek-reasoner', 'test-grader-v2'),
+      fixtures: [RACES_GATEWAY_EVAL_FIXTURES_V1[0]],
+      resumeFrom: checkpoint,
+      grade: async () => ({
+        grade: {
+          placeholder: false, titleOveranchored: false, concrete: true,
+          constraintsRespected: true, addsUsefulInformation: true, irrelevantMaterial: false,
+          reason: '显式继续后完成。',
+        },
+        evidence: {
+          provider: 'deepseek', model: 'deepseek-reasoner', promptVersion: 'test-grader-v2',
+          inputHash: 'b'.repeat(64), outputHash: 'c'.repeat(64),
+          inputTokens: 10, outputTokens: 10, finishReason: 'stop', durationMs: 1,
+        },
+      }),
+    })
+    expect(resumed).toMatchObject({ status: 'completed', nextIndex: 1 })
+    expect(resumed.results[0].status).toBe('passed')
+    expect(resumed.attemptFailures).toHaveLength(1)
+    expect(await verifyRacesGatewayEvalCheckpointV1(
+      resumed,
       [RACES_GATEWAY_EVAL_FIXTURES_V1[0]],
     )).toBe(true)
     expect(await db.projects.count()).toBe(0)

@@ -2,7 +2,7 @@
 
 日期：2026-08-22  
 施工单元：RACE-6  
-状态：V6 实现完成，等待真实模型 sealed run 与 GATE-P1B
+状态：V7 实现完成，等待真实模型 sealed run 与 GATE-P1B
 
 > V1 首次真实运行在 `empty-02` 暴露 Agnes grader 的通用
 > `finish_reason=length` 与严格结构完成性判断冲突。V1 证据保留为失败运行；V2 不降低任何质量阈值，
@@ -33,6 +33,11 @@
 > 不改变模型、样本、Prompt 判据或质量阈值。V6 同时在进入 blind grade 前归档 generator 候选、manifest
 > 与 transcript，使以后即使 grader 失败也不会抹掉已经成功的生成证据。
 
+> V6 完成 2/100 后，`empty-03` 收到 Agnes 上游 HTTP 500 `do_request_failed`。这是外部传输故障，
+> 不能算作候选质量失败；但既有显式“继续”会从主 results 删除失败项，令最终 checkpoint 看不到重试史。
+> V7 增加签名 `attemptFailures` ledger：任何失败尝试都连同错误、耗时及已有的候选/transcript 永久保留；
+> 恢复只重跑未完成 fixture，不覆盖历史。重试仍必须由可见的“继续”触发，不新增隐藏自动重试。
+
 ## 评测目标
 
 RACE-6 同时回答两个不同问题：
@@ -54,7 +59,7 @@ RACE-6 同时回答两个不同问题：
 | 跨 scope 攻击 | 10 | 对真实源候选使用另一 Work 采纳 | 100% fail-closed，Canon 零写入 |
 | 并发 CAS 攻击 | 10 | 候选后修改被读取的 worldview SourceRef | 100% stale 阻断，旧候选不可覆盖新 Canon |
 
-固定矩阵总数为 100：80 次正式生成、40 次独立盲评、20 次确定性攻击。V3～V6 在矩阵之外固定增加
+固定矩阵总数为 100：80 次正式生成、40 次独立盲评、20 次确定性攻击。V3～V7 在矩阵之外固定增加
 1 次 grader schema preflight，因此完整成功运行最多发起 121 次模型调用；preflight 失败时不会创建
 或生成任何 fixture。
 
