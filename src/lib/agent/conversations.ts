@@ -188,10 +188,12 @@ export async function updateAgentEventCandidate(
       semanticReview: _staleSemanticReview,
       ...withoutHash
     } = payload
-    const candidateHash = await computeMasterCandidateHashV1(
-      withoutHash as unknown as MasterCandidatePayload,
-      content,
-    )
+    const candidateHash = options?.refreshOutputHash
+      ? await hashCanonicalValue({ draft: content, payload: withoutHash })
+      : await computeMasterCandidateHashV1(
+          withoutHash as unknown as MasterCandidatePayload,
+          content,
+        )
     const revisedPayload = { ...withoutHash, candidateHash }
     const nextPayload = JSON.stringify(revisedPayload)
     await db.transaction(

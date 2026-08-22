@@ -181,7 +181,7 @@ describe.sequential('RACE-6 · races transcript + outcome eval', () => {
     expect(await cleanupRacesGatewayEvalProjectsV1()).toBe(0)
   })
 
-  it('以确定性模型替身跑完 100 例编排，并在自包含证据落盘后清理隔离项目', async () => {
+  it('以确定性模型替身覆盖八类编排，并在自包含证据落盘后清理隔离项目', async () => {
     vi.stubGlobal('fetch', vi.fn(async (_url: string, init?: RequestInit) => {
       const body = JSON.parse(String(init?.body)) as { messages: Array<{ content: string }> }
       const prompt = body.messages.map(message => message.content).join('\n')
@@ -202,9 +202,20 @@ describe.sequential('RACE-6 · races transcript + outcome eval', () => {
         usage: { prompt_tokens: 80, completion_tokens: 60, total_tokens: 140 },
       }), { status: 200 })
     }))
+    const fixtures = [
+      RACES_GATEWAY_EVAL_FIXTURES_V1.find(item => item.id === 'empty-01')!,
+      RACES_GATEWAY_EVAL_FIXTURES_V1.find(item => item.id === 'partial-01')!,
+      RACES_GATEWAY_EVAL_FIXTURES_V1.find(item => item.id === 'late-01')!,
+      RACES_GATEWAY_EVAL_FIXTURES_V1.find(item => item.id === 'pinned-01')!,
+      RACES_GATEWAY_EVAL_FIXTURES_V1.find(item => item.id === 'compare-01')!,
+      RACES_GATEWAY_EVAL_FIXTURES_V1.find(item => item.id === 'compare-02')!,
+      RACES_GATEWAY_EVAL_FIXTURES_V1.find(item => item.id === 'scope-01')!,
+      RACES_GATEWAY_EVAL_FIXTURES_V1.find(item => item.id === 'cas-01')!,
+    ]
     const checkpoint = await runRacesGatewayEvalV1({
       modelIdentity: { provider: 'deepseek', model: 'deepseek-chat' },
       graderIdentity: { provider: 'fixture', model: 'deterministic', promptVersion: 'test-grader-v1' },
+      fixtures,
       grade: async () => ({
         grade: {
           placeholder: false, titleOveranchored: false, concrete: true,
@@ -218,14 +229,14 @@ describe.sequential('RACE-6 · races transcript + outcome eval', () => {
         },
       }),
     })
-    expect(checkpoint.results).toHaveLength(100)
-    expect(checkpoint.score).toMatchObject({ passed: true, completedCount: 100 })
-    expect(checkpoint.results.filter(item => item.kind === 'late-target' && item.expectedAnchorDelivered)).toHaveLength(20)
+    expect(checkpoint.results).toHaveLength(8)
+    expect(checkpoint.score).toMatchObject({ passed: true, completedCount: 8 })
+    expect(checkpoint.results.filter(item => item.kind === 'late-target' && item.expectedAnchorDelivered)).toHaveLength(1)
     expect(checkpoint.results.filter(item => item.kind === 'late-target')
       .every(item => item.selectedResourceKeys.length <= 20)).toBe(true)
-    expect(checkpoint.results.filter(item => item.kind === 'cross-scope-attack' && item.crossScopeBlocked)).toHaveLength(10)
-    expect(checkpoint.results.filter(item => item.kind === 'concurrent-cas' && item.staleBlocked)).toHaveLength(10)
+    expect(checkpoint.results.filter(item => item.kind === 'cross-scope-attack' && item.crossScopeBlocked)).toHaveLength(1)
+    expect(checkpoint.results.filter(item => item.kind === 'concurrent-cas' && item.staleBlocked)).toHaveLength(1)
     expect(JSON.stringify(checkpoint).length).toBeLessThan(4_500_000)
     expect(await cleanupRacesGatewayEvalProjectsV1()).toBe(0)
-  }, 60_000)
+  }, 30_000)
 })

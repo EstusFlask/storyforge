@@ -25,9 +25,11 @@ function manualChunkFor(moduleId: string): string | undefined {
     if (packagePath.startsWith('dexie/')) return 'vendor-db'
     if (packagePath.startsWith('d3-hierarchy/')) return 'vendor-d3'
     if (packagePath.startsWith('lucide-react/')) return 'vendor-icons'
+    if (packagePath.startsWith('zustand/')) return 'vendor-zustand'
   }
 
   if (id.endsWith('/src/lib/ai/context-builder.ts')) return 'ai-context'
+  if (id.endsWith('/src/lib/context-gateway/selector.ts')) return 'context-selector'
   return undefined
 }
 

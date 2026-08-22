@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react'
 import { ClipboardCopy, Download, FileJson, LoaderCircle, Play, RotateCcw, ShieldCheck, Upload } from 'lucide-react'
 import { type ChatResult } from '../../lib/ai/client'
 import { executeRegisteredAIEntryV1 } from '../../lib/agent/formal-ai-entry'
@@ -44,7 +44,8 @@ import { useAIConfigStore } from '../../stores/ai-config'
 import { useDialog } from '../shared/Dialog'
 import H86StoryArcEvalPanel from './H86StoryArcEvalPanel'
 import CreativeReliabilityEvalPanel from './CreativeReliabilityEvalPanel'
-import RacesGatewayEvalPanel from './RacesGatewayEvalPanel'
+
+const RacesGatewayEvalPanel = lazy(() => import('./RacesGatewayEvalPanel'))
 
 interface SplitViewState {
   checkpoint: H4LongConsistencyRunCheckpointV1 | null
@@ -894,7 +895,9 @@ export default function HarnessEvalPanel() {
       {renderAdjudicationSplit('held-out', 'H85 两阶段判类 Held-out')}
       <H86StoryArcEvalPanel />
       <CreativeReliabilityEvalPanel />
-      <RacesGatewayEvalPanel />
+      <Suspense fallback={null}>
+        <RacesGatewayEvalPanel />
+      </Suspense>
 
       <section className="border-t border-border pt-3">
         <div className="flex flex-wrap items-center justify-between gap-2">

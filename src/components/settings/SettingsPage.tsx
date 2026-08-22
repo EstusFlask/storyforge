@@ -1,11 +1,14 @@
-import { useState } from 'react'
+import { lazy, Suspense, useState } from 'react'
 import { BookOpen } from 'lucide-react'
 import AIConfigPanel from './AIConfigPanel'
 import { resetWelcomeGuide } from '../guide/WelcomeGuide'
-import HarnessEvalPanel from './HarnessEvalPanel'
 import CreativeReliabilityCommunityPanel from './CreativeReliabilityCommunityPanel'
 import ProjectStorageWorkspacePanel from './ProjectStorageWorkspacePanel'
 import type { Project } from '../../lib/types'
+
+const HarnessEvalPanel = import.meta.env.DEV
+  ? lazy(() => import('./HarnessEvalPanel'))
+  : null
 
 interface Props {
   project?: Project
@@ -27,7 +30,11 @@ export default function SettingsPage({ project, onOpenDataManagement }: Props) {
         <ProjectStorageWorkspacePanel project={project} onOpenDataManagement={onOpenDataManagement} />
       </div>
       <CreativeReliabilityCommunityPanel />
-      {import.meta.env.DEV && <HarnessEvalPanel />}
+      {HarnessEvalPanel && (
+        <Suspense fallback={null}>
+          <HarnessEvalPanel />
+        </Suspense>
+      )}
 
       {/* 其他设置 */}
       <div className="max-w-2xl mt-6 p-4 bg-bg-surface border border-border rounded-xl">

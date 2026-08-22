@@ -373,7 +373,10 @@ export function useDetailedOutlineGenerationController(
           projectId,
           output,
           await resolveScopeLike(projectId),
-          { creativeArtifact, refreshOutputHash: true },
+          {
+            creativeArtifact,
+            refreshOutputHash: true,
+          },
         )
         const restored = await readLatestDetailedOutlineGenerationCandidateV1({
           scope: await resolveScopeLike(projectId),
