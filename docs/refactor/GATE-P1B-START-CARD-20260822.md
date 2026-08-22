@@ -27,8 +27,8 @@
 | RACE-6 Harness | 提交 `88432a28`；100 个冻结 fixture、80 次生成、40 次盲评、20 次确定性攻击 |
 | Phase gate 回归修复 | 提交 `17447e1d`；自动资源硬上限、V2 selector policy、author-edit canonical hash、bundle 拆分 |
 | 真实结构化 UI E2E 修复 | 提交 `bd722008`；value-only 编辑器不再写入外层 wrapper |
-| 完整 CI | 463 files / 2199 tests；依赖 0 漏洞；lint、TypeScript、build、bundle gate 全通过 |
-| 完整 E2E | 隔离 Chromium 53/53 通过 |
+| 完整 CI | V12：463 files / 2203 tests；依赖 0 漏洞；lint、TypeScript、build、bundle gate 全通过 |
+| 完整 E2E | V12：隔离端口 4198，Chromium 53/53 通过（5.3 分钟） |
 | 生命周期 | checkpoint 每例签名落盘；项目清理由 `PROJECT_TABLES` 派生的 `cascadeDeleteProject()` 完成 |
 
 以上只能证明 Harness 编排与机械不变量，不能替代真实生成质量结果。
@@ -86,6 +86,8 @@
 - 外部原因：Agnes 两次返回 `insufficient_user_quota`；第二次余额 `$0.001984`，预扣需 `$0.002214`。
 - V12 处置：集中修复额度与权限误分类；错误合同已变化，不能把旧 V11 checkpoint 冒充 V12，补足额度后
   从 V12 0/100 重新运行。不得更换模型身份或降低 grader 输出预算规避冻结协议。
+- V12 机械回执：完整 CI 463 files / 2203 tests、生产依赖 0 漏洞、bundle 通过；隔离 Chromium E2E
+  53/53 通过。该回执只证明代码与 UI 生命周期，不替代尚未运行的 V12 真实模型质量矩阵。
 
 ### V1 失败运行
 

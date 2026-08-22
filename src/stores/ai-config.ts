@@ -182,7 +182,7 @@ function getChineseExplanation(status: number, msg: string): string {
     || lower.includes('accountoverdueerror')
   ) return '账户存在逾期欠费，本次请求已在账户校验层被阻断；结清欠费后再重试'
   if (isProviderQuotaRejectionV1({ status, message: msg }))
-    return '账户额度或配额不足，本次请求未获 Provider 执行；补足额度后再重试'
+    return '账户余额不足或配额已用完，本次请求未获 Provider 执行；补足额度后再重试'
 
   // 按 HTTP 状态码
   if (status === 401) return 'API Key 无效或已过期'
