@@ -1,4 +1,5 @@
 import { AIError } from '../../types'
+import { isProviderQuotaRejectionV1 } from '../../ai/provider-rejection'
 import type {
   AgentRunFailureActionV1,
   AgentRunFailureCategoryV1,
@@ -63,6 +64,14 @@ function decision(error: unknown): Omit<AgentRunFailureEvidenceV1, 'fingerprint'
     return { code: 'host_interrupted', retryable: true, category: 'cancelled', action: 'retry' }
   }
   if (error instanceof AIError) {
+    if (isProviderQuotaRejectionV1({ status: error.status, message: error.message })) {
+      return {
+        code: 'provider_quota',
+        retryable: false,
+        category: 'deterministic',
+        action: 'pause-for-author',
+      }
+    }
     if ([408, 409, 425, 429].includes(error.status) || error.status >= 500) {
       return { code: 'provider_transient', retryable: true, category: 'transient', action: 'retry' }
     }

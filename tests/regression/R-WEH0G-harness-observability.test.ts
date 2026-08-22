@@ -6,6 +6,8 @@ import {
   classifyHarnessFailureV1,
   type HarnessFailureClassV1,
 } from '../../src/lib/agent/run/harness-failure'
+import { classifyAgentRunFailureV1 } from '../../src/lib/agent/run/failure-policy'
+import { isProviderQuotaRejectionV1 } from '../../src/lib/ai/provider-rejection'
 import {
   HARNESS_FAULT_POINTS_V1,
   configureHarnessFaultInjectionV1,
@@ -54,6 +56,32 @@ describe('R-WEH0G · Harness 证据、错误分类与开发态故障注入', () 
     const second = await classifyHarnessFailureV1(samples[8][1], { stage: 'candidate' })
     expect(second).toEqual(first)
     expect(first.fingerprint).toMatch(/^[a-f0-9]{64}$/)
+  })
+
+  it('额度不足与权限错误、瞬时限流分开分类，403/429 网关变体不会误导恢复动作', async () => {
+    const agnesQuota = new AIError(403, JSON.stringify({
+      error: { code: 'insufficient_user_quota', message: '预扣费额度失败, 用户剩余额度不足' },
+    }))
+    const openAIQuota = new AIError(429, 'quota_exceeded: billing_hard_limit_reached')
+    const authorization = new AIError(403, 'permission denied for model')
+    const rateLimit = new AIError(429, 'rate limit exceeded')
+
+    expect(isProviderQuotaRejectionV1({ status: 403, message: agnesQuota.message })).toBe(true)
+    await expect(classifyHarnessFailureV1(agnesQuota)).resolves.toMatchObject({
+      failureClass: 'provider', code: 'provider_quota', retryable: false,
+    })
+    await expect(classifyHarnessFailureV1(openAIQuota)).resolves.toMatchObject({
+      code: 'provider_quota', retryable: false,
+    })
+    await expect(classifyAgentRunFailureV1(agnesQuota)).resolves.toMatchObject({
+      code: 'provider_quota', retryable: false, action: 'pause-for-author',
+    })
+    await expect(classifyHarnessFailureV1(authorization)).resolves.toMatchObject({
+      code: 'provider_authorization', retryable: false,
+    })
+    await expect(classifyHarnessFailureV1(rateLimit)).resolves.toMatchObject({
+      code: 'provider_transient', retryable: true,
+    })
   })
 
   it('五段证据不会把待采纳候选或未完成多任务 Run 伪装成终态完成', () => {

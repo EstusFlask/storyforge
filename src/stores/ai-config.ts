@@ -4,6 +4,7 @@ import { normalizeProviderModel, PROVIDER_PRESETS } from '../lib/types'
 import { createLog, updateLog } from '../lib/ai/logger'
 import { nanoid } from '../lib/utils/id'
 import { buildOpenAIEndpoint, normalizeOpenAIBaseUrl } from '../lib/ai/openai-endpoint'
+import { isProviderQuotaRejectionV1 } from '../lib/ai/provider-rejection'
 import {
   sanitizeAITaskRoutes,
   type AITaskKind,
@@ -180,8 +181,8 @@ function getChineseExplanation(status: number, msg: string): string {
     || lower.includes('account overdue')
     || lower.includes('accountoverdueerror')
   ) return '账户存在逾期欠费，本次请求已在账户校验层被阻断；结清欠费后再重试'
-  if (lower.includes('insufficient balance') || lower.includes('insufficient_balance'))
-    return '账户余额不足，请充值后使用'
+  if (isProviderQuotaRejectionV1({ status, message: msg }))
+    return '账户额度或配额不足，本次请求未获 Provider 执行；补足额度后再重试'
 
   // 按 HTTP 状态码
   if (status === 401) return 'API Key 无效或已过期'

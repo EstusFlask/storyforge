@@ -1,4 +1,5 @@
 import { AIError } from '../../types'
+import { isProviderQuotaRejectionV1 } from '../../ai/provider-rejection'
 import { AgentTeamBudgetExceededError } from '../team-budget'
 import {
   StructuredOutputPipelineErrorV1,
@@ -98,14 +99,21 @@ function decide(
     return { failureClass, code: `structured_output_repair_${failureClass}`, retryable: false }
   }
   if (error instanceof AIError) {
+    const quotaRejected = isProviderQuotaRejectionV1({
+      status: error.status,
+      message: error.message,
+    })
     return {
       failureClass: 'provider',
-      code: error.status === 401 || error.status === 403
+      code: quotaRejected
+        ? 'provider_quota'
+        : error.status === 401 || error.status === 403
         ? 'provider_authorization'
         : [408, 409, 425, 429].includes(error.status) || error.status >= 500
           ? 'provider_transient'
           : 'provider_request_rejected',
-      retryable: [408, 409, 425, 429].includes(error.status) || error.status >= 500,
+      retryable: !quotaRejected
+        && ([408, 409, 425, 429].includes(error.status) || error.status >= 500),
     }
   }
   const normalized = message(error)

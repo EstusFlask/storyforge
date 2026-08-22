@@ -2,7 +2,7 @@
 
 日期：2026-08-22  
 施工单元：RACE-6  
-状态：V11 已运行至 4/100；grader 因 Agnes 额度不足可恢复暂停，GATE-P1B 未通过
+状态：V11 额度暂停证据已归档；V12 quota 分类修复完成，等待额度后重新 sealed run
 
 > V1 首次真实运行在 `empty-02` 暴露 Agnes grader 的通用
 > `finish_reason=length` 与严格结构完成性判断冲突。V1 证据保留为失败运行；V2 不降低任何质量阈值，
@@ -69,6 +69,14 @@
 > `d973641b2fa333378a67a22c4cb280c16f88523ca7190cb5c6cad79e7219da5f` 已通过 UI 导出；在账户额度
 > 足以完成 4096-token 预扣前不伪造完成、不降低预算、不切换有利模型。
 
+> V11 同一 checkpoint 的第二次显式续跑仍在 `empty-05` grader 收到
+> `insufficient_user_quota`，签名 hash 更新为
+> `feb455a46b8c545664a8afa5b4f0e01d5678156b01bb23e3d688256488465441`。证据同时暴露统一失败分类
+> 把带余额语义的 HTTP 403 错标为 `provider_authorization`。V12 建立 provider quota/credits 的集中判别，
+> 覆盖 402 以及 403/429 网关变体；Harness 与 durable failure policy 统一返回 `provider_quota`、不可自动
+> 重试、等待外部额度变化，权限错误和瞬时 rate limit 仍保持独立。因为失败证据合同发生变化，V12 使用
+> 新 checkpoint key，从 0 开始；生成模型、grader、4096-token 预算、fixture 和质量阈值均未改变。
+
 ## 评测目标
 
 RACE-6 同时回答两个不同问题：
@@ -90,7 +98,7 @@ RACE-6 同时回答两个不同问题：
 | 跨 scope 攻击 | 10 | 对真实源候选使用另一 Work 采纳 | 100% fail-closed，Canon 零写入 |
 | 并发 CAS 攻击 | 10 | 候选后修改被读取的 worldview SourceRef | 100% stale 阻断，旧候选不可覆盖新 Canon |
 
-固定矩阵总数为 100：80 次正式生成、40 次独立盲评、20 次确定性攻击。V3～V11 在矩阵之外固定增加
+固定矩阵总数为 100：80 次正式生成、40 次独立盲评、20 次确定性攻击。V3～V12 在矩阵之外固定增加
 1 次 grader schema preflight，因此完整成功运行最多发起 121 次模型调用；preflight 失败时不会创建
 或生成任何 fixture。
 

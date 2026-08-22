@@ -4,7 +4,7 @@
 任务 ID：`GATE-P1B`  
 隔离分支：`refactor/world-engine-harness`  
 基线：`bd722008 test(E2E): edit structured worldview value only`  
-状态：机械门已通过；V11 已验证前四例并在独立 grader 额度预扣处暂停，等待补足同一 Provider 额度后续跑
+状态：机械门已通过；V11 额度暂停已归档，V12 quota 分类修复完成，等待补足同一 Provider 额度后重新运行
 
 ## 1. 完成边界
 
@@ -39,11 +39,11 @@
 |---|---|
 | 隔离 origin | `http://127.0.0.1:4197/storyforge/` |
 | generator | `agnes/agnes-2.5-flash`（从正式 `agent.world-foundation.worldview-field` 路由解析） |
-| blind grader | `agnes/agnes-2.5-pro`（V11；由实时 `/v1/models` 目录确认，与 generator 身份不同） |
+| blind grader | `agnes/agnes-2.5-pro`（V12；由实时 `/v1/models` 目录确认，与 generator 身份不同） |
 | grader temperature | `0` |
 | grader max tokens | `4096`（V2；为兼容推理型 provider 的完成预算，不改变评分阈值） |
-| 单次 grader timeout | `600000 ms`（V11；等待预算，不改变输出 token 或质量阈值） |
-| checkpoint key | `storyforge-races-gateway-eval-v11` |
+| 单次 grader timeout | `600000 ms`（V12；等待预算，不改变输出 token 或质量阈值） |
+| checkpoint key | `storyforge-races-gateway-eval-v12` |
 | grader schema preflight | 矩阵前 1 次；严格闭集 JSON；证据写入 checkpoint，不参与质量计分 |
 | fixture / thresholds | 见 `RACE-6-EVAL-PROTOCOL-20260822.md`；真实结果出现后不得下调 |
 
@@ -76,16 +76,16 @@
 | scope 泄漏 / 对比交付 / CAS 阻断 | 待执行 |
 | 总判定 | **运行未完成，门未通过** |
 
-### V11 可恢复暂停
+### V11 额度暂停归档
 
-- checkpoint：`d973641b2fa333378a67a22c4cb280c16f88523ca7190cb5c6cad79e7219da5f`
+- checkpoint：首次 `d973641b2fa333378a67a22c4cb280c16f88523ca7190cb5c6cad79e7219da5f`；
+  第二次显式续跑 `feb455a46b8c545664a8afa5b4f0e01d5678156b01bb23e3d688256488465441`
 - 进度：`4/100` 已完成并签名；`empty-05` generator 已成功，进入 blind grader 时暂停。
-- 已验证：V9 的 `empty-03` 与 V7 的 `empty-04` 两个历史结构故障样本均在 V11 通过；当前失败尝试仅
-  1 次，阶段为 `grader`，统一分类为 Provider authorization/quota，不计入产品非 Provider 失败硬门。
-- 外部原因：Agnes 返回 `insufficient_user_quota`；账户剩余 `$0.001900`，grader 单次 4096-token
-  预扣需要 `$0.002304`。这不是刷新、网络或项目代码能够恢复的状态。
-- 恢复方式：补足同一 Agnes Key 的可用额度后，在现有页面点击“继续 4/100”；不得清理 checkpoint、
-  更换模型身份或降低 grader 输出预算来规避既有冻结协议。
+- 已验证：V9 的 `empty-03` 与 V7 的 `empty-04` 两个历史结构故障样本均在 V11 通过；两次 quota 尝试
+  都位于 `grader/provider`，不计入产品非 Provider 失败硬门。
+- 外部原因：Agnes 两次返回 `insufficient_user_quota`；第二次余额 `$0.001984`，预扣需 `$0.002214`。
+- V12 处置：集中修复额度与权限误分类；错误合同已变化，不能把旧 V11 checkpoint 冒充 V12，补足额度后
+  从 V12 0/100 重新运行。不得更换模型身份或降低 grader 输出预算规避冻结协议。
 
 ### V1 失败运行
 
