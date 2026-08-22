@@ -4,7 +4,7 @@
 任务 ID：`GATE-P1B`  
 隔离分支：`refactor/world-engine-harness`  
 基线：`bd722008 test(E2E): edit structured worldview value only`  
-状态：机械门已通过；凭据已按授权复制且连接测试成功；V1～V4 失败已归档，等待 V5 sealed run
+状态：机械门已通过；凭据已按授权复制且连接测试成功；V1～V5 失败已归档，等待 V6 sealed run
 
 ## 1. 完成边界
 
@@ -39,11 +39,11 @@
 |---|---|
 | 隔离 origin | `http://127.0.0.1:4197/storyforge/` |
 | generator | `agnes/agnes-2.5-flash`（从正式 `agent.world-foundation.worldview-field` 路由解析） |
-| blind grader | `agnes/agnes-2.5-pro`（V5；由实时 `/v1/models` 目录确认，与 generator 身份不同） |
+| blind grader | `agnes/agnes-2.5-pro`（V6；由实时 `/v1/models` 目录确认，与 generator 身份不同） |
 | grader temperature | `0` |
 | grader max tokens | `4096`（V2；为兼容推理型 provider 的完成预算，不改变评分阈值） |
-| 单次 grader timeout | `180000 ms` |
-| checkpoint key | `storyforge-races-gateway-eval-v5` |
+| 单次 grader timeout | `600000 ms`（V6；等待预算，不改变输出 token 或质量阈值） |
+| checkpoint key | `storyforge-races-gateway-eval-v6` |
 | grader schema preflight | 矩阵前 1 次；严格闭集 JSON；证据写入 checkpoint，不参与质量计分 |
 | fixture / thresholds | 见 `RACE-6-EVAL-PROTOCOL-20260822.md`；真实结果出现后不得下调 |
 
@@ -104,6 +104,16 @@
   执行请求同时发送了作者模板 system 和 Harness hard system；部分上游接受，严格上游拒绝。
 - 处置：保留 V4 失败 checkpoint；V5 在统一 Prompt 执行层把全部 system 内容合并为唯一首条
   system envelope，精确合并请求仍写入 hash 和 transcript；未更换模型、fixture 或质量阈值。
+
+### V5 失败运行
+
+- checkpoint：`7bca20b96e66fe3d0feb51ff757184c50b4c1ecd3e1f12a6df7ff3a516b4af5e`
+- 进度：`0/100`，失败样本 `empty-01`；grader preflight 27.666 秒成功，`finish_reason=stop`。
+- 原因：样本总耗时 190.451 秒，错误为 `signal is aborted without reason`；结合 grader 的 180 秒
+  唯一超时控制器，定位为首例 blind grade 超时。system envelope 已通过 generator 调用。
+- 处置：V6 将单次 grader 等待预算冻结为 600 秒，并显式分类超时；同时在 blind grade 前归档
+  generator 候选、manifest 和 transcript，防止 grader 故障抹掉已成功的生成证据。模型、fixture、
+  输出 token 上限与质量阈值均未改变。
 
 ## 6. 凭据与连接回执
 

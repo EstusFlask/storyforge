@@ -8,6 +8,7 @@ import {
 } from '../../src/lib/evals/races-gateway/scoring'
 import {
   cleanupRacesGatewayEvalProjectsV1,
+  loadRacesGatewayEvalCheckpointV1,
   runRacesGatewayEvalV1,
   verifyRacesGatewayEvalCheckpointV1,
 } from '../../src/lib/evals/races-gateway/runner'
@@ -135,6 +136,19 @@ describe.sequential('RACE-6 · races transcript + outcome eval', () => {
       fixtures: [RACES_GATEWAY_EVAL_FIXTURES_V1[0]],
       grade: async () => { throw new Error('grader 输出被截断') },
     })).rejects.toThrow('empty-01 执行失败')
+    const checkpoint = loadRacesGatewayEvalCheckpointV1()
+    expect(checkpoint?.results[0]).toMatchObject({
+      status: 'failed',
+      projectId: null,
+      candidateText: '潮岸民以盐誓登记亲属，钟港民以师徒谱继承身份；双方共享航道，却长期争夺司法证言权。',
+      error: 'grader 输出被截断',
+    })
+    expect(checkpoint?.results[0].contextManifestHash).toMatch(/^[a-f0-9]{64}$/)
+    expect(checkpoint?.results[0].transcriptArchive).not.toBeNull()
+    expect(await verifyRacesGatewayEvalCheckpointV1(
+      checkpoint!,
+      [RACES_GATEWAY_EVAL_FIXTURES_V1[0]],
+    )).toBe(true)
     expect(await db.projects.count()).toBe(0)
     expect(await cleanupRacesGatewayEvalProjectsV1()).toBe(0)
   })

@@ -2,7 +2,7 @@
 
 日期：2026-08-22  
 施工单元：RACE-6  
-状态：V5 实现完成，等待真实模型 sealed run 与 GATE-P1B
+状态：V6 实现完成，等待真实模型 sealed run 与 GATE-P1B
 
 > V1 首次真实运行在 `empty-02` 暴露 Agnes grader 的通用
 > `finish_reason=length` 与严格结构完成性判断冲突。V1 证据保留为失败运行；V2 不降低任何质量阈值，
@@ -26,6 +26,13 @@
 > 模板 system 内容与不可覆盖硬约束合并为唯一首条 system envelope，实际合并结果继续进入
 > `renderedPromptHash` 与 Context Gateway transcript。fixture、模型身份和质量阈值均未改变。
 
+> V5 的 grader preflight 在 27.666 秒完成且严格 JSON 通过；`empty-01` 在 190.451 秒失败，错误为
+> `signal is aborted without reason`。结合每次 blind grade 唯一的 180 秒 AbortController，证据将故障
+> 定位为首例 blind grade 超时，而不是 generator 或 system envelope 再次失败。V5 checkpoint 已导出归档。
+> V6 把独立 grader 的单次冻结等待预算提升为 600 秒，并在超时时返回明确错误；这只改变等待预算，
+> 不改变模型、样本、Prompt 判据或质量阈值。V6 同时在进入 blind grade 前归档 generator 候选、manifest
+> 与 transcript，使以后即使 grader 失败也不会抹掉已经成功的生成证据。
+
 ## 评测目标
 
 RACE-6 同时回答两个不同问题：
@@ -47,7 +54,7 @@ RACE-6 同时回答两个不同问题：
 | 跨 scope 攻击 | 10 | 对真实源候选使用另一 Work 采纳 | 100% fail-closed，Canon 零写入 |
 | 并发 CAS 攻击 | 10 | 候选后修改被读取的 worldview SourceRef | 100% stale 阻断，旧候选不可覆盖新 Canon |
 
-固定矩阵总数为 100：80 次正式生成、40 次独立盲评、20 次确定性攻击。V3～V5 在矩阵之外固定增加
+固定矩阵总数为 100：80 次正式生成、40 次独立盲评、20 次确定性攻击。V3～V6 在矩阵之外固定增加
 1 次 grader schema preflight，因此完整成功运行最多发起 121 次模型调用；preflight 失败时不会创建
 或生成任何 fixture。
 

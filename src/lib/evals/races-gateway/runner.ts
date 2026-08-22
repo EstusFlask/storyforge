@@ -26,8 +26,8 @@ import {
 } from './archive'
 import { scoreRacesGatewayEvalV1, RACES_GATEWAY_EVAL_THRESHOLDS_V1 } from './scoring'
 import {
-  RACES_GATEWAY_EVAL_STORAGE_KEY_V5,
-  RACES_GATEWAY_EVAL_VERSION_V5,
+  RACES_GATEWAY_EVAL_STORAGE_KEY_V6,
+  RACES_GATEWAY_EVAL_VERSION_V6,
   type RacesGatewayBlindGradeV1,
   type RacesGatewayBlindGradeEvidenceV1,
   type RacesGatewayEvalCheckpointV1,
@@ -175,6 +175,7 @@ async function executeModelFixture(input: {
 }): Promise<RacesGatewayEvalResultV1> {
   const startedAt = performance.now()
   let seeded: SeededRacesGatewayWorkspaceV1 | null = null
+  let generatedEvidence: RacesGatewayEvalResultV1 | null = null
   try {
     seeded = await seedWorkspace(input.fixture)
     const conversation = await getOrCreateAgentConversation({
@@ -225,10 +226,6 @@ async function executeModelFixture(input: {
       .map(ref => `${ref.role}:${ref.contentHash}`))
     const transcriptArtifacts = Object.fromEntries(Object.entries(evidence.artifactBodies)
       .filter(([key]) => transcriptArtifactKeys.has(key)))
-    const isQualityCase = input.fixture.kind === 'empty' || input.fixture.kind === 'partial-world'
-    const graded = isQualityCase
-      ? await input.grade({ title: input.fixture.title, seedText: input.fixture.seedText, candidateText: parsed.value })
-      : null
     const mandatoryDelivered = input.fixture.kind === 'pinned-mandatory'
       ? evidence.manifest.gateway.retrievalTrace.mandatory.some(decision => (
           includesRef(decision.sourceRefs, 'worldviews', seeded?.worldviewId, 'races')
@@ -237,7 +234,7 @@ async function executeModelFixture(input: {
     const expectedAnchorDelivered = input.fixture.kind === 'late-target'
       ? includesRef(refs, 'characters', seeded.lateTargetCharacterId)
       : null
-    return {
+    generatedEvidence = {
       fixtureId: input.fixture.id,
       kind: input.fixture.kind,
       status: 'passed',
@@ -258,9 +255,19 @@ async function executeModelFixture(input: {
         : null,
       staleBlocked: null,
       crossScopeBlocked: null,
+      grade: null,
+      gradeEvidence: null,
+      error: null,
+      durationMs: Math.max(1, Math.round(performance.now() - startedAt)),
+    }
+    const isQualityCase = input.fixture.kind === 'empty' || input.fixture.kind === 'partial-world'
+    const graded = isQualityCase
+      ? await input.grade({ title: input.fixture.title, seedText: input.fixture.seedText, candidateText: parsed.value })
+      : null
+    return {
+      ...generatedEvidence,
       grade: graded?.grade ?? null,
       gradeEvidence: graded?.evidence ?? null,
-      error: null,
       durationMs: Math.max(1, Math.round(performance.now() - startedAt)),
     }
   } catch (error) {
@@ -273,7 +280,7 @@ async function executeModelFixture(input: {
         cleanupFailure = `；隔离项目清理失败：${safeError(cleanupError)}`
       }
     }
-    return {
+    const emptyFailure: RacesGatewayEvalResultV1 = {
       fixtureId: input.fixture.id,
       kind: input.fixture.kind,
       status: 'failed',
@@ -294,6 +301,17 @@ async function executeModelFixture(input: {
       error: `${safeError(error)}${cleanupFailure}`,
       durationMs: Math.max(1, Math.round(performance.now() - startedAt)),
     }
+    return generatedEvidence
+      ? {
+          ...generatedEvidence,
+          status: 'failed',
+          projectId: null,
+          grade: null,
+          gradeEvidence: null,
+          error: emptyFailure.error,
+          durationMs: emptyFailure.durationMs,
+        }
+      : emptyFailure
   }
 }
 
@@ -462,7 +480,7 @@ export async function verifyRacesGatewayEvalCheckpointV1(
   fixtures: readonly RacesGatewayEvalFixtureV1[] = RACES_GATEWAY_EVAL_FIXTURES_V1,
 ): Promise<boolean> {
   try {
-    if (checkpoint.version !== RACES_GATEWAY_EVAL_VERSION_V5
+    if (checkpoint.version !== RACES_GATEWAY_EVAL_VERSION_V6
       || !/^[a-f0-9]{64}$/.test(checkpoint.fixtureHash)
       || !/^[a-f0-9]{64}$/.test(checkpoint.checkpointHash)) return false
     if (await hashCanonicalValue(fixtures) !== checkpoint.fixtureHash) return false
@@ -479,8 +497,11 @@ export async function verifyRacesGatewayEvalCheckpointV1(
       const result = checkpoint.results[index]
       const fixture = fixtures[index]
       if (!fixture || result.kind !== fixture.kind) return false
-      if (result.status !== 'passed' || !isModelFixture(fixture)) continue
-      if (!result.transcriptArchive) return false
+      if (!isModelFixture(fixture)) continue
+      if (!result.transcriptArchive) {
+        if (result.status === 'passed') return false
+        continue
+      }
       const transcript = await readRacesGatewayTranscriptArchiveV1(result.transcriptArchive)
       if (transcript.manifest.manifestHash !== result.contextManifestHash) return false
       const roles = new Set(transcript.manifest.artifacts.map(item => item.role))
@@ -493,6 +514,7 @@ export async function verifyRacesGatewayEvalCheckpointV1(
           && result.selectedResourceKeys.includes(ref.resourceKey)
           && transcript.artifactBodies[`source-snapshot:${ref.contentHash}`] == null) return false
       }
+      if (result.status !== 'passed') continue
       if (fixture.kind === 'empty' || fixture.kind === 'partial-world') {
         if (!result.grade || !result.gradeEvidence
           || result.gradeEvidence.provider !== checkpoint.graderIdentity.provider
@@ -509,7 +531,7 @@ export async function verifyRacesGatewayEvalCheckpointV1(
 
 export function loadRacesGatewayEvalCheckpointV1(): RacesGatewayEvalCheckpointV1 | null {
   try {
-    const raw = localStorage.getItem(RACES_GATEWAY_EVAL_STORAGE_KEY_V5)
+    const raw = localStorage.getItem(RACES_GATEWAY_EVAL_STORAGE_KEY_V6)
     return raw ? JSON.parse(raw) as RacesGatewayEvalCheckpointV1 : null
   } catch {
     return null
@@ -517,7 +539,7 @@ export function loadRacesGatewayEvalCheckpointV1(): RacesGatewayEvalCheckpointV1
 }
 
 export function persistRacesGatewayEvalCheckpointV1(checkpoint: RacesGatewayEvalCheckpointV1): void {
-  localStorage.setItem(RACES_GATEWAY_EVAL_STORAGE_KEY_V5, JSON.stringify(checkpoint))
+  localStorage.setItem(RACES_GATEWAY_EVAL_STORAGE_KEY_V6, JSON.stringify(checkpoint))
 }
 
 export function exportRacesGatewayEvalCheckpointV1(checkpoint: RacesGatewayEvalCheckpointV1): string {
@@ -531,7 +553,7 @@ export async function cleanupRacesGatewayEvalProjectsV1(): Promise<number> {
 }
 
 export async function clearRacesGatewayEvalCheckpointV1(): Promise<void> {
-  localStorage.removeItem(RACES_GATEWAY_EVAL_STORAGE_KEY_V5)
+  localStorage.removeItem(RACES_GATEWAY_EVAL_STORAGE_KEY_V6)
   await cleanupRacesGatewayEvalProjectsV1()
 }
 
@@ -580,7 +602,7 @@ export async function runRacesGatewayEvalV1(input: {
     await cleanupRacesGatewayEvalProjectsV1()
     const now = Date.now()
     checkpoint = await sealCheckpoint({
-      version: RACES_GATEWAY_EVAL_VERSION_V5,
+      version: RACES_GATEWAY_EVAL_VERSION_V6,
       fixtureHash,
       modelIdentity: input.modelIdentity,
       graderIdentity: input.graderIdentity,
@@ -603,6 +625,7 @@ export async function runRacesGatewayEvalV1(input: {
   }
   for (let index = checkpoint.nextIndex; index < fixtures.length; index += 1) {
     const fixture = fixtures[index]
+    await input.onProgress?.({ fixture, completed: checkpoint.nextIndex, total: fixtures.length, checkpoint })
     let result: RacesGatewayEvalResultV1
     if (fixture.kind === 'cross-scope-attack') result = await executeCrossScopeFixture(fixture, checkpoint.results)
     else if (fixture.kind === 'concurrent-cas') result = await executeCasFixture(fixture, checkpoint.results)
