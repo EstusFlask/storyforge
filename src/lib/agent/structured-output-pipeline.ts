@@ -1,4 +1,5 @@
 import type { ChatMessage } from '../types'
+import { jsonrepair } from 'jsonrepair'
 
 export type StructuredOutputStatusV1 =
   | 'ready'
@@ -20,6 +21,7 @@ export type StructuredOutputNormalizationStepV1 =
   | 'trim-outer-whitespace'
   | 'remove-single-json-fence'
   | 'extract-first-balanced-json'
+  | 'escape-unescaped-json-quotes'
   | 'apply-registered-field-alias'
 
 export interface StructuredOutputIssueV1 {
@@ -226,6 +228,45 @@ function firstBalancedJson(text: string, root: StructuredOutputContractV1['root'
   return null
 }
 
+/**
+ * Accept only the narrow, lossless subset of jsonrepair that inserts escape
+ * characters before existing quotes. This fixes prose quotes inside JSON
+ * strings without accepting truncation repair, invented delimiters, removed
+ * commas, rewritten keys, or any other content-changing salvage.
+ */
+function onlyInsertedQuoteEscapes(original: string, repaired: string): boolean {
+  let originalIndex = 0
+  let repairedIndex = 0
+  let inserted = 0
+  while (originalIndex < original.length && repairedIndex < repaired.length) {
+    if (original[originalIndex] === repaired[repairedIndex]) {
+      originalIndex += 1
+      repairedIndex += 1
+      continue
+    }
+    if (
+      repaired[repairedIndex] === '\\'
+      && repaired[repairedIndex + 1] === '"'
+      && original[originalIndex] === '"'
+    ) {
+      inserted += 1
+      repairedIndex += 1
+      continue
+    }
+    return false
+  }
+  return inserted > 0 && originalIndex === original.length && repairedIndex === repaired.length
+}
+
+function repairUnescapedJsonQuotes(text: string): string | null {
+  try {
+    const repaired = jsonrepair(text)
+    return onlyInsertedQuoteEscapes(text, repaired) ? repaired : null
+  } catch {
+    return null
+  }
+}
+
 function fail(input: {
   contract: StructuredOutputContractV1
   originalText: string
@@ -347,13 +388,25 @@ export function evaluateStructuredOutputV1<T>(input: {
       }
     }
     if (parsed === undefined) {
-      fail({
-        contract, originalText, normalizedText, steps, aliases,
-        issue: {
-          code: 'structured-output-invalid-json', category: 'parse', path: '$',
-          message: '模型响应不是有效且完整的 JSON。', repairable: true,
-        },
-      })
+      const quoteRepaired = repairUnescapedJsonQuotes(normalizedText)
+      if (quoteRepaired) {
+        try {
+          parsed = JSON.parse(quoteRepaired)
+          normalizedText = quoteRepaired
+          steps.push('escape-unescaped-json-quotes')
+        } catch {
+          parsed = undefined
+        }
+      }
+      if (parsed === undefined) {
+        fail({
+          contract, originalText, normalizedText, steps, aliases,
+          issue: {
+            code: 'structured-output-invalid-json', category: 'parse', path: '$',
+            message: '模型响应不是有效且完整的 JSON。', repairable: true,
+          },
+        })
+      }
     }
   }
 
@@ -583,6 +636,7 @@ export function parseStructuredOutputRunEvidenceV1(value: unknown): StructuredOu
       'trim-outer-whitespace',
       'remove-single-json-fence',
       'extract-first-balanced-json',
+      'escape-unescaped-json-quotes',
       'apply-registered-field-alias',
     ]
     if (attempt.normalizationSteps.some(step => !allowedSteps.includes(step as StructuredOutputNormalizationStepV1))) {

@@ -44,6 +44,7 @@
     "delaunator": "^5.1.0",
     "dexie": "^4.0.11",
     "json5": "^2.2.3",
+    "jsonrepair": "^3.15.0",
     "jszip": "^3.10.1",
     "lucide-react": "^0.468.0",
     "mammoth": "^1.12.0",

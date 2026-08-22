@@ -8,8 +8,8 @@ import { executeRegisteredAIEntryV1 } from '../../lib/agent/formal-ai-entry'
 import { hashCanonicalValue } from '../../lib/agent/run/hash'
 import {
   buildRacesGatewayBlindGraderMessagesV1,
-  RACES_GATEWAY_BLIND_GRADER_PROMPT_VERSION_V10,
-  RACES_GATEWAY_GRADER_TIMEOUT_MS_V10,
+  RACES_GATEWAY_BLIND_GRADER_PROMPT_VERSION_V11,
+  RACES_GATEWAY_GRADER_TIMEOUT_MS_V11,
   RacesGatewayBlindGraderFailureV1,
   RACES_GATEWAY_GRADER_PREFLIGHT_INPUT_V3,
 } from '../../lib/evals/races-gateway/protocol'
@@ -132,7 +132,7 @@ export default function RacesGatewayEvalPanel() {
           const messages = buildRacesGatewayBlindGraderMessagesV1(input)
           const result: ChatResult = {}
           const controller = new AbortController()
-          const timeout = setTimeout(() => controller.abort(), RACES_GATEWAY_GRADER_TIMEOUT_MS_V10)
+          const timeout = setTimeout(() => controller.abort(), RACES_GATEWAY_GRADER_TIMEOUT_MS_V11)
           const startedAt = performance.now()
           try {
             const output = await executeRegisteredAIEntryV1(
@@ -149,7 +149,7 @@ export default function RacesGatewayEvalPanel() {
             const evidence = {
                 provider: graderConfig.provider,
                 model: graderConfig.model,
-                promptVersion: RACES_GATEWAY_BLIND_GRADER_PROMPT_VERSION_V10,
+                promptVersion: RACES_GATEWAY_BLIND_GRADER_PROMPT_VERSION_V11,
                 inputHash: await hashCanonicalValue(messages),
                 outputHash: await hashCanonicalValue(output),
                 inputTokens: result.usage?.inputTokens ?? null,
@@ -168,7 +168,7 @@ export default function RacesGatewayEvalPanel() {
             }
           } catch (value) {
             if (controller.signal.aborted) {
-              throw new Error(`RACE-6 grader 超过 ${RACES_GATEWAY_GRADER_TIMEOUT_MS_V10 / 1_000} 秒未完成严格 JSON`)
+              throw new Error(`RACE-6 grader 超过 ${RACES_GATEWAY_GRADER_TIMEOUT_MS_V11 / 1_000} 秒未完成严格 JSON`)
             }
             throw value
           } finally {
@@ -185,7 +185,7 @@ export default function RacesGatewayEvalPanel() {
         graderIdentity: {
           provider: graderConfig.provider,
           model: graderConfig.model,
-          promptVersion: RACES_GATEWAY_BLIND_GRADER_PROMPT_VERSION_V10,
+          promptVersion: RACES_GATEWAY_BLIND_GRADER_PROMPT_VERSION_V11,
         },
         graderPreflight,
         resumeFrom: checkpoint,

@@ -2,8 +2,8 @@ import type { StructuredOutputRunEvidenceV1 } from '../../agent/structured-outpu
 import type { HarnessFailureEvidenceV1 } from '../../agent/run/harness-failure'
 import type { ExactRunArtifactReferenceV1 } from '../../types'
 
-export const RACES_GATEWAY_EVAL_VERSION_V10 = 'races-gateway-eval-v10' as const
-export const RACES_GATEWAY_EVAL_STORAGE_KEY_V10 = 'storyforge-races-gateway-eval-v10' as const
+export const RACES_GATEWAY_EVAL_VERSION_V11 = 'races-gateway-eval-v11' as const
+export const RACES_GATEWAY_EVAL_STORAGE_KEY_V11 = 'storyforge-races-gateway-eval-v11' as const
 
 export type RacesGatewayEvalKindV1 =
   | 'empty'
@@ -158,7 +158,7 @@ export interface RacesGatewayEvalScoreV1 {
 }
 
 export interface RacesGatewayEvalCheckpointV1 {
-  version: typeof RACES_GATEWAY_EVAL_VERSION_V10
+  version: typeof RACES_GATEWAY_EVAL_VERSION_V11
   fixtureHash: string
   modelIdentity: { provider: string; model: string }
   graderIdentity: { provider: string; model: string; promptVersion: string }

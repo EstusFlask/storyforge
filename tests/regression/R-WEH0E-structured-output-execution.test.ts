@@ -56,6 +56,38 @@ function createNode(input: {
 }
 
 describe('WEH-0E structured output execution', () => {
+  it('只确定性转义字符串内误写的引号，不把截断 JSON 静默补全为成功', async () => {
+    const seenMessages: ChatMessage[][] = []
+    const quoteNode = createNode({
+      outputs: ['{"field":"races","value":"上层称为"听潮人"，围绕"母汐"竞争"}'],
+      seenMessages,
+    })
+    const result = await runBudgetedGenerationNode({
+      node: quoteNode,
+      prepared: prepareGenerationNode(quoteNode, { context: '上下文' }),
+      budget: new AgentTeamBudgetTracker('balanced'),
+      callLabel: '引号修复',
+      maxOutputTokens: 1_000,
+    })
+    expect(result.output.value).toBe('上层称为"听潮人"，围绕"母汐"竞争')
+    expect(seenMessages).toHaveLength(1)
+    expect(result.structuredOutputEvidence?.attempts[0].evidence.normalizationSteps)
+      .toContain('escape-unescaped-json-quotes')
+    expect(result.structuredOutputEvidence?.attempts[0].evidence.originalText)
+      .toContain('"听潮人"')
+
+    const truncatedNode = createNode({
+      outputs: ['{"field":"races","value":"潮民', '{"field":"races","value":"潮民'],
+    })
+    await expect(runBudgetedGenerationNode({
+      node: truncatedNode,
+      prepared: prepareGenerationNode(truncatedNode, { context: '上下文' }),
+      budget: new AgentTeamBudgetTracker('balanced'),
+      callLabel: '截断拒绝',
+      maxOutputTokens: 1_000,
+    })).rejects.toBeInstanceOf(StructuredOutputRepairFailedErrorV1)
+  })
+
   it('非法 JSON 只额外 repair 一次，并把 raw/attempt 证据带回', async () => {
     const seenMessages: ChatMessage[][] = []
     const node = createNode({
