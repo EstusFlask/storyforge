@@ -2,7 +2,7 @@
 
 日期：2026-08-22  
 施工单元：RACE-6  
-状态：V4 实现完成，等待真实模型 sealed run 与 GATE-P1B
+状态：V5 实现完成，等待真实模型 sealed run 与 GATE-P1B
 
 > V1 首次真实运行在 `empty-02` 暴露 Agnes grader 的通用
 > `finish_reason=length` 与严格结构完成性判断冲突。V1 证据保留为失败运行；V2 不降低任何质量阈值，
@@ -19,6 +19,12 @@
 > `agnes-1.5-flash` 渠道。随后通过受治理的 `/v1/models` 实时发现确认目录包含
 > `agnes-2.5-pro` 与 `agnes-2.5-pro-alpha`。V4 冻结稳定版 `Agnes 2.5 Pro` 为 grader，
 > 不使用 alpha；设置页移除失效的 1.5 可选项，但保留历史导入的上下文预算兼容。
+
+> V4 的 schema preflight 与前 2 个空态样本成功，但 `empty-03` 的 generator 被路由到要求
+> system message 唯一且位于首位的严格上游，暴露冻结作者模板 system 与 Harness hard system
+> 被作为两条消息发送的跨渠道兼容缺陷。V4 checkpoint 只读归档；V5 在统一 Prompt 执行层将全部
+> 模板 system 内容与不可覆盖硬约束合并为唯一首条 system envelope，实际合并结果继续进入
+> `renderedPromptHash` 与 Context Gateway transcript。fixture、模型身份和质量阈值均未改变。
 
 ## 评测目标
 
@@ -41,7 +47,7 @@ RACE-6 同时回答两个不同问题：
 | 跨 scope 攻击 | 10 | 对真实源候选使用另一 Work 采纳 | 100% fail-closed，Canon 零写入 |
 | 并发 CAS 攻击 | 10 | 候选后修改被读取的 worldview SourceRef | 100% stale 阻断，旧候选不可覆盖新 Canon |
 
-固定矩阵总数为 100：80 次正式生成、40 次独立盲评、20 次确定性攻击。V3 在矩阵之外固定增加
+固定矩阵总数为 100：80 次正式生成、40 次独立盲评、20 次确定性攻击。V3～V5 在矩阵之外固定增加
 1 次 grader schema preflight，因此完整成功运行最多发起 121 次模型调用；preflight 失败时不会创建
 或生成任何 fixture。
 

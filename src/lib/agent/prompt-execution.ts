@@ -429,9 +429,15 @@ export async function renderFrozenPromptExecutionV1(input: {
   })
   const systemMessages = rendered.messages.filter(message => message.role === 'system')
   const otherMessages = rendered.messages.filter(message => message.role !== 'system')
+  // OpenAI-compatible gateways are inconsistent about accepting more than one
+  // system message. Keep every frozen template instruction and the Harness hard
+  // constraint, but send them as one provider-portable leading envelope. The
+  // merged request is what renderedPromptHash and the Context Gateway transcript
+  // bind, so durable evidence still describes the exact bytes sent to the model.
+  const systemEnvelope = [...systemMessages.map(message => message.content), hardSystem]
+    .join('\n\n')
   const messages: ChatMessage[] = [
-    ...systemMessages,
-    { role: 'system', content: hardSystem },
+    { role: 'system', content: systemEnvelope },
     ...otherMessages,
     { role: 'user', content: `【作者本轮明确要求】\n${authorInstruction}` },
     ...additional.map(content => ({ role: 'user' as const, content })),

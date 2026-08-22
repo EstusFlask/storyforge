@@ -26,8 +26,8 @@ import {
 } from './archive'
 import { scoreRacesGatewayEvalV1, RACES_GATEWAY_EVAL_THRESHOLDS_V1 } from './scoring'
 import {
-  RACES_GATEWAY_EVAL_STORAGE_KEY_V4,
-  RACES_GATEWAY_EVAL_VERSION_V4,
+  RACES_GATEWAY_EVAL_STORAGE_KEY_V5,
+  RACES_GATEWAY_EVAL_VERSION_V5,
   type RacesGatewayBlindGradeV1,
   type RacesGatewayBlindGradeEvidenceV1,
   type RacesGatewayEvalCheckpointV1,
@@ -462,7 +462,7 @@ export async function verifyRacesGatewayEvalCheckpointV1(
   fixtures: readonly RacesGatewayEvalFixtureV1[] = RACES_GATEWAY_EVAL_FIXTURES_V1,
 ): Promise<boolean> {
   try {
-    if (checkpoint.version !== RACES_GATEWAY_EVAL_VERSION_V4
+    if (checkpoint.version !== RACES_GATEWAY_EVAL_VERSION_V5
       || !/^[a-f0-9]{64}$/.test(checkpoint.fixtureHash)
       || !/^[a-f0-9]{64}$/.test(checkpoint.checkpointHash)) return false
     if (await hashCanonicalValue(fixtures) !== checkpoint.fixtureHash) return false
@@ -509,7 +509,7 @@ export async function verifyRacesGatewayEvalCheckpointV1(
 
 export function loadRacesGatewayEvalCheckpointV1(): RacesGatewayEvalCheckpointV1 | null {
   try {
-    const raw = localStorage.getItem(RACES_GATEWAY_EVAL_STORAGE_KEY_V4)
+    const raw = localStorage.getItem(RACES_GATEWAY_EVAL_STORAGE_KEY_V5)
     return raw ? JSON.parse(raw) as RacesGatewayEvalCheckpointV1 : null
   } catch {
     return null
@@ -517,7 +517,7 @@ export function loadRacesGatewayEvalCheckpointV1(): RacesGatewayEvalCheckpointV1
 }
 
 export function persistRacesGatewayEvalCheckpointV1(checkpoint: RacesGatewayEvalCheckpointV1): void {
-  localStorage.setItem(RACES_GATEWAY_EVAL_STORAGE_KEY_V4, JSON.stringify(checkpoint))
+  localStorage.setItem(RACES_GATEWAY_EVAL_STORAGE_KEY_V5, JSON.stringify(checkpoint))
 }
 
 export function exportRacesGatewayEvalCheckpointV1(checkpoint: RacesGatewayEvalCheckpointV1): string {
@@ -531,7 +531,7 @@ export async function cleanupRacesGatewayEvalProjectsV1(): Promise<number> {
 }
 
 export async function clearRacesGatewayEvalCheckpointV1(): Promise<void> {
-  localStorage.removeItem(RACES_GATEWAY_EVAL_STORAGE_KEY_V4)
+  localStorage.removeItem(RACES_GATEWAY_EVAL_STORAGE_KEY_V5)
   await cleanupRacesGatewayEvalProjectsV1()
 }
 
@@ -580,7 +580,7 @@ export async function runRacesGatewayEvalV1(input: {
     await cleanupRacesGatewayEvalProjectsV1()
     const now = Date.now()
     checkpoint = await sealCheckpoint({
-      version: RACES_GATEWAY_EVAL_VERSION_V4,
+      version: RACES_GATEWAY_EVAL_VERSION_V5,
       fixtureHash,
       modelIdentity: input.modelIdentity,
       graderIdentity: input.graderIdentity,

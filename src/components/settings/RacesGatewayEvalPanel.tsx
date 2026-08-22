@@ -8,7 +8,7 @@ import { executeRegisteredAIEntryV1 } from '../../lib/agent/formal-ai-entry'
 import { hashCanonicalValue } from '../../lib/agent/run/hash'
 import {
   buildRacesGatewayBlindGraderMessagesV1,
-  RACES_GATEWAY_BLIND_GRADER_PROMPT_VERSION_V4,
+  RACES_GATEWAY_BLIND_GRADER_PROMPT_VERSION_V5,
   RACES_GATEWAY_GRADER_PREFLIGHT_INPUT_V3,
 } from '../../lib/evals/races-gateway/protocol'
 import { parseRacesGatewayBlindGradeCompletionV2 } from '../../lib/evals/races-gateway/scoring'
@@ -150,7 +150,7 @@ export default function RacesGatewayEvalPanel() {
               evidence: {
                 provider: graderConfig.provider,
                 model: graderConfig.model,
-                promptVersion: RACES_GATEWAY_BLIND_GRADER_PROMPT_VERSION_V4,
+                promptVersion: RACES_GATEWAY_BLIND_GRADER_PROMPT_VERSION_V5,
                 inputHash: await hashCanonicalValue(messages),
                 outputHash: await hashCanonicalValue(output),
                 inputTokens: result.usage?.inputTokens ?? null,
@@ -173,7 +173,7 @@ export default function RacesGatewayEvalPanel() {
         graderIdentity: {
           provider: graderConfig.provider,
           model: graderConfig.model,
-          promptVersion: RACES_GATEWAY_BLIND_GRADER_PROMPT_VERSION_V4,
+          promptVersion: RACES_GATEWAY_BLIND_GRADER_PROMPT_VERSION_V5,
         },
         graderPreflight,
         resumeFrom: checkpoint,

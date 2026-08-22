@@ -53,11 +53,14 @@ describe('WEH-0F Prompt execution contract', () => {
       additionalUserMessages: ['REGISTERED_CONTEXT_ONLY'],
     })
 
-    expect(rendered.messages[0]).toEqual({ role: 'system', content: '作者 system override：冷峻' })
-    expect(rendered.messages[1]).toEqual({ role: 'system', content: 'HARNESS_HARD_JSON_SCOPE_PERMISSION' })
-    expect(rendered.messages[2]).toEqual({ role: 'user', content: '作者 user override：雾港' })
-    expect(rendered.messages[3].role).toBe('user')
-    expect(rendered.messages[3].content).toContain(longInstruction)
+    expect(rendered.messages[0]).toEqual({
+      role: 'system',
+      content: '作者 system override：冷峻\n\nHARNESS_HARD_JSON_SCOPE_PERMISSION',
+    })
+    expect(rendered.messages.filter(message => message.role === 'system')).toHaveLength(1)
+    expect(rendered.messages[1]).toEqual({ role: 'user', content: '作者 user override：雾港' })
+    expect(rendered.messages[2].role).toBe('user')
+    expect(rendered.messages[2].content).toContain(longInstruction)
     expect(rendered.messages.at(-1)?.content).toBe('REGISTERED_CONTEXT_ONLY')
     expect(rendered.generationOverrides).toEqual({ temperature: 0.4, maxTokens: 2_500 })
     expect(parsePromptExecutionEvidenceV1(rendered.evidence)).toEqual(rendered.evidence)
