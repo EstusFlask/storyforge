@@ -73,6 +73,13 @@ characterRelations/worldviews/geographies/codexEntries` 等产品需要的表没
 范围静默降级。当前允许落实的是：保护现场、形成需求与契约蓝图、纠正完成状态、给出产品内可执行
 施工顺序；**正式产品代码继续施工停在上述裁定之前。**
 
+### 0.3 审计后立即落实的隔离
+
+已从 `WorldWorkManager` 移除“把当前小说改成剧本或漫画”的默认创建入口，删除失去调用方且不能被
+新架构复用的 `AdaptWorkWizard` UI 壳/专用样式，并把真实 E2E 改为断言该入口不存在。旧 service、表
+和既有实验 Work 没有删除或迁移，避免丢数据；本次只阻止用户继续从 live Work 新建不合规改编。
+旧草稿的全局只读门仍属于 Phase 1 后续项，不能把“隐藏新建入口”描述为旧数据已经完成合规迁移。
+
 ## 1. 开发现场与权威依据
 
 ### 1.1 现场保护
@@ -91,7 +98,7 @@ world-to-product development charter`。因主工作区不适合立即同步，�
 本审计建立了以下关联闭包：
 
 ```text
-入口
+入口（审计基线；现已按 0.3 节隔离）
   WorldWorkManager → AdaptWorkWizard → createAdaptation
 来源读取
   source-manifest.ts → live Work/OutlineNode/Chapter/StoryCore
@@ -115,7 +122,7 @@ AI 写入
 `world-engine/releases.ts` 再按 owner 过滤并压缩记录。该判断不是功能分支新增代码造成的，也不能在
 产品适配器中无证据修补。
 
-## 2. 当前分支已有产品流程图
+## 2. 审计基线已有产品流程图（创建入口现已隔离）
 
 ### 2.1 短篇小说当前流程
 
@@ -646,7 +653,7 @@ FIELD_REGISTRY/AdoptionSchema/`adopt()` 写入，再创建新的 WorldRevision/W
 
 | 优先级 | 当前事实 | 与总纲差距 | 处置 |
 |---|---|---|---|
-| P0 | 向导从 active Work 读取 live Outline/Chapter/StoryCore | 没有从 WorldRelease 开始 | 下线为 legacy experimental；改为先选 Release，再走产品 Catalog |
+| P0 | 审计基线向导从 active Work 读取 live Outline/Chapter/StoryCore | 没有从 WorldRelease 开始 | **已隔离并删除旧向导 UI**；未来先选 Release，再走产品 Catalog |
 | P0 | SourceSelection 保存 `outlineNodeId/chapterId` | 跨产品长期身份使用 Dexie ID | 两套产品契约只保存 portable export ID/stable key |
 | P0 | SourceUnits 只存 hash/摘要，AI 时回读 live 正文 | 冻结来源可漂移且依赖工作表存在 | CONTEXT_SOURCES 只从 Release+Selection 读取；正文缺失按停止线处理 |
 | P0 | `createAdaptation()` 在 Selection 前创建 target Work/root/source rows | 世界选择冻结前已写产品表 | 改为 Catalog/preview 零写；Selection 冻结后才原子创建产品项目和目标 Work |
@@ -682,8 +689,8 @@ FIELD_REGISTRY/AdoptionSchema/`adopt()` 写入，再创建新的 WorldRevision/W
 - `AdaptationProject` 拆为 `ScreenplayProject` 与 `ComicProject`；Brief、Plan、target spec、状态不再共用。
 - `sourceUnitIds` 改为产品专属、可便携验证的 source refs；不能长期引用 `adaptationSourceUnits.id`。
 - `adaptation-durable.ts` 拆成 screenplay/comic Run；共用的只能是 Harness 基础设施。
-- `AdaptWorkWizard` 拆成两个产品入口，各自先选择 WorldRelease、填写产品设定、浏览专属 Catalog、
-  冻结 Selection。
+- 不恢复已删除的 `AdaptWorkWizard`；未来分别新建两个产品入口，各自先选择 WorldRelease、填写产品
+  设定、浏览专属 Catalog、冻结 Selection。
 - 完成操作从“改 status”升级为“校验并发布 immutable Product Release”。
 - 漫画媒资调用增加持久 job 和 Release blob pin。
 
@@ -804,7 +811,7 @@ WorldRelease 出口、不继续 product code。若选择修改出口，先写项
 
 ### Phase 1：对齐隔离
 
-1. 默认隐藏旧改编创建入口并标 legacy experimental；
+1. 已落实：默认隐藏旧改编创建入口并标 legacy experimental；
 2. 保留旧数据只读/导出；
 3. 更新能力基线、Feature Guide 和旧蓝图状态；
 4. 冻结短篇/长篇 Golden Master。

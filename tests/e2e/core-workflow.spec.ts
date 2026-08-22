@@ -39,7 +39,7 @@ test('产品综合首页提供并列功能入口和真实世界基座', async ({
   await expect(page.getByRole('button', { name: '文字游戏', exact: true })).toBeVisible()
 })
 
-test('短篇小说可沿统一创作基座分别改编为正规剧本和漫画', async ({ page }) => {
+test('短篇小说沿用统一创作基座，旧 live-Work 改编入口默认隔离', async ({ page }) => {
   await page.addInitScript(() => {
     localStorage.setItem('storyforge_guide_completed', 'e2e')
   })
@@ -66,59 +66,11 @@ test('短篇小说可沿统一创作基座分别改编为正规剧本和漫画',
   await expect(page.getByRole('heading', { name: '短篇小说创作', exact: true })).toBeVisible()
   await expect(page.getByText('小说 · 短篇', { exact: true })).toBeVisible()
 
-  // ADAPT-CORE-1 + SCREEN-1: freeze the selected novel source before opening
-  // the independent screenplay Work, then cross the manual confirmation gates.
+  // Charter alignment: the legacy adaptation wizard reads the mutable Work.
+  // Keep it unreachable until product-specific frozen SourceSelection exists.
   await page.getByRole('button', { name: '世界引擎', exact: true }).click()
   const manager = page.getByRole('region', { name: '世界作品' })
-  await manager.getByRole('button', { name: '把当前小说改成剧本或漫画', exact: true }).click()
-  const wizard = page.getByRole('complementary', { name: '创建小说改编' })
-  await wizard.getByRole('button', { name: '校验并预览来源', exact: true }).click()
-  await expect(wizard).toContainText('0 个有正文章节')
-  await wizard.getByRole('button', { name: '创建并进入工作台', exact: true }).click()
-  await expect(manager.locator('.sf-world-work-row.active')).toContainText('电影剧本')
-
-  await page.getByRole('button', { name: '作品创作', exact: true }).click()
-  await expect(page.getByRole('heading', { name: '正规剧本工作台', exact: true })).toBeVisible()
-  await expect(page.getByRole('heading', { name: 'E2E 短篇改编源 · 电影剧本', exact: true })).toBeVisible()
-  await page.getByRole('button', { name: '保存草稿', exact: true }).click()
-  await page.getByRole('button', { name: '作者确认 Brief', exact: true }).click()
-  await expect(page.getByText('已按 v1 确认', { exact: true }).first()).toBeVisible()
-  await page.getByRole('button', { name: '保存计划', exact: true }).click()
-  await page.getByRole('button', { name: '作者确认计划', exact: true }).click()
-  await page.getByRole('button', { name: '进入场景生产', exact: true }).click()
-  await page.getByRole('button', { name: '新建场景', exact: true }).click()
-  await expect(page.getByText('1 场', { exact: true }).first()).toBeVisible()
-  await expect(page.getByRole('button', { name: 'Fountain', exact: true })).toBeVisible()
-  await expect(page.getByRole('button', { name: 'FDX', exact: true })).toBeVisible()
-
-  // COMIC-1 + MEDIA-CORE-1: return to the unchanged source Work and create a
-  // second, independent adaptation. Production opens only after Brief, plan,
-  // and the visual bible have all been author-confirmed.
-  await page.getByRole('button', { name: '世界引擎', exact: true }).click()
-  await manager.locator('.sf-world-work-row').filter({ hasText: 'E2E 短篇改编源' }).first().locator('button').first().click()
-  await expect(manager.locator('.sf-world-work-row.active')).toContainText('小说 · 短篇')
-  await manager.getByRole('button', { name: '把当前小说改成剧本或漫画', exact: true }).click()
-  const comicWizard = page.getByRole('complementary', { name: '创建小说改编' })
-  await comicWizard.getByRole('button', { name: '页漫', exact: true }).click()
-  await comicWizard.getByRole('button', { name: '校验并预览来源', exact: true }).click()
-  await comicWizard.getByRole('button', { name: '创建并进入工作台', exact: true }).click()
-  await expect(manager.locator('.sf-world-work-row.active')).toContainText('漫画')
-
-  await page.getByRole('button', { name: '作品创作', exact: true }).click()
-  await expect(page.getByRole('heading', { name: '漫画工作台', exact: true })).toBeVisible()
-  await expect(page.getByRole('heading', { name: 'E2E 短篇改编源 · 漫画', exact: true })).toBeVisible()
-  await page.getByRole('button', { name: '保存草稿', exact: true }).click()
-  await page.getByRole('button', { name: '作者确认 Brief', exact: true }).click()
-  await page.getByRole('button', { name: '保存计划', exact: true }).click()
-  await page.getByRole('button', { name: '作者确认计划', exact: true }).click()
-  await page.getByRole('button', { name: '保存并确认视觉圣经', exact: true }).click()
-  await page.getByRole('button', { name: '进入漫画生产', exact: true }).click()
-  await page.getByRole('button', { name: '新页', exact: true }).click()
-  await expect(page.getByText(/1 页 \/ [1-9] 格/)).toBeVisible()
-  await page.getByRole('button', { name: 'QA 与导出', exact: true }).click()
-  await expect(page.getByText('正式导出已阻止', { exact: true })).toBeVisible()
-  await expect(page.getByRole('button', { name: 'CBZ', exact: true })).toBeVisible()
-  await expect(page.getByRole('button', { name: 'PDF 打印', exact: true })).toBeVisible()
+  await expect(manager.getByRole('button', { name: '把当前小说改成剧本或漫画', exact: true })).toHaveCount(0)
 })
 
 test('产品综合首页可从零创建世界引擎并分配稳定编号', async ({ page }) => {
