@@ -2,8 +2,8 @@ import type { StructuredOutputRunEvidenceV1 } from '../../agent/structured-outpu
 import type { HarnessFailureEvidenceV1 } from '../../agent/run/harness-failure'
 import type { ExactRunArtifactReferenceV1 } from '../../types'
 
-export const RACES_GATEWAY_EVAL_VERSION_V8 = 'races-gateway-eval-v8' as const
-export const RACES_GATEWAY_EVAL_STORAGE_KEY_V8 = 'storyforge-races-gateway-eval-v8' as const
+export const RACES_GATEWAY_EVAL_VERSION_V9 = 'races-gateway-eval-v9' as const
+export const RACES_GATEWAY_EVAL_STORAGE_KEY_V9 = 'storyforge-races-gateway-eval-v9' as const
 
 export type RacesGatewayEvalKindV1 =
   | 'empty'
@@ -47,6 +47,14 @@ export interface RacesGatewayBlindGradeEvidenceV1 {
   durationMs: number
 }
 
+export interface RacesGatewayBlindGradeFailureEvidenceV1
+  extends RacesGatewayBlindGradeEvidenceV1 {
+  rawOutput: string
+  parseError: string
+}
+
+export type RacesGatewayEvalFailureStageV1 = 'generation' | 'grader' | 'attack'
+
 export interface RacesGatewayTranscriptArchiveV1 {
   version: 1
   encoding: 'gzip-base64'
@@ -82,6 +90,7 @@ export interface RacesGatewayEvalResultV1 {
   fixtureId: string
   kind: RacesGatewayEvalKindV1
   status: 'passed' | 'failed'
+  failureStage: RacesGatewayEvalFailureStageV1 | null
   projectId: number | null
   runId: number | null
   candidateEventId: number | null
@@ -96,6 +105,7 @@ export interface RacesGatewayEvalResultV1 {
   crossScopeBlocked: boolean | null
   grade: RacesGatewayBlindGradeV1 | null
   gradeEvidence: RacesGatewayBlindGradeEvidenceV1 | null
+  gradeFailureEvidence: RacesGatewayBlindGradeFailureEvidenceV1 | null
   failureEvidence: HarnessFailureEvidenceV1 | null
   structuredFailureEvidence: StructuredOutputRunEvidenceV1 | null
   error: string | null
@@ -141,13 +151,14 @@ export interface RacesGatewayEvalScoreV1 {
   comparisonDeliveryRate: number
   casBlockRate: number
   providerAttemptFailureCount: number
+  graderAttemptFailureCount: number
   nonProviderAttemptFailureCount: number
   passed: boolean
   failures: string[]
 }
 
 export interface RacesGatewayEvalCheckpointV1 {
-  version: typeof RACES_GATEWAY_EVAL_VERSION_V8
+  version: typeof RACES_GATEWAY_EVAL_VERSION_V9
   fixtureHash: string
   modelIdentity: { provider: string; model: string }
   graderIdentity: { provider: string; model: string; promptVersion: string }

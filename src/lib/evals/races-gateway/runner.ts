@@ -27,6 +27,7 @@ import type { Character, Project, WorkspaceScope, Worldview } from '../../types'
 import { ensureWorkspaceOwnership } from '../../world-engine/ownership'
 import { stampNewRecord } from '../../world-engine/scope'
 import { RACES_GATEWAY_EVAL_FIXTURES_V1 } from './fixtures'
+import { RacesGatewayBlindGraderFailureV1 } from './protocol'
 import {
   createRacesGatewayFailureTranscriptArchiveV2,
   createRacesGatewayTranscriptArchiveV1,
@@ -34,8 +35,8 @@ import {
 } from './archive'
 import { scoreRacesGatewayEvalV1, RACES_GATEWAY_EVAL_THRESHOLDS_V1 } from './scoring'
 import {
-  RACES_GATEWAY_EVAL_STORAGE_KEY_V8,
-  RACES_GATEWAY_EVAL_VERSION_V8,
+  RACES_GATEWAY_EVAL_STORAGE_KEY_V9,
+  RACES_GATEWAY_EVAL_VERSION_V9,
   type RacesGatewayBlindGradeV1,
   type RacesGatewayBlindGradeEvidenceV1,
   type RacesGatewayEvalCheckpointV1,
@@ -250,6 +251,7 @@ async function executeModelFixture(input: {
       fixtureId: input.fixture.id,
       kind: input.fixture.kind,
       status: 'passed',
+      failureStage: null,
       projectId: seeded.projectId,
       runId: run.runId,
       candidateEventId: candidate.event.id!,
@@ -269,6 +271,7 @@ async function executeModelFixture(input: {
       crossScopeBlocked: null,
       grade: null,
       gradeEvidence: null,
+      gradeFailureEvidence: null,
       failureEvidence: null,
       structuredFailureEvidence: null,
       error: null,
@@ -288,6 +291,9 @@ async function executeModelFixture(input: {
     const failedProjectId = seeded?.projectId ?? null
     const failureEvidence = await classifyHarnessFailureV1(error)
     const structuredFailureEvidence = structuredOutputFailureEvidenceV1(error)
+    const gradeFailureEvidence = error instanceof RacesGatewayBlindGraderFailureV1
+      ? error.failureEvidence
+      : null
     let failureArchive: RacesGatewayEvalResultV1['transcriptArchive'] = null
     let archiveFailure = ''
     if (seeded && durableRunId != null && !generatedEvidence) {
@@ -343,6 +349,7 @@ async function executeModelFixture(input: {
       fixtureId: input.fixture.id,
       kind: input.fixture.kind,
       status: 'failed',
+      failureStage: 'generation',
       projectId: null,
       runId: null,
       candidateEventId: null,
@@ -357,6 +364,7 @@ async function executeModelFixture(input: {
       crossScopeBlocked: null,
       grade: null,
       gradeEvidence: null,
+      gradeFailureEvidence,
       failureEvidence,
       structuredFailureEvidence,
       error: `${safeError(error)}${archiveFailure}${cleanupFailure}`,
@@ -366,9 +374,11 @@ async function executeModelFixture(input: {
       ? {
           ...generatedEvidence,
           status: 'failed',
+          failureStage: 'grader',
           projectId: null,
           grade: null,
           gradeEvidence: null,
+          gradeFailureEvidence,
           failureEvidence,
           structuredFailureEvidence,
           error: emptyFailure.error,
@@ -425,12 +435,14 @@ async function executeCrossScopeFixture(
     }
     return {
       fixtureId: fixture.id, kind: fixture.kind, status: 'passed', projectId: source.scope.projectId,
+      failureStage: null,
       runId: source.result.runId, candidateEventId: source.result.candidateEventId, candidateText: '',
       contextManifestHash: source.result.contextManifestHash, selectedResourceKeys: [], mandatoryDelivered: null,
       transcriptArchive: null,
       expectedAnchorDelivered: null, expectedAnchorInOutcome: null, staleBlocked: null,
       crossScopeBlocked: true, grade: null, error: message || null,
       gradeEvidence: null,
+      gradeFailureEvidence: null,
       failureEvidence: null,
       structuredFailureEvidence: null,
       durationMs: Math.max(1, Math.round(performance.now() - startedAt)),
@@ -490,12 +502,14 @@ async function executeCasFixture(
     }
     return {
       fixtureId: fixture.id, kind: fixture.kind, status: 'passed', projectId: source.scope.projectId,
+      failureStage: null,
       runId: source.result.runId, candidateEventId: source.result.candidateEventId, candidateText: '',
       contextManifestHash: source.result.contextManifestHash, selectedResourceKeys: [], mandatoryDelivered: null,
       transcriptArchive: null,
       expectedAnchorDelivered: null, expectedAnchorInOutcome: null, staleBlocked: true,
       crossScopeBlocked: null, grade: null, error: message || null,
       gradeEvidence: null,
+      gradeFailureEvidence: null,
       failureEvidence: null,
       structuredFailureEvidence: null,
       durationMs: Math.max(1, Math.round(performance.now() - startedAt)),
@@ -511,13 +525,14 @@ async function failedAttackResult(
   startedAt: number,
 ): Promise<RacesGatewayEvalResultV1> {
   return {
-    fixtureId: fixture.id, kind: fixture.kind, status: 'failed', projectId: null, runId: null,
+    fixtureId: fixture.id, kind: fixture.kind, status: 'failed', failureStage: 'attack',
+    projectId: null, runId: null,
     candidateEventId: null, candidateText: '', contextManifestHash: null, transcriptArchive: null,
     selectedResourceKeys: [],
     mandatoryDelivered: null, expectedAnchorDelivered: null, expectedAnchorInOutcome: null,
     staleBlocked: fixture.kind === 'concurrent-cas' ? false : null,
     crossScopeBlocked: fixture.kind === 'cross-scope-attack' ? false : null,
-    grade: null, gradeEvidence: null,
+    grade: null, gradeEvidence: null, gradeFailureEvidence: null,
     failureEvidence: await classifyHarnessFailureV1(error, { stage: 'gate' }),
     structuredFailureEvidence: structuredOutputFailureEvidenceV1(error),
     error: safeError(error),
@@ -550,7 +565,7 @@ export async function verifyRacesGatewayEvalCheckpointV1(
   fixtures: readonly RacesGatewayEvalFixtureV1[] = RACES_GATEWAY_EVAL_FIXTURES_V1,
 ): Promise<boolean> {
   try {
-    if (checkpoint.version !== RACES_GATEWAY_EVAL_VERSION_V8
+    if (checkpoint.version !== RACES_GATEWAY_EVAL_VERSION_V9
       || !/^[a-f0-9]{64}$/.test(checkpoint.fixtureHash)
       || !/^[a-f0-9]{64}$/.test(checkpoint.checkpointHash)) return false
     if (await hashCanonicalValue(fixtures) !== checkpoint.fixtureHash) return false
@@ -567,7 +582,14 @@ export async function verifyRacesGatewayEvalCheckpointV1(
       const result = checkpoint.results[index]
       const fixture = fixtures[index]
       if (!fixture || result.kind !== fixture.kind) return false
-      if ((result.status === 'failed') !== (result.failureEvidence !== null)) return false
+      if ((result.status === 'failed') !== (result.failureEvidence !== null)
+        || (result.status === 'failed') !== (result.failureStage !== null)) return false
+      if (result.gradeFailureEvidence) {
+        if (result.failureStage !== 'grader'
+          || result.gradeFailureEvidence.rawOutput.length > 240_000
+          || await hashCanonicalValue(result.gradeFailureEvidence.rawOutput)
+            !== result.gradeFailureEvidence.outputHash) return false
+      }
       if (result.structuredFailureEvidence) {
         parseStructuredOutputRunEvidenceV1(result.structuredFailureEvidence)
       }
@@ -634,7 +656,7 @@ export async function verifyRacesGatewayEvalCheckpointV1(
 
 export function loadRacesGatewayEvalCheckpointV1(): RacesGatewayEvalCheckpointV1 | null {
   try {
-    const raw = localStorage.getItem(RACES_GATEWAY_EVAL_STORAGE_KEY_V8)
+    const raw = localStorage.getItem(RACES_GATEWAY_EVAL_STORAGE_KEY_V9)
     return raw ? JSON.parse(raw) as RacesGatewayEvalCheckpointV1 : null
   } catch {
     return null
@@ -642,7 +664,7 @@ export function loadRacesGatewayEvalCheckpointV1(): RacesGatewayEvalCheckpointV1
 }
 
 export function persistRacesGatewayEvalCheckpointV1(checkpoint: RacesGatewayEvalCheckpointV1): void {
-  localStorage.setItem(RACES_GATEWAY_EVAL_STORAGE_KEY_V8, JSON.stringify(checkpoint))
+  localStorage.setItem(RACES_GATEWAY_EVAL_STORAGE_KEY_V9, JSON.stringify(checkpoint))
 }
 
 export function exportRacesGatewayEvalCheckpointV1(checkpoint: RacesGatewayEvalCheckpointV1): string {
@@ -656,7 +678,7 @@ export async function cleanupRacesGatewayEvalProjectsV1(): Promise<number> {
 }
 
 export async function clearRacesGatewayEvalCheckpointV1(): Promise<void> {
-  localStorage.removeItem(RACES_GATEWAY_EVAL_STORAGE_KEY_V8)
+  localStorage.removeItem(RACES_GATEWAY_EVAL_STORAGE_KEY_V9)
   await cleanupRacesGatewayEvalProjectsV1()
 }
 
@@ -705,7 +727,7 @@ export async function runRacesGatewayEvalV1(input: {
     await cleanupRacesGatewayEvalProjectsV1()
     const now = Date.now()
     checkpoint = await sealCheckpoint({
-      version: RACES_GATEWAY_EVAL_VERSION_V8,
+      version: RACES_GATEWAY_EVAL_VERSION_V9,
       fixtureHash,
       modelIdentity: input.modelIdentity,
       graderIdentity: input.graderIdentity,

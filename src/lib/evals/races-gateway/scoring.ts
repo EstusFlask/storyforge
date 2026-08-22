@@ -89,10 +89,16 @@ export function scoreRacesGatewayEvalV1(
   const scopeLeakRate = rate(scope, item => item.crossScopeBlocked !== true)
   const comparisonDeliveryRate = rate(comparison, item => item.candidateText.length > 0)
   const casBlockRate = rate(cas, item => item.staleBlocked === true)
-  const providerAttemptFailureCount = attemptFailures.filter(item => (
-    item.result.failureEvidence?.failureClass === 'provider'
+  const graderAttemptFailureCount = attemptFailures.filter(item => (
+    item.result.failureStage === 'grader'
   )).length
-  const nonProviderAttemptFailureCount = attemptFailures.length - providerAttemptFailureCount
+  const providerAttemptFailureCount = attemptFailures.filter(item => (
+    item.result.failureStage !== 'grader'
+    && item.result.failureEvidence?.failureClass === 'provider'
+  )).length
+  const nonProviderAttemptFailureCount = attemptFailures.length
+    - graderAttemptFailureCount
+    - providerAttemptFailureCount
   const failures: string[] = []
   const expectedCount = fixtures.length
   if (results.length !== expectedCount || results.some(item => item.status !== 'passed')) failures.push('样本未全部成功执行')
@@ -117,7 +123,7 @@ export function scoreRacesGatewayEvalV1(
     partialConstraintRate, partialNewInformationRate, lateRecallAt20, pinnedDeliveryRate,
     lateOutcomeUseRate, pinnedOutcomeRetentionRate,
     scopeLeakRate, comparisonDeliveryRate, casBlockRate,
-    providerAttemptFailureCount, nonProviderAttemptFailureCount,
+    providerAttemptFailureCount, graderAttemptFailureCount, nonProviderAttemptFailureCount,
     passed: failures.length === 0, failures,
   }
 }

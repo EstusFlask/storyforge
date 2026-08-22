@@ -8,8 +8,9 @@ import { executeRegisteredAIEntryV1 } from '../../lib/agent/formal-ai-entry'
 import { hashCanonicalValue } from '../../lib/agent/run/hash'
 import {
   buildRacesGatewayBlindGraderMessagesV1,
-  RACES_GATEWAY_BLIND_GRADER_PROMPT_VERSION_V8,
-  RACES_GATEWAY_GRADER_TIMEOUT_MS_V8,
+  RACES_GATEWAY_BLIND_GRADER_PROMPT_VERSION_V9,
+  RACES_GATEWAY_GRADER_TIMEOUT_MS_V9,
+  RacesGatewayBlindGraderFailureV1,
   RACES_GATEWAY_GRADER_PREFLIGHT_INPUT_V3,
 } from '../../lib/evals/races-gateway/protocol'
 import { parseRacesGatewayBlindGradeCompletionV2 } from '../../lib/evals/races-gateway/scoring'
@@ -131,7 +132,7 @@ export default function RacesGatewayEvalPanel() {
           const messages = buildRacesGatewayBlindGraderMessagesV1(input)
           const result: ChatResult = {}
           const controller = new AbortController()
-          const timeout = setTimeout(() => controller.abort(), RACES_GATEWAY_GRADER_TIMEOUT_MS_V8)
+          const timeout = setTimeout(() => controller.abort(), RACES_GATEWAY_GRADER_TIMEOUT_MS_V9)
           const startedAt = performance.now()
           try {
             const output = await executeRegisteredAIEntryV1(
@@ -145,24 +146,29 @@ export default function RacesGatewayEvalPanel() {
                 ? { responseFormat: 'json_object' }
                 : undefined,
             )
-            const grade = parseRacesGatewayBlindGradeCompletionV2(output, result.finishReason)
-            return {
-              grade,
-              evidence: {
+            const evidence = {
                 provider: graderConfig.provider,
                 model: graderConfig.model,
-                promptVersion: RACES_GATEWAY_BLIND_GRADER_PROMPT_VERSION_V8,
+                promptVersion: RACES_GATEWAY_BLIND_GRADER_PROMPT_VERSION_V9,
                 inputHash: await hashCanonicalValue(messages),
                 outputHash: await hashCanonicalValue(output),
                 inputTokens: result.usage?.inputTokens ?? null,
                 outputTokens: result.usage?.outputTokens ?? null,
                 finishReason: result.finishReason ?? null,
                 durationMs: Math.max(1, Math.round(performance.now() - startedAt)),
-              },
+            }
+            try {
+              return { grade: parseRacesGatewayBlindGradeCompletionV2(output, result.finishReason), evidence }
+            } catch (value) {
+              throw new RacesGatewayBlindGraderFailureV1({
+                ...evidence,
+                rawOutput: output,
+                parseError: value instanceof Error ? value.message : String(value),
+              })
             }
           } catch (value) {
             if (controller.signal.aborted) {
-              throw new Error(`RACE-6 grader 超过 ${RACES_GATEWAY_GRADER_TIMEOUT_MS_V8 / 1_000} 秒未完成严格 JSON`)
+              throw new Error(`RACE-6 grader 超过 ${RACES_GATEWAY_GRADER_TIMEOUT_MS_V9 / 1_000} 秒未完成严格 JSON`)
             }
             throw value
           } finally {
@@ -179,7 +185,7 @@ export default function RacesGatewayEvalPanel() {
         graderIdentity: {
           provider: graderConfig.provider,
           model: graderConfig.model,
-          promptVersion: RACES_GATEWAY_BLIND_GRADER_PROMPT_VERSION_V8,
+          promptVersion: RACES_GATEWAY_BLIND_GRADER_PROMPT_VERSION_V9,
         },
         graderPreflight,
         resumeFrom: checkpoint,
@@ -322,6 +328,7 @@ export default function RacesGatewayEvalPanel() {
           <span>scope 泄漏 {rate(score.scopeLeakRate)}</span>
           <span>CAS 阻断 {rate(score.casBlockRate)}</span>
           <span>Provider 失败尝试 {score.providerAttemptFailureCount}</span>
+          <span>Grader 失败尝试 {score.graderAttemptFailureCount}</span>
           <span>非 Provider 失败尝试 {score.nonProviderAttemptFailureCount}</span>
           <span className={score.passed ? 'text-success' : 'text-error'}>
             {score.passed ? '门禁 PASS' : `门禁 FAIL · ${score.failures.join('、')}`}

@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { db } from '../../src/lib/db/schema'
+import { hashCanonicalValue } from '../../src/lib/agent/run/hash'
 import { RACES_GATEWAY_EVAL_FIXTURES_V1 } from '../../src/lib/evals/races-gateway/fixtures'
 import {
   parseRacesGatewayBlindGradeCompletionV2,
@@ -13,6 +14,7 @@ import {
   verifyRacesGatewayEvalCheckpointV1,
 } from '../../src/lib/evals/races-gateway/runner'
 import type { RacesGatewayEvalResultV1 } from '../../src/lib/evals/races-gateway/types'
+import { RacesGatewayBlindGraderFailureV1 } from '../../src/lib/evals/races-gateway/protocol'
 import { useAIConfigStore } from '../../src/stores/ai-config'
 
 function passingResult(index: number): RacesGatewayEvalResultV1 {
@@ -21,6 +23,7 @@ function passingResult(index: number): RacesGatewayEvalResultV1 {
     fixtureId: fixture.id,
     kind: fixture.kind,
     status: 'passed',
+    failureStage: null,
     projectId: index + 1,
     runId: index + 1,
     candidateEventId: index + 1,
@@ -43,6 +46,7 @@ function passingResult(index: number): RacesGatewayEvalResultV1 {
       reason: '满足冻结标准。',
     } : null,
     gradeEvidence: null,
+    gradeFailureEvidence: null,
     failureEvidence: null,
     structuredFailureEvidence: null,
     error: null,
@@ -99,6 +103,7 @@ describe.sequential('RACE-6 · races transcript + outcome eval', () => {
     const structuredFailure = {
       ...passingResult(0),
       status: 'failed' as const,
+      failureStage: 'generation' as const,
       failureEvidence: {
         version: 1 as const,
         failureClass: 'parse' as const,
@@ -158,14 +163,27 @@ describe.sequential('RACE-6 · races transcript + outcome eval', () => {
       graderIdentity: { provider: 'deepseek', model: 'deepseek-reasoner', promptVersion: 'test-grader-v2' },
       graderPreflight: preflightEvidence('deepseek', 'deepseek-reasoner', 'test-grader-v2'),
       fixtures: [RACES_GATEWAY_EVAL_FIXTURES_V1[0]],
-      grade: async () => { throw new Error('grader 输出被截断') },
+      grade: async () => {
+        const rawOutput = '{"placeholder":false'
+        throw new RacesGatewayBlindGraderFailureV1({
+          provider: 'deepseek', model: 'deepseek-reasoner', promptVersion: 'test-grader-v2',
+          inputHash: 'a'.repeat(64), outputHash: await hashCanonicalValue(rawOutput),
+          inputTokens: 10, outputTokens: 10, finishReason: 'length', durationMs: 1,
+          rawOutput, parseError: 'grader 输出被截断',
+        })
+      },
     })).rejects.toThrow('empty-01 执行失败')
     const checkpoint = loadRacesGatewayEvalCheckpointV1()
     expect(checkpoint?.results[0]).toMatchObject({
       status: 'failed',
+      failureStage: 'grader',
       projectId: null,
       candidateText: '潮岸民以盐誓登记亲属，钟港民以师徒谱继承身份；双方共享航道，却长期争夺司法证言权。',
       error: 'grader 输出被截断',
+      gradeFailureEvidence: {
+        rawOutput: '{"placeholder":false',
+        finishReason: 'length',
+      },
     })
     expect(checkpoint?.results[0].contextManifestHash).toMatch(/^[a-f0-9]{64}$/)
     expect(checkpoint?.results[0].transcriptArchive).not.toBeNull()
@@ -226,6 +244,7 @@ describe.sequential('RACE-6 · races transcript + outcome eval', () => {
     const failure = checkpoint.attemptFailures[0].result
     expect(failure).toMatchObject({
       status: 'failed',
+      failureStage: 'generation',
       failureEvidence: { failureClass: 'parse', code: 'structured_output_repair_parse' },
       structuredFailureEvidence: {
         status: 'manual-repair',

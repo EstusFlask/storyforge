@@ -2,7 +2,7 @@
 
 日期：2026-08-22  
 施工单元：RACE-6  
-状态：V8 实现完成，等待真实模型 sealed run 与 GATE-P1B
+状态：V9 实现完成，等待真实模型 sealed run 与 GATE-P1B
 
 > V1 首次真实运行在 `empty-02` 暴露 Agnes grader 的通用
 > `finish_reason=length` 与严格结构完成性判断冲突。V1 证据保留为失败运行；V2 不降低任何质量阈值，
@@ -45,6 +45,12 @@
 > failure transcript 后再清理项目。失败同时携带统一 Harness failure class；任何非 Provider 失败尝试的
 > 门槛冻结为 0，不能靠后续重试从 sealed score 中洗掉。Provider 瞬时故障保留并单独计数。
 
+> V8 完成 26/100 后，`partial-07` 的 generator、候选和 Context transcript 均已成功，但独立 grader
+> 返回 `finish_reason=length` 与不完整 JSON。既有分类无法区分“产品生成失败”和“评测器失败”，也只保存
+> grader 输出 hash。V9 冻结失败阶段 `generation / grader / attack`，grader 解析失败额外保存原始输出、
+> parse error、finish reason、tokens、耗时与 hash。grader 显式重跑次数单独进入 score，不污染产品侧
+> “非 Provider 失败尝试=0”硬门；但 40 个质量样本仍必须最终各有一份合法独立盲评才可完成。
+
 ## 评测目标
 
 RACE-6 同时回答两个不同问题：
@@ -66,7 +72,7 @@ RACE-6 同时回答两个不同问题：
 | 跨 scope 攻击 | 10 | 对真实源候选使用另一 Work 采纳 | 100% fail-closed，Canon 零写入 |
 | 并发 CAS 攻击 | 10 | 候选后修改被读取的 worldview SourceRef | 100% stale 阻断，旧候选不可覆盖新 Canon |
 
-固定矩阵总数为 100：80 次正式生成、40 次独立盲评、20 次确定性攻击。V3～V8 在矩阵之外固定增加
+固定矩阵总数为 100：80 次正式生成、40 次独立盲评、20 次确定性攻击。V3～V9 在矩阵之外固定增加
 1 次 grader schema preflight，因此完整成功运行最多发起 121 次模型调用；preflight 失败时不会创建
 或生成任何 fixture。
 
@@ -97,6 +103,7 @@ RACE-6 同时回答两个不同问题：
 - UI 与底层 runner 都拒绝 generator 和 grader 使用同一模型身份，防止模型自评。
 - grader 只看标题、给定种子和候选，不读取检索 trace、期望阈值或生成模型身份。
 - grader 必须返回严格闭集 JSON；非法 JSON、额外字段和截断都令当前样本失败，不做隐藏多次重试。
+- grader 失败由可见“继续”显式重跑；原始 grader 失败证据和次数永久保留，并与产品生成失败分栏统计。
 - provider 返回 `length/max_tokens` 但响应仍是完整严格闭集 JSON 时允许验收；若严格解析失败，按截断失败。两种情况都记录原始 finish reason。
 - 每个盲评保存输入/输出 hash、token、耗时和模型身份，不保存 API Key、认证头或隐藏推理。
 
