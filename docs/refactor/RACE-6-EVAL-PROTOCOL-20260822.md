@@ -2,7 +2,7 @@
 
 日期：2026-08-22  
 施工单元：RACE-6  
-状态：V9 实现完成，等待真实模型 sealed run 与 GATE-P1B
+状态：V10 实现完成，等待真实模型 sealed run 与 GATE-P1B
 
 > V1 首次真实运行在 `empty-02` 暴露 Agnes grader 的通用
 > `finish_reason=length` 与严格结构完成性判断冲突。V1 证据保留为失败运行；V2 不降低任何质量阈值，
@@ -51,6 +51,12 @@
 > parse error、finish reason、tokens、耗时与 hash。grader 显式重跑次数单独进入 score，不污染产品侧
 > “非 Provider 失败尝试=0”硬门；但 40 个质量样本仍必须最终各有一份合法独立盲评才可完成。
 
+> V9 完成 2/100 后，`empty-03` 首次输出只因正文中的引号未转义而不是合法 JSON；唯一修复调用却把
+> 内容包装进 `worldviews[]`，违反目标根 schema。失败证据证明统一修复器只披露了 schemaId、target 和
+> 问题文本，没有披露根类型、允许根字段和必填根字段，迫使模型猜测合同。V10 在每次结构化尝试证据中
+> 保存由实际合同派生的最小 `contractShape`，并只向修复调用披露该结构，不重放整份项目上下文、不增加
+> 第三次调用。V9 checkpoint 只读归档，fixture、模型和质量阈值不变。
+
 ## 评测目标
 
 RACE-6 同时回答两个不同问题：
@@ -72,7 +78,7 @@ RACE-6 同时回答两个不同问题：
 | 跨 scope 攻击 | 10 | 对真实源候选使用另一 Work 采纳 | 100% fail-closed，Canon 零写入 |
 | 并发 CAS 攻击 | 10 | 候选后修改被读取的 worldview SourceRef | 100% stale 阻断，旧候选不可覆盖新 Canon |
 
-固定矩阵总数为 100：80 次正式生成、40 次独立盲评、20 次确定性攻击。V3～V9 在矩阵之外固定增加
+固定矩阵总数为 100：80 次正式生成、40 次独立盲评、20 次确定性攻击。V3～V10 在矩阵之外固定增加
 1 次 grader schema preflight，因此完整成功运行最多发起 121 次模型调用；preflight 失败时不会创建
 或生成任何 fixture。
 

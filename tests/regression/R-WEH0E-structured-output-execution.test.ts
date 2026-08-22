@@ -72,6 +72,12 @@ describe('WEH-0E structured output execution', () => {
     expect(result.output).toEqual({ field: 'races', value: '潮民' })
     expect(seenMessages).toHaveLength(2)
     expect(seenMessages[1].map(item => item.content).join('\n')).not.toContain('完整项目材料')
+    expect(seenMessages[1].map(item => item.content).join('\n')).toContain(
+      '根对象只允许直接包含这些字段：field、value。不得增加外层包装字段。',
+    )
+    expect(seenMessages[1].map(item => item.content).join('\n')).toContain(
+      '根对象必须包含这些字段：field、value。',
+    )
     expect(result.structuredOutputEvidence?.attempts).toHaveLength(2)
     expect(result.structuredOutputEvidence?.attempts[0].evidence.originalText).toBe('{"field":"races"')
     expect(result.structuredOutputEvidence?.repair?.result).toBe('repaired')
@@ -97,6 +103,10 @@ describe('WEH-0E structured output execution', () => {
     const missingRepair = JSON.parse(JSON.stringify(result.structuredOutputEvidence))
     missingRepair.repair = null
     expect(() => parseStructuredOutputRunEvidenceV1(missingRepair)).toThrow('缺少 repair 身份')
+
+    const invalidShape = JSON.parse(JSON.stringify(result.structuredOutputEvidence))
+    invalidShape.attempts[0].evidence.contractShape.requiredRootFields.push('unknown')
+    expect(() => parseStructuredOutputRunEvidenceV1(invalidShape)).toThrow('contractShape')
   })
 
   it('第二次相同结构失败后停止，不产生第三次调用并保留两版 raw', async () => {

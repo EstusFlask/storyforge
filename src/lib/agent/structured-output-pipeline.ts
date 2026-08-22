@@ -50,12 +50,24 @@ export interface StructuredOutputAttemptEvidenceV1 {
   version: 1
   schemaId: string
   target: string
+  /**
+   * Minimal, contract-derived shape needed by the single repair call. Older
+   * persisted V1 evidence may omit it and remains readable, but new attempts
+   * always record it so the repairer never has to guess from schemaId alone.
+   */
+  contractShape?: StructuredOutputContractShapeV1
   status: StructuredOutputStatusV1
   originalText: string
   normalizedText: string
   normalizationSteps: StructuredOutputNormalizationStepV1[]
   appliedAliases: Array<{ alias: string; canonical: string }>
   issues: StructuredOutputIssueV1[]
+}
+
+export interface StructuredOutputContractShapeV1 {
+  root: StructuredOutputContractV1['root']
+  allowedRootFields: string[] | null
+  requiredRootFields: string[]
 }
 
 export interface StructuredOutputEvaluationV1<T> {
@@ -142,6 +154,14 @@ function evidence(input: Omit<StructuredOutputAttemptEvidenceV1, 'version'>): St
   return { version: 1, ...input }
 }
 
+function contractShape(contract: StructuredOutputContractV1): StructuredOutputContractShapeV1 {
+  return {
+    root: contract.root,
+    allowedRootFields: contract.allowedRootFields ? [...contract.allowedRootFields] : null,
+    requiredRootFields: [...(contract.requiredRootFields ?? [])],
+  }
+}
+
 export class StructuredOutputPipelineErrorV1 extends Error {
   readonly evidence: StructuredOutputAttemptEvidenceV1
 
@@ -218,6 +238,7 @@ function fail(input: {
   throw new StructuredOutputPipelineErrorV1(evidence({
     schemaId: input.contract.schemaId,
     target: input.contract.target,
+    contractShape: contractShape(input.contract),
     status: input.status ?? 'manual-repair',
     originalText: input.originalText,
     normalizedText: input.normalizedText,
@@ -413,6 +434,7 @@ export function evaluateStructuredOutputV1<T>(input: {
   const attemptEvidence = evidence({
     schemaId: contract.schemaId,
     target: contract.target,
+    contractShape: contractShape(contract),
     status: steps.some(step => step !== 'trim-outer-whitespace')
       ? 'usable-with-warnings'
       : 'ready',
@@ -452,12 +474,25 @@ export function buildStructuredOutputRepairMessagesV1(input: {
       message: item.message,
     })),
   ]
+  const shape = input.evidence.contractShape
+  const shapeRules = shape
+    ? [
+        `JSON 根类型必须是 ${shape.root === 'object' ? 'object' : 'array'}。`,
+        ...(shape.root === 'object' && shape.allowedRootFields
+          ? [`根对象只允许直接包含这些字段：${shape.allowedRootFields.join('、')}。不得增加外层包装字段。`]
+          : []),
+        ...(shape.root === 'object' && shape.requiredRootFields.length
+          ? [`根对象必须包含这些字段：${shape.requiredRootFields.join('、')}。`]
+          : []),
+      ]
+    : ['旧版证据没有保存根结构；必须依据列出的错误与原始输出修复，禁止臆造包装层。']
   return [{
     role: 'system',
     content: [
       '你是严格结构修复器。只修复列出的结构、字段和目标错误，不重新创作。',
       '保留上一次输出中的合法内容、事实、名称与顺序；不得添加未要求的新内容。',
       `输出必须符合 schema=${input.evidence.schemaId}，target=${input.evidence.target}。`,
+      ...shapeRules,
       '只输出一个完整 JSON 根，不要解释，不要 Markdown。',
     ].join('\n'),
   }, {
@@ -525,6 +560,24 @@ export function parseStructuredOutputRunEvidenceV1(value: unknown): StructuredOu
       || !Array.isArray(attempt.appliedAliases)
       || !Array.isArray(attempt.issues)
     ) throw new Error(`结构化输出运行证据 attempts[${index}].evidence 无效。`)
+    if (attempt.contractShape !== undefined) {
+      const shape = attempt.contractShape
+      const allowedRootFields = isRecord(shape) ? shape.allowedRootFields : undefined
+      const requiredRootFields = isRecord(shape) ? shape.requiredRootFields : undefined
+      if (
+        !isRecord(shape)
+        || (shape.root !== 'object' && shape.root !== 'array')
+        || !(allowedRootFields === null || Array.isArray(allowedRootFields))
+        || (Array.isArray(allowedRootFields) && allowedRootFields.some(field => (
+          typeof field !== 'string' || !field
+        )))
+        || !Array.isArray(requiredRootFields)
+        || requiredRootFields.some(field => typeof field !== 'string' || !field)
+        || (Array.isArray(allowedRootFields) && requiredRootFields.some(field => (
+          !allowedRootFields.includes(field)
+        )))
+      ) throw new Error(`结构化输出运行证据 attempts[${index}].contractShape 无效。`)
+    }
     const allowedSteps: StructuredOutputNormalizationStepV1[] = [
       'remove-bom',
       'trim-outer-whitespace',

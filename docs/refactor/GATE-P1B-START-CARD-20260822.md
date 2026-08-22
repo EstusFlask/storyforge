@@ -4,7 +4,7 @@
 任务 ID：`GATE-P1B`  
 隔离分支：`refactor/world-engine-harness`  
 基线：`bd722008 test(E2E): edit structured worldview value only`  
-状态：机械门已通过；凭据已按授权复制且连接测试成功；V1～V8 失败已归档，等待 V9 sealed run
+状态：机械门已通过；凭据已按授权复制且连接测试成功；V1～V9 失败已归档，等待 V10 sealed run
 
 ## 1. 完成边界
 
@@ -39,11 +39,11 @@
 |---|---|
 | 隔离 origin | `http://127.0.0.1:4197/storyforge/` |
 | generator | `agnes/agnes-2.5-flash`（从正式 `agent.world-foundation.worldview-field` 路由解析） |
-| blind grader | `agnes/agnes-2.5-pro`（V9；由实时 `/v1/models` 目录确认，与 generator 身份不同） |
+| blind grader | `agnes/agnes-2.5-pro`（V10；由实时 `/v1/models` 目录确认，与 generator 身份不同） |
 | grader temperature | `0` |
 | grader max tokens | `4096`（V2；为兼容推理型 provider 的完成预算，不改变评分阈值） |
-| 单次 grader timeout | `600000 ms`（V9；等待预算，不改变输出 token 或质量阈值） |
-| checkpoint key | `storyforge-races-gateway-eval-v9` |
+| 单次 grader timeout | `600000 ms`（V10；等待预算，不改变输出 token 或质量阈值） |
+| checkpoint key | `storyforge-races-gateway-eval-v10` |
 | grader schema preflight | 矩阵前 1 次；严格闭集 JSON；证据写入 checkpoint，不参与质量计分 |
 | fixture / thresholds | 见 `RACE-6-EVAL-PROTOCOL-20260822.md`；真实结果出现后不得下调 |
 
@@ -141,6 +141,15 @@
   不完整。该故障属于评测器，不应误算为 StoryForge generator 的非 Provider 失败。
 - 处置：V9 为失败证据冻结 `generation / grader / attack` 阶段；grader 失败保存原始输出、parse error、
   finish reason、tokens、耗时与 hash，并单独统计显式重跑次数。产品质量阈值、模型与 fixture 未改变。
+
+### V9 失败运行
+
+- checkpoint：`eced7d0d08b1612ab10db21b980c68b2ba8e3e07e28378339526d1b182f19ba1`
+- 进度：`2/100`，失败样本 `empty-03`；失败阶段为 `generation`，非 Provider 尝试为 1。
+- 原因：首次候选因正文引号未转义而不是合法 JSON；唯一修复调用保留了全部内容，却错误增加
+  `worldviews[]` 外层。失败 transcript 显示修复器只收到 schemaId、target 和错误，没有根合同结构。
+- 处置：V10 把实际结构合同派生为最小 `contractShape`（根类型、允许根字段、必填根字段）并随 exact
+  evidence 保存、向唯一修复调用披露；不重放完整项目上下文、不加第三次调用。模型、fixture 与阈值不变。
 
 ## 6. 凭据与连接回执
 

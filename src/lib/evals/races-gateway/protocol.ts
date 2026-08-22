@@ -1,10 +1,10 @@
 import type { ChatMessage } from '../../types'
 import type { RacesGatewayBlindGradeFailureEvidenceV1 } from './types'
 
-export const RACES_GATEWAY_BLIND_GRADER_PROMPT_VERSION_V9 =
-  'races-gateway-blind-grader-v9' as const
+export const RACES_GATEWAY_BLIND_GRADER_PROMPT_VERSION_V10 =
+  'races-gateway-blind-grader-v10' as const
 
-export const RACES_GATEWAY_GRADER_TIMEOUT_MS_V9 = 600_000 as const
+export const RACES_GATEWAY_GRADER_TIMEOUT_MS_V10 = 600_000 as const
 
 export class RacesGatewayBlindGraderFailureV1 extends Error {
   constructor(readonly failureEvidence: RacesGatewayBlindGradeFailureEvidenceV1) {
@@ -28,7 +28,7 @@ export function buildRacesGatewayBlindGraderMessagesV1(input: {
     {
       role: 'system',
       content: [
-        `你是小说世界观候选的盲评员。协议版本：${RACES_GATEWAY_BLIND_GRADER_PROMPT_VERSION_V9}。`,
+        `你是小说世界观候选的盲评员。协议版本：${RACES_GATEWAY_BLIND_GRADER_PROMPT_VERSION_V10}。`,
         '你不知道候选来自哪种实现，也不得推测实现。只根据输入判断。',
         'placeholder：候选主要是占位、说明任务、复述要求或解释“种族与民族”概念。',
         'titleOveranchored：候选把作品名当成必须解释的概念，或大部分设定只是标题的同义扩写；仅把标题作为轻微意象不算。',
