@@ -1,6 +1,6 @@
 # StoryForge 短篇小说、小说改剧本、小说改漫画总施工蓝图
 
-> 文档状态：`IMPLEMENTED / VERIFIED`
+> 文档状态：`HISTORICAL IMPLEMENTATION RECORD / CHARTER ALIGNMENT BLOCKED`
 >
 > 基线审查日期：2026-08-22
 >
@@ -14,7 +14,14 @@
 > `docs/AI-HARNESS-REBUILD-RELEASE-20260817.md`、
 > `docs/refactor/WORLD-ENGINE-HARNESS-REPAIR-IMPLEMENTATION-PLAN-20260821.md`
 
-> 实施回执（2026-08-22）：`SHORT-1`、`ADAPT-CORE-1`、`SCREEN-1`、`COMIC-1`、
+> 2026-08-22 对齐更正：最新 `origin/main` 已新增项目级权威总纲
+> `docs/WORLD-ENGINE-TO-PRODUCT-DEVELOPMENT-CHARTER.md`。本蓝图早于该总纲，现有剧本/漫画来源实现
+> 仍读取可变小说 Work，并未从不可变 WorldRelease 冻结产品专属 SourceSelection；也尚无产品
+> Release。正式完成状态已经撤回。当前差距、世界数据需求、两套产品契约和停止门以
+> [`SHORT-SCREENPLAY-COMIC-WORLD-SOURCE-ALIGNMENT-AUDIT-20260822.md`](./SHORT-SCREENPLAY-COMIC-WORLD-SOURCE-ALIGNMENT-AUDIT-20260822.md)
+> 为准；项目级正文来源和 V2 便携映射裁定前停止扩大产品实现。
+
+> 历史实施回执（不代表总纲对齐或正式完成，2026-08-22）：`SHORT-1`、`ADAPT-CORE-1`、`SCREEN-1`、`COMIC-1`、
 > `MEDIA-CORE-1` 已在 `feat/short-screenplay-comic` 完成。数据库升级至 v66，
 > `PROJECT_TABLES` 覆盖 90 张表，严格备份格式升级至 v9；完整 `npm run ci` 通过
 > 444 个测试文件 / 2,087 条测试（总覆盖率 83.98%），`npm run ci:e2e` 通过
