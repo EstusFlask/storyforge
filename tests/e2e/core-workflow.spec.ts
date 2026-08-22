@@ -1480,7 +1480,7 @@ test('神明与信仰面板一次生成结构化候选，刷新恢复后采纳�
       divineRules: '作者确认版：神谕必须由两名无血缘见证者共同记录。',
     },
   }
-  await candidate.fill(JSON.stringify(edited, null, 2))
+  await candidate.fill(JSON.stringify(edited.value, null, 2))
   await page.getByRole('button', { name: '采纳', exact: true }).click()
   await expect(page.getByText(edited.value.divineRules, { exact: true })).toBeVisible()
   await expect(candidate).toHaveCount(0)
