@@ -127,6 +127,9 @@ export function checkRegistry(): RegistryValidationResult {
   }
 
   const fieldKeys = new Set<string>()
+  const generatableWorldviewFields = new Set(FIELD_REGISTRY
+    .filter(field => field.aiGeneration?.domain === 'worldview-foundation')
+    .map(field => field.field))
   for (const field of FIELD_REGISTRY) {
     if (!REGISTRY_BY_NAME.has(field.target)) {
       errors.push(`FIELD_REGISTRY 指向不存在的表: ${field.target}.${field.field}`)
@@ -137,7 +140,48 @@ export function checkRegistry(): RegistryValidationResult {
     if (field.type === 'enum' && (!field.enums || field.enums.length === 0)) {
       errors.push(`FIELD_REGISTRY enum 缺少枚举值: ${key}`)
     }
+    if (field.aiGeneration) {
+      const capability = field.aiGeneration
+      if (field.target !== 'worldviews' || capability.domain !== 'worldview-foundation') {
+        errors.push(`FIELD_REGISTRY 世界基座生成能力挂载到错误目标: ${key}`)
+      }
+      if (!capability.label.trim() || !capability.outputSchemaId.trim() || capability.maxChars < 2) {
+        errors.push(`FIELD_REGISTRY 生成能力 label/schema/maxChars 无效: ${key}`)
+      }
+      if (capability.kind === 'text' && !['string', 'longtext'].includes(field.type)) {
+        errors.push(`FIELD_REGISTRY 生成能力 kind=text 但字段不是文本: ${key}`)
+      }
+      if (capability.kind !== 'text' && field.type !== 'object') {
+        errors.push(`FIELD_REGISTRY 生成能力 kind=${capability.kind} 但字段不是 object: ${key}`)
+      }
+      if (!capability.modes.length || new Set(capability.modes).size !== capability.modes.length) {
+        errors.push(`FIELD_REGISTRY 生成能力 modes 为空或重复: ${key}`)
+      }
+      for (const dependency of capability.directDependencies) {
+        if (dependency === field.field || !generatableWorldviewFields.has(dependency)) {
+          errors.push(`FIELD_REGISTRY 生成能力直接依赖无效: ${key} -> ${dependency}`)
+        }
+      }
+    }
   }
+
+  const dependencyGraph = new Map(FIELD_REGISTRY
+    .filter(field => field.aiGeneration?.domain === 'worldview-foundation')
+    .map(field => [field.field, [...field.aiGeneration!.directDependencies]]))
+  const visiting = new Set<string>()
+  const visited = new Set<string>()
+  const visit = (field: string): void => {
+    if (visiting.has(field)) {
+      errors.push(`FIELD_REGISTRY 世界基座生成能力依赖成环: ${field}`)
+      return
+    }
+    if (visited.has(field)) return
+    visiting.add(field)
+    for (const dependency of dependencyGraph.get(field) ?? []) visit(dependency)
+    visiting.delete(field)
+    visited.add(field)
+  }
+  for (const field of dependencyGraph.keys()) visit(field)
 
   const adoptionTargets = new Set<string>()
   for (const schema of ADOPTION_SCHEMAS) {

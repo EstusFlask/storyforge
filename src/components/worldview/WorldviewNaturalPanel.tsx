@@ -31,7 +31,10 @@ const NATURAL_PANEL_KEY_BY_AGENT_FIELD: Partial<Record<WorldviewAgentField, Fiel
   mountainsRivers: 'mountainsRivers',
   climateByRegion: 'climateByRegion',
   naturalResourceOverview: 'naturalResources',
+  naturalResources: 'naturalResources',
 }
+
+export const WORLDVIEW_NATURAL_AGENT_FIELDS = Object.keys(NATURAL_PANEL_KEY_BY_AGENT_FIELD) as WorldviewAgentField[]
 
 // 每个方面(子页) → 其专属词条分类(builtInKey)。(重镇/城池已移到人文环境;自然资源单独处理)
 const NATURAL_CODEX_KEYS: Record<string, string[] | undefined> = {
@@ -238,15 +241,32 @@ export default function WorldviewNaturalPanel({ project }: Props) {
                 embedded
               />
             </div>
-            {/* 旧版自然资源(纯文本)——保留兼容 */}
-            <details className="border-t border-border/60 pt-3">
-              <summary className="text-xs text-text-muted cursor-pointer hover:text-text-secondary">旧版「自然资源」纯文本(兼容保留,可继续编辑)</summary>
+            {/* 原生结构明细：保持 object 类型，不序列化成旁路字符串。 */}
+            <details className="border-t border-border/60 pt-3" open={pendingWorldviewField === 'naturalResources'}>
+              <summary className="text-xs text-text-muted cursor-pointer hover:text-text-secondary">自然资源分类明细（原生结构）</summary>
               <div className="mt-2">
                 <NaturalResourcesEditor
                   naturalResources={naturalResources}
                   setNaturalResources={setNaturalResources}
                   save={save}
                 />
+                <div className="mt-4">
+                  <WorldviewAgentControls
+                    field="naturalResources"
+                    project={project}
+                    activeGroupId={activeGroupId}
+                    copilot={copilot}
+                    candidate={pendingWorldviewCandidates.find(candidate => candidate.payload.worldviewField === 'naturalResources')}
+                    otherPendingWorldviewLabel={pendingWorldviewCandidates.find(candidate => candidate.payload.worldviewField !== 'naturalResources')?.payload.label}
+                    hasOtherPendingCandidates={hasOtherPendingCandidates}
+                    onRunningChange={running => setRunningField(running ? 'naturalResources' : null)}
+                    onAdopted={async candidate => {
+                      await copilot.adoptCandidate(candidate)
+                      await loadAll(project.id!, project.enableMultiWorld ? activeGroupId : null)
+                    }}
+                    buttonLabel="AI 生成分类明细"
+                  />
+                </div>
               </div>
             </details>
           </div>

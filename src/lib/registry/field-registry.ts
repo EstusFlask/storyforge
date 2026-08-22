@@ -112,6 +112,90 @@ function enumeration(
   return { target, field, type: 'enum', enums, enumAliasMap, aliases, sanitize: trimString }
 }
 
+const ALL_WORLDVIEW_FIELD_MODES = ['expand', 'rewrite', 'polish'] as const
+
+/**
+ * WE-1 single source for the generatable world-foundation surface. The entries
+ * are FIELD_REGISTRY specs themselves, so adding or removing a capability also
+ * changes Skill coverage, Gateway required targets and parameterized guards.
+ */
+export const WORLDVIEW_GENERATABLE_FIELD_SPECS = [
+  {
+    target: 'worldviews', field: 'worldOrigin', type: 'longtext', aliases: ['summary', 'origin', 'worldSummary', '世界来源', '世界起源'], sanitize: trimString,
+    aiGeneration: { version: 1, domain: 'worldview-foundation', label: '世界来源', kind: 'text', directDependencies: [], modes: ALL_WORLDVIEW_FIELD_MODES, outputSchemaId: 'worldview-field.text.v1', maxChars: 12_000, temporaryAssumptions: 'allowed' },
+  },
+  {
+    target: 'worldviews', field: 'powerHierarchy', type: 'longtext', aliases: ['powerSystem', 'power', '力量体系'], sanitize: trimString,
+    aiGeneration: { version: 1, domain: 'worldview-foundation', label: '力量体系', kind: 'text', directDependencies: ['worldOrigin'], modes: ALL_WORLDVIEW_FIELD_MODES, outputSchemaId: 'worldview-field.text.v1', maxChars: 30_000, temporaryAssumptions: 'allowed' },
+  },
+  {
+    target: 'worldviews', field: 'divineDesign', type: 'object', aliases: ['divinity', '神明设定'],
+    aiGeneration: { version: 1, domain: 'worldview-foundation', label: '神明与信仰', kind: 'divine-design', directDependencies: ['worldOrigin', 'powerHierarchy'], modes: ALL_WORLDVIEW_FIELD_MODES, outputSchemaId: 'worldview-field.divine-design.v1', maxChars: 60_000, temporaryAssumptions: 'allowed' },
+  },
+  {
+    target: 'worldviews', field: 'worldStructure', type: 'longtext', aliases: ['structure', '世界结构'], sanitize: trimString,
+    aiGeneration: { version: 1, domain: 'worldview-foundation', label: '世界结构', kind: 'text', directDependencies: ['worldOrigin'], modes: ALL_WORLDVIEW_FIELD_MODES, outputSchemaId: 'worldview-field.text.v1', maxChars: 20_000, temporaryAssumptions: 'allowed' },
+  },
+  {
+    target: 'worldviews', field: 'worldDimensions', type: 'longtext', aliases: ['dimensions', '世界尺寸'], sanitize: trimString,
+    aiGeneration: { version: 1, domain: 'worldview-foundation', label: '疆域尺寸', kind: 'text', directDependencies: ['worldStructure'], modes: ALL_WORLDVIEW_FIELD_MODES, outputSchemaId: 'worldview-field.text.v1', maxChars: 12_000, temporaryAssumptions: 'allowed' },
+  },
+  {
+    target: 'worldviews', field: 'continentLayout', type: 'longtext', aliases: ['continent', 'layout', '地貌分布', '大陆分布'], sanitize: trimString,
+    aiGeneration: { version: 1, domain: 'worldview-foundation', label: '地貌分布', kind: 'text', directDependencies: ['worldStructure', 'worldDimensions'], modes: ALL_WORLDVIEW_FIELD_MODES, outputSchemaId: 'worldview-field.text.v1', maxChars: 30_000, temporaryAssumptions: 'allowed' },
+  },
+  {
+    target: 'worldviews', field: 'regionDimensions', type: 'longtext', aliases: ['区域面积'], sanitize: trimString,
+    aiGeneration: { version: 1, domain: 'worldview-foundation', label: '城池重镇', kind: 'text', directDependencies: ['continentLayout', 'worldDimensions'], modes: ALL_WORLDVIEW_FIELD_MODES, outputSchemaId: 'worldview-field.text.v1', maxChars: 30_000, temporaryAssumptions: 'allowed' },
+  },
+  {
+    target: 'worldviews', field: 'mountainsRivers', type: 'longtext', aliases: ['山川河流'], sanitize: trimString,
+    aiGeneration: { version: 1, domain: 'worldview-foundation', label: '山川水系', kind: 'text', directDependencies: ['continentLayout', 'worldDimensions'], modes: ALL_WORLDVIEW_FIELD_MODES, outputSchemaId: 'worldview-field.text.v1', maxChars: 30_000, temporaryAssumptions: 'allowed' },
+  },
+  {
+    target: 'worldviews', field: 'climateByRegion', type: 'longtext', aliases: ['climate', '气候'], sanitize: trimString,
+    aiGeneration: { version: 1, domain: 'worldview-foundation', label: '气候环境', kind: 'text', directDependencies: ['continentLayout', 'mountainsRivers'], modes: ALL_WORLDVIEW_FIELD_MODES, outputSchemaId: 'worldview-field.text.v1', maxChars: 30_000, temporaryAssumptions: 'allowed' },
+  },
+  {
+    target: 'worldviews', field: 'naturalResourceOverview', type: 'longtext', aliases: ['自然资源概述', '自然资源全貌'], sanitize: trimString,
+    aiGeneration: { version: 1, domain: 'worldview-foundation', label: '自然资源概述', kind: 'text', directDependencies: ['continentLayout', 'mountainsRivers', 'climateByRegion'], modes: ALL_WORLDVIEW_FIELD_MODES, outputSchemaId: 'worldview-field.text.v1', maxChars: 30_000, temporaryAssumptions: 'allowed' },
+  },
+  {
+    target: 'worldviews', field: 'naturalResources', type: 'object', aliases: ['resources', '自然资源'],
+    aiGeneration: { version: 1, domain: 'worldview-foundation', label: '自然资源明细', kind: 'natural-resources', directDependencies: ['naturalResourceOverview', 'continentLayout', 'climateByRegion'], modes: ALL_WORLDVIEW_FIELD_MODES, outputSchemaId: 'worldview-field.natural-resources.v1', maxChars: 80_000, temporaryAssumptions: 'allowed' },
+  },
+  {
+    target: 'worldviews', field: 'races', type: 'longtext', aliases: ['species', '种族'], sanitize: trimString,
+    aiGeneration: { version: 1, domain: 'worldview-foundation', label: '种族与民族', kind: 'text', directDependencies: ['worldOrigin', 'continentLayout', 'climateByRegion', 'naturalResourceOverview'], modes: ALL_WORLDVIEW_FIELD_MODES, outputSchemaId: 'worldview-field.text.v1', maxChars: 30_000, temporaryAssumptions: 'allowed' },
+  },
+  {
+    target: 'worldviews', field: 'factionLayout', type: 'longtext', aliases: ['factions', '势力分布'], sanitize: trimString,
+    aiGeneration: { version: 1, domain: 'worldview-foundation', label: '势力分布', kind: 'text', directDependencies: ['races', 'regionDimensions', 'powerHierarchy'], modes: ALL_WORLDVIEW_FIELD_MODES, outputSchemaId: 'worldview-field.text.v1', maxChars: 30_000, temporaryAssumptions: 'allowed' },
+  },
+  {
+    target: 'worldviews', field: 'politicsOverview', type: 'longtext', aliases: ['政治概述', '政治制度概述'], sanitize: trimString,
+    aiGeneration: { version: 1, domain: 'worldview-foundation', label: '政治制度', kind: 'text', directDependencies: ['factionLayout', 'races', 'regionDimensions'], modes: ALL_WORLDVIEW_FIELD_MODES, outputSchemaId: 'worldview-field.text.v1', maxChars: 30_000, temporaryAssumptions: 'allowed' },
+  },
+  {
+    target: 'worldviews', field: 'economyOverview', type: 'longtext', aliases: ['经济概述', '经济制度概述'], sanitize: trimString,
+    aiGeneration: { version: 1, domain: 'worldview-foundation', label: '经济制度', kind: 'text', directDependencies: ['naturalResourceOverview', 'regionDimensions', 'factionLayout'], modes: ALL_WORLDVIEW_FIELD_MODES, outputSchemaId: 'worldview-field.text.v1', maxChars: 30_000, temporaryAssumptions: 'allowed' },
+  },
+  {
+    target: 'worldviews', field: 'cultureOverview', type: 'longtext', aliases: ['文化概述', '文化制度概述'], sanitize: trimString,
+    aiGeneration: { version: 1, domain: 'worldview-foundation', label: '文化制度', kind: 'text', directDependencies: ['races', 'politicsOverview', 'economyOverview', 'divineDesign'], modes: ALL_WORLDVIEW_FIELD_MODES, outputSchemaId: 'worldview-field.text.v1', maxChars: 30_000, temporaryAssumptions: 'allowed' },
+  },
+  {
+    target: 'worldviews', field: 'internalConflicts', type: 'longtext', aliases: ['conflicts', '内部矛盾'], sanitize: trimString,
+    aiGeneration: { version: 1, domain: 'worldview-foundation', label: '矛盾冲突', kind: 'text', directDependencies: ['races', 'factionLayout', 'politicsOverview', 'economyOverview', 'cultureOverview'], modes: ALL_WORLDVIEW_FIELD_MODES, outputSchemaId: 'worldview-field.text.v1', maxChars: 30_000, temporaryAssumptions: 'allowed' },
+  },
+  {
+    target: 'worldviews', field: 'itemDesign', type: 'longtext', aliases: ['items', 'artifactDesign', '道具设计'], sanitize: trimString,
+    aiGeneration: { version: 1, domain: 'worldview-foundation', label: '道具与器物', kind: 'text', directDependencies: ['powerHierarchy', 'naturalResourceOverview', 'economyOverview', 'cultureOverview'], modes: ALL_WORLDVIEW_FIELD_MODES, outputSchemaId: 'worldview-field.text.v1', maxChars: 30_000, temporaryAssumptions: 'allowed' },
+  },
+] as const satisfies readonly FieldSpec[]
+
+export type WorldviewGeneratableField = typeof WORLDVIEW_GENERATABLE_FIELD_SPECS[number]['field']
+
 export const FIELD_REGISTRY: FieldSpec[] = [
   // MEMORY-5: author-edited workspace roots. Stable identities, owner IDs,
   // active pointers and derived counters remain outside the editable surface.
@@ -153,28 +237,13 @@ export const FIELD_REGISTRY: FieldSpec[] = [
   json('worldviews', 'economy', ['货币体系', '经济']),
   longtext('worldviews', 'rules', ['旧世界规则']),
 
-  // worldviews: v3 结构字段。summary 作为 AI 反推别名归一到 worldOrigin。
-  longtext('worldviews', 'worldOrigin', ['summary', 'origin', 'worldSummary', '世界来源', '世界起源']),
-  longtext('worldviews', 'powerHierarchy', ['powerSystem', 'power', '力量体系']),
-  object('worldviews', 'divineDesign', ['divinity', '神明设定']),
-  longtext('worldviews', 'worldStructure', ['structure', '世界结构']),
-  longtext('worldviews', 'worldDimensions', ['dimensions', '世界尺寸']),
-  longtext('worldviews', 'continentLayout', ['continent', 'layout', '地貌分布', '大陆分布']),
-  longtext('worldviews', 'regionDimensions', ['区域面积']),
-  longtext('worldviews', 'mountainsRivers', ['山川河流']),
-  longtext('worldviews', 'climateByRegion', ['climate', '气候']),
-  longtext('worldviews', 'naturalResourceOverview', ['自然资源概述', '自然资源全貌']),
-  object('worldviews', 'naturalResources', ['resources', '自然资源']),
+  // worldviews: v3 可生成字段及能力均由同一注册声明派生。
+  ...WORLDVIEW_GENERATABLE_FIELD_SPECS,
+
+  // 兼容保留但不作为新 AI 生成目标的历史字段。
   longtext('worldviews', 'historyLine', ['history', 'worldHistory', '历史线']),
   longtext('worldviews', 'worldEvents', ['events', '大事记']),
-  longtext('worldviews', 'races', ['species', '种族']),
-  longtext('worldviews', 'factionLayout', ['factions', '势力分布']),
   longtext('worldviews', 'politicsEconomyCulture', ['politics', 'economyCulture', '政治经济文化']),
-  longtext('worldviews', 'politicsOverview', ['政治概述', '政治制度概述']),
-  longtext('worldviews', 'economyOverview', ['经济概述', '经济制度概述']),
-  longtext('worldviews', 'cultureOverview', ['文化概述', '文化制度概述']),
-  longtext('worldviews', 'internalConflicts', ['conflicts', '内部矛盾']),
-  longtext('worldviews', 'itemDesign', ['items', 'artifactDesign', '道具设计']),
 
   // 世界引擎人工/确定性初始化共用的正式世界基础字段。
   // 这些表已经由 PROJECT_TABLES 管理生命周期；登记后，演示安装器也必须经 adopt() 写入，

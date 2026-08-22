@@ -1,6 +1,9 @@
 import { CHARACTER_DIMENSIONS } from '../character/character-dimensions'
 import { CONTEXT_SOURCE_BY_KEY } from '../registry/context-sources'
-import { FIELD_BY_TARGET } from '../registry/field-registry'
+import {
+  FIELD_BY_TARGET,
+  WORLDVIEW_GENERATABLE_FIELD_SPECS,
+} from '../registry/field-registry'
 import { ADOPTION_EXTENSIONS } from '../registry/adoption-schema'
 import { REGISTRY_BY_NAME } from '../registry/project-tables'
 import {
@@ -1227,8 +1230,8 @@ export const AGENT_SKILLS = [
     contextCompression: WORLDVIEW_FIELD_COMPRESSION_POLICY,
     contextGateway: {
       version: 1,
-      rollout: 'shadow',
-      requiredWriteTargets: ['worldviews.races'],
+      rollout: 'required',
+      requiredWriteTargets: WORLDVIEW_GENERATABLE_FIELD_SPECS.map(spec => `worldviews.${spec.field}`),
       providerSourceKeys: ['ragSelection'],
       allowedResourceKinds: [
         'world', 'worldview-field', 'story-core-field', 'character',
@@ -1249,28 +1252,11 @@ export const AGENT_SKILLS = [
     maxOutputTokens: 6_000,
     writeTargets: [{
       table: 'worldviews',
-      fields: [
-        'worldOrigin',
-        'powerHierarchy',
-        'divineDesign',
-        'worldStructure',
-        'worldDimensions',
-        'continentLayout',
-        'mountainsRivers',
-        'climateByRegion',
-        'naturalResourceOverview',
-        'races',
-        'factionLayout',
-        'regionDimensions',
-        'politicsOverview',
-        'economyOverview',
-        'cultureOverview',
-        'internalConflicts',
-        'itemDesign',
-      ],
+      fields: WORLDVIEW_GENERATABLE_FIELD_SPECS.map(spec => spec.field),
     }],
-    lastVerifiedAt: '2026-08-22',
+    lastVerifiedAt: '2026-08-23',
     regressionTests: [
+      'R-WE1-worldview-generatable-contract',
       'R-HARNESS32-worldview-field-agent',
       'R-HARNESS32-worldview-panels-ui',
       'R-RACE1-races-gateway-canary',

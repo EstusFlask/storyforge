@@ -30,6 +30,9 @@ import {
   runGenerationNode,
 } from '../../src/lib/generation/generation-node'
 import type { Project, WorkspaceScope } from '../../src/lib/types'
+import { generateWorkspaceUid } from '../../src/lib/memory/identity'
+import { ensureWorkspaceOwnership } from '../../src/lib/world-engine/ownership'
+import { stampNewRecord } from '../../src/lib/world-engine/scope'
 
 const directWorkflow = {
   version: 1 as const,
@@ -40,54 +43,27 @@ const directWorkflow = {
 async function createWorkspace(): Promise<{ project: Project; scope: WorkspaceScope; worldviewId: number }> {
   const now = Date.now()
   const projectId = await db.projects.add({
+    workspaceUid: generateWorkspaceUid(),
     name: '镜城纪事',
     genre: 'fantasy',
     genres: ['fantasy'],
     description: '',
     status: 'drafting',
     targetWordCount: 120_000,
-    worldCode: 'harness-32-world',
-    worldVersion: 1,
     createdAt: now,
     updatedAt: now,
   } as Project) as number
-  const worldId = await db.worlds.add({
+  const { scope } = await ensureWorkspaceOwnership(projectId)
+  const worldviewId = await db.worldviews.add(stampNewRecord(scope, 'worldviews', {
     projectId,
-    code: 'harness-32-world',
-    name: '镜海世界',
-    description: '',
-    currentVersion: 1,
-    createdAt: now,
-    updatedAt: now,
-  }) as number
-  const workId = await db.works.add({
-    projectId,
-    worldId,
-    title: '镜城纪事',
-    description: '',
-    genres: ['fantasy'],
-    status: 'drafting',
-    targetWordCount: 120_000,
-    createdAt: now,
-    updatedAt: now,
-  }) as number
-  await db.projects.update(projectId, {
-    activeWorldId: worldId,
-    activeWorkId: workId,
-    ownershipSchemaVersion: 1,
-  })
-  const worldviewId = await db.worldviews.add({
-    projectId,
-    worldId,
     worldOrigin: '镜海退潮时，城民被典当的记忆会凝成盐晶。',
     powerHierarchy: '拾忆师只能读取自愿典当的记忆。',
     factionLayout: '镜税署与拾忆行会争夺盐晶解释权。',
     createdAt: now,
     updatedAt: now,
-  } as never) as number
-  await db.storyCores.add({
+  }, { owner: 'world' }) as never) as number
+  await db.storyCores.add(stampNewRecord(scope, 'storyCores', {
     projectId,
-    workId,
     logline: '守灯人追查一枚不属于任何人的记忆盐晶。',
     concept: '记忆可以纳税，也可以被继承。',
     theme: '记忆与责任',
@@ -98,10 +74,10 @@ async function createWorkspace(): Promise<{ project: Project; scope: WorkspaceSc
     subPlots: '',
     createdAt: now,
     updatedAt: now,
-  } as never)
+  }, { owner: 'work' }) as never)
   const project = await db.projects.get(projectId)
   if (!project) throw new Error('测试项目创建失败')
-  return { project, scope: { projectId, worldId, workId }, worldviewId }
+  return { project, scope, worldviewId }
 }
 
 function request(field: 'continentLayout' | 'divineDesign' = 'continentLayout') {
@@ -180,7 +156,7 @@ describe.sequential('R-HARNESS32 · 世界基座字段 Agent Skill 与受治理�
     const generated = await runGenerationNode(prepared.node, prepared.prepared)
 
     expect(generated.gate?.status).toBe('pass')
-    expect(prepared.contextSources).toEqual(expect.arrayContaining(['worldview', 'storyCore']))
+    expect(prepared.contextSources).toEqual(['ragSelection'])
     expect(prepared.contextEvidence.inputState).toMatchObject({
       state: 'partial',
       handling: 'reference-and-create',
@@ -201,9 +177,8 @@ describe.sequential('R-HARNESS32 · 世界基座字段 Agent Skill 与受治理�
     const { project, scope } = await createWorkspace()
     await db.worldviews.clear()
     await db.storyCores.clear()
-    await db.characters.add({
+    await db.characters.add(stampNewRecord(scope, 'characters', {
       projectId: project.id!,
-      worldId: scope.worldId,
       name: '失忆的守灯人',
       roleWeight: 'main',
       moralAxis: 'good',
@@ -215,7 +190,7 @@ describe.sequential('R-HARNESS32 · 世界基座字段 Agent Skill 与受治理�
       motivation: '找回父亲的记忆并查清潮汐钟的用途。',
       createdAt: Date.now(),
       updatedAt: Date.now(),
-    } as never)
+    }, { owner: 'world' }) as never)
     let prompt = ''
     const prepared = await prepareWorldviewFieldCopilot({
       projectId: project.id!,
@@ -350,6 +325,13 @@ describe.sequential('R-HARNESS32 · 世界基座字段 Agent Skill 与受治理�
         authorRequest: task.instruction,
         skillId: task.skillId,
       }, { runAI: async () => JSON.stringify(textCandidate()) })
+      if (prepared.contextGatewayExecution) {
+        await options.executionTrace?.contextGatewayPrepared?.(task, {
+          execution: prepared.contextGatewayExecution,
+          assembled: prepared.input.assembled,
+          renderedRequest: prepared.prepared.messages,
+        })
+      }
       const generated = await runGenerationNode(prepared.node, prepared.prepared)
       const durableCandidate: ExecutedMasterCandidate = {
         payload: {
@@ -362,6 +344,8 @@ describe.sequential('R-HARNESS32 · 世界基座字段 Agent Skill 与受治理�
           contextEvidence: prepared.contextEvidence,
           baseSnapshot: prepared.snapshot,
           worldviewField: prepared.targetField,
+          worldviewFieldOperation: prepared.input.mode,
+          worldviewFieldOutputBudget: prepared.input.outputBudget,
           dependsOnTaskIds: [],
           workspaceScope: scope,
           teamBudgetEvidence: options.budget.snapshot(),
@@ -370,6 +354,14 @@ describe.sequential('R-HARNESS32 · 世界基座字段 Agent Skill 与受治理�
         draft: JSON.stringify(generated.output, null, 2),
         runtimeNode: prepared.node,
         runtimeOutput: generated.output,
+        ...(prepared.contextGatewayExecution ? {
+          contextGatewayRuntime: {
+            execution: prepared.contextGatewayExecution,
+            assembled: prepared.input.assembled,
+            renderedRequest: prepared.prepared.messages,
+            rawResponse: generated.output,
+          },
+        } : {}),
       }
       await options.executionTrace?.candidateReady?.(task, durableCandidate)
       return [durableCandidate]

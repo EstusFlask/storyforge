@@ -26,6 +26,8 @@ const AGENT_FIELD_BY_ORIGIN_KEY: Record<WorldviewOriginFieldKey, WorldviewAgentF
   divine: 'divineDesign',
 }
 
+export const WORLDVIEW_ORIGIN_AGENT_FIELDS = Object.values(AGENT_FIELD_BY_ORIGIN_KEY)
+
 interface Props {
   project: Project
   initialWorldviewId?: number | null

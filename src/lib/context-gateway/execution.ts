@@ -65,6 +65,12 @@ export interface ExecuteContextGatewayInputV1 {
   query?: string
   budgetTokens?: number
   mandatoryResourceKeys?: readonly string[]
+  /**
+   * Mandatory target resources whose exact source value must be delivered.
+   * This is a deterministic escalation for known edit targets, not an Agent
+   * search shortcut; every key must also be declared mandatory.
+   */
+  mandatoryOriginalResourceKeys?: readonly string[]
   targetResourceKeys?: readonly string[]
   entityKeys?: readonly string[]
   storyArcKeys?: readonly string[]
@@ -337,6 +343,7 @@ export async function executeContextGatewayV1(
     descriptors: catalog.descriptors,
     budgetTokens: Math.min(input.budgetTokens ?? session.policy.maxRetrievedTokens, session.policy.maxRetrievedTokens),
     mandatoryResourceKeys: input.mandatoryResourceKeys,
+    mandatoryOriginalResourceKeys: input.mandatoryOriginalResourceKeys,
     targetResourceKeys: input.targetResourceKeys,
     entityKeys: input.entityKeys,
     storyArcKeys: input.storyArcKeys,
@@ -349,16 +356,72 @@ export async function executeContextGatewayV1(
     fail('hard-sufficiency', `${initialHardFailure.id}:${initialHardFailure.reasonCode}`)
   }
 
+  const mandatoryInputKeys = new Set(input.mandatoryResourceKeys ?? [])
+  const mandatoryOriginalKeys = new Set(input.mandatoryOriginalResourceKeys ?? [])
+  for (const key of mandatoryOriginalKeys) {
+    if (!mandatoryInputKeys.has(key)) {
+      fail('original-not-mandatory', `原文定点读取必须同时声明 mandatory resource: ${key}`)
+    }
+    if (!session.policy.allowOriginalRead || !session.policy.allowedDepths.includes('original')) {
+      fail('original-forbidden', `Skill 不允许原文定点读取: ${key}`)
+    }
+  }
+
   const descriptorByKey = new Map(catalog.descriptors.map(item => [item.resourceKey, item]))
   const deterministicReads: RetrievalDecisionV1[] = []
   const sourceSnapshots: ContextGatewaySourceSnapshotInputV1[] = []
   const packetBlocks: string[] = []
-  for (const decision of selector.selected) {
+  const deterministicDecisions = [...selector.selected].sort((left, right) => (
+    Number(mandatoryOriginalKeys.has(right.resourceKey))
+    - Number(mandatoryOriginalKeys.has(left.resourceKey))
+    || left.resourceKey.localeCompare(right.resourceKey)
+  ))
+  for (const decision of deterministicDecisions) {
     const descriptor = descriptorByKey.get(decision.resourceKey)
       ?? fail('selector-resource', `选择结果缺少目录资源 ${decision.resourceKey}`)
     const remaining = session.policy.maxRetrievedTokens - session.usage.retrievedTokens
     if (remaining < 1) fail('deterministic-token-budget', `确定性读取 ${decision.resourceKey} 前额度耗尽`)
-    const read = await bindingFor(session, decision.sourceKey).provider.read({
+    const binding = bindingFor(session, decision.sourceKey)
+    if (mandatoryOriginalKeys.has(decision.resourceKey)) {
+      if (descriptor.sourceRefs.length !== 1) {
+        fail('mandatory-original-ambiguous', `原文定点读取要求唯一 source ref: ${decision.resourceKey}`)
+      }
+      const sourceRef = descriptor.sourceRefs[0]!
+      const read = await binding.provider.readOriginal({
+        scope: session.scope,
+        resourceKey: decision.resourceKey,
+        sourceRef,
+        maxTokens: remaining,
+      })
+      const exactHash = sourceRef.anchor?.quoteHash ?? sourceRef.contentHash
+      if (descriptor.contentHash !== decision.contentHash
+        || descriptor.policyHash !== decision.policyHash
+        || read.descriptor.contentHash !== decision.contentHash
+        || read.descriptor.policyHash !== decision.policyHash
+        || read.contentHash !== exactHash
+        || read.contentHash !== await sha256Text(read.content)
+        || read.tokenCount !== estimateTokens(read.content)) {
+        fail('mandatory-original-incomplete', `${decision.resourceKey} 原文超出本轮预算或验签失败，拒绝静默截断`)
+      }
+      settleContextGatewayTokensV1(session, read.tokenCount)
+      deterministicReads.push({
+        ...retrievalDecision({ decision, descriptor: read.descriptor, tokenCount: read.tokenCount }),
+        depth: 'original',
+        sourceRefs: [sourceRef],
+      })
+      sourceSnapshots.push({
+        sourceKey: decision.sourceKey,
+        resourceKey: decision.resourceKey,
+        sourceRefs: [sourceRef],
+        content: read.content,
+      })
+      packetBlocks.push(`【${read.descriptor.kind}｜${read.descriptor.title}｜original】\n${read.content}`)
+      continue
+    }
+    if (decision.depth === 'original') {
+      fail('original-not-declared', `selector 返回了未声明的原文读取: ${decision.resourceKey}`)
+    }
+    const read = await binding.provider.read({
       scope: session.scope,
       resourceKey: decision.resourceKey,
       depth: decision.depth,

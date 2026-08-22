@@ -200,7 +200,7 @@ AI 输出经 `adopt({ target, data })` 写回,只有这里登记的字段可写(
 | `worldNodes` | `mapConfigJSON` |
 | `worldRulesProfiles` | `customNodes` `entries` `globalNote` |
 | `worlds` | `description` `name` |
-| `worldviews` | `climateByRegion` `continentLayout` `culture` `cultureOverview` `divineDesign` `economy` `economyOverview` `factionLayout` `geography` `history` `historyLine` `internalConflicts` `itemDesign` `mountainsRivers` `naturalResourceOverview` `naturalResources` `politicsEconomyCulture` `politicsOverview` `powerHierarchy` `races` `regionDimensions` `rules` `society` `worldDimensions` `worldEvents` `worldOrigin` `worldStructure` |
+| `worldviews` | `culture` `economy` `geography` `history` `historyLine` `politicsEconomyCulture` `rules` `society` `worldEvents` |
 
 ### 领域写回扩展（不是第二套通用 adopt）
 
@@ -299,7 +299,7 @@ AI 输出经 `adopt({ target, data })` 写回,只有这里登记的字段可写(
 - `src/lib/agent/storyline-progress-copilot.ts:375 · chat`
 - `src/lib/agent/world-game-copilot.ts:295 · chat`
 - `src/lib/agent/world-origin-copilot.ts:255 · chat`
-- `src/lib/agent/worldview-field-copilot.ts:930 · chat`
+- `src/lib/agent/worldview-field-copilot.ts:952 · chat`
 - `src/lib/character-interaction/harness.ts:396 · chat`
 - `src/lib/evals/agent-harness/story-arc-main-path-browser.ts:97 · chat`
 - `src/lib/evals/creative-reliability/browser.ts:88 · chat`
@@ -350,4 +350,4 @@ AI 输出经 `adopt({ target, data })` 写回,只有这里登记的字段可写(
 
 ---
 
-生成时间基准:commit `e1b1ab88`
+生成时间基准:commit `0dac1ab5`

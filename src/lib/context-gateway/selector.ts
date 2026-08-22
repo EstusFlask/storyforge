@@ -73,6 +73,7 @@ export interface ContextSelectorInputV1 {
   descriptors: readonly ContextResourceDescriptorV1[]
   budgetTokens: number
   mandatoryResourceKeys?: readonly string[]
+  mandatoryOriginalResourceKeys?: readonly string[]
   targetResourceKeys?: readonly string[]
   entityKeys?: readonly string[]
   storyArcKeys?: readonly string[]
@@ -86,7 +87,7 @@ export interface ContextSelectionDecisionV1 {
   sourceKey: string
   kind: ContextResourceKind
   category: ContextSelectorCategoryV1
-  depth: Exclude<ContextResourceDepthV1, 'original'>
+  depth: ContextResourceDepthV1
   estimatedTokens: number
   hardRequirement: boolean
   reasonCodes: ContextSelectionReasonCodeV1[]
@@ -318,8 +319,11 @@ function selectDepth(
   fail('no-readable-depth', `${descriptor.resourceKey} 没有 Policy 允许的非原文读取深度`)
 }
 
-function estimatedTokens(descriptor: ContextResourceDescriptorV1, depth: Exclude<ContextResourceDepthV1, 'original'>): number {
+function estimatedTokens(descriptor: ContextResourceDescriptorV1, depth: ContextResourceDepthV1): number {
   const estimate = descriptor.tokenEstimate[depth] ?? descriptor.tokenEstimate.index ?? 0
+  // Explicit original escalation is governed by the Gateway's total budget and
+  // must not silently inherit the lossy per-resource discovery cap.
+  if (depth === 'original') return Math.max(0, estimate)
   return Math.max(0, Math.min(estimate, descriptor.tokenCap ?? Number.MAX_SAFE_INTEGER))
 }
 
@@ -410,6 +414,11 @@ export async function selectContextResourcesV1(input: ContextSelectorInputV1): P
   }
   const selectorPolicy = getContextSelectorPolicyV1(input.taskKind)
   const mandatoryKeys = sortedKeys(input.mandatoryResourceKeys, 'mandatoryResourceKeys')
+  const mandatoryOriginalKeys = sortedKeys(input.mandatoryOriginalResourceKeys, 'mandatoryOriginalResourceKeys')
+  if (mandatoryOriginalKeys.some(key => !mandatoryKeys.includes(key))) {
+    fail('original-not-mandatory', 'mandatoryOriginalResourceKeys 必须同时属于 mandatoryResourceKeys')
+  }
+  const mandatoryOriginalSet = new Set(mandatoryOriginalKeys)
   const targetKeys = sortedKeys(input.targetResourceKeys, 'targetResourceKeys')
   const entityKeys = sortedKeys(input.entityKeys, 'entityKeys')
   const arcKeys = sortedKeys(input.storyArcKeys, 'storyArcKeys')
@@ -544,7 +553,14 @@ export async function selectContextResourcesV1(input: ContextSelectorInputV1): P
     const focused = [...entry.reasons].some(reason => [
       'explicit-mandatory', 'must-read', 'pinned', 'target-resource',
     ].includes(reason))
-    const depth = selectDepth(entry.descriptor, input.accessPolicy, focused)
+    const depth = mandatoryOriginalSet.has(entry.descriptor.resourceKey)
+      ? 'original'
+      : selectDepth(entry.descriptor, input.accessPolicy, focused)
+    if (depth === 'original' && (
+      !input.accessPolicy.allowOriginalRead
+      || !input.accessPolicy.allowedDepths.includes('original')
+      || !entry.descriptor.availableDepths.includes('original')
+    )) fail('original-forbidden', `${entry.descriptor.resourceKey} 不允许原文定点读取`)
     return {
       resourceKey: entry.descriptor.resourceKey,
       sourceKey: entry.descriptor.sourceKey,

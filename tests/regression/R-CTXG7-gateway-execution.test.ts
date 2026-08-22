@@ -247,6 +247,44 @@ describe('CTXG-7 · Gateway fast/complex execution', () => {
     expect(result.transcript[0].content).not.toContain('read_project_status(')
   })
 
+  it('known edit targets use exact Mandatory Original and fail closed instead of returning a prefix', async () => {
+    const fixture = await seedWorkspace()
+    const lateFact = '[TARGET-TAIL:七次退潮后才获得成年身份]'
+    await addScoped(fixture.scope, 'worldviews', {
+      worldGroupId: null,
+      races: `${'潮民的航季、亲族和盐路契约形成共同身份。'.repeat(120)}${lateFact}`,
+    }, 'world')
+    const catalog = await descriptors(fixture.scope)
+    const target = catalog.find(item => item.sourceRefs.some(ref => (
+      ref.table === 'worldviews' && ref.field === 'races'
+    )))!
+
+    const exact = await executeContextGatewayV1({
+      skill: worldviewSkill(),
+      scope: fixture.scope,
+      worldGroupId: null,
+      budgetTokens: 12_000,
+      mandatoryResourceKeys: [target.resourceKey],
+      mandatoryOriginalResourceKeys: [target.resourceKey],
+      targetResourceKeys: [target.resourceKey],
+      additionalReadsEnabled: false,
+    })
+    expect(exact.selector.selected.find(item => item.resourceKey === target.resourceKey)?.depth).toBe('original')
+    expect(exact.retrievalTrace.mandatory.find(item => item.resourceKey === target.resourceKey)?.depth).toBe('original')
+    expect(exact.contextPacket.content).toContain(lateFact)
+
+    await expect(executeContextGatewayV1({
+      skill: worldviewSkill(),
+      scope: fixture.scope,
+      worldGroupId: null,
+      budgetTokens: 1_000,
+      mandatoryResourceKeys: [target.resourceKey],
+      mandatoryOriginalResourceKeys: [target.resourceKey],
+      targetResourceKeys: [target.resourceKey],
+      additionalReadsEnabled: false,
+    })).rejects.toThrow('hard-sufficiency')
+  })
+
   it('freezes Gateway policy in Skill V2 and requires V3 only after a Skill rollout becomes required', async () => {
     const fixture = await seedWorkspace()
     const skill = worldviewSkill()
@@ -259,8 +297,12 @@ describe('CTXG-7 · Gateway fast/complex execution', () => {
     }
     await expect(assertAgentSkillExecutionBindingIntegrityV2(tampered)).rejects.toThrow('skillDefinitionHash')
 
+    const shadowSkill: AgentSkillDefinitionV1 = {
+      ...skill,
+      contextGateway: { ...skill.contextGateway!, rollout: 'shadow', requiredWriteTargets: [] },
+    }
     await expect(assertContextGatewayCandidateAdoptableV1({
-      skill,
+      skill: shadowSkill,
       scope: fixture.scope,
       worldGroupId: null,
       runId: 999,
@@ -269,10 +311,7 @@ describe('CTXG-7 · Gateway fast/complex execution', () => {
       candidateHash: 'a'.repeat(64),
     })).resolves.toEqual({ mode: 'legacy-or-shadow' })
 
-    const requiredSkill: AgentSkillDefinitionV1 = {
-      ...skill,
-      contextGateway: { ...skill.contextGateway!, rollout: 'required' },
-    }
+    const requiredSkill = skill
     await expect(assertContextGatewayCandidateAdoptableV1({
       skill: requiredSkill,
       scope: fixture.scope,

@@ -251,4 +251,33 @@ describe('R-HARNESS32 · 三个世界基座面板统一进入主 Agent Harness',
       climateByRegion: '盐雾季会让北岸连续失温七日。',
     })
   })
+
+  it('自然资源原生对象候选刷新后可审查和修改，不退化为旁路文本', async () => {
+    const naturalResources = {
+      rareCreatures: '雾鹿会沿盐雾迁徙。',
+      herbs: '潮眠草只在退潮后的三小时内开花。',
+      minerals: '北岸出产可记录声音的回声盐晶。',
+      others: '贝壳纸是城邦间的主要契约载体。',
+    }
+    mocks.copilot.pendingCandidates = [candidate('naturalResources', '自然资源明细', naturalResources)]
+    const host = await renderPanel(WorldviewNaturalPanel)
+
+    await vi.waitFor(() => {
+      expect(host.querySelector('textarea[aria-label="自然资源明细候选内容"]')).not.toBeNull()
+    })
+    expect(host.querySelector('[aria-label="自然资源有待确认候选"]')).not.toBeNull()
+    expect(host.textContent).toContain('自然资源分类明细（原生结构）')
+
+    const editor = host.querySelector<HTMLTextAreaElement>('textarea[aria-label="自然资源明细候选内容"]')!
+    const revisedValue = {
+      ...naturalResources,
+      others: '贝壳纸是城邦间的契约载体，烧毁后会留下不可伪造的潮纹。',
+    }
+    await act(async () => setInputValue(editor, JSON.stringify(revisedValue, null, 2)))
+
+    expect(mocks.copilot.updateCandidate).toHaveBeenCalledWith(51, JSON.stringify({
+      field: 'naturalResources',
+      value: revisedValue,
+    }, null, 2))
+  })
 })

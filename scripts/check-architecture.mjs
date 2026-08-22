@@ -1145,9 +1145,24 @@ if (/\bdb\.|from ['"]\.\.\/db\//.test(contextShadowReadSource)
   || /recordContextGateway|finalizeContextGateway|adopt\(|persistCandidate|createAgentRun/.test(contextShadowReadSource)) {
   violations.push('[㉚shadow 零副作用] shadow compare 不得直接访问 DB、写 Run/Artifact、持久化候选或采纳')
 }
+const worldviewFieldCopilotSource = read('src/lib/agent/worldview-field-copilot.ts')
+const fieldRegistrySource = read('src/lib/registry/field-registry.ts')
 if (!agentSkillSource.includes("id: 'world-origin.worldview-field'")
-  || !/id:\s*'world-origin\.worldview-field'[\s\S]*?rollout:\s*'shadow'/.test(agentSkillSource)) {
-  violations.push('[㉚未切生产] Phase 1A 总门期间第一个业务 Skill 必须仍处于 shadow')
+  || !/id:\s*'world-origin\.worldview-field'[\s\S]*?rollout:\s*'required'/.test(agentSkillSource)
+  || !agentSkillSource.includes('requiredWriteTargets: WORLDVIEW_GENERATABLE_FIELD_SPECS.map')
+  || !agentSkillSource.includes('fields: WORLDVIEW_GENERATABLE_FIELD_SPECS.map')) {
+  violations.push('[㉚WE-1 required] 世界基座 Skill 必须从 generatable capability 派生 required Gateway 与写目标')
+}
+for (const token of [
+  'WORLDVIEW_GENERATABLE_FIELD_SPECS', 'aiGeneration:', "domain: 'worldview-foundation'",
+  'directDependencies:', 'outputSchemaId:', 'temporaryAssumptions:',
+]) {
+  if (!fieldRegistrySource.includes(token)) violations.push(`[㉚WE-1 字段能力] FIELD_REGISTRY 缺少 ${token}`)
+}
+if (!worldviewFieldCopilotSource.includes('WORLDVIEW_GENERATABLE_FIELD_SPECS')
+  || !worldviewFieldCopilotSource.includes('WORLDVIEW_AGENT_FIELD_CAPABILITIES')
+  || !worldviewFieldCopilotSource.includes('`worldview-field:${before.ragDocumentId}:field:${targetField}`')) {
+  violations.push('[㉚WE-1 controller] 字段集合、合同与 mandatory target 必须从注册能力派生，不得只特判 races')
 }
 if (!contextGatewayIndexSource.includes("from './shadow-read'")) {
   violations.push('[㉚公开入口] shadow compare 必须从唯一 Context Gateway headless 边界导出')

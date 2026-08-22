@@ -345,6 +345,22 @@ export interface FieldSpec {
   label?: string
   /** 中文/别名枚举归一,如 主角 -> protagonist */
   enumAliasMap?: Record<string, string>
+  /**
+   * AI generation is opt-in. A registered writable field is not automatically
+   * generatable; formal Skills derive their target set and field contract from
+   * this capability instead of maintaining a second field list.
+   */
+  aiGeneration?: {
+    version: 1
+    domain: 'worldview-foundation'
+    label: string
+    kind: 'text' | 'divine-design' | 'natural-resources'
+    directDependencies: readonly string[]
+    modes: readonly ('expand' | 'rewrite' | 'polish')[]
+    outputSchemaId: string
+    maxChars: number
+    temporaryAssumptions: 'allowed' | 'forbidden'
+  }
 }
 
 export interface CompositeIdentity {

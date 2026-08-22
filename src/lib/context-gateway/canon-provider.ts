@@ -501,6 +501,7 @@ async function makeDescriptor(input: {
   sourceRefs: ContextSourceRefV1[]
   relations: ContextResourceRelationV1[]
   authority: ContextResourceAuthorityV1
+  originalTokenEstimate?: number
   policyField?: string
   timeRange?: ContextTimeRangeV1
 }): Promise<ProjectedResourceV1> {
@@ -537,7 +538,7 @@ async function makeDescriptor(input: {
         summary: estimateTokens(short(input.shortSummary, 600)),
         focused: estimateTokens(input.focusedContent ?? input.fullContent),
         full: estimateTokens(input.fullContent),
-        original: sourceRefs.reduce((sum, ref) => sum + Math.ceil((ref.anchor?.end ?? 0) / 3), 0),
+        original: input.originalTokenEstimate ?? estimateTokens(input.fullContent),
       },
       availableDepths: ['index', 'summary', 'focused', 'full', 'original'],
       priority: policy.priority,
@@ -587,6 +588,7 @@ async function genericResources(
     title: `${title} · ${current.label}`,
     shortSummary: current.presented,
     fullContent: current.presented,
+    originalTokenEstimate: estimateTokens(current.exact),
     sourceRefs: refsByField[index],
     relations: [{ kind: 'parent', targetResourceKey: recordKey(spec, row), direction: 'outgoing' }, ...relations],
     authority: fieldAuthorities[index],
