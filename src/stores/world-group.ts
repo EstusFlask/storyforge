@@ -29,7 +29,9 @@ interface WorldGroupStore {
   reorderGroups: (scope: WorkspaceScopeLike, orderedIds: number[]) => Promise<void>
 
   // 世界间关系
-  createLink: (data: Omit<WorldGroupLink, 'id' | 'createdAt'>) => Promise<number>
+  createLink: (data: Omit<WorldGroupLink, 'id' | 'createdAt' | 'updatedAt'>) => Promise<number>
+  updateLink: (id: number, patch: Partial<Pick<WorldGroupLink,
+    'fromGroupId' | 'toGroupId' | 'linkType' | 'name' | 'description' | 'bidirectional'>>) => Promise<void>
   deleteLink: (id: number) => Promise<void>
 
   // 确保默认主世界组存在
@@ -140,10 +142,33 @@ export const useWorldGroupStore = create<WorldGroupStore>((set, get) => ({
     const id = await db.worldGroupLinks.add(stampNewRecord(scope, 'worldGroupLinks', {
       ...data,
       createdAt: now(),
+      updatedAt: now(),
     } as WorldGroupLink, { owner: 'world' })) as number
     const links = await readOwnedRows<WorldGroupLink>(scope, 'worldGroupLinks', { owner: 'world' })
     set({ links })
     return id
+  },
+
+  updateLink: async (id, patch) => {
+    const current = get().links.find(link => link.id === id) ?? await db.worldGroupLinks.get(id)
+    if (!current) throw new Error('[WorldGroup] 世界关系不存在')
+    const scope = await resolveScopeLike(current.projectId)
+    if (!await assertRecordInScope(scope, 'worldGroupLinks', current, { owner: 'world' })) {
+      throw new Error('[WorldGroup] 世界关系不属于当前 World')
+    }
+    const fromGroupId = patch.fromGroupId ?? current.fromGroupId
+    const toGroupId = patch.toGroupId ?? current.toGroupId
+    if (fromGroupId === toGroupId) throw new Error('[WorldGroup] 世界关系不能连接同一世界')
+    const [from, to] = await Promise.all([db.worldGroups.get(fromGroupId), db.worldGroups.get(toGroupId)])
+    if (!from || !to || !await assertRecordInScope(scope, 'worldGroups', from, { owner: 'world' })
+      || !await assertRecordInScope(scope, 'worldGroups', to, { owner: 'world' })) {
+      throw new Error('[WorldGroup] 世界关系端点不属于当前 World')
+    }
+    const updatedAt = now()
+    await db.worldGroupLinks.update(id, { ...patch, updatedAt })
+    set({
+      links: get().links.map(link => link.id === id ? { ...link, ...patch, updatedAt } : link),
+    })
   },
 
   deleteLink: async (id) => {

@@ -195,7 +195,7 @@ AI 输出经 `adopt({ target, data })` 写回,只有这里登记的字段可写(
 | `storylineProgress` | `arcId` `currentStageId` `evidenceQuote` `involvedEntities` `lastActiveChapterId` `lastActiveChapterTitle` `progressNote` `status` |
 | `userStyleProfiles` | `enabled` `profile` `sampleCount` `sampleWords` `sourceChapterIds` |
 | `works` | `description` `genres` `methodologyId` `status` `targetWordCount` `title` `writingStyleId` |
-| `worldGroups` | `description` `entryCondition` `icon` `name` `order` `plannedChapterCount` `powerRestriction` `type` |
+| `worldGroups` | `description` `entryCondition` `exitCondition` `icon` `name` `order` `plannedChapterCount` `powerRestriction` `takeawayRules` `type` |
 | `worldNodes` | `mapConfigJSON` |
 | `worldRulesProfiles` | `customNodes` `entries` `globalNote` |
 | `worlds` | `description` `name` |
@@ -350,4 +350,4 @@ AI 输出经 `adopt({ target, data })` 写回,只有这里登记的字段可写(
 
 ---
 
-生成时间基准:commit `b09b1602`
+生成时间基准:commit `8a78e34c`

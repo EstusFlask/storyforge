@@ -74,10 +74,13 @@ async function validRange(scope: WorkspaceScope, from: number | null, to: number
 }
 
 async function resolveCharacterId(scope: WorkspaceScope, name: string): Promise<number | null> {
+  const project = await db.projects.get(scope.projectId)
+  const allowUnassignedSingleWorld = project?.enableMultiWorld !== true
   const matches = (await readOwnedRows<any>(scope, 'characters', { owner: 'world' }))
     .filter(character =>
       character.name === name
-      && (character.isCrossWorld || character.homeWorldGroupId == null))
+      && (character.isCrossWorld
+        || (allowUnassignedSingleWorld && (character.homeWorldGroupId ?? null) === null)))
   return matches.length === 1 ? matches[0].id ?? null : null
 }
 

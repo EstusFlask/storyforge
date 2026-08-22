@@ -260,7 +260,9 @@ export const FIELD_REGISTRY: FieldSpec[] = [
   text('worldGroups', 'icon', ['世界图标']),
   num('worldGroups', 'order', ['世界顺序']),
   longtext('worldGroups', 'entryCondition', ['进入条件']),
+  longtext('worldGroups', 'exitCondition', ['离开条件']),
   longtext('worldGroups', 'powerRestriction', ['能力限制']),
+  longtext('worldGroups', 'takeawayRules', ['带出规则']),
   num('worldGroups', 'plannedChapterCount', ['预计章节数']),
 
   // worldviews: legacy free-text fields still used by existing panels.

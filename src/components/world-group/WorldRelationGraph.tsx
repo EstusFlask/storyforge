@@ -154,6 +154,7 @@ export default function WorldRelationGraph({ onNodeClick }: Props) {
                   stroke={style.color}
                   strokeWidth={1.5}
                   strokeDasharray={style.dash}
+                  markerStart={l.bidirectional ? `url(#arrow-${l.linkType})` : undefined}
                   markerEnd={`url(#arrow-${l.linkType})`}
                 />
                 <text x={mx} y={my - 4} textAnchor="middle" className="fill-text-muted" style={{ fontSize: 9 }}>

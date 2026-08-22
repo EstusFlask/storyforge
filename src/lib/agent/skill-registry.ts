@@ -34,6 +34,7 @@ export type AgentSkillExecutionModeV1 =
   | 'worldview-field'
   | 'world-suggest'
   | 'worldview-expand'
+  | 'world-link-context'
   | 'constitution-extract'
   | 'codex-extract'
   | 'codex-enrich'
@@ -1269,6 +1270,52 @@ export const AGENT_SKILLS = [
   },
   {
     version: 1,
+    id: 'world-origin.world-link-context',
+    agentId: 'world-origin',
+    defaultForAgent: false,
+    label: '世界通道上下文',
+    owner: 'world-foundation-agent',
+    promptVersion: 'world-link-context-v1',
+    executionMode: 'world-link-context',
+    contextTaskKind: 'agent-world-origin',
+    readToolNames: [],
+    contextSourceKeys: WORLD_SUGGEST_CONTEXT_SOURCE_KEYS,
+    optionalContextSourceKeys: [],
+    inputPolicy: {
+      sourceKeys: WORLD_SUGGEST_CONTEXT_SOURCE_KEYS,
+      states: {
+        empty: { handling: 'create-from-request', instruction: '目标世界和通道是强制资源；缺失时停止，不得猜测相邻世界。' },
+        partial: { handling: 'reference-and-create', instruction: '只沿指定通道展开一个相邻世界，并保留方向与进出约束。' },
+        complete: { handling: 'grounded-transform', instruction: '严格依据目标世界和指定通道资源工作，不得跨第二跳读取。' },
+      },
+    },
+    contextCompression: WORLD_SUGGEST_COMPRESSION_POLICY,
+    contextGateway: {
+      version: 1,
+      rollout: 'required',
+      requiredWriteTargets: [],
+      providerSourceKeys: ['ragSelection'],
+      allowedResourceKinds: [
+        'world', 'world-link', 'worldview-field', 'story-core-field', 'character',
+        'character-relation', 'story-arc', 'outline-node', 'chapter', 'fact', 'codex-entry',
+      ],
+      allowedDepths: ['index', 'summary', 'focused', 'full', 'original'],
+      maxReadCalls: 3,
+      maxRetrievedTokens: 16_000,
+      maxPlanningSteps: 3,
+      maxPlanningModelTokens: 12_000,
+      allowOriginalRead: true,
+      additionalReadToolNames: [
+        'list_context_catalog', 'search_context', 'read_context_resource', 'read_original_evidence',
+      ],
+    },
+    maxOutputTokens: 2_000,
+    writeTargets: [],
+    lastVerifiedAt: '2026-08-23',
+    regressionTests: ['R-MW1-world-link-governance'],
+  },
+  {
+    version: 1,
     id: 'world-origin.world-suggest',
     agentId: 'world-origin',
     defaultForAgent: false,
@@ -1722,7 +1769,7 @@ export const AGENT_SKILLS = [
       ],
     }],
     lastVerifiedAt: '2026-08-23',
-    regressionTests: ['R-CHAR1-character-lifecycle-candidate'],
+    regressionTests: ['R-CHAR1-character-gateway-contract', 'R-CHAR1-character-lifecycle-ui'],
   },
   {
     version: 1,
@@ -2932,7 +2979,7 @@ export function validateAgentSkillDefinitionsV1(
   definitions: readonly AgentSkillDefinitionV1[],
 ): void {
   const executionModesByAgent: Record<DomainAgentId, ReadonlySet<AgentSkillExecutionModeV1>> = {
-    'world-origin': new Set(['complete', 'worldview-field', 'world-suggest', 'worldview-expand', 'constitution-extract', 'codex-extract', 'codex-enrich', 'story-core', 'creative-rules', 'locations', 'map-config', 'history-consult', 'history-storm', 'review']),
+    'world-origin': new Set(['complete', 'worldview-field', 'world-suggest', 'worldview-expand', 'world-link-context', 'constitution-extract', 'codex-extract', 'codex-enrich', 'story-core', 'creative-rules', 'locations', 'map-config', 'history-consult', 'history-storm', 'review']),
     character: new Set(['create', 'supplement', 'lifecycle', 'relationships', 'character-reply', 'memory-curator']),
     inspiration: new Set(['reference-summary', 'reference-characters', 'reverse', 'review']),
     outline: new Set(['auto', 'story-arcs', 'foreshadow-suggestions', 'storyline-progress', 'character-driven', 'character-revision', 'world-game', 'impact-summary-regenerate', 'volumes', 'chapters', 'details']),

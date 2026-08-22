@@ -89,6 +89,10 @@ export function createContextAccessPolicyForExecutionV1(
 ): ContextAccessPolicyV1 {
   const declared = createContextAccessPolicyFromSkillV1(skill)
   const excluded = new Set(excludedResourceKinds)
+  // Adjacent worlds are exposed only by the explicit channel task. Normal
+  // worldview/character/story/prose work cannot gain one-hop access merely
+  // because a world-link happens to exist in the catalog.
+  if (skill.executionMode !== 'world-link-context') excluded.add('world-link')
   return {
     ...declared,
     allowedResourceKinds: declared.allowedResourceKinds.filter(kind => !excluded.has(kind)),

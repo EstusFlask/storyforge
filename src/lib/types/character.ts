@@ -90,7 +90,7 @@ export interface Character extends RagDocumentMetadata {
   statusProducerCandidateHash?: string | null
 
   // ── Phase 25.4 多世界 ──
-  /** 角色原属世界组 ID（null = 主角/跨世界角色） */
+  /** 角色原属世界组 ID；null 只表示尚未归属/单世界兼容，不代表跨世界。 */
   homeWorldGroupId?: number | null
   /** 是否跨世界角色（主角、系统精灵等，在所有世界中可见） */
   isCrossWorld?: boolean

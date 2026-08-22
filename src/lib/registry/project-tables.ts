@@ -994,7 +994,9 @@ const PROJECT_TABLE_REGISTRATIONS: ProjectTableRegistration[] = [
     exportRemap: [
       { field: 'fromGroupId', remapVia: 'worldGroups', exportAs: '_fromGroupExportId', onUnmapped: 'require' },
       { field: 'toGroupId', remapVia: 'worldGroups', exportAs: '_toGroupExportId', onUnmapped: 'require' },
-    ] },
+    ],
+    defaults: { bidirectional: false },
+    note: '方向/双向性由 from/to + bidirectional 表达；进入/离开/力量/带出规则来自两端世界并由 Gateway 聚合。' },
 
   // ───────────────────── 参考书 / 作品分析 ─────────────────────
   { table: db.references, name: 'references', owner: 'project', exportable: true,

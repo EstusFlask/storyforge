@@ -557,7 +557,15 @@ async function genericResources(
 ): Promise<ProjectedResourceV1[]> {
   const fields = await fieldsForRow(spec, row)
   if (!fields.length) return []
-  const title = rowTitle(spec, row)
+  const baseTitle = rowTitle(spec, row)
+  const groupId = spec.homeWorldScoped
+    ? (typeof row.homeWorldGroupId === 'number' ? row.homeWorldGroupId : null)
+    : (typeof row.worldGroupId === 'number' ? row.worldGroupId : null)
+  const group = groupId == null ? undefined : await db.worldGroups.get(groupId)
+  const scopeIdentity = spec.homeWorldScoped && row.isCrossWorld === true
+    ? '跨世界'
+    : group?.projectId === row.projectId ? `世界：${group.name}` : ''
+  const title = scopeIdentity ? `${baseTitle} · ${scopeIdentity}` : baseTitle
   const relations = await relationsForRow(spec, row)
   const refsByField = await Promise.all(fields.map(current => Promise.all(
     current.sourceFields.map(source => sourceRef(spec, row, source.key, source.exact)),

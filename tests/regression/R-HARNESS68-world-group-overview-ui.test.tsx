@@ -6,7 +6,16 @@ import type { Project, WorldGroup } from '../../src/lib/types'
 const groups: WorldGroup[] = [{
   id: 7, projectId: 1, worldId: 11, name: '归潮港', description: '所有潮汐门的起点。',
   type: 'primary', icon: '⚓', order: 0, createdAt: 1, updatedAt: 1,
+} as WorldGroup, {
+  id: 8, projectId: 1, worldId: 11, name: '盐镜界', description: '倒悬镜海。',
+  type: 'parallel', icon: '🪞', order: 1, createdAt: 1, updatedAt: 1,
 } as WorldGroup]
+
+const links = [{
+  id: 9, projectId: 1, worldId: 11, fromGroupId: 7, toGroupId: 8,
+  linkType: 'portal', name: '盐镜门', description: '退潮时开启', bidirectional: false,
+  createdAt: 1, updatedAt: 1,
+}]
 
 const mocks = vi.hoisted(() => ({
   loadAll: vi.fn(async () => undefined),
@@ -14,6 +23,7 @@ const mocks = vi.hoisted(() => ({
   createGroup: vi.fn(async () => 8),
   deleteGroup: vi.fn(async () => undefined),
   createLink: vi.fn(async () => 1),
+  updateLink: vi.fn(async () => undefined),
   deleteLink: vi.fn(async () => undefined),
   resolveScopeLike: vi.fn(async () => ({ projectId: 1, worldId: 11, workId: 12 })),
   generate: vi.fn(),
@@ -27,13 +37,14 @@ const mocks = vi.hoisted(() => ({
 vi.mock('../../src/stores/world-group', () => ({
   useWorldGroupStore: () => ({
     groups,
-    links: [],
+    links,
     loading: false,
     loadAll: mocks.loadAll,
     ensurePrimaryGroup: mocks.ensurePrimaryGroup,
     createGroup: mocks.createGroup,
     deleteGroup: mocks.deleteGroup,
     createLink: mocks.createLink,
+    updateLink: mocks.updateLink,
     deleteLink: mocks.deleteLink,
   }),
 }))
@@ -207,5 +218,21 @@ describe('R-HARNESS68 · 世界建议 UI', () => {
     await vi.waitFor(() => expect(mocks.readPending).toHaveBeenCalledWith({ scope: nextScope }))
     expect(mocks.loadAll).toHaveBeenLastCalledWith(nextScope)
     expect(mocks.ensurePrimaryGroup).toHaveBeenLastCalledWith(nextScope)
+  })
+
+  it('作者可以编辑通道方向、双向性和描述，而不是只能删除重建', async () => {
+    const host = await renderOverview()
+    const edit = host.querySelector('button[title="编辑关系"]') as HTMLButtonElement
+    expect(edit).toBeTruthy()
+    await act(async () => edit.click())
+    expect(host.textContent).toContain('编辑世界通道')
+    expect((host.querySelector('textarea[placeholder*="通道触发方式"]') as HTMLTextAreaElement).value)
+      .toBe('退潮时开启')
+    const checkbox = host.querySelector('input[type="checkbox"]') as HTMLInputElement
+    await act(async () => checkbox.click())
+    await act(async () => button(host, '保存关系').click())
+    expect(mocks.updateLink).toHaveBeenCalledWith(9, expect.objectContaining({
+      fromGroupId: 7, toGroupId: 8, name: '盐镜门', description: '退潮时开启', bidirectional: true,
+    }))
   })
 })
