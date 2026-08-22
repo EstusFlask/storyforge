@@ -4,7 +4,7 @@
 任务 ID：`GATE-P1B`  
 隔离分支：`refactor/world-engine-harness`  
 基线：`bd722008 test(E2E): edit structured worldview value only`  
-状态：机械门已通过；V11 额度暂停已归档，V12 quota 分类修复完成，等待补足同一 Provider 额度后重新运行
+状态：⛔ V12 机械门已通过；真实 grader preflight 连续因同一 Agnes quota 拒绝，等待外部额度变化
 
 ## 1. 完成边界
 
@@ -88,6 +88,14 @@
   从 V12 0/100 重新运行。不得更换模型身份或降低 grader 输出预算规避冻结协议。
 - V12 机械回执：完整 CI 463 files / 2203 tests、生产依赖 0 漏洞、bundle 通过；隔离 Chromium E2E
   53/53 通过。该回执只证明代码与 UI 生命周期，不替代尚未运行的 V12 真实模型质量矩阵。
+
+### V12 grader preflight 阻断
+
+- V12 在任何 fixture、隔离项目或 checkpoint 创建前执行独立 grader schema preflight。
+- Agnes 返回 HTTP 403 `insufficient_user_quota`：账户剩余 `$0.001984`，本次预扣需 `$0.002068`。
+- 因失败发生在 preflight，V12 没有 checkpoint，也没有可计分样本；项目数据和 V11 归档均未改动。
+- 同一额度 blocker 已跨原始运行和两轮目标续作重复确认；在外部额度变化前无法获得真实模型门禁证据，
+  不得进入 Phase 2，也不得用替身、降低预算或历史 V11 部分样本冒充完成。
 
 ### V1 失败运行
 

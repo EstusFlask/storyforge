@@ -2,7 +2,7 @@
 
 日期：2026-08-22  
 施工单元：RACE-6  
-状态：V11 额度暂停证据已归档；V12 quota 分类修复完成，等待额度后重新 sealed run
+状态：⛔ V12 quota 分类与机械门完成；真实 grader preflight 因外部额度阻断
 
 > V1 首次真实运行在 `empty-02` 暴露 Agnes grader 的通用
 > `finish_reason=length` 与严格结构完成性判断冲突。V1 证据保留为失败运行；V2 不降低任何质量阈值，
@@ -76,6 +76,11 @@
 > 覆盖 402 以及 403/429 网关变体；Harness 与 durable failure policy 统一返回 `provider_quota`、不可自动
 > 重试、等待外部额度变化，权限错误和瞬时 rate limit 仍保持独立。因为失败证据合同发生变化，V12 使用
 > 新 checkpoint key，从 0 开始；生成模型、grader、4096-token 预算、fixture 和质量阈值均未改变。
+
+> V12 首次真实 schema preflight 在创建任何 fixture/checkpoint 前再次收到 HTTP 403
+> `insufficient_user_quota`：余额 `$0.001984`、预扣需 `$0.002068`。因此 V12 没有产生可计分样本，
+> 也没有写入隔离项目。完整 CI 463 files / 2203 tests 与隔离 Chromium 53/53 只能证明机械链路；真实质量门
+> 仍被外部账户状态阻断，不能据此进入 Phase 2。
 
 ## 评测目标
 
