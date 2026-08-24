@@ -1158,6 +1158,12 @@ if (!canonProviderSource.includes('UNCACHED_CANON_RESOURCE_PROVIDER_V1')
   || !canonProviderSource.includes('projected.fullContent.toLocaleLowerCase')) {
   violations.push('[㉙Provider 透明接入] Canon 必须以同合同包装缓存，并在 derived index 坏/缺时定点回 Canon body')
 }
+for (const token of [
+  'MAX_RESOURCE_LOCATORS_V1', 'RESOURCE_LOCATORS_V1', 'locatorCacheKeyV1',
+  'rememberResourceLocatorV1', 'scopeFingerprint', 'await visibleInScope',
+]) {
+  if (!canonProviderSource.includes(token)) violations.push(`[㉙Provider 定位器] 缺少 ${token}`)
+}
 if (!contextGatewayIndexSource.includes("from './provider-cache'")
   || !contextGatewayIndexSource.includes("from './narrative-retrieval'")) {
   violations.push('[㉙公开入口] 缓存诊断与长篇候选规划必须从唯一 Context Gateway headless 边界导出')

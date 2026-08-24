@@ -98,6 +98,44 @@ interface LocatedProjectionV1 {
   itemIndex: number
 }
 
+interface ResourceLocatorV1 {
+  tableName: string
+  recordId: number
+}
+
+const MAX_RESOURCE_LOCATORS_V1 = 100_000
+
+// Disposable acceleration only. The epoch is advanced by the existing global
+// Dexie mutation boundary, so a locator can never outlive the Canon generation
+// that produced its descriptor. Reads still reload the row and revalidate
+// scope/content/policy hashes; this map is not a second identity authority.
+let RESOURCE_LOCATORS_V1 = new Map<string, ResourceLocatorV1>()
+let resourceLocatorEpochV1 = -1
+
+function locatorCacheKeyV1(scopeFingerprint: string, resourceKey: string): string {
+  const epoch = contextGatewayCacheEpochV1()
+  if (resourceLocatorEpochV1 !== epoch) {
+    RESOURCE_LOCATORS_V1 = new Map<string, ResourceLocatorV1>()
+    resourceLocatorEpochV1 = epoch
+  }
+  return `${scopeFingerprint}\u0000${resourceKey}`
+}
+
+function rememberResourceLocatorV1(input: {
+  scopeFingerprint: string
+  resourceKey: string
+  tableName: string
+  recordId: number
+}): void {
+  if (RESOURCE_LOCATORS_V1.size >= MAX_RESOURCE_LOCATORS_V1) {
+    RESOURCE_LOCATORS_V1 = new Map<string, ResourceLocatorV1>()
+  }
+  RESOURCE_LOCATORS_V1.set(locatorCacheKeyV1(input.scopeFingerprint, input.resourceKey), {
+    tableName: input.tableName,
+    recordId: input.recordId,
+  })
+}
+
 export class CanonResourceProviderError extends Error {
   constructor(public readonly code: string, message: string) {
     super(`[canon-resource:${code}] ${message}`)
@@ -1102,6 +1140,12 @@ async function catalogPage(input: ResourceListInputV1 | ResourceSearchInputV1): 
         : 0
       for (let itemIndex = start; itemIndex < resources.length; itemIndex++) {
         const projected = resources[itemIndex]
+        rememberResourceLocatorV1({
+          scopeFingerprint,
+          resourceKey: projected.descriptor.resourceKey,
+          tableName: spec.name,
+          recordId,
+        })
         const searchable = `${projected.descriptor.resourceKey}\n${projected.descriptor.title}\n${projected.descriptor.shortSummary}`
           .toLocaleLowerCase('zh-CN')
         const narrativeMatch = narrativePlan
@@ -1145,6 +1189,23 @@ async function findProjection(input: {
   resourceKey: string
 }): Promise<ProjectedResourceV1> {
   const workspace = await validatedScope(input.scope)
+  const scopeFingerprint = await canonScopeFingerprintV1(input.scope)
+  const locator = RESOURCE_LOCATORS_V1.get(locatorCacheKeyV1(scopeFingerprint, input.resourceKey))
+  if (locator) {
+    const spec = REGISTRY_BY_NAME.get(locator.tableName)
+    const row = spec?.resourceIdentity
+      ? await spec.table.get(locator.recordId) as ResourceRow | undefined
+      : undefined
+    if (spec?.resourceIdentity && row
+      && await visibleInScope(workspace, input.scope, spec as ResourceSpec, row)) {
+      const found = (await projectRow(spec as ResourceSpec, row, input.scope))
+        .find(item => item.descriptor.resourceKey === input.resourceKey)
+      if (found) return found
+    }
+    // A missing/replaced row is expected after damaged imports or unexpected
+    // cache state. Discard the disposable hints and use the authoritative scan.
+    RESOURCE_LOCATORS_V1 = new Map<string, ResourceLocatorV1>()
+  }
   for (const spec of resourceSpecs()) {
     if (!input.resourceKey.startsWith(`${spec.resourceIdentity.contextKind}:`)) continue
     for (const recordId of await primaryKeys(spec, input.scope.projectId)) {
