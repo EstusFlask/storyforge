@@ -530,6 +530,11 @@ export const FIELD_REGISTRY: FieldSpec[] = [
   num('codexEntries', 'cultivationSystemId', ['修炼体系ID']),
   text('codexEntries', 'cultivationStageId', ['境界ID', '当前境界ID']),
   num('codexEntries', 'importantLocationId', ['重要地点ID', '空间地点ID']),
+  enumeration('codexEntries', 'origin', ['manual', 'verbatim-extraction', 'ai-created-suggestion', 'import']),
+  json('codexEntries', 'sourceEvidenceQuotes', ['来源逐字证据']),
+  text('codexEntries', 'sourceContentHash', ['来源内容哈希']),
+  num('codexEntries', 'producerRunId', ['来源运行ID']),
+  text('codexEntries', 'producerCandidateHash', ['来源候选哈希']),
   num('codexEntries', 'order'),
   num('codexEntries', 'worldGroupId'),
 

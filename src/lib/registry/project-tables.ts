@@ -711,7 +711,12 @@ const PROJECT_TABLE_REGISTRATIONS: ProjectTableRegistration[] = [
       { field: 'worldGroupId', remapVia: 'worldGroups', exportAs: '_worldGroupExportId' },
       { field: 'cultivationSystemId', remapVia: 'cultivationSystems', exportAs: '_cultivationSystemExportId' },
       { field: 'importantLocationId', remapVia: 'importantLocations', exportAs: '_importantLocationExportId' },
-    ] },
+      { field: 'producerRunId', remapVia: 'agentRuns', exportAs: '_producerRunExportId', deferred: true },
+    ],
+    defaults: {
+      origin: 'manual', sourceEvidenceQuotes: '[]', sourceContentHash: '',
+      producerRunId: null, producerCandidateHash: null,
+    } },
 
   // ───────────────────── 文风学习（FB-5） ─────────────────────
   { table: db.userStyleProfiles, name: 'userStyleProfiles', owner: 'project', exportable: true,
@@ -762,6 +767,7 @@ const PROJECT_TABLE_REGISTRATIONS: ProjectTableRegistration[] = [
       { kind: 'simple', field: 'id', target: 'agentRunCheckpoints[runId]', onDelete: 'cascade' },
       { kind: 'simple', field: 'id', target: 'agentEvents[durableRunId]', onDelete: 'setNull' },
       { kind: 'simple', field: 'id', target: 'storyArcs[producerRunId]', onDelete: 'setNull' },
+      { kind: 'simple', field: 'id', target: 'codexEntries[producerRunId]', onDelete: 'setNull' },
     ],
     exportRemap: [
       { field: 'parentRunId', remapVia: 'agentRuns', selfTree: true, exportAs: '_parentExportId' },

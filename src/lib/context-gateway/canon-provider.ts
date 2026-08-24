@@ -346,6 +346,9 @@ async function worldGroupForRow(
 ): Promise<number | null | undefined> {
   if (spec.name === 'worldGroups') return row.id ?? undefined
   if (spec.name === 'worldGroupLinks') return fallback
+  // Codex 分类 schema 属于整个 World，而不是某个 worldGroup。旧备份仍可能
+  // 带有 worldGroupId=null；不能据此把分类从多世界 Gateway 目录中隐藏。
+  if (spec.name === 'codexCategories') return undefined
   if (typeof row.worldGroupId === 'number' || row.worldGroupId === null) return row.worldGroupId as number | null
   if (spec.homeWorldScoped) return (row.homeWorldGroupId as number | null | undefined) ?? null
   let outlineNodeId: number | undefined

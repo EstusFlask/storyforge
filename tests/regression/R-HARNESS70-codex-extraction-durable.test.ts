@@ -6,6 +6,7 @@ import { exportProjectJSON, importProjectJSON } from '../../src/lib/export/json-
 import { getAgentSkillV1 } from '../../src/lib/agent/skill-registry'
 import { CONTEXT_SOURCE_BY_KEY } from '../../src/lib/registry/context-sources'
 import { PROJECT_TABLES } from '../../src/lib/registry/project-tables'
+import { backfillResourceUidsV1 } from '../../src/lib/context-gateway/resource-identity'
 import { parseCodexEntriesStrictV1 } from '../../src/lib/ai/adapters/structured-extract-adapter'
 import * as codexAdapter from '../../src/lib/ai/adapters/structured-extract-adapter'
 import {
@@ -48,6 +49,7 @@ async function seed(suffix = '') {
     description: '生于旧港。', fields: JSON.stringify({ habitat: '旧港' }), refs: '{}', tags: '[]',
     importance: 1, order: 0, createdAt: now, updatedAt: now,
   } as any) as number
+  await backfillResourceUidsV1(projectId)
   return {
     scope: { projectId, worldId, workId } satisfies WorkspaceScope,
     projectId, worldId, workId, worldGroupId, categoryId, existingId,
@@ -84,7 +86,8 @@ describe.sequential('R-HARNESS70 · Codex 词条 durable 分块抽取与原子�
     expect(PROJECT_TABLES.find(item => item.name === 'codexEntries')).toMatchObject({ exportable: true, worldScoped: true })
     expect(getAgentSkillV1('world-origin.codex-extract')).toMatchObject({
       agentId: 'world-origin', executionMode: 'codex-extract',
-      contextSourceKeys: ['manualText', 'codexExtractionBaseline'],
+      contextSourceKeys: ['manualText', 'ragSelection'],
+      contextGateway: { rollout: 'required', providerSourceKeys: ['ragSelection'] },
       writeTargets: [{ table: 'codexEntries' }],
     })
     const fixture = await seed()

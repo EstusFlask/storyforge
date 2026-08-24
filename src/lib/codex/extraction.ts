@@ -5,6 +5,7 @@ import { readOwnedRows } from '../world-engine/scope'
 
 export interface CodexExtractionCategoryV1 {
   id: number
+  ragDocumentId: string
   name: string
   icon: string
   domain: CodexCategory['domain']
@@ -16,6 +17,7 @@ export interface CodexExtractionCategoryV1 {
 
 export interface CodexExtractionEntryV1 {
   id: number
+  ragDocumentId: string
   categoryId: number
   name: string
   icon: string
@@ -28,6 +30,11 @@ export interface CodexExtractionEntryV1 {
   cultivationSystemId: number | null
   cultivationStageId: string | null
   importantLocationId: number | null
+  origin: NonNullable<CodexEntry['origin']>
+  sourceEvidenceQuotes: string
+  sourceContentHash: string
+  producerRunId: number | null
+  producerCandidateHash: string | null
   order: number
   worldGroupId: number | null
   worldId: number
@@ -60,6 +67,7 @@ function categorySnapshot(row: CodexCategory & { id: number }): CodexExtractionC
   assertFieldSchema(fields)
   return {
     id: row.id,
+    ragDocumentId: row.ragDocumentId ?? '',
     name: row.name,
     icon: row.icon ?? '',
     domain: row.domain,
@@ -73,6 +81,7 @@ function categorySnapshot(row: CodexCategory & { id: number }): CodexExtractionC
 function entrySnapshot(row: CodexEntry & { id: number }): CodexExtractionEntryV1 {
   return {
     id: row.id,
+    ragDocumentId: row.ragDocumentId ?? '',
     categoryId: row.categoryId,
     name: row.name,
     icon: row.icon ?? '',
@@ -85,6 +94,11 @@ function entrySnapshot(row: CodexEntry & { id: number }): CodexExtractionEntryV1
     cultivationSystemId: row.cultivationSystemId ?? null,
     cultivationStageId: row.cultivationStageId ?? null,
     importantLocationId: row.importantLocationId ?? null,
+    origin: row.origin ?? 'manual',
+    sourceEvidenceQuotes: row.sourceEvidenceQuotes ?? '[]',
+    sourceContentHash: row.sourceContentHash ?? '',
+    producerRunId: row.producerRunId ?? null,
+    producerCandidateHash: row.producerCandidateHash ?? null,
     order: row.order,
     worldGroupId: row.worldGroupId ?? null,
     worldId: Number((row as unknown as Record<string, unknown>).worldId),

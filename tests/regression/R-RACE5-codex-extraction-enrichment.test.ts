@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { db } from '../../src/lib/db/schema'
 import type { WorkspaceScope } from '../../src/lib/types'
 import { getAgentSkillV1 } from '../../src/lib/agent/skill-registry'
+import { backfillResourceUidsV1 } from '../../src/lib/context-gateway/resource-identity'
 import {
   adoptCodexExtractionCandidateV1,
   generateCodexEnrichmentCandidateV1,
@@ -43,6 +44,7 @@ async function seed(): Promise<{
     builtInKey: 'race', fieldSchema: JSON.stringify([{ key: 'custom', label: '风俗', type: 'text' }]),
     hidden: false, order: 0, worldGroupId: null, createdAt: NOW, updatedAt: NOW,
   } as never) as number
+  await backfillResourceUidsV1(projectId)
   return { scope: { projectId, worldId, workId }, categoryId, worldGroupId }
 }
 
@@ -95,7 +97,8 @@ describe.sequential('RACE-5 · Codex extraction/enrichment separation', () => {
     const fixture = await seed()
     expect(getAgentSkillV1('world-origin.codex-enrich')).toMatchObject({
       executionMode: 'codex-enrich',
-      contextSourceKeys: expect.arrayContaining(['worldview', 'codexExtractionBaseline']),
+      contextSourceKeys: ['ragSelection'],
+      contextGateway: { rollout: 'required', providerSourceKeys: ['ragSelection'] },
       writeTargets: [{ table: 'codexEntries' }],
     })
     let prompt = ''

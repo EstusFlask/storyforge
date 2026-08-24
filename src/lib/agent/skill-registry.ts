@@ -235,9 +235,12 @@ const WORLD_SUGGEST_CONTEXT_SOURCE_KEYS = [
 ] as const
 
 const CONSTITUTION_EXTRACT_CONTEXT_SOURCE_KEYS = ['constitutionScanSources'] as const
-const CODEX_EXTRACT_CONTEXT_SOURCE_KEYS = ['manualText', 'codexExtractionBaseline'] as const
-const CODEX_ENRICH_CONTEXT_SOURCE_KEYS = [
-  'worldview', 'storyCore', 'characters', 'storyArcs', 'codexExtractionBaseline',
+const CODEX_EXTRACT_CONTEXT_SOURCE_KEYS = ['manualText', 'ragSelection'] as const
+const CODEX_ENRICH_CONTEXT_SOURCE_KEYS = ['ragSelection'] as const
+const CODEX_CANDIDATE_WRITE_FIELDS = [
+  'categoryId', 'name', 'icon', 'summary', 'description', 'fields', 'refs', 'tags',
+  'importance', 'origin', 'sourceEvidenceQuotes', 'sourceContentHash', 'producerRunId',
+  'producerCandidateHash', 'order', 'worldGroupId',
 ] as const
 const CULTIVATION_PROGRESS_EXTRACTION_CONTEXT_SOURCE_KEYS = [
   'chapterContent',
@@ -971,7 +974,7 @@ const WORLD_SUGGEST_COMPRESSION_POLICY = compressionPolicy([
   'storyCore',
 ])
 const CONSTITUTION_EXTRACT_COMPRESSION_POLICY = compressionPolicy(['constitutionScanSources'])
-const CODEX_EXTRACT_COMPRESSION_POLICY = compressionPolicy(['manualText', 'codexExtractionBaseline'])
+const CODEX_EXTRACT_COMPRESSION_POLICY = compressionPolicy(CODEX_EXTRACT_CONTEXT_SOURCE_KEYS)
 const CODEX_ENRICH_COMPRESSION_POLICY = compressionPolicy(CODEX_ENRICH_CONTEXT_SOURCE_KEYS)
 const CULTIVATION_PROGRESS_EXTRACTION_COMPRESSION_POLICY = compressionPolicy(
   CULTIVATION_PROGRESS_EXTRACTION_CONTEXT_SOURCE_KEYS,
@@ -1423,13 +1426,33 @@ export const AGENT_SKILLS = [
       },
     },
     contextCompression: CODEX_EXTRACT_COMPRESSION_POLICY,
+    contextGateway: {
+      version: 1,
+      rollout: 'required',
+      requiredWriteTargets: CODEX_CANDIDATE_WRITE_FIELDS.map(field => `codexEntries.${field}`),
+      providerSourceKeys: ['ragSelection'],
+      allowedResourceKinds: ['codex-entry'],
+      allowedDepths: ['index', 'summary', 'focused', 'full', 'original'],
+      maxReadCalls: 2,
+      maxRetrievedTokens: 20_000,
+      maxPlanningSteps: 2,
+      maxPlanningModelTokens: 8_000,
+      allowOriginalRead: true,
+      additionalReadToolNames: [
+        'list_context_catalog', 'search_context', 'read_context_resource', 'read_original_evidence',
+      ],
+    },
     maxOutputTokens: 4_000,
     writeTargets: [{
       table: 'codexEntries',
-      fields: ['categoryId', 'name', 'icon', 'summary', 'description', 'fields', 'refs', 'tags', 'importance', 'order', 'worldGroupId'],
+      fields: [...CODEX_CANDIDATE_WRITE_FIELDS],
     }],
-    lastVerifiedAt: '2026-08-14',
-    regressionTests: ['R-HARNESS70-codex-extraction-durable', 'R-RACE5-codex-extraction-enrichment'],
+    lastVerifiedAt: '2026-08-24',
+    regressionTests: [
+      'R-HARNESS70-codex-extraction-durable',
+      'R-RACE5-codex-extraction-enrichment',
+      'R-CODEX1-gateway-provenance',
+    ],
   },
   {
     version: 1,
@@ -1453,13 +1476,33 @@ export const AGENT_SKILLS = [
       },
     },
     contextCompression: CODEX_ENRICH_COMPRESSION_POLICY,
+    contextGateway: {
+      version: 1,
+      rollout: 'required',
+      requiredWriteTargets: CODEX_CANDIDATE_WRITE_FIELDS.map(field => `codexEntries.${field}`),
+      providerSourceKeys: ['ragSelection'],
+      allowedResourceKinds: [
+        'world', 'worldview-field', 'story-core-field', 'character', 'character-relation',
+        'story-arc', 'storyline-progress', 'outline-node', 'detailed-outline', 'chapter',
+        'foreshadow', 'location', 'codex-entry', 'fact', 'reference', 'narrative-blueprint',
+      ],
+      allowedDepths: ['index', 'summary', 'focused', 'full', 'original'],
+      maxReadCalls: 4,
+      maxRetrievedTokens: 32_000,
+      maxPlanningSteps: 5,
+      maxPlanningModelTokens: 24_000,
+      allowOriginalRead: true,
+      additionalReadToolNames: [
+        'list_context_catalog', 'search_context', 'read_context_resource', 'read_original_evidence',
+      ],
+    },
     maxOutputTokens: 4_000,
     writeTargets: [{
       table: 'codexEntries',
-      fields: ['categoryId', 'name', 'icon', 'summary', 'description', 'fields', 'refs', 'tags', 'importance', 'order', 'worldGroupId'],
+      fields: [...CODEX_CANDIDATE_WRITE_FIELDS],
     }],
-    lastVerifiedAt: '2026-08-22',
-    regressionTests: ['R-RACE5-codex-extraction-enrichment'],
+    lastVerifiedAt: '2026-08-24',
+    regressionTests: ['R-RACE5-codex-extraction-enrichment', 'R-CODEX1-gateway-provenance'],
   },
   {
     version: 1,
