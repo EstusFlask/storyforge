@@ -13,12 +13,13 @@
 
 - 读：Skill 只声明 `manualText` / `ragSelection`；Context Gateway 从 `PROJECT_TABLES.resourceIdentity` 和 `FIELD_REGISTRY` 派生 category、entry 与 custom field 资源。
 - 写：新增 provenance 字段全部进入 `FIELD_REGISTRY`，并由两个 Skill 的 `writeTargets` 与 required Gateway targets 同源声明；最终仍只经 `adopt(codexEntries)` 写入。
-- 表：`codexEntries.producerRunId` 已进入 `PROJECT_TABLES` export remap；`agentRuns` 删除时 set-null，不级联删除作者已采纳词条；历史词条由 defaults 解释为 `origin=manual`。
+- 表：DB v65 为 `codexEntries.producerRunId` 建立生命周期索引并迁移历史默认值；该字段已进入 `PROJECT_TABLES` export remap，`agentRuns` 删除时 set-null，不级联删除作者已采纳词条；历史词条明确迁移为 `origin=manual`，不会伪造 AI 来源。
 - scope：修复项目级共享 `codexCategories.worldGroupId=null` 在多世界目录中被误判为主世界专属的问题。
 
 ## 验证证据
 
 - `R-CODEX1-gateway-provenance`：3/3。覆盖 required Gateway、分类/自定义字段资源地址、逐字抽取与 AI 补全两次独立采纳、正式来源证据。
+- `R-CODEX1-v65-migration`：历史人工词条无损升级、来源默认值和 `producerRunId` 生命周期索引。
 - `R-HARNESS70-codex-extraction-durable` + `R-RACE5-codex-extraction-enrichment` + UI：30/30。
 - Context Gateway / registry 定向回归：37/37。
 - `npm run check:architecture`、`npm run check:required-tables`、`npx tsc --noEmit` 已通过；AI manual 已重新生成。

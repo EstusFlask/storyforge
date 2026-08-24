@@ -144,6 +144,7 @@ function normalize(data: any) {
   for (const row of data.codexEntries ?? []) {
     delete row._cultivationSystemExportId
     delete row._importantLocationExportId
+    delete row._producerRunExportId
     delete row.cultivationStageId
   }
   return data
