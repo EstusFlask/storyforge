@@ -63,7 +63,7 @@ function options(overrides: Partial<Parameters<typeof runProseSemanticReviewCycl
     reviewer: {
       provider: 'test',
       model: 'reviewer-v1',
-      promptVersion: 'prose-semantic-review-v1' as const,
+      promptVersion: 'prose-semantic-review-v2' as const,
       executionBinding: reviewerBinding,
       correlatedJudge: true,
     },

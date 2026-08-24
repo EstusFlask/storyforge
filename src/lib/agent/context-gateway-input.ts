@@ -73,6 +73,22 @@ export function contextGatewayInputStateSourceKeysV1(
     ].includes(ref.table))) {
     available.add('activeNarrativeBlueprint')
   }
+  if (skill.inputPolicy.sourceKeys.includes('chapterContinuityHandoff')
+    && execution.contextPacket.sourceRefs.some(ref => (
+      ref.table === 'chapters' && ['content', 'continuityHandoff', 'planReconciliation'].includes(ref.field)
+    ))) available.add('chapterContinuityHandoff')
+  if (skill.inputPolicy.sourceKeys.includes('characterKnowledge')
+    && execution.contextPacket.sourceRefs.some(ref => ref.table === 'knowledgeLedger')) {
+    available.add('characterKnowledge')
+  }
+  if (skill.inputPolicy.sourceKeys.includes('currentFacts')
+    && execution.contextPacket.sourceRefs.some(ref => ref.table === 'temporalFacts')) {
+    available.add('currentFacts')
+  }
+  if (skill.inputPolicy.sourceKeys.includes('consistencyDossier')
+    && execution.retrievalTrace.mandatory.some(item => item.resourceKey.endsWith(':consistency-dossier'))) {
+    available.add('consistencyDossier')
+  }
   return skill.inputPolicy.sourceKeys.filter(key => available.has(key))
 }
 

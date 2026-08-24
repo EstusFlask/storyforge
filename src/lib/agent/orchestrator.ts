@@ -1876,6 +1876,11 @@ async function executeSequentialMasterAgentPlan(
           perspectiveCharacterId: task.perspectiveCharacterId ?? null,
           signal: input.signal,
         })
+        await input.executionTrace?.contextGatewayPrepared?.(task, {
+          execution: prepared.contextGatewayExecution,
+          assembled: prepared.input.assembled,
+          renderedRequest: prepared.prepared.messages,
+        })
         if (creativeReliabilityEnabled) {
           const result = await runProseCreativeReliabilityV1({
             prepared,
@@ -1914,6 +1919,12 @@ async function executeSequentialMasterAgentPlan(
             draft,
             runtimeNode: prepared.node,
             runtimeOutput: result.output,
+            contextGatewayRuntime: {
+              execution: prepared.contextGatewayExecution,
+              assembled: prepared.input.assembled,
+              renderedRequest: prepared.prepared.messages,
+              rawResponse: result.artifact,
+            },
           })
           outputs.set(task.id, draft)
         } else {
@@ -1954,6 +1965,12 @@ async function executeSequentialMasterAgentPlan(
             draft,
             runtimeNode: prepared.node,
             runtimeOutput: result.output,
+            contextGatewayRuntime: {
+              execution: prepared.contextGatewayExecution,
+              assembled: prepared.input.assembled,
+              renderedRequest: prepared.prepared.messages,
+              rawResponse: result.output,
+            },
           })
           outputs.set(task.id, draft)
         }

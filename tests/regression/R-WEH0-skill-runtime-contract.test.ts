@@ -24,21 +24,18 @@ import {
 } from '../../src/lib/outline/harness'
 
 describe('WEH-0A · Skill → formal Run 单向派生', () => {
-  it('正文默认真实读取 Blueprint，只有显式 POV 才激活角色认知', async () => {
+  it('正文只声明 Gateway 单一来源，Blueprint 与 POV 认知由同一 packet 投影', async () => {
     const withoutPerspective = await resolveProseGenerationExecutionBindingV2({ operation: 'generate' })
     const withPerspective = await resolveProseGenerationExecutionBindingV2({
       operation: 'generate',
       perspectiveCharacterId: 7,
     })
 
-    expect(withoutPerspective.contextSourceKeys).toContain('activeNarrativeBlueprint')
-    expect(withoutPerspective.contextSourceKeys).not.toContain('characterKnowledge')
-    expect(withPerspective.contextSourceKeys).toContain('activeNarrativeBlueprint')
-    expect(withPerspective.contextSourceKeys).toContain('characterKnowledge')
-    expect(withPerspective.optionalContextActivations).toEqual([expect.objectContaining({
-      sourceKey: 'characterKnowledge',
-      reasonCode: 'perspective-character',
-    })])
+    expect(withoutPerspective.contextSourceKeys).toEqual(['ragSelection'])
+    expect(withPerspective.contextSourceKeys).toEqual(['ragSelection'])
+    expect(withPerspective.optionalContextActivations).toEqual([])
+    expect(getAgentSkillV1('prose.generate').inputPolicy.sourceKeys).toContain('activeNarrativeBlueprint')
+    expect(getAgentSkillV1('prose.generate').inputPolicy.sourceKeys).toContain('characterKnowledge')
   })
 
   it('大纲只在明确续接候选存在时激活 priorOutlineCandidate', async () => {
@@ -219,7 +216,8 @@ describe('WEH-0A · Skill → formal Run 单向派生', () => {
     const detailController = readFileSync(resolve(process.cwd(), 'src/components/outline/useDetailedOutlineGenerationController.ts'), 'utf8')
     const batchDetailRunner = readFileSync(resolve(process.cwd(), 'src/lib/ai/batch-detail-runner.ts'), 'utf8')
     expect(chapterEditor).not.toContain('PROSE_GENERATION_SOURCE_KEYS_V1')
-    expect(chapterEditor).toContain('sourceKeys: generationBinding.contextSourceKeys')
+    expect(chapterEditor).toContain('prepareProseGatewayAssemblyV1')
+    expect(chapterEditor).not.toContain('sourceKeys: generationBinding.contextSourceKeys')
     expect(outlinePanel).not.toContain('OUTLINE_GENERATION_SOURCE_KEYS')
     expect(outlinePanel).toContain('prepareOutlineGatewayAssemblyV1')
     expect(detailController).not.toContain('DETAILED_OUTLINE_GENERATION_SOURCE_KEYS_V1')

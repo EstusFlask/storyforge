@@ -9,8 +9,8 @@ import {
   type AgentTeamBudgetEvidence,
 } from './team-budget'
 
-export const PROSE_SEMANTIC_REVIEW_PROMPT_VERSION_V1 = 'prose-semantic-review-v1'
-export const PROSE_SEMANTIC_REVISION_PROMPT_VERSION_V1 = 'prose-semantic-revision-v1'
+export const PROSE_SEMANTIC_REVIEW_PROMPT_VERSION_V1 = 'prose-semantic-review-v2'
+export const PROSE_SEMANTIC_REVISION_PROMPT_VERSION_V1 = 'prose-semantic-revision-v2'
 
 type ProseSemanticExecutionBinding = AgentSkillExecutionBindingV1 | AgentSkillExecutionBindingV2
 

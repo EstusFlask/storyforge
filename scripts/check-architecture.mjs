@@ -417,6 +417,7 @@ for (const file of walk('src/lib')) {
 
 // ── ⑬ 正文/大纲正式生成来源只能由 Agent Skill binding 派生 ──
 const chapterEditorSource = read('src/components/editor/ChapterEditor.tsx')
+const proseCopilotSource = read('src/lib/agent/prose-copilot.ts')
 const outlinePanelSource = read('src/components/outline/OutlinePanel.tsx')
 const detailedOutlineControllerSource = read('src/components/outline/useDetailedOutlineGenerationController.ts')
 const batchDetailRunnerGovernanceSource = read('src/lib/ai/batch-detail-runner.ts')
@@ -427,8 +428,15 @@ const outlineHarnessSource = read('src/lib/outline/harness.ts')
 if (/\bPROSE_GENERATION_SOURCE_KEYS_V1\b/.test(chapterEditorSource)) {
   violations.push('[⑬Skill来源旁路] ChapterEditor 不得拥有 PROSE_GENERATION_SOURCE_KEYS_V1；正式来源必须取 generationBinding.contextSourceKeys')
 }
-if (!/sourceKeys:\s*generationBinding\.contextSourceKeys/.test(chapterEditorSource)) {
-  violations.push('[⑬Skill来源派生] ChapterEditor 正文正式请求未从 generationBinding.contextSourceKeys 装配')
+if (!/prepareProseGatewayAssemblyV1\s*\(/.test(chapterEditorSource)) {
+  violations.push('[⑬Gateway来源派生] ChapterEditor 正文正式请求未调用 prepareProseGatewayAssemblyV1')
+}
+if (/sourceKeys:\s*generationBinding\.contextSourceKeys/.test(chapterEditorSource)) {
+  violations.push('[⑬Gateway来源旁路] ChapterEditor 不得退回页面层 Skill 来源清单装配')
+}
+if (!/prepareProseGatewayAssemblyV1\s*\(/.test(proseCopilotSource)
+  || /assembleContext\s*\(/.test(proseCopilotSource)) {
+  violations.push('[⑬Gateway来源派生] 主 Agent prose-copilot 必须复用 prepareProseGatewayAssemblyV1，禁止保留第二套上下文装配')
 }
 if (/\bOUTLINE_GENERATION_SOURCE_KEYS\b/.test(outlinePanelSource)) {
   violations.push('[⑬Gateway来源旁路] OutlinePanel 不得拥有 OUTLINE_GENERATION_SOURCE_KEYS；正式来源必须由共享 Gateway 装配器派生')

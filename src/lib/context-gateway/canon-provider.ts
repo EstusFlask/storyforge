@@ -27,6 +27,10 @@ import type { RagDocumentPolicy, RagFieldPolicy } from '../types/rag-library'
 import { parseEntryFields, parseFieldSchema } from '../types/codex'
 import { normalizeDetailedScenes } from '../types/detailed-outline'
 import { parseStages } from '../types/story-arc'
+import {
+  buildLongTermConsistencyDossierV1,
+  formatLongTermConsistencyDossierV1,
+} from '../memory/consistency-dossier'
 import { htmlToPlainText } from '../utils/html'
 import { assertRecordInScope, resolveScope } from '../world-engine/scope'
 import { isPortableResourceUidV1 } from './resource-uid'
@@ -389,6 +393,10 @@ async function visibleInScope(
   row: ResourceRow,
 ): Promise<boolean> {
   if (row.projectId !== frozen.projectId || !await assertRecordInScope(workspace, spec.name, row)) return false
+  if (spec.name === 'knowledgeLedger'
+    && Object.prototype.hasOwnProperty.call(frozen, 'characterId')) {
+    return frozen.characterId != null && row.characterId === frozen.characterId
+  }
   const selectedGroup = frozen.worldGroupId
   if (spec.name === 'worldGroups') return selectedGroup == null || row.id === selectedGroup
   if (spec.name === 'worldGroupLinks') {
@@ -732,6 +740,113 @@ async function nestedWrittenBoundary(
   })]
 }
 
+async function nestedChapterContinuity(
+  spec: ResourceSpec,
+  row: ResourceRow,
+  frozenScope: FrozenResourceScopeV1,
+): Promise<ProjectedResourceV1[]> {
+  if (spec.name !== 'chapters' || typeof row.content !== 'string' || !row.content.trim()) return []
+  const plain = normalizeChapterText(row.content)
+  const tail = plain.slice(-4_000)
+  const fields = ['content', 'summary', 'continuityHandoff', 'planReconciliation']
+    .filter(field => row[field] !== undefined && exactValue(row[field]).trim())
+  const refs = await Promise.all(fields.map(field => sourceRef(spec, row, field, exactValue(row[field]))))
+  const relations = await relationsForRow(spec, row)
+  const body = [
+    '【章节直接连续性】',
+    `章节：${rowTitle(spec, row)}`,
+    row.summary ? `已验摘要：${exactValue(row.summary)}` : '',
+    row.continuityHandoff ? `交接：${exactValue(row.continuityHandoff)}` : '',
+    row.planReconciliation ? `计划对账：${exactValue(row.planReconciliation)}` : '',
+    `原文尾部（最多 4000 字符）：\n${tail}`,
+  ].filter(Boolean).join('\n')
+  return [await makeDescriptor({
+    spec,
+    row,
+    frozenScope,
+    resourceKey: `${recordKey(spec, row)}:continuity-tail`,
+    title: `${rowTitle(spec, row)} · 直接连续性`,
+    shortSummary: tail.slice(-360),
+    fullContent: body,
+    sourceRefs: refs,
+    relations: [{ kind: 'parent', targetResourceKey: recordKey(spec, row), direction: 'outgoing' }, ...relations],
+    authority: await chapterDerivedAuthority(row, row.continuityHandoff ? 'continuityHandoff' : 'content'),
+    policyField: 'content',
+    timeRange: timeRangeForRow(spec.name, row),
+  })]
+}
+
+/**
+ * PROSE-1: expose the deterministic long-term consistency dossier as a real
+ * Canon resource.  The previous CONTEXT_SOURCES reader produced useful text,
+ * but it could not be frozen in a Gateway inventory or revalidated at
+ * adoption.  This aggregate is anchored to the boundary chapter and carries
+ * exact refs for every row used by the dossier, including the canonical
+ * chapter sequence that decides temporal visibility.
+ */
+async function nestedConsistencyDossier(
+  spec: ResourceSpec,
+  row: ResourceRow,
+  frozenScope: FrozenResourceScopeV1,
+): Promise<ProjectedResourceV1[]> {
+  if (spec.name !== 'chapters' || typeof row.id !== 'number'
+    || frozenScope.chapterId !== row.id) return []
+  const dossier = await buildLongTermConsistencyDossierV1({
+    scope: {
+      projectId: frozenScope.projectId,
+      worldId: frozenScope.worldId!,
+      workId: frozenScope.workId!,
+    },
+    boundaryChapterId: row.id,
+    maxTokens: 5_500,
+  })
+  const refs: ContextSourceRefV1[] = []
+  const referenced = new Map<string, Set<number>>()
+  for (const ref of dossier.sourceRefs) {
+    if (typeof ref.recordId !== 'number') continue
+    referenced.set(ref.table, new Set([
+      ...(referenced.get(ref.table) ?? []),
+      ref.recordId,
+    ]))
+  }
+  // The descriptor content hash is rebuilt from the complete dossier during
+  // adoption freshness checks. Source refs remain a bounded exact provenance
+  // sample (the Gateway capability contract permits at most 64 per resource).
+  const boundaryFields = (await fieldsForRow(spec, row)).filter(field => (
+    ['title', 'outlineNodeId', 'order', 'content'].includes(field.key)
+  ))
+  refs.push(...await Promise.all(boundaryFields.flatMap(field => field.sourceFields)
+    .map(field => sourceRef(spec, row, field.key, field.exact))))
+  for (const [table, ids] of referenced) {
+    const registered = REGISTRY_BY_NAME.get(table)
+    if (!registered?.resourceIdentity) continue
+    for (const id of [...ids].sort((left, right) => left - right)) {
+      const sourceRow = await registered.table.get(id) as ResourceRow | undefined
+      if (!sourceRow || sourceRow.projectId !== row.projectId) continue
+      if (refs.length >= 64) break
+      const field = (await fieldsForRow(registered as ResourceSpec, sourceRow))[0]
+      const source = field?.sourceFields[0]
+      if (source) refs.push(await sourceRef(registered as ResourceSpec, sourceRow, source.key, source.exact))
+    }
+    if (refs.length >= 64) break
+  }
+  const body = formatLongTermConsistencyDossierV1(dossier)
+  return [await makeDescriptor({
+    spec,
+    row,
+    frozenScope,
+    resourceKey: `${recordKey(spec, row)}:consistency-dossier`,
+    title: `${rowTitle(spec, row)} · 长期一致性档案`,
+    shortSummary: `边界章节 #${row.id}；${dossier.sourceRefs.length} 条权威来源；${dossier.findings.length} 个待核对项`,
+    fullContent: body,
+    sourceRefs: refs,
+    relations: [{ kind: 'parent', targetResourceKey: recordKey(spec, row), direction: 'outgoing' }],
+    authority: 'confirmed-evidence',
+    policyField: 'content',
+    timeRange: timeRangeForRow(spec.name, row),
+  })]
+}
+
 async function worldLinkAggregate(
   spec: ResourceSpec,
   row: ResourceRow,
@@ -803,6 +918,8 @@ async function projectRow(
     ...await nestedStoryStages(spec, row, frozenScope),
     ...await nestedDetailedScenes(spec, row, frozenScope),
     ...await nestedWrittenBoundary(spec, row, frozenScope),
+    ...await nestedChapterContinuity(spec, row, frozenScope),
+    ...await nestedConsistencyDossier(spec, row, frozenScope),
   ]
   return [...(link ? [link] : []), ...withoutGenericLinkRecord, ...nested]
     .sort((left, right) => left.descriptor.resourceKey.localeCompare(right.descriptor.resourceKey))
@@ -823,6 +940,22 @@ async function validatedScope(scope: FrozenResourceScopeV1) {
       fail('scope-world-group', 'worldGroupId 不属于冻结 World scope')
     }
   }
+  if (scope.chapterId != null) {
+    const chapter = await db.chapters.get(scope.chapterId)
+    if (!chapter || !await assertRecordInScope(workspace, 'chapters', chapter, { owner: 'work' })) {
+      fail('scope-chapter', 'chapterId 不属于冻结 Work scope')
+    }
+  }
+  if (scope.characterId != null) {
+    const character = await db.characters.get(scope.characterId)
+    if (!character || !await assertRecordInScope(workspace, 'characters', character, { owner: 'world' })) {
+      fail('scope-character', 'characterId 不属于冻结 World scope')
+    }
+    if (!(character.isCrossWorld === true
+      || (character.homeWorldGroupId ?? null) === (scope.worldGroupId ?? null))) {
+      fail('scope-character-world', 'characterId 不属于冻结 worldGroup scope')
+    }
+  }
   return workspace
 }
 
@@ -833,6 +966,10 @@ export async function canonScopeFingerprintV1(scope: FrozenResourceScopeV1): Pro
     worldId: scope.worldId,
     workId: scope.workId,
     worldGroupId: scope.worldGroupId ?? null,
+    chapterId: scope.chapterId ?? null,
+    characterId: Object.prototype.hasOwnProperty.call(scope, 'characterId')
+      ? scope.characterId ?? null
+      : '__all__',
   } })
 }
 

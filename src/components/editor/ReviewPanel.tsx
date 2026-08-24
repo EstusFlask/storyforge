@@ -23,6 +23,7 @@ import { AgentTeamBudgetTracker } from '../../lib/agent/team-budget'
 import { runDurableConsistencyAuditV1 } from '../../lib/agent/run/consistency-audit-durable'
 import { resolveScopeLike } from '../../lib/world-engine/scope'
 import { useAIConfigStore } from '../../stores/ai-config'
+import { prepareProseGatewayAssemblyV1 } from '../../lib/prose/gateway-context'
 
 interface Props {
   projectId: number
@@ -58,8 +59,8 @@ const TABS: { key: TabType; label: string; icon: typeof ShieldCheck }[] = [
 ]
 
 export default function ReviewPanel(props: Props) {
-  const { projectId, chapterId, outlineNodeId, worldGroupId, chapterContent, chapterTitle, worldContext, characterContext,
-    prevChapterSummary, nextChapterSummary, foreshadowContext, stateContext, onClose, onReviseByReport } = props
+  const { projectId, chapterId, outlineNodeId, worldGroupId, chapterContent, chapterTitle,
+    prevChapterSummary, nextChapterSummary, onClose, onReviseByReport } = props
 
   const ai = useAIStream(createAISessionKey(projectId, 'review.run', chapterId))
   const [auditMode, setAuditMode] = useState<ConsistencyAuditMode>('fast')
@@ -92,9 +93,21 @@ export default function ReviewPanel(props: Props) {
   }, [chapterId, props.consistencyRun, setConsistency])
 
   const handleRunReview = async () => {
+    if (outlineNodeId == null) throw new Error('正文审查缺少目标章纲。')
+    await props.onBeforeConsistencyRun?.()
+    const config = useAIConfigStore.getState().config
+    const assembled = await prepareProseGatewayAssemblyV1({
+      projectId,
+      worldGroupId: worldGroupId ?? null,
+      chapterId,
+      outlineNodeId,
+      operation: 'review',
+      authorRequest: `审查《${chapterTitle}》当前正文的质量与一致性`,
+      config,
+    })
     const messages = buildReviewPrompt(
-      chapterContent, chapterTitle, worldContext,
-      characterContext, prevChapterSummary, foreshadowContext, stateContext
+      chapterContent, chapterTitle, assembled.text,
+      '', '', '', ''
     )
     const output = await ai.start(messages, undefined, {
       formalEntryId: 'prose.review.quality', category: 'review.quality',

@@ -53,13 +53,15 @@ describe('NS-1 T4/T5 · canonical sequence and continuity sources', () => {
 
   it('routes generation and continuation through registered continuity sources', () => {
     const source = readFileSync(resolve(process.cwd(), 'src/components/editor/ChapterEditor.tsx'), 'utf8')
+    const gateway = readFileSync(resolve(process.cwd(), 'src/lib/prose/gateway-context.ts'), 'utf8')
     const generationFlow = source.slice(
       source.indexOf('const buildFullWorldCtx = async'),
       source.indexOf('const handlePolish = () => {'),
     )
-    expect(generationFlow).toContain("'chapterContinuityHandoff'")
-    expect(generationFlow).toContain("'previousChapterEnding'")
-    expect(generationFlow).toContain("'recentChapterSummaries'")
+    expect(generationFlow).toContain('prepareProseGatewayAssemblyV1')
+    expect(gateway).toContain(':continuity-tail`')
+    expect(gateway).toContain(':consistency-dossier`')
+    expect(generationFlow).not.toContain('sourceKeys:')
     expect(generationFlow).not.toContain('chapters.filter(c => c.order <')
   })
 

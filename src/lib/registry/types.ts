@@ -640,6 +640,12 @@ export interface FrozenResourceScopeV1 {
   worldId?: number
   workId?: number
   worldGroupId?: number | null
+  /** Optional operation boundary. Providers may expose target-specific
+   * aggregate resources without materializing one aggregate for every chapter. */
+  chapterId?: number
+  /** undefined = unrestricted catalog; null = explicitly no character
+   * knowledge; number = only this perspective character's knowledge. */
+  characterId?: number | null
 }
 
 export interface ResourceListInputV1 {

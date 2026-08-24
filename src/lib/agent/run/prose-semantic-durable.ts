@@ -1,6 +1,5 @@
 import type { ChatMessage, WorkspaceScope } from '../../types'
 import type { AssembleContextResult } from '../../registry/types'
-import { assembleContext } from '../../registry/assemble-context'
 import { estimateTokens } from '../../ai/context-budget'
 import {
   createAgentSkillExecutionBindingV1,
@@ -8,6 +7,7 @@ import {
 } from '../execution-binding'
 import { getAgentSkillV1, resolveAgentSkillContextSourceKeysV1 } from '../skill-registry'
 import {
+  PROSE_SEMANTIC_REVIEW_PROMPT_VERSION_V1,
   runProseSemanticReviewCycleV1,
   type ProseSemanticReviewCycleResultV1,
 } from '../prose-semantic-review'
@@ -44,7 +44,7 @@ export async function runDurableProseSemanticReviewV1(input: {
   informationBoundary: InformationBoundaryManifestV1
   generationProvider: string
   generationModel: string
-  reviewerProvider: NonNullable<Parameters<typeof assembleContext>[0]['provider']>
+  reviewerProvider: string
   reviewerModel: string
   budget: AgentTeamBudgetTracker
   review: (messages: ChatMessage[]) => Promise<string>
@@ -60,13 +60,10 @@ export async function runDurableProseSemanticReviewV1(input: {
   const publish = () => input.onSnapshot?.(snapshot)
   const reviewerSkill = getAgentSkillV1('prose.review', 'prose')
   const revisionSkill = getAgentSkillV1('prose.revise', 'prose')
-  const optionalContextActivations = input.informationBoundary.perspectiveCharacterId == null ? [] : [{
-    sourceKey: 'characterKnowledge' as const,
-    reasonCode: 'perspective-character' as const,
-    boundaryHash: await hashCanonicalValue({
-      perspectiveCharacterId: input.informationBoundary.perspectiveCharacterId,
-    }),
-  }]
+  if (reviewerSkill.promptVersion !== PROSE_SEMANTIC_REVIEW_PROMPT_VERSION_V1) {
+    throw new Error('prose.review Skill promptVersion 与语义审查协议不一致')
+  }
+  const optionalContextActivations: [] = []
   const reviewerBinding = input.snapshot.contract.version !== 1
     ? await createAgentSkillExecutionBindingV2(reviewerSkill, {
         optionalContextActivations,
@@ -89,17 +86,10 @@ export async function runDurableProseSemanticReviewV1(input: {
     : resolveAgentSkillContextSourceKeysV1(revisionSkill, {
         includeOptional: input.informationBoundary.perspectiveCharacterId != null,
       })
-  const reviewAssembled = await assembleContext({
-    projectId: input.projectId,
-    scope: input.scope,
-    chapterId: input.chapterId,
-    outlineNodeId: input.outlineNodeId,
-    worldGroupId: input.worldGroupId,
-    sourceKeys: reviewSourceKeys,
-    provider: input.reviewerProvider,
-    model: input.reviewerModel,
-    inputBudgetMaxTokens: 24_000,
-  })
+  // PROSE-1: review and revision consume the exact Gateway assembly used by
+  // generation. A reviewer may interpret it differently, but cannot rebuild a
+  // narrower hand-written source list or create a second context truth.
+  const reviewAssembled = input.generationAssembled
   const manifestFor = (
     stepId: ProseSemanticStepIdV1,
     assembled: AssembleContextResult,
@@ -171,7 +161,7 @@ export async function runDurableProseSemanticReviewV1(input: {
       reviewer: {
         provider: input.reviewerProvider,
         model: input.reviewerModel,
-        promptVersion: 'prose-semantic-review-v1',
+        promptVersion: PROSE_SEMANTIC_REVIEW_PROMPT_VERSION_V1,
         executionBinding: reviewerBinding,
         correlatedJudge: input.reviewerProvider === input.generationProvider
           && input.reviewerModel === input.generationModel,

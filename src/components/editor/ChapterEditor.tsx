@@ -33,6 +33,7 @@ import { db } from '../../lib/db/schema'
 import { buildGenreConstraintContext } from '../../lib/ai/genre-metadata'
 import { buildStylePromptInjection } from '../../lib/ai/writing-styles'
 import { assembleContext } from '../../lib/registry/assemble-context'
+import { prepareProseGatewayAssemblyV1 } from '../../lib/prose/gateway-context'
 import { resolveChapterDisplayMeta } from '../../lib/outline/chapter-display'
 import { pickBestChapterForOutline } from '../../lib/chapters/selectors'
 import { useCreativeRulesStore } from '../../stores/project-singletons'
@@ -185,17 +186,17 @@ import {
 import { classifyAgentRunFailureV1 } from '../../lib/agent/run/failure-policy'
 import { resolveScopeLike } from '../../lib/world-engine/scope'
 import {
-  beginProseGenerationStepV1,
+  beginProseGenerationGatewayStepV1,
   commitProseGenerationAdoptionV1,
   createProseGenerationDurableRunV1,
   failProseGenerationStepV1,
+  finalizeProseGenerationGatewayStepV1,
   hashProseGenerationCandidateV1,
   isProseGenerationCandidateCurrentV1,
   markProseGenerationStaleV1,
   persistProseGenerationCandidateV1,
   readLatestProseGenerationCandidateV1,
   recordProseGenerationCandidateV1,
-  recordProseGenerationModelOutputV1,
   rejectProseGenerationCandidateV1,
   recoverProseGenerationCandidateV1,
   resolveProseGenerationExecutionBindingV2,
@@ -1025,26 +1026,29 @@ export default function ChapterEditor({ project, outlineNodeId }: Props) {
   const [charCtx, setCharCtx] = useState('')
   useEffect(() => {
     let cancelled = false
-    void resolveProseGenerationExecutionBindingV2({
-      operation: 'generate',
-      perspectiveCharacterId,
-    }).then(binding => assembleContext({
+    if (!currentChapter?.id || !outlineNode?.id) {
+      setWorldCtx('')
+      setCharCtx('')
+      return () => { cancelled = true }
+    }
+    void prepareProseGatewayAssemblyV1({
       projectId: project.id!,
       worldGroupId: chapterWorldGroupId ?? null,
-      outlineNodeId: outlineNode?.id ?? null,
-      chapterId: currentChapter?.id ?? null,
-      provider: aiConfig.provider,
-      model: aiConfig.model,
-      sourceKeys: binding.contextSourceKeys,
-      ...(perspectiveCharacterId != null ? { characterId: perspectiveCharacterId } : {}),
-    })).then(assembled => {
+      chapterId: currentChapter.id,
+      outlineNodeId: outlineNode.id,
+      operation: 'review',
+      authorRequest: '预览当前章节受控创作上下文',
+      perspectiveCharacterId,
+      config: aiConfig,
+    }).then(assembled => {
       if (cancelled) return
-      const charIdx = assembled.included.indexOf('characters')
       setWorldCtx(assembled.text)
-      setCharCtx(charIdx >= 0 ? assembled.segments[charIdx]?.content ?? '' : '')
+      setCharCtx('')
+    }).catch(() => {
+      if (!cancelled) { setWorldCtx(''); setCharCtx('') }
     })
     return () => { cancelled = true }
-  }, [project.id, chapterWorldGroupId, outlineNode?.id, currentChapter?.id, aiConfig.provider, aiConfig.model, perspectiveCharacterId])
+  }, [project.id, chapterWorldGroupId, outlineNode?.id, currentChapter?.id, aiConfig, perspectiveCharacterId])
 
   // A2: 按需召回 — 根据章节大纲+标题+已有文本筛选相关状态卡
   const selectiveState = useMemo(() => {
@@ -1142,77 +1146,49 @@ export default function ChapterEditor({ project, outlineNodeId }: Props) {
       citedIds = JSON.parse(creativeRules?.citedReferenceIds || '[]')
     } catch { /* ignore */ }
 
-    const stateRef = [
-      outlineNode?.title,
-      outlineNode?.summary,
-      currentChapter?.title,
-      plainText.slice(-2000),
-    ].filter(Boolean).join(' ')
-
     const generationBinding = await resolveProseGenerationExecutionBindingV2({
       operation,
       perspectiveCharacterId,
     })
-
-    const assembled = await assembleContext({
+    if (!currentChapter?.id || !outlineNode?.id) throw new Error('正文生成缺少目标章节或章纲。')
+    const assembled = await prepareProseGatewayAssemblyV1({
       projectId: project.id!,
       worldGroupId: chapterWorldGroupId ?? null,
-      outlineNodeId: outlineNode?.id ?? null,
-      chapterId: currentChapter?.id ?? null,
-      currentChapterOrder: currentChapter?.order ?? 0,
-      provider: aiConfig.provider,
-      model: aiConfig.model,
+      chapterId: currentChapter.id,
+      outlineNodeId: outlineNode.id,
+      operation,
+      authorRequest: [customInstruction.trim(), outlineNode.title, outlineNode.summary, plainText.slice(-2_000)]
+        .filter(Boolean).join('\n'),
+      perspectiveCharacterId,
       citedReferenceIds: citedIds,
-      stateReferenceText: stateRef,
-      extraStateIds,
-      // 角色也由同一次 assembleContext 装配，随后从主文本中拆出一次注入；
-      // 这样 durable Context Manifest 能覆盖真正发送给模型的全部注册表来源。
-      sourceKeys: generationBinding.contextSourceKeys,
-      ...(perspectiveCharacterId != null ? { characterId: perspectiveCharacterId } : {}),
+      config: aiConfig,
     })
 
-    console.log(`[assembleContext] ${taskType} 模式 — included:${assembled.included.join(',')} trimmed:${assembled.trimmed.join(',') || 'none'} tokens:${assembled.totalInputTokens}`)
+    console.log(`[ContextGateway] ${taskType} 模式 — path:${assembled.contextGatewayExecution.path} selected:${assembled.contextGatewayExecution.retrievalTrace.mandatory.length + assembled.contextGatewayExecution.retrievalTrace.autoSelected.length} tokens:${assembled.totalInputTokens}`)
 
     // Phase E: 题材约束 + 写作风格注入
     const genreCtx = buildGenreConstraintContext(project.genres?.length ? project.genres : project.genre)
     const styleCtx = project.writingStyleId ? buildStylePromptInjection(project.writingStyleId) : ''
 
-    const segmentFor = (key: string) => {
-      const index = assembled.included.indexOf(key)
-      return index >= 0 ? assembled.segments[index]?.content ?? '' : ''
-    }
-    const continuityKeys = new Set([
-      'chapterContinuityHandoff',
-      'previousPlanReconciliation',
-      'previousChapterEnding',
-      'recentChapterSummaries',
-      'characters',
-    ])
-    const assembledSegmentsWithoutContinuity = assembled.segments
-      .filter((_, index) => !continuityKeys.has(assembled.included[index]))
-    const assembledWithoutContinuity = assembledSegmentsWithoutContinuity
-      .map(segment => segment.content)
-      .join('\n\n')
-    const parts = [assembledWithoutContinuity]
+    const parts = [assembled.text]
     if (genreCtx) parts.push(genreCtx)
     if (styleCtx) parts.push(styleCtx)
-    const worldRulesIdx = assembled.included.indexOf('worldRules')
     const maxContext = aiConfig.contextWindow && aiConfig.contextWindow > 0
       ? aiConfig.contextWindow
       : getModelPreset(aiConfig.provider, aiConfig.model).maxContext
     const continuityBudgetTokens = maxContext <= 8_192 ? 3000 : maxContext <= 32_768 ? 6000 : 10_000
     return {
       text: parts.filter(Boolean).join('\n\n'),
-      segments: assembledSegmentsWithoutContinuity,
+      segments: assembled.segments,
       assembled,
       generationBinding,
-      characterContext: segmentFor('characters'),
-      worldRulesContext: worldRulesIdx >= 0 ? assembled.segments[worldRulesIdx]?.content ?? '' : '',
+      characterContext: '',
+      worldRulesContext: '',
       continuity: {
-        handoff: segmentFor('chapterContinuityHandoff'),
-        planReconciliation: segmentFor('previousPlanReconciliation'),
-        previousTail: segmentFor('previousChapterEnding'),
-        recentSummaries: segmentFor('recentChapterSummaries'),
+        handoff: '',
+        planReconciliation: '',
+        previousTail: '',
+        recentSummaries: '',
       },
       continuityBudgetTokens,
     }
@@ -1290,21 +1266,14 @@ export default function ChapterEditor({ project, outlineNodeId }: Props) {
       perspectiveCharacterId,
       generationBinding: input.generationBinding,
     })
-    const contextManifest = await createContextManifestFromAssemblyV1({
-      runId: snapshot.run.id,
-      stepId: PROSE_GENERATION_STEP_ID_V1,
-      attempt: 1,
-      projectId: project.id!,
-      worldGroupId: chapterWorldGroupId ?? null,
-      declaredSourceKeys: input.generationBinding.contextSourceKeys,
-      assembled: input.assembled,
-      boundary: { chapterId, outlineNodeId: sourceChapter.outlineNodeId },
-      readerVersion: 'chapter-prose-generation-context-v1',
-    })
-    snapshot = await beginProseGenerationStepV1({
+    const begun = await beginProseGenerationGatewayStepV1({
       scope,
       snapshot,
-      contextManifest,
+      worldGroupId: chapterWorldGroupId ?? null,
+      chapterId,
+      outlineNodeId: sourceChapter.outlineNodeId,
+      assembled: input.assembled,
+      messages: actualMessages,
       binding: {
         operation: input.operation,
         sourceTextHash,
@@ -1314,6 +1283,9 @@ export default function ChapterEditor({ project, outlineNodeId }: Props) {
       budgetReservationTokens: generationReservation.estimatedInputTokens
         + generationReservation.reservedOutputTokens,
     })
+    snapshot = begun.snapshot
+    const gatewayAttempt = begun.attempt
+    let gatewayManifestHash = ''
     proseSnapshotRef.current = snapshot
 
     let traceError: unknown = null
@@ -1328,12 +1300,15 @@ export default function ChapterEditor({ project, outlineNodeId }: Props) {
         modelResponded: async output => {
           budget.settleCall(generationReservation, output)
           generationSettled = true
-          snapshot = await recordProseGenerationModelOutputV1({
+          const finalized = await finalizeProseGenerationGatewayStepV1({
             scope,
             snapshot,
+            attempt: gatewayAttempt,
             output: String(output ?? ''),
             usedTokens: generationReservation.estimatedInputTokens + estimateTokens(String(output ?? '')),
           })
+          snapshot = finalized.snapshot
+          gatewayManifestHash = finalized.manifest.manifestHash
           proseSnapshotRef.current = snapshot
         },
         candidateReady: async output => {
@@ -1351,6 +1326,7 @@ export default function ChapterEditor({ project, outlineNodeId }: Props) {
             contentRevision: input.contentRevision,
             outputText,
             outputTextHash: await hashCanonicalValue(outputText),
+            gatewayEvidenceVersion: 3 as const,
             expectedContentHash: await hashChapterText(
               input.operation === 'continue'
                 ? [normalizeChapterText(sourceChapter.content ?? ''), normalizeChapterText(outputText)]
@@ -1364,13 +1340,14 @@ export default function ChapterEditor({ project, outlineNodeId }: Props) {
             createdAt: Date.now(),
           }
           const candidateHash = await hashProseGenerationCandidateV1(baseCandidate)
+          if (!gatewayManifestHash) throw new Error('正文候选缺少已完成的 ContextManifestV3。')
           const candidate: ProseGenerationCandidateV1 = {
             ...baseCandidate,
             durable: {
               runId: snapshot.run.id,
               stepId: PROSE_GENERATION_STEP_ID_V1,
               attempt: 1,
-              contextManifestHash: contextManifest.manifestHash,
+              contextManifestHash: gatewayManifestHash,
               candidateHash,
             },
           }
@@ -1667,7 +1644,7 @@ export default function ChapterEditor({ project, outlineNodeId }: Props) {
 
   // G8：按审校报告让 AI 改全文 —— 走和「生成正文」相同的预览→采纳/关闭流程
   const handleReviseByReport = async (report: ReviewResult) => {
-    if (!plainText.trim()) return
+    if (!plainText.trim() || !currentChapter?.id || !outlineNode?.id) return
     const ok = await dialog.confirm({
       title: '按审校报告让 AI 改全文？',
       message: `将依据本章审校报告修改整章正文（约 ${countWords(plainText)} 字），篇幅与原文保持相近。改写结果会先预览，确认后才替换原文。`,
@@ -1675,7 +1652,18 @@ export default function ChapterEditor({ project, outlineNodeId }: Props) {
     })
     if (!ok) return
     reviseReportRef.current = report
-    const messages = buildReviewRevisePrompt(plainText, report, worldCtx, charCtx)
+    await persistCurrentEditorContent()
+    const assembled = await prepareProseGatewayAssemblyV1({
+      projectId: project.id!,
+      worldGroupId: chapterWorldGroupId ?? null,
+      chapterId: currentChapter.id,
+      outlineNodeId: outlineNode.id,
+      operation: 'revise',
+      authorRequest: `按审校报告修订本章：${JSON.stringify(report)}`,
+      perspectiveCharacterId,
+      config: aiConfig,
+    })
+    const messages = buildReviewRevisePrompt(plainText, report, assembled.text, '')
     ai.setOperation('revise-full')
     ai.start(messages, undefined, {
       formalEntryId: 'prose.chapter.revise', category: 'review.revise', projectId: project.id!,

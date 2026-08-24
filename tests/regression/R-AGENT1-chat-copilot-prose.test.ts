@@ -1,6 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
-  PROSE_COPILOT_SOURCE_KEYS,
   ProseCopilotStaleError,
   adoptRestoredProseCandidate,
   createProseCopilotNode,
@@ -18,9 +17,8 @@ import {
   prepareGenerationNode,
   runGenerationNode,
 } from '../../src/lib/generation/generation-node'
-import { assembleContext } from '../../src/lib/registry/assemble-context'
 import type { AIConfigPreset, Chapter, OutlineNode, Project } from '../../src/lib/types'
-import { resolveScopeLike } from '../../src/lib/world-engine/scope'
+import { resolveScopeLike, stampNewRecord } from '../../src/lib/world-engine/scope'
 import { useAIConfigStore } from '../../src/stores/ai-config'
 import { buildNarrativeBriefV1 } from '../../src/lib/agent/narrative-brief'
 import { AgentTeamBudgetTracker } from '../../src/lib/agent/team-budget'
@@ -49,8 +47,8 @@ async function seedProject(): Promise<{
     updatedAt: now,
   }
   project.id = await db.projects.add(project) as number
-  const volumeId = await db.outlineNodes.add({
-    projectId: project.id,
+  const scope = await resolveScopeLike(project.id)
+  const volumeId = await db.outlineNodes.add(stampNewRecord(scope, 'outlineNodes', {
     parentId: null,
     type: 'volume',
     title: '第一卷：退潮',
@@ -59,9 +57,8 @@ async function seedProject(): Promise<{
     worldGroupId: null,
     createdAt: now,
     updatedAt: now,
-  }) as number
-  const firstId = await db.outlineNodes.add({
-    projectId: project.id,
+  }, { owner: 'work' })) as number
+  const firstId = await db.outlineNodes.add(stampNewRecord(scope, 'outlineNodes', {
     parentId: volumeId,
     type: 'chapter',
     title: '第一章：海床之光',
@@ -70,9 +67,8 @@ async function seedProject(): Promise<{
     worldGroupId: null,
     createdAt: now,
     updatedAt: now,
-  }) as number
-  const secondId = await db.outlineNodes.add({
-    projectId: project.id,
+  }, { owner: 'work' })) as number
+  const secondId = await db.outlineNodes.add(stampNewRecord(scope, 'outlineNodes', {
     parentId: volumeId,
     type: 'chapter',
     title: '第二章：无声之钟',
@@ -81,14 +77,13 @@ async function seedProject(): Promise<{
     worldGroupId: null,
     createdAt: now,
     updatedAt: now,
-  }) as number
-  await db.worldviews.add({
-    projectId: project.id,
+  }, { owner: 'work' })) as number
+  await db.worldviews.add(stampNewRecord(scope, 'worldviews', {
     worldGroupId: null,
     worldOrigin: '盐海每十年退潮，浮空城会在海床上方显形。',
     createdAt: now,
     updatedAt: now,
-  } as never)
+  }, { owner: 'world' }) as never)
   return { project, volumeId, firstId, secondId }
 }
 
@@ -100,16 +95,7 @@ async function makeNodeInput(
 ): Promise<ProseCopilotInput> {
   const config = useAIConfigStore.getState().config
   const scope = await resolveScopeLike(project.id!)
-  const assembled = await assembleContext({
-    projectId: project.id!,
-    worldGroupId: null,
-    outlineNodeId: outlineNode.id,
-    chapterId: chapter?.id ?? null,
-    currentChapterOrder: chapter?.order ?? 0,
-    provider: config.provider,
-    model: config.model,
-    sourceKeys: [...PROSE_COPILOT_SOURCE_KEYS],
-  })
+  const assembled = prepared.input.assembled
   return {
     project,
     scope,
@@ -156,8 +142,8 @@ describe('AGENT-1 27.1-d · ChatCopilot 正文闭环', () => {
 
     expect(prepared.operation).toBe('generate')
     expect(prepared.outlineNodeId).toBe(firstId)
-    expect(prepared.contextSources).toContain('chapterOutline')
-    expect(prepared.contextSources).toContain('worldview')
+    expect(prepared.contextSources).toEqual(['ragSelection'])
+    expect(prepared.contextGatewayExecution.retrievalTrace.mandatory.length).toBeGreaterThan(0)
     expect(prepared.contextEvidence.inputState).toMatchObject({
       state: 'partial',
       handling: 'reference-and-create',
@@ -167,15 +153,15 @@ describe('AGENT-1 27.1-d · ChatCopilot 正文闭环', () => {
     expect(prompt).toContain('盐海每十年退潮')
     expect(prompt).toContain('本轮叙事任务（运行时合同，不是新增 Canon）')
     expect(prompt).toContain('不要用世界观介绍代替故事推进')
-    expect(prepared.input.narrativeBrief.entryState).toContain('第一章：海床之光')
+    expect(prepared.input.narrativeBrief.entryState).toContain('退潮后，守灯人第一次看见浮空城')
     expect(await db.chapters.count()).toBe(0)
   })
 
   it('正文 Skill 冻结生成或续写语义，不依赖提示词再次猜测操作', async () => {
     const { project, firstId } = await seedProject()
     const now = Date.now()
-    await db.chapters.add({
-      projectId: project.id!,
+    const scope = await resolveScopeLike(project.id!)
+    await db.chapters.add(stampNewRecord(scope, 'chapters', {
       outlineNodeId: firstId,
       title: '第一章：海床之光',
       content: '<p>作者已有正文。</p>',
@@ -184,7 +170,7 @@ describe('AGENT-1 27.1-d · ChatCopilot 正文闭环', () => {
       worldGroupId: null,
       createdAt: now,
       updatedAt: now,
-    })
+    }, { owner: 'work' }))
     const continued = await prepareProseCopilot({
       projectId: project.id!,
       worldGroupId: null,
@@ -398,7 +384,7 @@ describe('AGENT-1 27.1-d · ChatCopilot 正文闭环', () => {
     })
 
     expect(prepared.perspectiveCharacterId).toBeNull()
-    expect(prepared.contextSources).not.toContain('characterKnowledge')
+    expect(prepared.contextSources).toEqual(['ragSelection'])
     expect(prepared.prepared.messages.map(message => message.content).join('\n'))
       .toContain('未指定视角角色')
   })
@@ -406,26 +392,24 @@ describe('AGENT-1 27.1-d · ChatCopilot 正文闭环', () => {
   it('正文显式视角只注入该角色在目标章前已知内容', async () => {
     const { project, firstId, secondId } = await seedProject()
     const now = Date.now()
-    const mainId = await db.characters.add({
-      projectId: project.id!,
+    const scope = await resolveScopeLike(project.id!)
+    const mainId = await db.characters.add(stampNewRecord(scope, 'characters', {
       name: '守灯人',
       roleWeight: 'main',
       moralAxis: 'neutral',
       orderAxis: 'neutral',
       createdAt: now,
       updatedAt: now,
-    } as any) as number
-    const sideId = await db.characters.add({
-      projectId: project.id!,
+    }, { owner: 'world' }) as any) as number
+    const sideId = await db.characters.add(stampNewRecord(scope, 'characters', {
       name: '钟匠',
       roleWeight: 'supporting',
       moralAxis: 'neutral',
       orderAxis: 'neutral',
       createdAt: now,
       updatedAt: now,
-    } as any) as number
-    const firstChapterId = await db.chapters.add({
-      projectId: project.id!,
+    }, { owner: 'world' }) as any) as number
+    const firstChapterId = await db.chapters.add(stampNewRecord(scope, 'chapters', {
       outlineNodeId: firstId,
       title: '第一章：海床之光',
       content: '',
@@ -435,10 +419,9 @@ describe('AGENT-1 27.1-d · ChatCopilot 正文闭环', () => {
       notes: '',
       createdAt: now,
       updatedAt: now,
-    } as any) as number
+    }, { owner: 'work' }) as any) as number
     await db.knowledgeLedger.bulkAdd([
-      {
-        projectId: project.id!,
+      stampNewRecord(scope, 'knowledgeLedger', {
         characterId: mainId,
         characterName: '守灯人',
         knowledgeKey: 'main.secret',
@@ -449,9 +432,8 @@ describe('AGENT-1 27.1-d · ChatCopilot 正文闭环', () => {
         status: 'confirmed',
         createdAt: now,
         updatedAt: now,
-      },
-      {
-        projectId: project.id!,
+      }, { owner: 'work' }),
+      stampNewRecord(scope, 'knowledgeLedger', {
         characterId: sideId,
         characterName: '钟匠',
         knowledgeKey: 'side.secret',
@@ -462,7 +444,7 @@ describe('AGENT-1 27.1-d · ChatCopilot 正文闭环', () => {
         status: 'confirmed',
         createdAt: now + 1,
         updatedAt: now + 1,
-      },
+      }, { owner: 'work' }),
     ] as any)
 
     const prepared = await prepareProseCopilot({
@@ -473,7 +455,7 @@ describe('AGENT-1 27.1-d · ChatCopilot 正文闭环', () => {
     })
     const context = prepared.prepared.messages.map(message => message.content).join('\n')
     expect(prepared.perspectiveCharacterId).toBe(mainId)
-    expect(prepared.contextSources).toContain('characterKnowledge')
+    expect(prepared.contextSources).toEqual(['ragSelection'])
     expect(context).toContain('主角知道潮门会在黎明前关闭')
     expect(context).not.toContain('配角知道钟芯其实被藏在井底')
     expect(prepared.snapshot.perspectiveCharacterId).toBe(mainId)
@@ -518,8 +500,8 @@ describe('AGENT-1 27.1-d · ChatCopilot 正文闭环', () => {
   it('已有正文只有明确续写才会追加，普通生成与重写请求均被保护', async () => {
     const { project, firstId } = await seedProject()
     const now = Date.now()
-    const chapterId = await db.chapters.add({
-      projectId: project.id!,
+    const scope = await resolveScopeLike(project.id!)
+    const chapterId = await db.chapters.add(stampNewRecord(scope, 'chapters', {
       outlineNodeId: firstId,
       title: '第一章：海床之光',
       content: '<p>作者原稿不可覆盖。</p>',
@@ -529,7 +511,7 @@ describe('AGENT-1 27.1-d · ChatCopilot 正文闭环', () => {
       notes: '',
       createdAt: now,
       updatedAt: now,
-    }) as number
+    }, { owner: 'work' })) as number
 
     await expect(prepareProseCopilot({
       projectId: project.id!,

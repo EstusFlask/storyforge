@@ -62,6 +62,8 @@ export interface ExecuteContextGatewayInputV1 {
   skill: AgentSkillDefinitionV1
   scope: WorkspaceScope
   worldGroupId?: number | null
+  chapterId?: number | null
+  characterId?: number | null
   query?: string
   budgetTokens?: number
   mandatoryResourceKeys?: readonly string[]
@@ -124,6 +126,8 @@ function frozenScope(input: ExecuteContextGatewayInputV1) {
     worldId: input.scope.worldId,
     workId: input.scope.workId,
     worldGroupId: input.worldGroupId ?? null,
+    ...(input.chapterId == null ? {} : { chapterId: input.chapterId }),
+    ...(input.characterId === undefined ? {} : { characterId: input.characterId }),
   }
 }
 
@@ -629,6 +633,8 @@ export async function assertContextGatewayCandidateAdoptableV1(input: {
   writeTarget?: string
   scope: WorkspaceScope
   worldGroupId?: number | null
+  chapterId?: number | null
+  characterId?: number | null
   runId: number
   stepId: string
   attempt: number
@@ -656,6 +662,8 @@ export async function assertContextGatewayCandidateAdoptableV1(input: {
       worldId: input.scope.worldId,
       workId: input.scope.workId,
       worldGroupId: input.worldGroupId ?? null,
+      ...(input.chapterId == null ? {} : { chapterId: input.chapterId }),
+      ...(input.characterId === undefined ? {} : { characterId: input.characterId }),
     },
     policy: createContextAccessPolicyForExecutionV1(input.skill, input.excludedResourceKinds),
   })
