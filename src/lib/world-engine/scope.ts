@@ -243,11 +243,15 @@ export async function readOwnedRows<T = Record<string, unknown>>(
   const rows = spec.owner === 'project' || spec.owner === 'transient'
     ? await spec.table.where('projectId').equals(scope.projectId).toArray()
     : await spec.table.toArray()
-  const owned: T[] = []
-  for (const row of rows as Record<string, unknown>[]) {
-    if (await assertRecordInScope(scope, tableName, row, options)) owned.push(row as T)
-  }
-  return owned
+  // Keep this to one awaited Promise while callers may be inside a Dexie
+  // transaction. Most direct-owner checks resolve without issuing another IDB
+  // request; awaiting them one by one can let a browser auto-commit a large
+  // transaction before the caller performs its write.
+  const records = rows as Record<string, unknown>[]
+  const ownership = await Promise.all(records.map(row => (
+    assertRecordInScope(scope, tableName, row, options)
+  )))
+  return records.filter((_, index) => ownership[index]) as T[]
 }
 
 /** Stamp a new row from trusted scope. Existing owner ids must agree or the write fails closed. */
