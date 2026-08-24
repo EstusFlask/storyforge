@@ -85,10 +85,12 @@ import {
 } from './worldview-field-copilot'
 import {
   adoptRestoredStoryArcCandidate,
+  parseStoryArcMutationRequestV1,
   prepareStoryArcCopilot,
   runStoryArcCreativeReliabilityV1,
   type StoryArcCopilotSnapshot,
   type StoryArcRequestKind,
+  type StoryArcMutationRequestV1,
 } from './story-arc-copilot'
 import {
   adoptRestoredCharacterDrivenCandidateV1,
@@ -230,6 +232,8 @@ export interface MasterAgentTask {
   characterLifecycleRequest?: CharacterLifecycleTaskInputV1
   /** 故事线进度映射固定的已写章节。 */
   storylineProgressChapterId?: number
+  /** ARC-1: existing-arc transformations freeze operation and stable target ID. */
+  storyArcMutationRequest?: StoryArcMutationRequestV1
   /** New formal plans freeze the selected PromptTemplate and run options here. */
   promptExecution?: PromptExecutionOptionsV1
 }
@@ -277,6 +281,7 @@ export interface MasterCandidatePayload {
   outlineMode?: OutlineCopilotMode
   outlineParentId?: number | null
   storyArcKind?: StoryArcRequestKind
+  storyArcMutationRequest?: StoryArcMutationRequestV1
   storyCoreField?: StoryCoreField
   creativeRulesField?: CreativeRulesField
   worldviewField?: WorldviewAgentField
@@ -355,6 +360,7 @@ export interface PinnedMasterAgentTaskV1 {
   characterSupplementRequest?: CharacterSupplementTaskInputV1
   characterLifecycleRequest?: CharacterLifecycleTaskInputV1
   storylineProgressChapterId?: number
+  storyArcMutationRequest?: StoryArcMutationRequestV1
   promptExecution?: PromptExecutionRequestV1
   id?: string
 }
@@ -636,6 +642,10 @@ export async function createMasterAgentPlan(input: {
         throw new Error('故事线进度 Skill 必须固定已写章节 ID。')
       }
     }
+    if (
+      pinned.storyArcMutationRequest !== undefined
+      && (pinned.agentId !== 'outline' || pinned.skillId !== 'outline.story-arcs')
+    ) throw new Error('只有故事线 Skill 可以固定既有故事线变换请求。')
     const characterRevisionRequest = pinned.characterRevisionRequest === undefined
       ? undefined
       : parseCharacterRevisionTaskInputV1(pinned.characterRevisionRequest)
@@ -645,6 +655,9 @@ export async function createMasterAgentPlan(input: {
     const characterLifecycleRequest = pinned.characterLifecycleRequest === undefined
       ? undefined
       : parseCharacterLifecycleTaskInputV1(pinned.characterLifecycleRequest)
+    const storyArcMutationRequest = pinned.storyArcMutationRequest === undefined
+      ? undefined
+      : parseStoryArcMutationRequestV1(pinned.storyArcMutationRequest)
     const instruction = pinned.instruction.trim()
     if (instruction.length > 8_000) {
       throw new Error('固定领域任务的作者要求超过 8000 字符；已在模型调用前阻止，请缩短后重试。')
@@ -676,6 +689,7 @@ export async function createMasterAgentPlan(input: {
       ...(pinned.storylineProgressChapterId !== undefined
         ? { storylineProgressChapterId: pinned.storylineProgressChapterId }
         : {}),
+      ...(storyArcMutationRequest !== undefined ? { storyArcMutationRequest } : {}),
     }
     const expectedPromptModule = governedPromptModuleForTaskV1(task)
     if (pinned.promptExecution !== undefined) {
@@ -1633,6 +1647,7 @@ async function executeSequentialMasterAgentPlan(
             contextCompressionRuntime,
             inheritedAssumptions,
             creativeReliabilityEnabled,
+            mutationRequest: task.storyArcMutationRequest,
             signal: input.signal,
           })
           if (prepared.contextGatewayExecution) {
@@ -1668,6 +1683,7 @@ async function executeSequentialMasterAgentPlan(
                 baseSnapshot: prepared.snapshot,
                 workspaceScope: scope,
                 storyArcKind: prepared.kind,
+                storyArcMutationRequest: prepared.mutation,
                 dependsOnTaskIds: task.dependsOn,
                 dependencyBindings,
                 creativeArtifact: result.artifact,
@@ -1714,6 +1730,7 @@ async function executeSequentialMasterAgentPlan(
                 baseSnapshot: prepared.snapshot,
                 workspaceScope: scope,
                 storyArcKind: prepared.kind,
+                storyArcMutationRequest: prepared.mutation,
                 dependsOnTaskIds: task.dependsOn,
                 dependencyBindings,
                 structuredOutputEvidence: result.structuredOutputEvidence,
@@ -2271,6 +2288,7 @@ export async function adoptMasterCandidate(input: {
       draft: input.draft,
       producerRunId: input.payload.runId,
       producerCandidateHash: input.payload.candidateHash,
+      mutation: input.payload.storyArcMutationRequest,
     })
   } else if (input.runtime) {
     const output = input.payload.skillId === 'world-origin.worldview-field'

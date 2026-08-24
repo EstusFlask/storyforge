@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => ({
     busy: false,
     error: null as string | null,
     submitRequest: vi.fn(),
+    submitTargetedRequest: vi.fn(),
     updateCandidate: vi.fn(),
     rejectCandidate: vi.fn(),
     adoptCandidate: vi.fn(),
@@ -17,6 +18,7 @@ const mocks = vi.hoisted(() => ({
   storyArcStore: {
     arcs: [] as any[],
     activeArcId: null as number | null,
+    intentAlignmentByArcId: {} as Record<number, string>,
     loadAll: vi.fn(),
     setActiveArc: vi.fn(),
     addArc: vi.fn(async () => 1),
@@ -169,6 +171,7 @@ beforeEach(() => {
   mocks.copilot.error = null
   mocks.storyArcStore.arcs = []
   mocks.storyArcStore.activeArcId = null
+  mocks.storyArcStore.intentAlignmentByArcId = {}
 })
 
 afterEach(async () => {
@@ -250,5 +253,74 @@ describe('R-HARNESS30 · 故事线面板统一进入主 Agent Harness', () => {
     expect(adopt.disabled).toBe(true)
     expect(host.querySelector<HTMLTextAreaElement>('textarea[aria-label="主线故事线候选内容"]'))
       .not.toBeNull()
+  })
+
+  it('扩写锁定当前故事线稳定 ID，扩写与润色候选并排展示冻结原版和可编辑新版', async () => {
+    const stages = JSON.stringify([
+      { id: 'stage-a', title: '起点', description: '主角发现钟塔。', keyEvents: ['拿到密钥'] },
+      { id: 'stage-b', title: '对抗', description: '守卫封锁入口。', keyEvents: ['正面冲突'] },
+      { id: 'stage-c', title: '抉择', description: '主角决定是否敲钟。', keyEvents: ['作出选择'] },
+    ])
+    mocks.storyArcStore.arcs = [{
+      id: 9,
+      projectId: project.id,
+      name: '潮汐钟主线',
+      type: 'main',
+      description: '原版描述',
+      stages,
+    }]
+    mocks.storyArcStore.activeArcId = 9
+    let host = await renderPanel()
+    await act(async () => Array.from(host.querySelectorAll('button'))
+      .find(button => button.textContent === '扩写')!.click())
+    expect(mocks.copilot.submitTargetedRequest).toHaveBeenCalledWith(
+      expect.stringContaining('扩写现有主线“潮汐钟主线”'),
+      expect.objectContaining({
+        agentId: 'outline',
+        skillId: 'outline.story-arcs',
+        storyArcMutationRequest: { operation: 'expand', targetArcId: 9 },
+      }),
+    )
+
+    const current = mounted.pop()!
+    await act(async () => current.root.unmount())
+    current.host.remove()
+    const pending = candidate()
+    pending.payload.label = '扩写主线故事线'
+    pending.payload.storyArcMutationRequest = { operation: 'expand', targetArcId: 9 }
+    pending.payload.baseSnapshot = {
+      arcs: [{ id: 9, name: '潮汐钟主线', type: 'main', description: '原版描述', stages }],
+    }
+    mocks.copilot.pendingCandidates = [pending]
+    host = await renderPanel()
+    expect(host.textContent).toContain('原版（冻结）')
+    expect(host.textContent).toContain('新版（可编辑）')
+    expect(host.querySelector<HTMLTextAreaElement>('textarea[aria-label="扩写主线故事线原版内容"]')?.readOnly)
+      .toBe(true)
+    expect(host.querySelector<HTMLTextAreaElement>('textarea[aria-label="扩写主线故事线候选内容"]'))
+      .not.toBeNull()
+  })
+
+  it('故事意图变化时显示确定性过期原因和生产 provenance，不静默覆盖故事线', async () => {
+    mocks.storyArcStore.arcs = [{
+      id: 12,
+      projectId: project.id,
+      name: '来源已变化的主线',
+      type: 'main',
+      description: '现有执行投影',
+      stages: '[]',
+      sourceStoryCoreId: 7,
+      sourceStoryCoreRevision: 1787500000000,
+      producerRunId: 33,
+      producerCandidateHash: 'abcdef1234567890',
+    }]
+    mocks.storyArcStore.activeArcId = 12
+    mocks.storyArcStore.intentAlignmentByArcId = { 12: 'stale' }
+    const host = await renderPanel()
+    expect(host.textContent).toContain('过期原因：故事核心意图的冻结 hash 已在这条故事线生成后变化')
+    expect(host.textContent).toContain('provenance：storyCore #7')
+    expect(host.textContent).toContain('run #33')
+    expect(host.textContent).toContain('candidate abcdef123456')
+    expect(mocks.storyArcStore.updateArc).not.toHaveBeenCalled()
   })
 })

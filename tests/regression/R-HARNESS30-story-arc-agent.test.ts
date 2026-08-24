@@ -133,6 +133,51 @@ function mainArc(name = '潮汐钟主线'): StoryArcCopilotCandidate {
   }
 }
 
+async function seedExistingArc(scope: WorkspaceScope) {
+  const now = Date.now()
+  const stages = [
+    { id: 'stage-a', title: '退潮启程', description: '主角取得钟塔密钥。', keyEvents: ['前辈遗物暴露密令'] },
+    { id: 'stage-b', title: '钟塔裂痕', description: '主角确认钟声代价。', keyEvents: ['各方争夺钟塔'] },
+    { id: 'stage-c', title: '涨潮抉择', description: '主角必须决定是否敲钟。', keyEvents: ['旧港开始撤离'] },
+  ]
+  const arcId = await db.storyArcs.add(stampNewRecord(scope, 'storyArcs', {
+    projectId: scope.projectId,
+    name: '潮汐钟主线',
+    type: 'main',
+    description: '原版主线描述。',
+    stages: JSON.stringify(stages),
+    createdAt: now,
+    updatedAt: now,
+  }, { owner: 'work' }) as never) as number
+  const progressId = await db.storylineProgress.add(stampNewRecord(scope, 'storylineProgress', {
+    projectId: scope.projectId,
+    arcId,
+    currentStageId: 'stage-b',
+    status: 'active',
+    progressNote: '主角已进入钟塔。',
+    lastActiveChapterId: null,
+    involvedEntities: '[]',
+    evidenceQuote: '钟门在身后合拢。',
+    createdAt: now,
+    updatedAt: now,
+  }, { owner: 'work' }) as never) as number
+  return { arcId, progressId, stages }
+}
+
+function expandedArc(): StoryArcCopilotCandidate {
+  return {
+    name: '潮汐钟主线',
+    type: 'main',
+    description: '原版主线扩充了角色选择、证据链和支线交汇。',
+    stages: [
+      { stageId: 'stage-a', title: '退潮启程', description: '主角依照前辈遗物取得钟塔密钥。', keyEvents: ['前辈遗物暴露密令'] },
+      { stageId: 'stage-b', title: '钟塔裂痕', description: '主角与守卫冲突并确认钟声代价。', keyEvents: ['各方争夺钟塔', '主角核对钟铭'] },
+      { stageId: 'stage-c', title: '涨潮抉择', description: '旧港撤离迫使主角决定是否敲钟。', keyEvents: ['旧港开始撤离'] },
+      { title: '余潮回响', description: '主角的选择触发记忆修复支线，并留下后续压力。', keyEvents: ['支线角色带回被删除的见证'] },
+    ],
+  }
+}
+
 function plan(): MasterAgentPlan {
   return {
     summary: '依据现有设定规划一条主线故事线。',
@@ -179,7 +224,7 @@ describe.sequential('R-HARNESS30 · 故事线 Agent Skill 与受治理采纳', (
     expect(getAgentSkillV1('outline.story-arcs')).toMatchObject({
       agentId: 'outline',
       executionMode: 'story-arcs',
-      promptVersion: 'story-arc-copilot-v7',
+      promptVersion: 'story-arc-copilot-v8',
       writeTargets: [{
         table: 'storyArcs',
         fields: [
@@ -812,6 +857,162 @@ describe.sequential('R-HARNESS30 · 故事线 Agent Skill 与受治理采纳', (
       .rejects.toThrow('故事线已在候选生成后发生变化')
     expect(saveCandidates).not.toHaveBeenCalled()
     expect(await db.storyArcs.count()).toBe(0)
+  })
+
+  it('ARC-1 扩写经 Gateway 冻结原文并原位更新稳定故事线/阶段，采纳前零写入', async () => {
+    const { project, scope } = await createWorkspace()
+    const fixture = await seedExistingArc(scope)
+    const runAI = vi.fn(async messages => {
+      const prompt = messages.map(message => message.content).join('\n')
+      expect(prompt).toContain('本轮扩写目标故事线')
+      expect(prompt).toContain('"stageId": "stage-b"')
+      expect(prompt).toContain('触发它的正式证据或作者要求、关联角色、开始时点')
+      return JSON.stringify({ storyArcs: [expandedArc()] })
+    })
+    const prepared = await prepareStoryArcCopilot({
+      projectId: project.id!,
+      scope,
+      worldGroupId: null,
+      authorRequest: '扩写现有主线，增加角色选择与支线交汇',
+      mutationRequest: { operation: 'expand', targetArcId: fixture.arcId },
+    }, { runAI })
+    const target = prepared.snapshot.arcs?.find(arc => arc.id === fixture.arcId)
+    const targetResourceKey = `story-arc:${target?.ragDocumentId}`
+    expect(target?.ragDocumentId).toBeTruthy()
+    expect(prepared.contextGatewayExecution?.retrievalTrace.mandatory).toContainEqual(
+      expect.objectContaining({
+        resourceKey: targetResourceKey,
+        depth: 'full',
+        sourceRefs: expect.arrayContaining([expect.objectContaining({ table: 'storyArcs' })]),
+      }),
+    )
+    expect(prepared.contextGatewayExecution?.retrievalTrace.mandatory).toEqual(
+      expect.arrayContaining(['name', 'type', 'description', 'stages'].map(field => expect.objectContaining({
+        resourceKey: `${targetResourceKey}:field:${field}`,
+        depth: 'original',
+      }))),
+    )
+    const progressResourceId = (await db.storylineProgress.get(fixture.progressId) as any).ragDocumentId
+    expect(prepared.contextGatewayExecution?.retrievalTrace.mandatory).toContainEqual(
+      expect.objectContaining({
+        resourceKey: `storyline-progress:${progressResourceId}`,
+        depth: 'full',
+      }),
+    )
+    const generated = await runGenerationNode(prepared.node, prepared.prepared)
+    expect(generated.gate?.status).toBe('pass')
+    expect(await db.storyArcs.get(fixture.arcId)).toMatchObject({ description: '原版主线描述。' })
+    expect(await db.storyArcs.count()).toBe(1)
+
+    const adopted = await adoptGenerationNodeOutput(prepared.node, generated.output)
+    expect(adopted.adopted).toBe(true)
+    expect(adopted.adoption).toEqual({ writtenCount: 1, ids: [fixture.arcId] })
+    expect(await db.storyArcs.count()).toBe(1)
+    const row = await db.storyArcs.get(fixture.arcId)
+    const storedStages = JSON.parse(row!.stages) as Array<{ id: string; title: string }>
+    expect(storedStages.slice(0, 3).map(stage => stage.id)).toEqual(['stage-a', 'stage-b', 'stage-c'])
+    expect(storedStages[3].id).toMatch(/^[A-Za-z0-9_-]{8}$/)
+    expect((await db.storylineProgress.get(fixture.progressId))?.currentStageId).toBe('stage-b')
+    expect(runAI).toHaveBeenCalledOnce()
+  })
+
+  it('ARC-1 拒绝未知/伪造 stageId，并在目标基线变化后阻断旧变换候选', async () => {
+    const { project, scope } = await createWorkspace()
+    const fixture = await seedExistingArc(scope)
+    const prepared = await prepareStoryArcCopilot({
+      projectId: project.id!,
+      scope,
+      worldGroupId: null,
+      authorRequest: '润色现有主线',
+      mutationRequest: { operation: 'polish', targetArcId: fixture.arcId },
+    })
+    const forged = expandedArc()
+    forged.stages[0] = { ...forged.stages[0], stageId: 'stage-forged' }
+    const blocked = await adoptGenerationNodeOutput(prepared.node, [forged])
+    expect(blocked.adopted).toBe(false)
+    expect(blocked.gate?.issues.map(issue => issue.code)).toContain('story-arc-stage-id-unknown')
+    expect((await db.storyArcs.get(fixture.arcId))?.description).toBe('原版主线描述。')
+
+    await db.storylineProgress.update(fixture.progressId, {
+      progressNote: '作者已把动态进度推进到新的证据点。',
+      updatedAt: Date.now() + 100,
+    })
+    await expect(adoptGenerationNodeOutput(prepared.node, [expandedArc()]))
+      .rejects.toThrow('故事线已在候选生成后发生变化')
+    expect((await db.storyArcs.get(fixture.arcId))?.description).toBe('原版主线描述。')
+
+    const createPrepared = await prepareStoryArcCopilot({
+      projectId: project.id!,
+      scope,
+      worldGroupId: null,
+      authorRequest: '生成一条新的支线故事线',
+    })
+    const createWithForgedIdentity = {
+      ...mainArc('新支线'),
+      type: 'sub' as const,
+      stages: mainArc().stages.map((stage, index) => ({ ...stage, ...(index === 0 ? { stageId: 'forged' } : {}) })),
+    }
+    const createBlocked = await adoptGenerationNodeOutput(createPrepared.node, [createWithForgedIdentity])
+    expect(createBlocked.adopted).toBe(false)
+    expect(createBlocked.gate?.issues.map(issue => issue.code)).toContain('story-arc-create-stage-id')
+    expect(await db.storyArcs.count()).toBe(1)
+  })
+
+  it('ARC-1 变换任务冻结进 durable 计划，刷新恢复后仍只采纳同一目标记录', async () => {
+    const { project, scope } = await createWorkspace()
+    const fixture = await seedExistingArc(scope)
+    const conversation = await getOrCreateAgentConversation({
+      projectId: project.id!,
+      scope,
+      worldGroupId: null,
+    })
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({
+      choices: [{ message: { content: JSON.stringify({ storyArcs: [expandedArc()] }) } }],
+      usage: { prompt_tokens: 40, completion_tokens: 60, total_tokens: 100 },
+    }), { status: 200 }))
+    vi.stubGlobal('fetch', fetchMock)
+    const transformPlan: MasterAgentPlan = {
+      summary: '扩写当前主线。',
+      tasks: [{
+        id: 'story-arcs-expand-1',
+        agentId: 'outline',
+        skillId: 'outline.story-arcs',
+        instruction: '扩写现有主线，增加角色选择与支线交汇',
+        dependsOn: [],
+        storyArcMutationRequest: { operation: 'expand', targetArcId: fixture.arcId },
+      }],
+      workflow: directWorkflow,
+    }
+    const first = await runDurableMasterAgentPlanV1({
+      scope,
+      worldGroupId: null,
+      conversationId: conversation.id!,
+      plan: transformPlan,
+      budget: new AgentTeamBudgetTracker('balanced'),
+    })
+    expect(first.projection.state).toBe('awaiting_confirmation')
+    expect(first.candidates[0].payload.storyArcMutationRequest).toEqual({
+      operation: 'expand',
+      targetArcId: fixture.arcId,
+    })
+    expect(await db.storyArcs.count()).toBe(1)
+    expect((await db.storyArcs.get(fixture.arcId))?.description).toBe('原版主线描述。')
+    expect(fetchMock).toHaveBeenCalledOnce()
+
+    const restored = await restoreMasterAgentCandidatesV1({ scope, runId: first.runId })
+    expect(restored.candidates[0].payload.storyArcMutationRequest).toEqual({
+      operation: 'expand',
+      targetArcId: fixture.arcId,
+    })
+    await commitMasterAgentCandidateAdoptionV1({
+      scope,
+      runId: first.runId,
+      candidateEventId: restored.candidates[0].event.id!,
+    })
+    expect(await db.storyArcs.count()).toBe(1)
+    expect((await db.storyArcs.get(fixture.arcId))?.description).toBe(expandedArc().description)
+    expect(fetchMock).toHaveBeenCalledOnce()
+    expect((await verifyMasterAgentRunV1({ scope, runId: first.runId })).accepted).toBe(true)
   })
 
   it('durable 候选刷新恢复不重复模型调用，并只经确认与 adopt 完成终态', async () => {

@@ -107,6 +107,10 @@ import {
 } from '../worldview-field-copilot'
 import { MAX_INSPIRATION_FRAGMENTS } from '../../inspiration/workspace'
 import { parseCharacterRevisionTaskInputV1 } from '../character-revision-copilot'
+import {
+  parseStoryArcMutationRequestV1,
+  type StoryArcMutationRequestV1,
+} from '../story-arc-copilot'
 import { parseWorkspaceContentRevisionV1 } from '../../authoring/content-revision'
 import {
   assertPromptEvidenceMatchesOptionsV1,
@@ -450,6 +454,23 @@ function readOptionalStorylineProgressChapterId(
   return chapterId
 }
 
+function readOptionalStoryArcMutationRequest(
+  value: Record<string, unknown>,
+  agentId: DomainAgentId,
+  skillId: AgentSkillId | undefined,
+  label: string,
+): StoryArcMutationRequestV1 | undefined {
+  if (!Object.prototype.hasOwnProperty.call(value, 'storyArcMutationRequest')) return undefined
+  if (agentId !== 'outline' || skillId !== 'outline.story-arcs') {
+    fail(label + '.storyArcMutationRequest 无效')
+  }
+  try {
+    return parseStoryArcMutationRequestV1(value.storyArcMutationRequest)
+  } catch (error) {
+    fail(`${label}.storyArcMutationRequest 无效：${error instanceof Error ? error.message : String(error)}`)
+  }
+}
+
 function readOptionalSkillId(
   value: Record<string, unknown>,
   agentId: DomainAgentId,
@@ -513,7 +534,7 @@ export function parseMasterAgentPlanV1(value: unknown): MasterAgentPlan {
     assertKeysWithOptional(
       item,
       ['id', 'agentId', 'instruction', 'dependsOn'],
-      ['perspectiveCharacterId', 'skillId', 'inspirationFragmentIds', 'characterDrivenPlanId', 'characterRevisionRequest', 'characterSupplementRequest', 'characterLifecycleRequest', 'storylineProgressChapterId', 'promptExecution'],
+      ['perspectiveCharacterId', 'skillId', 'inspirationFragmentIds', 'characterDrivenPlanId', 'characterRevisionRequest', 'characterSupplementRequest', 'characterLifecycleRequest', 'storylineProgressChapterId', 'storyArcMutationRequest', 'promptExecution'],
       '主 Agent 计划任务 ' + (index + 1),
     )
     const id = readString(item.id, `主 Agent 计划任务 ${index + 1}.id`, MAX_TASK_ID_CHARS)
@@ -570,6 +591,12 @@ export function parseMasterAgentPlanV1(value: unknown): MasterAgentPlan {
       skillId,
       '主 Agent 计划任务 ' + id,
     )
+    const storyArcMutationRequest = readOptionalStoryArcMutationRequest(
+      item,
+      agentId,
+      skillId,
+      '主 Agent 计划任务 ' + id,
+    )
     const expectedPromptModule = promptModuleForPlanTaskV1(agentId, skillId)
     const promptExecution = item.promptExecution === undefined
       ? undefined
@@ -589,6 +616,7 @@ export function parseMasterAgentPlanV1(value: unknown): MasterAgentPlan {
       ...(characterSupplementRequest !== undefined ? { characterSupplementRequest } : {}),
       ...(characterLifecycleRequest !== undefined ? { characterLifecycleRequest } : {}),
       ...(storylineProgressChapterId !== undefined ? { storylineProgressChapterId } : {}),
+      ...(storyArcMutationRequest !== undefined ? { storyArcMutationRequest } : {}),
       ...(promptExecution !== undefined ? { promptExecution } : {}),
     }
   })
@@ -875,6 +903,8 @@ function sameTaskIdentity(left: MasterAgentTask, right: MasterAgentTask): boolea
     && JSON.stringify(left.characterLifecycleRequest ?? null)
       === JSON.stringify(right.characterLifecycleRequest ?? null)
     && (left.storylineProgressChapterId ?? null) === (right.storylineProgressChapterId ?? null)
+    && JSON.stringify(left.storyArcMutationRequest ?? null)
+      === JSON.stringify(right.storyArcMutationRequest ?? null)
 }
 
 function sameTaskDefinition(left: MasterAgentTask, right: MasterAgentTask): boolean {
@@ -1308,6 +1338,13 @@ function parseCandidatePayload(value: unknown, label: string): MasterCandidatePa
     payload.storylineProgressChapterId !== undefined
     && (!Number.isInteger(payload.storylineProgressChapterId) || payload.storylineProgressChapterId < 1)
   ) fail(label + ' storylineProgressChapterId 无效')
+  if (payload.storyArcMutationRequest !== undefined) {
+    try {
+      payload.storyArcMutationRequest = parseStoryArcMutationRequestV1(payload.storyArcMutationRequest)
+    } catch (error) {
+      fail(`${label} storyArcMutationRequest 无效：${error instanceof Error ? error.message : String(error)}`)
+    }
+  }
   if (
     payload.characterDrivenPlanId !== undefined
     && (!Number.isInteger(payload.characterDrivenPlanId) || payload.characterDrivenPlanId < 1)
@@ -1386,6 +1423,15 @@ function assertCandidateMatchesTaskSkill(
     taskSkill.executionMode === 'story-arcs'
     && !['main', 'sub', 'mixed'].includes(payload.storyArcKind ?? '')
   ) fail(`${label} 的故事线类型与 Skill 不一致`)
+  if (
+    taskSkill.executionMode === 'story-arcs'
+    && JSON.stringify(payload.storyArcMutationRequest ?? { operation: 'create' })
+      !== JSON.stringify(task.storyArcMutationRequest ?? { operation: 'create' })
+  ) fail(`${label} 的故事线操作与 Skill 计划不一致`)
+  if (
+    taskSkill.executionMode !== 'story-arcs'
+    && payload.storyArcMutationRequest !== undefined
+  ) fail(`${label} 不得携带故事线操作请求`)
   if (
     taskSkill.executionMode === 'character-driven'
     && (

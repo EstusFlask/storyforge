@@ -618,13 +618,14 @@ async function nestedStoryStages(
   const stages = parseStages(row.stages)
   const ref = await sourceRef(spec, row, 'stages', row.stages)
   const relations = await relationsForRow(spec, row)
-  return Promise.all(stages.map(stage => {
+  const nested = await Promise.all(stages.map(async stage => {
+    const stageKey = `${recordKey(spec, row)}:stage:${encodeURIComponent(stage.id)}`
     const body = canonicalStringify(stage)
-    return makeDescriptor({
+    const stageResource = await makeDescriptor({
       spec,
       row,
       frozenScope,
-      resourceKey: `${recordKey(spec, row)}:stage:${encodeURIComponent(stage.id)}`,
+      resourceKey: stageKey,
       title: `${rowTitle(spec, row)} · ${stage.title}`,
       shortSummary: stage.description || stage.title,
       fullContent: body,
@@ -634,7 +635,26 @@ async function nestedStoryStages(
       policyField: 'stages',
       timeRange: { start: stage.startVolume, end: stage.endVolume },
     })
+    const eventResources = await Promise.all(stage.keyEvents.map((event, index) => makeDescriptor({
+      spec,
+      row,
+      frozenScope,
+      // StoryStage currently owns stable IDs while key events are ordered values.
+      // The stable parent stage plus ordinal keeps an unchanged event addressable
+      // without inventing a second identity outside the registered schema.
+      resourceKey: `${stageKey}:event:${index + 1}`,
+      title: `${rowTitle(spec, row)} · ${stage.title} · 关键事件 ${index + 1}`,
+      shortSummary: event,
+      fullContent: event,
+      sourceRefs: [ref],
+      relations: [{ kind: 'parent', targetResourceKey: stageKey, direction: 'outgoing' }, ...relations],
+      authority: 'author-canon',
+      policyField: 'stages',
+      timeRange: { start: stage.startVolume, end: stage.endVolume },
+    })))
+    return [stageResource, ...eventResources]
   }))
+  return nested.flat()
 }
 
 async function nestedDetailedScenes(

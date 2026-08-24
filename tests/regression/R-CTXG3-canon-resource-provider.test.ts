@@ -240,6 +240,12 @@ describe('CTXG-3 · Canon resource provider', () => {
       'detailed-outline', 'narrative-blueprint', 'chapter', 'foreshadow', 'fact', 'reference',
     ] as const) expect(kinds.has(expected)).toBe(true)
     expect(descriptors.some(item => item.resourceKey.includes(':stage:stage-2'))).toBe(true)
+    const event = descriptors.find(item => item.resourceKey.includes(':stage:stage-2:event:1'))!
+    expect(event.shortSummary).toBe('转折')
+    expect(event.relations).toContainEqual(expect.objectContaining({
+      kind: 'parent',
+      targetResourceKey: expect.stringContaining(':stage:stage-2'),
+    }))
     expect(descriptors.some(item => item.resourceKey.includes(':scene:scene-harbor'))).toBe(true)
     expect(descriptors.find(item => item.title.includes('待确认角色驱动方案'))?.authority).toBe('candidate')
     expect(descriptors.find(item => item.kind === 'chapter'

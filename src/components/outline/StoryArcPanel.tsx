@@ -16,6 +16,7 @@ import StorylineProgressPanel from './StorylineProgressPanel'
 import CreativeArtifactSummary from '../agent/CreativeArtifactSummary'
 import { creativeArtifactCanAdoptV1 } from '../../lib/agent/creative-reliability'
 import HarnessEvidencePanel from '../agent/HarnessEvidencePanel'
+import type { StoryArcOperationV1, StoryArcCopilotSnapshot } from '../../lib/agent/story-arc-copilot'
 import {
   INITIAL_RECORD_TARGET_CLASS,
   initialRecordTargetAttributes,
@@ -93,6 +94,24 @@ export default function StoryArcPanel({ project, worldGroupId, initialRecordTarg
     await copilot.submitRequest(`依据当前作品已确认的世界、故事核心、角色和既有规划，生成一条${typeLabel}故事线。`)
   }
 
+  const handleTransform = async (operation: Exclude<StoryArcOperationV1, 'create'>) => {
+    if (activeArc?.id == null) return
+    const operationLabel = operation === 'expand'
+      ? '扩写'
+      : operation === 'rewrite'
+        ? '重写'
+        : operation === 'polish'
+          ? '润色'
+          : '重规划'
+    const instruction = `${operationLabel}现有${activeArc.type === 'main' ? '主线' : '支线'}“${activeArc.name}”，保持目标身份并依据当前已确认 Canon 生成可编辑候选。`
+    await copilot.submitTargetedRequest(instruction, {
+      agentId: 'outline',
+      skillId: 'outline.story-arcs',
+      instruction,
+      storyArcMutationRequest: { operation, targetArcId: activeArc.id },
+    })
+  }
+
   // 删除故事线
   const handleDeleteArc = async (id: number) => {
     const arc = arcs.find(a => a.id === id)
@@ -126,7 +145,10 @@ export default function StoryArcPanel({ project, worldGroupId, initialRecordTarg
             <span className={`w-2 h-2 rounded-full ${arc.type === 'main' ? 'bg-amber-400' : 'bg-blue-400'}`} />
             {arc.name}
             {arc.id != null && intentAlignmentByArcId[arc.id] === 'stale' && (
-              <span title="故事核心意图已变化，当前故事线不会被自动覆盖">意图已变</span>
+              <span title="故事核心意图的冻结 hash 已变化，当前故事线不会被自动覆盖">意图已变</span>
+            )}
+            {arc.id != null && intentAlignmentByArcId[arc.id] === 'source-missing' && (
+              <span title="故事线记录的故事核心来源已经缺失或不属于当前 Work">来源缺失</span>
             )}
           </button>
         ))}
@@ -169,6 +191,23 @@ export default function StoryArcPanel({ project, worldGroupId, initialRecordTarg
             {copilot.busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
             AI 生成
           </button>
+          {(['expand', 'rewrite', 'polish', 'replan'] as const).map(operation => (
+            <button
+              key={operation}
+              type="button"
+              onClick={() => { void handleTransform(operation) }}
+              disabled={
+                activeArc?.id == null
+                || copilot.loading
+                || copilot.busy
+                || copilot.pendingCandidates.length > 0
+                || (project.enableMultiWorld === true && worldGroupId == null)
+              }
+              className="px-2 py-1.5 text-xs text-text-muted hover:bg-bg-hover hover:text-accent rounded disabled:opacity-40"
+            >
+              {operation === 'expand' ? '扩写' : operation === 'rewrite' ? '重写' : operation === 'polish' ? '润色' : '重规划'}
+            </button>
+          ))}
         </div>
       </div>
 
@@ -178,9 +217,20 @@ export default function StoryArcPanel({ project, worldGroupId, initialRecordTarg
         </p>
       )}
 
-      {activeIntentAlignment === 'stale' && (
+      {(activeIntentAlignment === 'stale' || activeIntentAlignment === 'source-missing') && activeArc && (
         <div className="mb-4 rounded border border-warning/40 bg-warning/5 px-3 py-2 text-xs text-text-secondary">
-          故事核心意图已在这条故事线生成后变化。系统不会自动覆盖现有故事线；请保留当前版本，另行生成并确认重规划候选。
+          <p>
+            {activeIntentAlignment === 'stale'
+              ? '过期原因：故事核心意图的冻结 hash 已在这条故事线生成后变化。'
+              : '过期原因：这条故事线记录的故事核心来源已经缺失或不属于当前 Work。'}
+            系统不会静默选择或覆盖任何一边；请检查 provenance 后另行生成并确认重规划候选。
+          </p>
+          <p className="mt-1 font-mono text-[10px] text-text-muted">
+            provenance：storyCore #{activeArc.sourceStoryCoreId ?? '未记录'}
+            {' · '}revision {activeArc.sourceStoryCoreRevision ?? '未记录'}
+            {' · '}run #{activeArc.producerRunId ?? '未记录'}
+            {' · '}candidate {activeArc.producerCandidateHash?.slice(0, 12) ?? '未记录'}
+          </p>
         </div>
       )}
 
@@ -203,15 +253,49 @@ export default function StoryArcPanel({ project, worldGroupId, initialRecordTarg
                 : `${candidate.payload.contextSources.length} 个输入来源`}
             </span>
           </div>
-          <CTextarea
-            aria-label={`${candidate.payload.label}候选内容`}
-            value={candidate.event.content}
-            disabled={copilot.busy}
-            onChange={event => {
-              void copilot.updateCandidate(candidate.event.id!, event.target.value)
-            }}
-            className="min-h-72 w-full resize-y font-mono text-xs leading-5"
-          />
+          <div className={candidate.payload.storyArcMutationRequest?.operation === 'expand'
+            || candidate.payload.storyArcMutationRequest?.operation === 'polish'
+            ? 'grid gap-3 md:grid-cols-2'
+            : ''}>
+            {(candidate.payload.storyArcMutationRequest?.operation === 'expand'
+              || candidate.payload.storyArcMutationRequest?.operation === 'polish') && (() => {
+              const snapshot = candidate.payload.baseSnapshot as StoryArcCopilotSnapshot
+              const original = snapshot.arcs?.find(arc => (
+                arc.id === candidate.payload.storyArcMutationRequest?.targetArcId
+              ))
+              return (
+                <label className="grid gap-1 text-[11px] text-text-muted">
+                  原版（冻结）
+                  <CTextarea
+                    aria-label={`${candidate.payload.label}原版内容`}
+                    value={original ? JSON.stringify({
+                      name: original.name,
+                      type: original.type,
+                      description: original.description,
+                      stages: parseStages(original.stages),
+                    }, null, 2) : '目标原版不可用，请拒绝并重新生成。'}
+                    readOnly
+                    className="min-h-72 w-full resize-y font-mono text-xs leading-5"
+                  />
+                </label>
+              )
+            })()}
+            <label className="grid gap-1 text-[11px] text-text-muted">
+              {candidate.payload.storyArcMutationRequest?.operation === 'expand'
+                || candidate.payload.storyArcMutationRequest?.operation === 'polish'
+                ? '新版（可编辑）'
+                : ''}
+              <CTextarea
+                aria-label={`${candidate.payload.label}候选内容`}
+                value={candidate.event.content}
+                disabled={copilot.busy}
+                onChange={event => {
+                  void copilot.updateCandidate(candidate.event.id!, event.target.value)
+                }}
+                className="min-h-72 w-full resize-y font-mono text-xs leading-5"
+              />
+            </label>
+          </div>
           {candidate.payload.creativeArtifact && (
             <CreativeArtifactSummary
               artifact={candidate.payload.creativeArtifact}

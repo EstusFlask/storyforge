@@ -155,6 +155,7 @@ function revalidateCandidateCreativeArtifactV1(input: {
       draft: input.draft,
       snapshot: payload.baseSnapshot as Parameters<typeof revalidateStoryArcCreativeDraftV1>[0]['snapshot'],
       kind: payload.storyArcKind,
+      mutation: payload.storyArcMutationRequest,
       previousArtifact: input.creativeArtifact,
     })
   }

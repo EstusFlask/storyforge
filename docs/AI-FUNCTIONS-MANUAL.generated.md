@@ -232,8 +232,8 @@ AI 输出经 `adopt({ target, data })` 写回,只有这里登记的字段可写(
 
 | category | 触发文件 |
 |---|---|
-| `agent.orchestrator` | `src/lib/agent/orchestrator.ts:745` |
-| `agent.orchestrator.replan` | `src/lib/agent/orchestrator.ts:832` |
+| `agent.orchestrator` | `src/lib/agent/orchestrator.ts:759` |
+| `agent.orchestrator.replan` | `src/lib/agent/orchestrator.ts:846` |
 | `agent.readonly` | `src/lib/agent/client-adapter.ts:118` |
 | `canon.setting.extract` | `src/lib/agent/run/constitution-extraction-durable.ts:508` |
 | `chapter.content` | `src/lib/generation/chapter-generation-node.ts:23` |
@@ -293,8 +293,8 @@ AI 输出经 `adopt({ target, data })` 写回,只有这里登记的字段可写(
 - `src/lib/agent/run/codex-extraction-durable.ts:779 · chat`
 - `src/lib/agent/run/history-agent-durable.ts:514 · chat`
 - `src/lib/agent/run/reference-derived-durable.ts:506 · chat`
-- `src/lib/agent/story-arc-copilot.ts:1351 · chat`
-- `src/lib/agent/story-arc-copilot.ts:1399 · chat`
+- `src/lib/agent/story-arc-copilot.ts:1584 · chat`
+- `src/lib/agent/story-arc-copilot.ts:1636 · chat`
 - `src/lib/agent/story-core-copilot.ts:556 · chat`
 - `src/lib/agent/storyline-progress-copilot.ts:375 · chat`
 - `src/lib/agent/world-game-copilot.ts:295 · chat`
@@ -350,4 +350,4 @@ AI 输出经 `adopt({ target, data })` 写回,只有这里登记的字段可写(
 
 ---
 
-生成时间基准:commit `5045ce9b`
+生成时间基准:commit `eb23e4cc`
