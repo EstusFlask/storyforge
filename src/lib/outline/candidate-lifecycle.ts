@@ -40,6 +40,7 @@ import {
   encodeGenerationOperation,
   type OutlineGenerationRequest,
 } from './generation-request'
+import { assertOutlineRequestTargetsUnwrittenFutureV1 } from './future-boundary'
 
 export const OUTLINE_GENERATION_CONVERSATION_PURPOSE = 'outline-generation-v1'
 export const OUTLINE_GENERATION_CANDIDATE_PAYLOAD_TYPE = 'outline-generation-candidate'
@@ -621,6 +622,13 @@ async function executeOutlineAdoptionIntent(
   intent: OutlineGenerationAdoptionIntentV1,
   faultInjector?: (boundary: OutlineGenerationAdoptionFaultBoundaryV1) => void | Promise<void>,
 ): Promise<unknown> {
+  const request = decodeGenerationOperation(candidate.operation)
+  if (!request) throw new Error('大纲候选操作无法解析，已阻止采纳。')
+  await assertOutlineRequestTargetsUnwrittenFutureV1({
+    scope,
+    worldGroupId: candidate.worldGroupId,
+    request,
+  })
   if (intent.kind === 'single-volume' || intent.kind === 'single-chapter') {
     const result = await adoptGeneratedOutlineSummary(
       candidate.projectId,
@@ -777,6 +785,13 @@ export async function adoptOutlineGenerationCandidateV1(input: {
       throw new Error(`大纲候选已过期：${error instanceof Error ? error.message : String(error)}`)
     }
   }
+  const request = decodeGenerationOperation(input.candidate.operation)
+  if (!request) throw new Error('大纲候选操作无法解析，已阻止采纳。')
+  await assertOutlineRequestTargetsUnwrittenFutureV1({
+    scope: resolved.scope,
+    worldGroupId: input.candidate.worldGroupId,
+    request,
+  })
   await beginOutlineGenerationAdoptionV1(input.candidate, input.intent)
   await inject('after-intent')
   const { scope } = resolved

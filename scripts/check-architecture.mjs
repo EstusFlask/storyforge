@@ -427,10 +427,13 @@ if (!/sourceKeys:\s*generationBinding\.contextSourceKeys/.test(chapterEditorSour
   violations.push('[⑬Skill来源派生] ChapterEditor 正文正式请求未从 generationBinding.contextSourceKeys 装配')
 }
 if (/\bOUTLINE_GENERATION_SOURCE_KEYS\b/.test(outlinePanelSource)) {
-  violations.push('[⑬Skill来源旁路] OutlinePanel 不得拥有 OUTLINE_GENERATION_SOURCE_KEYS；正式来源必须由 Skill resolver 派生')
+  violations.push('[⑬Gateway来源旁路] OutlinePanel 不得拥有 OUTLINE_GENERATION_SOURCE_KEYS；正式来源必须由共享 Gateway 装配器派生')
 }
-if (!/sourceKeys:\s*resolveOutlineGenerationSourceKeysV2\s*\(/.test(outlinePanelSource)) {
-  violations.push('[⑬Skill来源派生] OutlinePanel 大纲正式请求未调用 resolveOutlineGenerationSourceKeysV2')
+if (!/prepareOutlineGatewayAssemblyV1\s*\(/.test(outlinePanelSource)) {
+  violations.push('[⑬Gateway来源派生] OutlinePanel 大纲正式请求未调用 prepareOutlineGatewayAssemblyV1')
+}
+if (/resolveOutlineGenerationSourceKeysV2\s*\(/.test(outlinePanelSource)) {
+  violations.push('[⑬Gateway来源旁路] OutlinePanel 不得重新使用页面层来源 resolver')
 }
 if (!/PROSE_GENERATION_SOURCE_KEYS_V1[\s\S]*?resolveAgentSkillContextSourceKeysV1\s*\([\s\S]*?getAgentSkillV1\('prose\.generate'/.test(proseDurableSource)) {
   violations.push('[⑬Skill来源别名] prose 历史来源别名必须只读派生自 prose.generate Skill')

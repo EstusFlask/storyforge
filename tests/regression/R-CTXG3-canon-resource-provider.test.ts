@@ -182,6 +182,16 @@ async function seedSixDomains() {
   await addScoped(scope, 'narrativeNodes', {
     moduleId, key: 'entry', kind: 'entry', title: '盐港入口', summary: '主角拾起镜片', conditionJson: '{}', effectsJson: '[]', successorKeysJson: '[]', sourceOutlineNodeId: volumeId, order: 0,
   }, 'work')
+  await addScoped(scope, 'narrativeBeats', {
+    moduleId, nodeKey: 'entry', beatKey: 'mirror-awakes', kind: 'narration',
+    speakerCharacterId: null, text: '镜片在潮声中苏醒。', order: 0,
+  }, 'work')
+  await addScoped(scope, 'narrativeChoices', {
+    moduleId, sourceNodeKey: 'entry', choiceKey: 'touch-mirror', text: '触碰镜片',
+    description: '接受镜海的召唤', unavailableReason: '', targetNodeKey: 'entry',
+    displayConditionJson: '{}', availableConditionJson: '{}', effectsJson: '[]', tagsJson: '[]', order: 0,
+  }, 'work')
+  await db.works.update(scope.workId, { activeNarrativeModuleId: moduleId })
   await addScoped(scope, 'foreshadows', {
     name: '潮钟裂纹', description: '第三次敲响后裂纹扩大', notes: '', status: 'planned', type: 'object', importance: 'major', plantChapterId: chapterIds[0], resolveChapterId: null,
   }, 'work')
@@ -247,6 +257,15 @@ describe('CTXG-3 · Canon resource provider', () => {
       targetResourceKey: expect.stringContaining(':stage:stage-2'),
     }))
     expect(descriptors.some(item => item.resourceKey.includes(':scene:scene-harbor'))).toBe(true)
+    expect(descriptors.filter(item => item.kind === 'narrative-blueprint')
+      .some(item => item.sourceRefs.some(ref => ref.table === 'narrativeBeats'))).toBe(true)
+    expect(descriptors.filter(item => item.kind === 'narrative-blueprint')
+      .some(item => item.sourceRefs.some(ref => ref.table === 'narrativeChoices'))).toBe(true)
+    const writtenBoundary = descriptors.find(item => item.resourceKey.endsWith(':written-boundary'))!
+    expect(writtenBoundary).toBeTruthy()
+    expect((await CANON_RESOURCE_PROVIDER_V1.read({
+      scope, resourceKey: writtenBoundary.resourceKey, depth: 'full', maxTokens: 1000,
+    })).content).toContain('只读；未来大纲生成不得覆盖、重排或替换该章')
     expect(descriptors.find(item => item.title.includes('待确认角色驱动方案'))?.authority).toBe('candidate')
     expect(descriptors.find(item => item.kind === 'chapter'
       && item.sourceRefs[0]?.recordId === fixture.chapterIds[0]

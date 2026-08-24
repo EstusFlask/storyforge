@@ -46,8 +46,8 @@ function assembled(text: string): AssembleContextResult {
   })
   return {
     text,
-    included: ['storyCore'],
-    segments: [{ label: '故事核心', layer: 'L1', content: '守住主线', tokens: 1, trimmable: true }],
+    included: ['ragSelection'],
+    segments: [{ label: 'Gateway 资料', layer: 'L0', content: '守住主线', tokens: 1, trimmable: false }],
     omitted: [],
     trimmed: [],
     totalInputTokens: 1,
@@ -56,10 +56,10 @@ function assembled(text: string): AssembleContextResult {
     overBudgetAfterTrim: false,
     sourceEvidence: sourceKeys.map(key => ({
       key,
-      status: key === 'storyCore' ? 'included' as const : 'omitted' as const,
-      delivery: key === 'storyCore' ? 'full' as const : 'none' as const,
-      originalTokens: key === 'storyCore' ? 1 : 0,
-      inputTokens: key === 'storyCore' ? 1 : 0,
+      status: key === 'ragSelection' ? 'included' as const : 'omitted' as const,
+      delivery: key === 'ragSelection' ? 'full' as const : 'none' as const,
+      originalTokens: key === 'ragSelection' ? 1 : 0,
+      inputTokens: key === 'ragSelection' ? 1 : 0,
     })),
   }
 }

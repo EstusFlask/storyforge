@@ -287,7 +287,7 @@ AI 输出经 `adopt({ target, data })` 写回,只有这里登记的字段可写(
 - `src/lib/agent/inspiration-copilot.ts:341 · chat`
 - `src/lib/agent/master-candidate-semantic-review.ts:601 · chat`
 - `src/lib/agent/outline-copilot.ts:494 · chat`
-- `src/lib/agent/outline-copilot.ts:743 · chat`
+- `src/lib/agent/outline-copilot.ts:744 · chat`
 - `src/lib/agent/prose-copilot.ts:665 · chat`
 - `src/lib/agent/prose-copilot.ts:930 · chat`
 - `src/lib/agent/run/codex-extraction-durable.ts:779 · chat`
@@ -350,4 +350,4 @@ AI 输出经 `adopt({ target, data })` 写回,只有这里登记的字段可写(
 
 ---
 
-生成时间基准:commit `eb23e4cc`
+生成时间基准:commit `a062b45c`

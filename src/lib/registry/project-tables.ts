@@ -422,6 +422,7 @@ const PROJECT_TABLE_REGISTRATIONS: ProjectTableRegistration[] = [
     note: 'WORLD-2D 条件、选择、效果、后继和结局节点' },
 
   { table: db.narrativeBeats, name: 'narrativeBeats', owner: 'project', exportable: true, exportIdField: true,
+    resourceIdentity: RESOURCE_IDENTITY('narrative-beat', 'narrative-blueprint', '叙事节拍'),
     domainOwner: { allowed: ['world', 'work'], legacyDefault: 'work', locator: { kind: 'parent', owner: 'work', table: 'narrativeModules', field: 'moduleId' } },
     worldDomains: ['narrative'], communityShare: 'world', releaseSection: 'narrative',
     exportRemap: [
@@ -432,6 +433,7 @@ const PROJECT_TABLE_REGISTRATIONS: ProjectTableRegistration[] = [
     note: 'STORYGAME-1A 节点内有序旁白、对话、动作和系统提示；不保存玩家进度' },
 
   { table: db.narrativeChoices, name: 'narrativeChoices', owner: 'project', exportable: true, exportIdField: true,
+    resourceIdentity: RESOURCE_IDENTITY('narrative-choice', 'narrative-blueprint', '叙事选择'),
     domainOwner: { allowed: ['world', 'work'], legacyDefault: 'work', locator: { kind: 'parent', owner: 'work', table: 'narrativeModules', field: 'moduleId' } },
     worldDomains: ['narrative'], communityShare: 'world', releaseSection: 'narrative',
     exportRemap: [

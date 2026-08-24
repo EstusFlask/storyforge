@@ -4,7 +4,7 @@ export type NarrativeModuleKind = typeof NARRATIVE_MODULE_KINDS[number]
 export const NARRATIVE_NODE_KINDS = ['entry', 'scene', 'choice', 'ending'] as const
 export type NarrativeNodeKind = typeof NARRATIVE_NODE_KINDS[number]
 
-export interface NarrativeModule {
+export interface NarrativeModule extends RagDocumentMetadata {
   id?: number
   projectId: number
   worldId?: number | null
@@ -20,7 +20,7 @@ export interface NarrativeModule {
   updatedAt: number
 }
 
-export interface NarrativeNode {
+export interface NarrativeNode extends RagDocumentMetadata {
   id?: number
   projectId: number
   moduleId: number
@@ -87,3 +87,4 @@ export interface NarrativeExecutionStep {
   state: Record<string, unknown>
   successorNodes: NarrativeNode[]
 }
+import type { RagDocumentMetadata } from './rag-library'

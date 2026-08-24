@@ -219,6 +219,6 @@ describe('WEH-0A · Skill → formal Run 单向派生', () => {
     expect(chapterEditor).not.toContain('PROSE_GENERATION_SOURCE_KEYS_V1')
     expect(chapterEditor).toContain('sourceKeys: generationBinding.contextSourceKeys')
     expect(outlinePanel).not.toContain('OUTLINE_GENERATION_SOURCE_KEYS')
-    expect(outlinePanel).toContain('resolveOutlineGenerationSourceKeysV2')
+    expect(outlinePanel).toContain('prepareOutlineGatewayAssemblyV1')
   })
 })

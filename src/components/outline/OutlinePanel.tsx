@@ -3,8 +3,7 @@ import { useOutlineStore } from '../../stores/outline'
 import { useWorldGroupStore } from '../../stores/world-group'
 import { useAIStream } from '../../hooks/useAIStream'
 import { createAISessionKey } from '../../stores/ai-generation-session'
-import { assembleContext } from '../../lib/registry/assemble-context'
-import { resolveOutlineGenerationSourceKeysV2 } from '../../lib/outline/harness'
+import { prepareOutlineGatewayAssemblyV1 } from '../../lib/outline/gateway-context'
 import {
   parseChapterOutlineOutput, parseVolumeOutlineOutput,
   type ParsedVolume, type ParsedChapter,
@@ -27,7 +26,7 @@ import { useOutlineBatchGeneration } from './useOutlineBatchGeneration'
 import { useOutlineGenerationController } from './useOutlineGenerationController'
 import { useOutlineChapterCountEstimate } from './useOutlineChapterCountEstimate'
 import { useOutlineChapterDrag } from './useOutlineChapterDrag'
-import { decodeGenerationOperation } from '../../lib/outline/generation-request'
+import { decodeGenerationOperation, type OutlineGenerationRequest } from '../../lib/outline/generation-request'
 import { useInitialRecordTarget } from '../shared/initial-record-target'
 
 interface Props {
@@ -198,24 +197,22 @@ export default function OutlinePanel({ project, onOpenChapter, initialNodeId }: 
   }), [parameterValues, systemOverride, userOverride])
 
   const buildOutlineAssembledContext = useCallback(async (
-    request: Parameters<typeof resolveOutlineGenerationSourceKeysV2>[0]['request'],
+    request: OutlineGenerationRequest,
     worldGroupId: number | null,
-    outlineNodeId?: number | null,
+    _outlineNodeId?: number | null,
     priorOutlineCandidateText?: string,
   ) => {
-    return await assembleContext({
+    return await prepareOutlineGatewayAssemblyV1({
       projectId: project.id!,
       worldGroupId,
-      outlineNodeId: outlineNodeId ?? null,
+      request,
+      authorRequest: hint.trim() || (request.kind === 'volumes' || request.kind === 'single-volume'
+        ? '依据当前 Canon 规划未写未来卷纲。'
+        : '依据当前 Canon 把目标卷拆分为未写未来章纲。'),
+      config: aiConfig,
       priorOutlineCandidateText,
-      provider: aiConfig.provider,
-      model: aiConfig.model,
-      sourceKeys: resolveOutlineGenerationSourceKeysV2({
-        request,
-        hasPriorOutlineCandidate: Boolean(priorOutlineCandidateText?.trim()),
-      }),
     })
-  }, [project.id, aiConfig.provider, aiConfig.model])
+  }, [project.id, aiConfig, hint])
 
   const generation = useOutlineGenerationController({
     project,

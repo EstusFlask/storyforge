@@ -164,25 +164,36 @@ export interface AgentSkillDefinitionV1 {
 }
 
 const OUTLINE_CONTEXT_SOURCE_KEYS = [
-  'canonAssertions',
-  'worldview',
-  'storyCore',
-  'activeNarrativeBlueprint',
-  'characterDrivenPlan',
-  'powerSystem',
-  'cultivationProgress',
-  'codex',
-  'characters',
-  'creativeRules',
-  'worldRules',
-  'historical',
-  'locations',
-  'foreshadows',
-  'storyArcs',
-  'storylineProgress',
-  'existingVolumeOutlines',
-  'writtenChapterProgress',
+  'ragSelection',
 ] as const
+
+const OUTLINE_CONTEXT_GATEWAY_POLICY = {
+  version: 1,
+  rollout: 'required',
+  requiredWriteTargets: [
+    'outlineNodes.parentId',
+    'outlineNodes.type',
+    'outlineNodes.title',
+    'outlineNodes.summary',
+    'outlineNodes.order',
+  ],
+  providerSourceKeys: ['ragSelection'],
+  allowedResourceKinds: [
+    'world', 'worldview-field', 'world-link', 'story-core-field',
+    'character', 'character-relation', 'story-arc', 'storyline-progress',
+    'outline-node', 'detailed-outline', 'narrative-blueprint', 'chapter',
+    'foreshadow', 'location', 'codex-entry', 'fact', 'reference',
+  ],
+  allowedDepths: ['index', 'summary', 'focused', 'full', 'original'],
+  maxReadCalls: 8,
+  maxRetrievedTokens: 64_000,
+  maxPlanningSteps: 8,
+  maxPlanningModelTokens: 64_000,
+  allowOriginalRead: true,
+  additionalReadToolNames: [
+    'list_context_catalog', 'search_context', 'read_context_resource', 'read_original_evidence',
+  ],
+} as const satisfies AgentSkillContextGatewayPolicyV1
 
 const WORLD_GAME_CONTEXT_SOURCE_KEYS = ['worldGameAuthoring'] as const
 
@@ -1000,18 +1011,7 @@ const CHARACTER_SUPPLEMENT_COMPRESSION_POLICY = compressionPolicy([
   'characterPassages',
 ])
 const INSPIRATION_COMPRESSION_POLICY = compressionPolicy(['inspirationWorkspace'])
-const OUTLINE_COMPRESSION_POLICY = compressionPolicy([
-  'worldview',
-  'storyCore',
-  'activeNarrativeBlueprint',
-  'characterDrivenPlan',
-  'powerSystem',
-  'codex',
-  'characters',
-  'historical',
-  'storyArcs',
-  'existingVolumeOutlines',
-])
+const OUTLINE_COMPRESSION_POLICY = compressionPolicy(['ragSelection'])
 const WORLD_GAME_COMPRESSION_POLICY = compressionPolicy(['worldGameAuthoring'])
 const OUTLINE_STORY_ARC_COMPRESSION_POLICY = compressionPolicy([
   'worldview',
@@ -2106,7 +2106,7 @@ export const AGENT_SKILLS = [
     defaultForAgent: true,
     label: '卷章纲编排',
     owner: 'outline-agent',
-    promptVersion: 'outline-copilot-v1',
+    promptVersion: 'outline-copilot-v2',
     executionMode: 'auto',
     contextTaskKind: 'agent-outline',
     readToolNames: [],
@@ -2114,9 +2114,10 @@ export const AGENT_SKILLS = [
     optionalContextSourceKeys: ['priorOutlineCandidate'],
     inputPolicy: OUTLINE_VOLUME_INPUT_POLICY,
     contextCompression: OUTLINE_COMPRESSION_POLICY,
+    contextGateway: OUTLINE_CONTEXT_GATEWAY_POLICY,
     maxOutputTokens: 12_000,
     writeTargets: [{ table: 'outlineNodes', fields: ['parentId', 'type', 'title', 'summary', 'order'] }],
-    lastVerifiedAt: '2026-08-21',
+    lastVerifiedAt: '2026-08-24',
     regressionTests: ['R-WEH0-skill-runtime-contract', 'R-AGENT1-chat-copilot-outline', 'R-HARNESS11-outline-batch-durable', 'R-HARNESS16-semantic-context-compression', 'R-HARNESS18-execution-version-freshness'],
   },
   {
@@ -2126,7 +2127,7 @@ export const AGENT_SKILLS = [
     defaultForAgent: false,
     label: '卷纲编排',
     owner: 'outline-agent',
-    promptVersion: 'outline-copilot-v1',
+    promptVersion: 'outline-copilot-v2',
     executionMode: 'volumes',
     contextTaskKind: 'agent-outline',
     readToolNames: [],
@@ -2134,9 +2135,10 @@ export const AGENT_SKILLS = [
     optionalContextSourceKeys: ['priorOutlineCandidate'],
     inputPolicy: OUTLINE_VOLUME_INPUT_POLICY,
     contextCompression: OUTLINE_COMPRESSION_POLICY,
+    contextGateway: OUTLINE_CONTEXT_GATEWAY_POLICY,
     maxOutputTokens: 8_000,
     writeTargets: [{ table: 'outlineNodes', fields: ['parentId', 'type', 'title', 'summary', 'order'] }],
-    lastVerifiedAt: '2026-08-21',
+    lastVerifiedAt: '2026-08-24',
     regressionTests: ['R-WEH0-skill-runtime-contract', 'R-HARNESS14-workflow-classifier', 'R-AGENT1-chat-copilot-outline', 'R-HARNESS16-semantic-context-compression', 'R-HARNESS18-execution-version-freshness'],
   },
   {
@@ -2146,7 +2148,7 @@ export const AGENT_SKILLS = [
     defaultForAgent: false,
     label: '章纲编排',
     owner: 'outline-agent',
-    promptVersion: 'outline-copilot-v1',
+    promptVersion: 'outline-copilot-v2',
     executionMode: 'chapters',
     contextTaskKind: 'agent-outline',
     readToolNames: [],
@@ -2154,9 +2156,10 @@ export const AGENT_SKILLS = [
     optionalContextSourceKeys: ['priorOutlineCandidate'],
     inputPolicy: OUTLINE_CHAPTER_INPUT_POLICY,
     contextCompression: OUTLINE_COMPRESSION_POLICY,
+    contextGateway: OUTLINE_CONTEXT_GATEWAY_POLICY,
     maxOutputTokens: 12_000,
     writeTargets: [{ table: 'outlineNodes', fields: ['parentId', 'type', 'title', 'summary', 'order'] }],
-    lastVerifiedAt: '2026-08-21',
+    lastVerifiedAt: '2026-08-24',
     regressionTests: ['R-WEH0-skill-runtime-contract', 'R-HARNESS14-workflow-classifier', 'R-AGENT1-chat-copilot-outline', 'R-HARNESS16-semantic-context-compression', 'R-HARNESS18-execution-version-freshness'],
   },
   {
@@ -3069,7 +3072,14 @@ export function validateAgentSkillDefinitionsV1(
       throw new Error(`Agent Skill ${skill.id} 的输入状态来源重复`)
     }
     for (const sourceKey of skill.inputPolicy.sourceKeys) {
-      if (!authorizedSourceKeys.includes(sourceKey)) {
+      // A required Canon Gateway reads through its frozen provider source and
+      // projects logical domain availability from exact SourceRefs. Those
+      // logical keys classify empty/partial/complete input; they are not a
+      // second, direct context-reading authority.
+      const projectedByRequiredGateway = skill.contextGateway?.rollout === 'required'
+        && skill.contextGateway.providerSourceKeys.includes('ragSelection')
+        && CONTEXT_SOURCE_BY_KEY.has(sourceKey)
+      if (!authorizedSourceKeys.includes(sourceKey) && !projectedByRequiredGateway) {
         throw new Error(`Agent Skill ${skill.id} 的输入状态来源未获读取授权 ${sourceKey}`)
       }
     }

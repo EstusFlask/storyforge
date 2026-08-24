@@ -14,7 +14,10 @@ import {
 } from '../outline/adopt-generation'
 import { buildOutlineGenerationPlan } from '../outline/generation-plan'
 import type { OutlineGenerationRequest } from '../outline/generation-request'
-import { assembleContext } from '../registry/assemble-context'
+import {
+  prepareOutlineGatewayAssemblyV1,
+} from '../outline/gateway-context'
+import type { AssembleContextResult } from '../registry/types'
 import {
   isLegacyReadScope,
   readOwnedRows,
@@ -32,18 +35,13 @@ import type {
 import {
   attachAgentContextInputStateV1,
   evidenceFromContextResult,
-  resolveAgentContextPolicy,
   type AgentContextEvidence,
   type AgentContextProfile,
 } from './context-policy'
-import {
-  createAgentContextCompressionSessionV1,
-  type AgentContextCompressionRuntimeV1,
-} from './context-compression'
+import type { AgentContextCompressionRuntimeV1 } from './context-compression'
 import {
   getDefaultAgentSkillV1,
   buildAgentSkillInputGuidanceV1,
-  resolveAgentSkillInputStateV1,
   resolveAgentSkillV1,
   type AgentSkillExecutionModeV1,
   type AgentSkillId,
@@ -68,6 +66,11 @@ import {
   type CreativeArtifactV1,
 } from './creative-reliability'
 import type { AgentTeamBudgetTracker } from './team-budget'
+import {
+  contextGatewayInputStateSourceKeysV1,
+  projectContextGatewayInputStateV1,
+} from './context-gateway-input'
+import type { ContextGatewayExecutionV1 } from '../context-gateway/execution'
 
 export const OUTLINE_COPILOT_SOURCE_KEYS = getDefaultAgentSkillV1('outline').contextSourceKeys
 
@@ -90,7 +93,7 @@ export interface OutlineCopilotInput {
   parentVolumeId: number | null
   nodes: OutlineNode[]
   volumes: OutlineNode[]
-  assembled: Awaited<ReturnType<typeof assembleContext>>
+  assembled: AssembleContextResult
   narrativeBrief: NarrativeBriefV1
   creativeReliabilityEnabled?: boolean
   snapshot: OutlineCopilotSnapshot
@@ -116,6 +119,7 @@ export interface PreparedOutlineCopilot {
   contextEvidence: AgentContextEvidence
   input: OutlineCopilotInput
   modelIdentity: { provider: string; model: string }
+  contextGatewayExecution: ContextGatewayExecutionV1
   runRaw: (messages: ChatMessage[]) => Promise<CreativeRawModelResultV1>
 }
 
@@ -424,38 +428,34 @@ export async function prepareOutlineCopilot(input: {
     { category: routingCategory },
   ).config
   const contextProfile = input.contextProfile ?? 'full'
-  const contextPolicy = resolveAgentContextPolicy(skill.contextTaskKind, contextProfile)
-  const compression = input.contextCompressionRuntime
-    ? createAgentContextCompressionSessionV1({
-        policy: skill.contextCompression,
-        config,
-        projectId: input.projectId,
-        authorRequest: request,
-        routingCategory,
-        signal: input.signal,
-        runtime: input.contextCompressionRuntime,
-      })
-    : undefined
-  const assembled = await assembleContext({
+  const assembled = await prepareOutlineGatewayAssemblyV1({
     projectId: input.projectId,
     scope,
     worldGroupId,
-    outlineNodeId: parentVolumeId,
-    provider: config.provider,
-    model: config.model,
-    sourceKeys: [...skill.contextSourceKeys],
-    inputBudgetMaxTokens: contextPolicy.maxInputTokens,
-    sourceBudgetScale: contextPolicy.sourceBudgetScale,
-    sourceTransformer: compression?.sourceTransformer,
+    request: mode === 'volumes'
+      ? { kind: 'volumes' }
+      : { kind: 'chapters', volumeId: parentVolumeId! },
+    authorRequest: request,
+    config,
+    contextProfile,
+    signal: input.signal,
   })
   const currentNodes = await readOwnedRows<OutlineNode>(readScope, 'outlineNodes', { owner: 'work' })
   const snapshot = snapshotOf(currentNodes, worldGroupId, mode, parentVolumeId)
   if (before.serialized !== snapshot.serialized) throw new OutlineCopilotStaleError()
 
-  const inputState = resolveAgentSkillInputStateV1(skill, [assembled])
+  const inputState = projectContextGatewayInputStateV1(
+    skill,
+    assembled.contextGatewayExecution,
+    assembled,
+  )
   const contextEvidence = attachAgentContextInputStateV1(
     evidenceFromContextResult(contextProfile, assembled),
     inputState,
+  )
+  contextEvidence.inputStateSourceKeys = contextGatewayInputStateSourceKeysV1(
+    skill,
+    assembled.contextGatewayExecution,
   )
   const inputGuidance = buildAgentSkillInputGuidanceV1(skill, inputState)
   const narrativeBrief = buildNarrativeBriefV1({
@@ -522,6 +522,7 @@ export async function prepareOutlineCopilot(input: {
     contextEvidence,
     input: nodeInput,
     modelIdentity: { provider: config.provider, model: config.model },
+    contextGatewayExecution: assembled.contextGatewayExecution,
     runRaw,
     label: mode === 'volumes'
       ? '卷级大纲'

@@ -326,6 +326,18 @@ async function scopeForRow(
   row: ResourceRow,
 ): Promise<ContextResourceDescriptorV1['scope']> {
   const result: ContextResourceDescriptorV1['scope'] = { projectId: frozen.projectId }
+  const locator = spec.domainOwner?.locator
+  if (locator?.kind === 'parent') {
+    const parentSpec = REGISTRY_BY_NAME.get(locator.table)
+    const parentId = row[locator.field]
+    const parent = parentSpec && typeof parentId === 'number'
+      ? await parentSpec.table.get(parentId) as ResourceRow | undefined
+      : undefined
+    if (!parentSpec || !parent || parent.projectId !== frozen.projectId) {
+      fail('owner-parent', `${spec.name}#${row.id ?? '?'} 缺少可验证的 owner 父记录`)
+    }
+    Object.assign(result, await scopeForRow(frozen, parentSpec as ResourceSpec, parent))
+  }
   const allowed = spec.domainOwner?.allowed ?? []
   const hasWorld = typeof row.worldId === 'number'
   const hasWork = typeof row.workId === 'number'
@@ -683,6 +695,43 @@ async function nestedDetailedScenes(
   })))
 }
 
+async function nestedWrittenBoundary(
+  spec: ResourceSpec,
+  row: ResourceRow,
+  frozenScope: FrozenResourceScopeV1,
+): Promise<ProjectedResourceV1[]> {
+  if (spec.name !== 'chapters' || typeof row.content !== 'string' || !row.content.trim()) return []
+  const refs = await Promise.all(['title', 'content', 'wordCount', 'status']
+    .filter(field => row[field] !== undefined)
+    .map(field => sourceRef(spec, row, field, exactValue(row[field]))))
+  const relations = await relationsForRow(spec, row)
+  const wordCount = typeof row.wordCount === 'number' ? row.wordCount : 0
+  const contentHash = await sha256Text(row.content)
+  const body = [
+    '【已写正文保护边界】',
+    `章节：${rowTitle(spec, row)}`,
+    `章节 ID：${row.id}`,
+    `大纲节点 ID：${exactValue(row.outlineNodeId)}`,
+    `状态：${exactValue(row.status) || 'draft'}`,
+    `字数：${wordCount}`,
+    `正文 hash：${contentHash}`,
+    '约束：该章节已有正文，只读；未来大纲生成不得覆盖、重排或替换该章。',
+  ].join('\n')
+  return [await makeDescriptor({
+    spec,
+    row,
+    frozenScope,
+    resourceKey: `${recordKey(spec, row)}:written-boundary`,
+    title: `${rowTitle(spec, row)} · 已写正文保护边界`,
+    shortSummary: `已有正文 ${wordCount} 字；outlineNodeId=${exactValue(row.outlineNodeId)}`,
+    fullContent: body,
+    sourceRefs: refs,
+    relations: [{ kind: 'parent', targetResourceKey: recordKey(spec, row), direction: 'outgoing' }, ...relations],
+    authority: 'author-canon',
+    policyField: 'content',
+  })]
+}
+
 async function worldLinkAggregate(
   spec: ResourceSpec,
   row: ResourceRow,
@@ -753,6 +802,7 @@ async function projectRow(
   const nested = [
     ...await nestedStoryStages(spec, row, frozenScope),
     ...await nestedDetailedScenes(spec, row, frozenScope),
+    ...await nestedWrittenBoundary(spec, row, frozenScope),
   ]
   return [...(link ? [link] : []), ...withoutGenericLinkRecord, ...nested]
     .sort((left, right) => left.descriptor.resourceKey.localeCompare(right.descriptor.resourceKey))

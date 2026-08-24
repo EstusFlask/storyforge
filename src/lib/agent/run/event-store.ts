@@ -673,7 +673,10 @@ export async function appendAgentRunEventV1<T extends AgentRunEventTypeV1>(
       if (
         input.expectedLastSequence != null
         && input.expectedLastSequence !== snapshot.projection.lastSequence
-      ) fail('sequence_conflict', '运行已被其它执行者推进，请刷新后重试')
+      ) fail(
+        'sequence_conflict',
+        `运行已被其它执行者推进，请刷新后重试（expected=${input.expectedLastSequence}, actual=${snapshot.projection.lastSequence}, event=${input.type}）`,
+      )
       const event = parseAgentRunEventV1({
         version: 1,
         runId: input.runId,

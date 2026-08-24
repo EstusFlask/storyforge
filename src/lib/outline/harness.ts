@@ -3,14 +3,21 @@ import {
   appendAgentRunEventV1,
   allocateInMemoryAgentRunIdV1,
   createContextManifestFromAssemblyV1,
+  createContextManifestV2FromV1,
   createAgentRunV1,
   createGenerationNodeDurableTraceV1,
   createGenerationNodeShadowTraceV1,
   hashCanonicalValue,
+  readAgentRunV1,
   type AgentRunSnapshotV1,
   type GenerationNodeDurableTraceV1,
   type GenerationNodeShadowTraceV1,
 } from '../agent/run'
+import {
+  finalizeContextGatewayAttemptEvidenceV1,
+  recordContextGatewayPreflightEvidenceV1,
+  type ContextGatewayPreflightEvidenceV1,
+} from '../context-gateway/attempt-evidence'
 import {
   assertAgentSkillBindingMatchesAssemblyV2,
   createAgentSkillExecutionBindingV2,
@@ -46,6 +53,7 @@ import {
   type OutlineGenerationBatchRefV1,
   type OutlineGenerationCandidateV1,
 } from './candidate-lifecycle'
+import { outlineGatewayExecutionFromAssemblyV1 } from './gateway-context'
 
 export * from './candidate-lifecycle'
 
@@ -379,7 +387,7 @@ function composeOutlineTraces(input: {
     },
     async terminateRun({ status, code }) {
       if (!input.durable || !input.scope) return
-      const projection = input.durable.projection()
+      const projection = (await readAgentRunV1(input.scope, input.durable.runId)).projection
       if (['completed', 'failed', 'cancelled', 'recovery_required'].includes(projection.state)) return
       await appendAgentRunEventV1({
         scope: input.scope,
@@ -435,6 +443,7 @@ export async function createOutlineGenerationTraceV1(input: {
       await input.faultInjector('trace-initialization')
     }
     scope = await resolveScope({ projectId: input.projectId })
+    const resolvedScope = scope
     const contentRevision = input.contentRevision ?? (executionBoundary === 'formal'
       ? await captureWorkspaceContentRevisionV1({
           scope,
@@ -461,7 +470,7 @@ export async function createOutlineGenerationTraceV1(input: {
       conversationId: conversation.id,
       contract: await outlineRunContract({ ...input, executionBoundary, binding }),
     })
-    const manifest = await outlineManifest({
+    const manifestV1 = await outlineManifest({
       runId: created.run.id,
       projectId: input.projectId,
       worldGroupId: input.worldGroupId,
@@ -469,11 +478,56 @@ export async function createOutlineGenerationTraceV1(input: {
       assembled: input.assembled,
       binding,
     })
+    const gatewayExecution = outlineGatewayExecutionFromAssemblyV1(input.assembled)
+    if (executionBoundary === 'formal' && !gatewayExecution) {
+      throw new Error('正式大纲运行缺少 required Context Gateway 执行结果，已阻止模型调用。')
+    }
+    const baseManifest = gatewayExecution
+      ? await createContextManifestV2FromV1({ manifest: manifestV1, scope: resolvedScope })
+      : null
+    let preflight: ContextGatewayPreflightEvidenceV1 | null = null
     const durable = createGenerationNodeDurableTraceV1({
-      scope,
+      scope: resolvedScope,
       snapshot: created,
       stepId: encodeGenerationOperation(input.request),
-      manifest,
+      ...(gatewayExecution && baseManifest ? {
+        beforeModelEvidence: async ({ snapshot, messages }) => {
+          const recorded = await recordContextGatewayPreflightEvidenceV1({
+            scope: resolvedScope,
+            runId: snapshot.run.id!,
+            stepId: encodeGenerationOperation(input.request),
+            attempt: 1,
+            contextPacket: gatewayExecution.contextPacket,
+            selector: gatewayExecution.selector,
+            renderedRequest: messages,
+            sourceSnapshots: gatewayExecution.sourceSnapshots,
+            toolTranscript: gatewayExecution.toolTranscript,
+            expectedLastSequence: snapshot.projection.lastSequence,
+          })
+          preflight = recorded.evidence
+          return recorded.snapshot
+        },
+        afterModelRespondedEvidence: async ({ snapshot, output, candidateHash }) => {
+          if (!preflight) throw new Error('大纲 Gateway 缺少模型调用前的 exact preflight 证据。')
+          const finalized = await finalizeContextGatewayAttemptEvidenceV1({
+            scope: resolvedScope,
+            runId: snapshot.run.id!,
+            stepId: encodeGenerationOperation(input.request),
+            attempt: 1,
+            baseManifest,
+            preflight,
+            selector: gatewayExecution.selector,
+            sufficiency: gatewayExecution.sufficiency,
+            retrievalTrace: gatewayExecution.retrievalTrace,
+            gatewayVersionHash: gatewayExecution.contextPacket.gatewayVersionHash,
+            policyHash: gatewayExecution.contextPacket.policyHash,
+            rawResponse: output,
+            candidateHash,
+            expectedLastSequence: snapshot.projection.lastSequence,
+          })
+          return finalized.snapshot
+        },
+      } : { manifest: manifestV1 }),
     })
     return composeOutlineTraces({
       shadow,
