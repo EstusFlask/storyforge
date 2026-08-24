@@ -585,6 +585,15 @@ async function runOwnershipMigration(plan: OwnershipMigrationPlan, receiptId: nu
         writingStyleId: normalized.writingStyleId,
         methodologyId: normalized.methodologyId,
         activeCharacterDrivenPlanId: normalized.activeCharacterDrivenPlanId,
+        postAdoptionPolicy: 'suggest',
+        postAdoptionTaskTypes: ['organization', 'memory', 'retrieval', 'consistency'],
+        postAdoptionBudget: {
+          maxModelCalls: 2,
+          maxInputTokens: 48_000,
+          maxOutputTokens: 16_000,
+          maxCostUsd: 0.25,
+          allowUnknownCost: false,
+        },
         createdAt: normalized.createdAt ?? now,
         updatedAt: normalized.updatedAt ?? now,
       }) as number

@@ -51,6 +51,7 @@ const BASE_STEP_IDS: readonly ChapterPostAdoptionStepIdV1[] = [
 ]
 
 const DEPENDENCIES: Record<ChapterPostAdoptionStepIdV1, readonly ChapterPostAdoptionStepIdV1[]> = {
+  [CHAPTER_POST_ADOPTION_STEP_IDS_V1.authorization]: [],
   [CHAPTER_POST_ADOPTION_STEP_IDS_V1.organization]: [],
   // Memory reads the same source正文 and may proceed while the author is
   // reviewing the organization candidate, but never before that step has
@@ -61,11 +62,23 @@ const DEPENDENCIES: Record<ChapterPostAdoptionStepIdV1, readonly ChapterPostAdop
 }
 
 function stepIds(snapshot: AgentRunSnapshotV1): ChapterPostAdoptionStepIdV1[] {
-  return snapshot.contract.executionBindings?.some(binding => (
+  const base = snapshot.contract.executionBindings?.some(binding => (
     binding.stepId === CHAPTER_POST_ADOPTION_STEP_IDS_V1.consistency
   ))
     ? [...BASE_STEP_IDS, CHAPTER_POST_ADOPTION_STEP_IDS_V1.consistency]
     : [...BASE_STEP_IDS]
+  const allowed = snapshot.contract.automationAuthorization?.taskTypes
+  const selected = allowed
+    ? base.filter(stepId => allowed.includes(
+      stepId === CHAPTER_POST_ADOPTION_STEP_IDS_V1.organization ? 'organization'
+        : stepId === CHAPTER_POST_ADOPTION_STEP_IDS_V1.memory ? 'memory'
+          : stepId === CHAPTER_POST_ADOPTION_STEP_IDS_V1.consistency ? 'consistency'
+            : 'retrieval',
+    ))
+    : base
+  return snapshot.contract.automationAuthorization
+    ? [CHAPTER_POST_ADOPTION_STEP_IDS_V1.authorization, ...selected]
+    : selected
 }
 
 function lastFailure(
@@ -95,6 +108,7 @@ function classifyStep(
   const step = snapshot.projection.steps[stepId]
   const dependencyStepIds = [...DEPENDENCIES[stepId]]
   const organization = knownSteps.find(candidate => candidate.stepId === CHAPTER_POST_ADOPTION_STEP_IDS_V1.organization)
+  const organizationRequired = snapshot.contract.automationAuthorization?.taskTypes.includes('organization') ?? true
   if (!step) {
     return {
       stepId,
@@ -103,7 +117,7 @@ function classifyStep(
       nextAttempt: 1,
       retryable: null,
       action: dependencyAction(knownSteps, dependencyStepIds)
-        && (stepId !== CHAPTER_POST_ADOPTION_STEP_IDS_V1.memory || (organization?.attempt ?? 0) > 0)
+        && (stepId !== CHAPTER_POST_ADOPTION_STEP_IDS_V1.memory || !organizationRequired || (organization?.attempt ?? 0) > 0)
         ? 'run-scheduled'
         : 'blocked-dependency',
       dependencyStepIds,
@@ -119,7 +133,7 @@ function classifyStep(
   else if (step.status === 'running') action = 'inspect-running'
   else if (
     !dependencyAction(knownSteps, dependencyStepIds)
-    || (stepId === CHAPTER_POST_ADOPTION_STEP_IDS_V1.memory && (organization?.attempt ?? 0) === 0)
+    || (stepId === CHAPTER_POST_ADOPTION_STEP_IDS_V1.memory && organizationRequired && (organization?.attempt ?? 0) === 0)
   ) action = 'blocked-dependency'
   else if (failure?.retryable === false || step.attempt >= maxAttempts) action = 'blocked-non-retryable'
   else {
@@ -148,12 +162,16 @@ export function buildChapterPostAdoptionResumePlanV1(
   const next = steps.find(step => (
     step.action === 'run-scheduled' || step.action === 'retry-failed'
   ))
-  const blocked = steps.find(step => (
+  const hardBlocked = steps.find(step => (
     step.action === 'blocked-non-retryable'
     || step.action === 'blocked-stale'
-    || step.action === 'blocked-dependency'
     || step.action === 'inspect-running'
   ))
+  // A downstream dependency is not a run-level blocker while an earlier step
+  // is runnable; it becomes blocking only when no progress can be made.
+  const blocked = hardBlocked ?? (!next
+    ? steps.find(step => step.action === 'blocked-dependency')
+    : undefined)
   const terminal = snapshot.projection.state === 'completed'
   return {
     runId: snapshot.run.id,

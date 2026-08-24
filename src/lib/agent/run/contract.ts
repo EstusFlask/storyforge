@@ -34,6 +34,7 @@ import {
   readEnum,
   readHash,
   readInteger,
+  readNonNegativeNumber,
   readRecord,
   readString,
 } from './schema-utils'
@@ -339,7 +340,7 @@ export function parseAgentRunContractV1(value: unknown): AgentRunContractV1 {
   const record = readRecord(value, 'contract')
   assertExactKeys(
     record,
-    ['version', 'objective', 'workflowKind', 'lineage', 'scope', 'permissions', 'runtimeBindingHash', 'executionBindings', 'dependencyReceiptPolicy', 'candidateSemanticReviewPolicy', 'budget', 'acceptance', 'verificationPlan', 'failurePolicy'],
+    ['version', 'objective', 'workflowKind', 'lineage', 'scope', 'permissions', 'runtimeBindingHash', 'executionBindings', 'dependencyReceiptPolicy', 'candidateSemanticReviewPolicy', 'automationAuthorization', 'budget', 'acceptance', 'verificationPlan', 'failurePolicy'],
     ['version', 'objective', 'workflowKind', 'scope', 'permissions', 'budget', 'acceptance', 'verificationPlan', 'failurePolicy'],
     'contract',
   )
@@ -487,6 +488,78 @@ export function parseAgentRunContractV1(value: unknown): AgentRunContractV1 {
     }
   }
 
+  let automationAuthorization: AgentRunContractV1['automationAuthorization']
+  if (record.automationAuthorization !== undefined) {
+    const authorization = readRecord(record.automationAuthorization, 'contract.automationAuthorization')
+    assertExactKeys(
+      authorization,
+      ['version', 'mode', 'policy', 'taskKey', 'settingsHash', 'sourceTextHash', 'taskTypes', 'modelRoutes', 'maxCostUsd', 'allowUnknownCost', 'estimate'],
+      ['version', 'mode', 'policy', 'taskKey', 'settingsHash', 'sourceTextHash', 'taskTypes', 'maxCostUsd', 'allowUnknownCost', 'estimate'],
+      'contract.automationAuthorization',
+    )
+    if (authorization.version !== 1) {
+      failSchema('unsupported_version', 'contract.automationAuthorization.version', '仅支持版本 1')
+    }
+    const taskTypes = readArray(authorization.taskTypes, 'contract.automationAuthorization.taskTypes')
+      .map((item, index) => readEnum(
+        item,
+        ['organization', 'memory', 'retrieval', 'consistency'] as const,
+        `contract.automationAuthorization.taskTypes[${index}]`,
+      ))
+    if (taskTypes.length === 0) {
+      failSchema('invalid_value', 'contract.automationAuthorization.taskTypes', '不得为空')
+    }
+    assertUnique(taskTypes, 'contract.automationAuthorization.taskTypes')
+    const modelRoutes = authorization.modelRoutes === undefined
+      ? undefined
+      : readArray(authorization.modelRoutes, 'contract.automationAuthorization.modelRoutes').map((item, index) => {
+        const route = readRecord(item, `contract.automationAuthorization.modelRoutes[${index}]`)
+        assertExactKeys(
+          route,
+          ['taskType', 'provider', 'model'],
+          ['taskType', 'provider', 'model'],
+          `contract.automationAuthorization.modelRoutes[${index}]`,
+        )
+        return {
+          taskType: readEnum(route.taskType, ['organization', 'memory'], `contract.automationAuthorization.modelRoutes[${index}].taskType`),
+          provider: readString(route.provider, `contract.automationAuthorization.modelRoutes[${index}].provider`),
+          model: readString(route.model, `contract.automationAuthorization.modelRoutes[${index}].model`),
+        }
+      })
+    if (modelRoutes) assertUnique(modelRoutes.map(route => route.taskType), 'contract.automationAuthorization.modelRoutes')
+    const estimate = readRecord(authorization.estimate, 'contract.automationAuthorization.estimate')
+    assertExactKeys(
+      estimate,
+      ['modelCalls', 'inputTokensMin', 'inputTokensMax', 'outputTokensMin', 'outputTokensMax', 'costUsdMin', 'costUsdMax'],
+      ['modelCalls', 'inputTokensMin', 'inputTokensMax', 'outputTokensMin', 'outputTokensMax', 'costUsdMin', 'costUsdMax'],
+      'contract.automationAuthorization.estimate',
+    )
+    const nullableCost = (value: unknown, path: string) => value === null
+      ? null
+      : readNonNegativeNumber(value, path)
+    automationAuthorization = {
+      version: 1,
+      mode: readEnum(authorization.mode, ['author-confirmed', 'preauthorized'], 'contract.automationAuthorization.mode'),
+      policy: readEnum(authorization.policy, ['suggest', 'auto-with-budget'], 'contract.automationAuthorization.policy'),
+      taskKey: readHash(authorization.taskKey, 'contract.automationAuthorization.taskKey'),
+      settingsHash: readHash(authorization.settingsHash, 'contract.automationAuthorization.settingsHash'),
+      sourceTextHash: readHash(authorization.sourceTextHash, 'contract.automationAuthorization.sourceTextHash'),
+      taskTypes,
+      ...(modelRoutes ? { modelRoutes } : {}),
+      maxCostUsd: readNonNegativeNumber(authorization.maxCostUsd, 'contract.automationAuthorization.maxCostUsd'),
+      allowUnknownCost: readBoolean(authorization.allowUnknownCost, 'contract.automationAuthorization.allowUnknownCost'),
+      estimate: {
+        modelCalls: readInteger(estimate.modelCalls, 'contract.automationAuthorization.estimate.modelCalls', { min: 0 }),
+        inputTokensMin: readInteger(estimate.inputTokensMin, 'contract.automationAuthorization.estimate.inputTokensMin', { min: 0 }),
+        inputTokensMax: readInteger(estimate.inputTokensMax, 'contract.automationAuthorization.estimate.inputTokensMax', { min: 0 }),
+        outputTokensMin: readInteger(estimate.outputTokensMin, 'contract.automationAuthorization.estimate.outputTokensMin', { min: 0 }),
+        outputTokensMax: readInteger(estimate.outputTokensMax, 'contract.automationAuthorization.estimate.outputTokensMax', { min: 0 }),
+        costUsdMin: nullableCost(estimate.costUsdMin, 'contract.automationAuthorization.estimate.costUsdMin'),
+        costUsdMax: nullableCost(estimate.costUsdMax, 'contract.automationAuthorization.estimate.costUsdMax'),
+      },
+    }
+  }
+
   const budgetRecord = readRecord(record.budget, 'contract.budget')
   const requiredBudgetKeys = ['maxModelCalls', 'maxToolCalls', 'maxInputTokens', 'maxOutputTokens', 'maxAttemptsPerStep'] as const
   const budgetKeys = [...requiredBudgetKeys, 'maxReplans', 'maxToolResultTokens', 'maxProtocolErrors'] as const
@@ -552,6 +625,7 @@ export function parseAgentRunContractV1(value: unknown): AgentRunContractV1 {
     ...(executionBindings ? { executionBindings } : {}),
     ...(dependencyReceiptPolicy ? { dependencyReceiptPolicy } : {}),
     ...(candidateSemanticReviewPolicy ? { candidateSemanticReviewPolicy } : {}),
+    ...(automationAuthorization ? { automationAuthorization } : {}),
     budget: {
       maxModelCalls: readInteger(budgetRecord.maxModelCalls, 'contract.budget.maxModelCalls', { min: 1 }),
       maxToolCalls: readInteger(budgetRecord.maxToolCalls, 'contract.budget.maxToolCalls', { min: 0 }),
@@ -633,6 +707,7 @@ function parseSkillBoundContract(
     'executionBindings',
     'dependencyReceiptPolicy',
     'candidateSemanticReviewPolicy',
+    'automationAuthorization',
     'budget',
     'acceptance',
     'verificationPlan',

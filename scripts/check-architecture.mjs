@@ -1206,6 +1206,30 @@ if (!workspacePageSource.includes('await flushPendingEditsV1()')
   violations.push('[㉚切页保存屏障] 工作区侧栏必须在卸载当前编辑器前 flush，保存失败不得继续切页')
 }
 
+// ── ㉛ PROGRESS-1 正文采纳只能经统一章后策略协调器 ──
+const acceptProseStart = chapterEditorSource.indexOf('const handleAcceptAI = async')
+const acceptProseEnd = chapterEditorSource.indexOf('const handleDismissAI = async', acceptProseStart)
+const acceptProseBody = acceptProseStart >= 0 && acceptProseEnd > acceptProseStart
+  ? chapterEditorSource.slice(acceptProseStart, acceptProseEnd)
+  : ''
+if (!acceptProseBody.includes('preparePostAdoptionAfterCommit({')
+  || acceptProseBody.includes('handleAutoPostGenerate({')) {
+  violations.push('[㉛章后策略旁路] 正文采纳必须进入 preparePostAdoptionAfterCommit，禁止直接启动模型后处理')
+}
+const postAdoptionCoordinatorStart = chapterEditorSource.indexOf('const preparePostAdoptionAfterCommit = async')
+const postAdoptionCoordinatorEnd = chapterEditorSource.indexOf('const handleAuthorizePostAdoption = async', postAdoptionCoordinatorStart)
+const postAdoptionCoordinatorBody = postAdoptionCoordinatorStart >= 0 && postAdoptionCoordinatorEnd > postAdoptionCoordinatorStart
+  ? chapterEditorSource.slice(postAdoptionCoordinatorStart, postAdoptionCoordinatorEnd)
+  : ''
+const invalidateIndex = postAdoptionCoordinatorBody.indexOf('invalidateChapterPostAdoptionDerivativesV1({')
+const policyIndex = postAdoptionCoordinatorBody.indexOf('readWorkPostAdoptionSettingsV1(scope)')
+const runIndex = postAdoptionCoordinatorBody.indexOf('createChapterPostAdoptionDurableRunV1({')
+if (invalidateIndex < 0 || policyIndex <= invalidateIndex || runIndex <= policyIndex
+  || !postAdoptionCoordinatorBody.includes("settings.policy === 'off'")
+  || !postAdoptionCoordinatorBody.includes("settings.policy === 'auto-with-budget'")) {
+  violations.push('[㉛章后策略顺序] 章后协调器必须先确定性失效，再读取 Work 策略，并在 off/suggest/auto 边界后创建 Run')
+}
+
 // ── 报告 ──
 if (violations.length) {
   console.error('[architecture] ❌ 发现反模式违规(违反 CLAUDE.md 三注册表铁律):\n')

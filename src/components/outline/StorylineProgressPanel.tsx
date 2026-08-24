@@ -5,9 +5,9 @@ import { useMasterCopilot } from '../agent/useMasterCopilot'
 import { CTextarea } from '../shared/CompositionInput'
 import type { Chapter, StoryArc } from '../../lib/types'
 import { parseStages } from '../../lib/types'
-import { db } from '../../lib/db/schema'
 import { htmlToPlainText } from '../../lib/utils/html'
 import { resolveCanonicalChapterSequence } from '../../lib/ai/chapter-memory/canonical-chapter-sequence'
+import { readOwnedRows, resolveReadScopeLike } from '../../lib/world-engine/scope'
 import {
   parseStorylineProgressResult,
   type StorylineAnalysisCandidates,
@@ -43,11 +43,11 @@ export default function StorylineProgressPanel(props: {
   const arcVersion = props.arcs.map(arc => `${arc.id}:${arc.updatedAt}`).join('|')
 
   useEffect(() => {
-    void Promise.all([
-      loadAll(props.projectId),
+    void resolveReadScopeLike(props.projectId).then(scope => Promise.all([
+      loadAll(scope),
       Promise.all([
-        db.chapters.where('projectId').equals(props.projectId).toArray(),
-        db.outlineNodes.where('projectId').equals(props.projectId).toArray(),
+        readOwnedRows<Chapter>(scope, 'chapters', { owner: 'work' }),
+        readOwnedRows<any>(scope, 'outlineNodes', { owner: 'work' }),
       ]).then(([chapterRows, outlineNodes]) => {
         const { sequence } = resolveCanonicalChapterSequence(outlineNodes, chapterRows)
         const written = sequence
@@ -58,7 +58,7 @@ export default function StorylineProgressPanel(props: {
           ? current
           : written[written.length - 1]?.id ?? null)
       }),
-    ])
+    ]))
   }, [props.projectId, loadAll, arcVersion])
 
   const selectedChapter = chapters.find(row => row.id === chapterId) ?? null

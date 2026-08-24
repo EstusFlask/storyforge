@@ -204,6 +204,33 @@ export interface AgentRunContractV1 {
     verifierSetVersion: string
     taskIds: string[]
   }
+  /** PROGRESS-1: immutable author/policy authorization for automated child work. */
+  automationAuthorization?: {
+    version: 1
+    mode: 'author-confirmed' | 'preauthorized'
+    policy: 'suggest' | 'auto-with-budget'
+    taskKey: string
+    settingsHash: string
+    sourceTextHash: string
+    taskTypes: Array<'organization' | 'memory' | 'retrieval' | 'consistency'>
+    /** Frozen effective routes for the two model-bearing steps. */
+    modelRoutes?: Array<{
+      taskType: 'organization' | 'memory'
+      provider: string
+      model: string
+    }>
+    maxCostUsd: number
+    allowUnknownCost: boolean
+    estimate: {
+      modelCalls: number
+      inputTokensMin: number
+      inputTokensMax: number
+      outputTokensMin: number
+      outputTokensMax: number
+      costUsdMin: number | null
+      costUsdMax: number | null
+    }
+  }
   budget: {
     maxModelCalls: number
     maxToolCalls: number

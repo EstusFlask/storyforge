@@ -57,7 +57,9 @@ describe('R-HARNESS13 · Agent Skill 单一事实源', () => {
 
     expect(contract.permissions.contextSourceKeys).toContain('projectStatus')
     expect(contract.permissions.contextSourceKeys).toContain('ragSelection')
-    expect(contract.permissions.contextSourceKeys).toContain('chapterOutline')
+    // PROSE-1: prose no longer freezes every potential source into the outer
+    // contract; the required Gateway exposes the governed ragSelection catalog.
+    expect(contract.permissions.contextSourceKeys).not.toContain('chapterOutline')
     expect(contract.permissions.contextSourceKeys).not.toContain('characterKnowledge')
     expect(contract.permissions.writeTargets.map(target => target.table)).toEqual([
       'worldviews',
@@ -78,7 +80,7 @@ describe('R-HARNESS13 · Agent Skill 单一事实源', () => {
     ])).toThrow('不是主计划可直接执行的生成 Skill')
   })
 
-  it('只有显式正文视角才把角色认知源加入 Skill 权限', () => {
+  it('正文视角不会绕过 Gateway 把角色认知源塞回外层权限', () => {
     const withoutPerspective = contractFor([
       { id: 'prose', agentId: 'prose', instruction: '写第一章正文', dependsOn: [] },
     ])
@@ -92,7 +94,8 @@ describe('R-HARNESS13 · Agent Skill 单一事实源', () => {
       },
     ])
     expect(withoutPerspective.permissions.contextSourceKeys).not.toContain('characterKnowledge')
-    expect(withPerspective.permissions.contextSourceKeys).toContain('characterKnowledge')
+    expect(withPerspective.permissions.contextSourceKeys).not.toContain('characterKnowledge')
+    expect(withPerspective.permissions.contextSourceKeys).toContain('ragSelection')
   })
 
   it('未知上下文源和未知写字段均 fail-closed', () => {
@@ -125,6 +128,6 @@ describe('R-HARNESS13 · Agent Skill 单一事实源', () => {
     ])
     expect(resolveAgentSkillContextSourceKeysV1(prose)).not.toContain('characterKnowledge')
     expect(resolveAgentSkillContextSourceKeysV1(prose, { includeOptional: true }))
-      .toContain('characterKnowledge')
+      .toEqual(['ragSelection'])
   })
 })

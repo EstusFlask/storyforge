@@ -302,6 +302,7 @@ describe('AGENT-1 27.2b · 整理本章 Agent', () => {
       timeline: 1,
       relations: 1,
       foreshadows: 1,
+      storyline: 0,
     })
     expect((await db.stateCards.toArray())[0]).toMatchObject({ entityName: '林舟', lastChapterId: chapterId })
     expect((await db.temporalFacts.toArray())[0]).toMatchObject({
@@ -319,7 +320,10 @@ describe('AGENT-1 27.2b · 整理本章 Agent', () => {
     })
     expect((await db.characters.get(11))?.relationships).toContain('苏砚')
     expect((await db.foreshadows.get(1))).toMatchObject({ status: 'planted', plantChapterId: chapterId })
-    expect(Object.values(result.run.candidate.domainStatus)).toEqual(Array(6).fill('adopted'))
+    expect(Object.values(result.run.candidate.domainStatus)).toEqual([
+      ...Array(6).fill('adopted'),
+      'skipped',
+    ])
     expect(await db.agentEvents.where('conversationId').equals(run.conversation.id!).count()).toBe(2)
 
     const retried = await adoptChapterOrganizationSelection({
@@ -333,6 +337,7 @@ describe('AGENT-1 27.2b · 整理本章 Agent', () => {
       timeline: 0,
       relations: 0,
       foreshadows: 0,
+      storyline: 0,
     })
     expect(await db.stateCards.count()).toBe(1)
     expect(await db.temporalFacts.count()).toBe(1)

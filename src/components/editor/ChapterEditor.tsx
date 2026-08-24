@@ -107,6 +107,7 @@ import {
 } from '../../lib/agent/run/chapter-transition-durable'
 import {
   beginChapterPostAdoptionStepV1,
+  authorizeChapterPostAdoptionV1,
   beginChapterPostAdoptionOrganizationAdoptionV1,
   chapterPostAdoptionChainStateV1,
   commitChapterPostAdoptionOrganizationV1,
@@ -117,6 +118,7 @@ import {
   rejectChapterPostAdoptionOrganizationAdoptionV1,
   recoverChapterPostAdoptionOrganizationV1,
   recoverChapterPostAdoptionConsistencyV1,
+  rejectChapterPostAdoptionAuthorizationV1,
   readChapterPostAdoptionChainStatusV1,
   readLatestChapterPostAdoptionRunV1,
   scheduleChapterPostAdoptionStepsV1,
@@ -185,6 +187,14 @@ import {
 } from '../../lib/agent/run/impact-story-timeline-regeneration-durable'
 import { classifyAgentRunFailureV1 } from '../../lib/agent/run/failure-policy'
 import { resolveScopeLike } from '../../lib/world-engine/scope'
+import {
+  buildPostAdoptionAuthorizationSnapshotV1,
+  invalidateChapterPostAdoptionDerivativesV1,
+  preflightPostAdoptionAutoV1,
+  readWorkPostAdoptionSettingsV1,
+  updateWorkPostAdoptionSettingsV1,
+  type ResolvedPostAdoptionSettingsV1,
+} from '../../lib/prose/post-adoption-policy'
 import {
   beginProseGenerationGatewayStepV1,
   commitProseGenerationAdoptionV1,
@@ -269,7 +279,7 @@ export default function ChapterEditor({ project, outlineNodeId }: Props) {
   const { cards: stateCards, loadAll: loadStateCards, buildStateContext, buildSelectiveStateContext, applyDiffs } = useStateCardStore()
   const { characters, loadAll: loadCharacters } = useCharacterStore()
   const { creativeRules } = useCreativeRulesStore()
-  const { loadAll: loadArcs } = useStoryArcStore()
+  const { arcs: storyArcs, loadAll: loadArcs } = useStoryArcStore()
   const { buildForeshadowContext, loadAll: loadForeshadows } = useForeshadowStore()
   const { entries: itemEntries, loadAll: loadItemLedger } = useItemLedgerStore()
   const { locations, loadAll: loadLocations } = useLocationStore()
@@ -359,6 +369,8 @@ export default function ChapterEditor({ project, outlineNodeId }: Props) {
   const [transitionRunId, setTransitionRunId] = useState<number | null>(null)
   const [postAdoptionRunId, setPostAdoptionRunId] = useState<number | null>(null)
   const [postAdoptionChainState, setPostAdoptionChainState] = useState<ChapterPostAdoptionChainStateV1 | null>(null)
+  const [postAdoptionSettings, setPostAdoptionSettings] = useState<ResolvedPostAdoptionSettingsV1 | null>(null)
+  const [postAdoptionInvalidation, setPostAdoptionInvalidation] = useState<{ deletedChunks: number; staleSummaries: number; demotedFacts: number } | null>(null)
   const [transitionError, setTransitionError] = useState('')
   const [consistencyRun, setConsistencyRun] = useState<ConsistencyAgentRun | null>(null)
   const [consistencyCurrent, setConsistencyCurrent] = useState(false)
@@ -874,10 +886,17 @@ export default function ChapterEditor({ project, outlineNodeId }: Props) {
 
   useEffect(() => {
     let cancelled = false
-    void resolveScopeLike(project.id!).then(scope => {
-      if (!cancelled) setEditorWorkspaceScope(scope)
+    void resolveScopeLike(project.id!).then(async scope => {
+      const settings = await readWorkPostAdoptionSettingsV1(scope)
+      if (!cancelled) {
+        setEditorWorkspaceScope(scope)
+        setPostAdoptionSettings(settings)
+      }
     }).catch(() => {
-      if (!cancelled) setEditorWorkspaceScope(null)
+      if (!cancelled) {
+        setEditorWorkspaceScope(null)
+        setPostAdoptionSettings(null)
+      }
     })
     return () => { cancelled = true }
   }, [project.id])
@@ -1774,6 +1793,7 @@ export default function ChapterEditor({ project, outlineNodeId }: Props) {
         knownItemNames: itemEntries.map(entry => entry.itemName),
         existingRelations,
         foreshadows: useForeshadowStore.getState().foreshadows,
+        storyArcs,
         // 正文已在专用区完整提供；这里只追加其它登记来源，避免正文重复消耗 tokens。
         contextSnapshot: organizationContextSnapshot,
         budget,
@@ -1877,7 +1897,7 @@ export default function ChapterEditor({ project, outlineNodeId }: Props) {
             updatePostAdoptionSnapshot(verified.snapshot)
           } catch (verificationError) {
             // 其它后处理步骤可能仍在运行；终态验证会在最后一步完成后重试。
-            console.info('[ChapterPostAdoption] 六域采纳后暂不能签发终态回执:', verificationError)
+            console.info('[ChapterPostAdoption] 七域采纳后暂不能签发终态回执:', verificationError)
             try {
               updatePostAdoptionSnapshot(await readAgentRunV1(workspaceScope, snapshot.run.id))
             } catch {
@@ -1919,7 +1939,7 @@ export default function ChapterEditor({ project, outlineNodeId }: Props) {
                 scope: staleScope,
                 runId: organizationRun.candidate.durable.runId,
                 candidateHash: organizationRun.candidate.durable.candidateHash,
-                reason: '正文已变化；作者确认前的六域交接候选已失效。',
+                reason: '正文已变化；作者确认前的七域交接候选已失效。',
               })
             } else {
               await markChapterOrganizationStaleV1({
@@ -2506,7 +2526,7 @@ export default function ChapterEditor({ project, outlineNodeId }: Props) {
   }
 
   // HARNESS-20/41: 正文采纳后的单一 post-adoption barrier。
-  // 六域结构抽取复用“整理本章”Agent；检索、章节记忆和确定性一致性守卫均有独立证据。
+  // 七域结构抽取复用“整理本章”Agent；检索、章节记忆和确定性一致性守卫均有独立证据。
   const handleAutoPostGenerate = async (task: {
     chapterId: number
     chapterTitle: string
@@ -2531,6 +2551,8 @@ export default function ChapterEditor({ project, outlineNodeId }: Props) {
       : null
     const transitionWorldGroupId = transitionOutline?.worldGroupId ?? chapterWorldGroupId ?? null
     const expectedSourceTextHash = await hashChapterText(task.chapterContent)
+    const organizationRequestConfig = resolveRequestConfig(aiConfig, { category: 'chapter.organize' }).config
+    const memoryRequestConfig = resolveRequestConfig(aiConfig, { category: 'chapter.memory' }).config
     setTransitionError('')
     setTransitionCandidate(null)
     transitionCandidateRef.current = null
@@ -2558,14 +2580,17 @@ export default function ChapterEditor({ project, outlineNodeId }: Props) {
     transitionSnapshotRef.current = snapshot
     snapshot = await scheduleChapterPostAdoptionStepsV1({ scope, snapshot })
 
-    const assembledFor = async (sourceKeys: readonly string[]) => assembleContext({
+    const assembledFor = async (
+      sourceKeys: readonly string[],
+      requestConfig = aiConfig,
+    ) => assembleContext({
       projectId: project.id!,
       scope,
       worldGroupId: transitionWorldGroupId,
       chapterId: task.chapterId,
       outlineNodeId: transitionChapter?.outlineNodeId ?? null,
-      provider: aiConfig.provider,
-      model: aiConfig.model,
+      provider: requestConfig.provider,
+      model: requestConfig.model,
       sourceKeys: [...sourceKeys],
       stateReferenceText: task.chapterPlainText,
       extraStateIds,
@@ -2599,14 +2624,13 @@ export default function ChapterEditor({ project, outlineNodeId }: Props) {
       setPostAdoptionChainState(chapterPostAdoptionChainStateV1(next))
     }
     const shouldRunStep = (stepId: ChapterPostAdoptionStepIdV1): boolean => {
-      if (task.resumeRunId == null) return true
       return isChapterPostAdoptionStepRunnableV1(
         buildChapterPostAdoptionResumePlanV1(snapshot),
         stepId,
       )
     }
 
-    // 1. 一次综合抽取六域候选；作者确认前业务表零写入。
+    // 1. 一次综合抽取七域候选；作者确认前业务表零写入。
     if (!shouldRunStep(CHAPTER_POST_ADOPTION_STEP_IDS_V1.organization)) {
       if (snapshot.projection.steps[CHAPTER_POST_ADOPTION_STEP_IDS_V1.organization]?.status === 'awaiting_confirmation') {
         setShowOrganization(true)
@@ -2615,7 +2639,10 @@ export default function ChapterEditor({ project, outlineNodeId }: Props) {
     setAutoProcessing('extracting')
     try {
       await ensureFresh()
-      const organizationAssembly = await assembledFor(CHAPTER_POST_ADOPTION_STEP_SOURCE_KEYS_V1.organization)
+      const organizationAssembly = await assembledFor(
+        CHAPTER_POST_ADOPTION_STEP_SOURCE_KEYS_V1.organization,
+        organizationRequestConfig,
+      )
       const organizationManifest = await manifestFor(
         CHAPTER_POST_ADOPTION_STEP_IDS_V1.organization,
         1,
@@ -2628,6 +2655,10 @@ export default function ChapterEditor({ project, outlineNodeId }: Props) {
         stepId: CHAPTER_POST_ADOPTION_STEP_IDS_V1.organization,
         contextManifest: organizationManifest,
         binding: { chapterId: task.chapterId, sourceTextHash: expectedSourceTextHash },
+        modelIdentity: {
+          provider: organizationRequestConfig.provider,
+          model: organizationRequestConfig.model,
+        },
       }))
       const [allRelations] = await Promise.all([
         db.characterRelations.where('projectId').equals(project.id!).toArray(),
@@ -2661,6 +2692,7 @@ export default function ChapterEditor({ project, outlineNodeId }: Props) {
         knownItemNames: itemEntries.map(entry => entry.itemName),
         existingRelations,
         foreshadows: useForeshadowStore.getState().foreshadows,
+        storyArcs,
         contextSnapshot: organizationContextSnapshot,
         budget,
         call: messages => executeRegisteredAIEntryV1('prose.chapter.organize', messages, aiConfig, {
@@ -2706,7 +2738,7 @@ export default function ChapterEditor({ project, outlineNodeId }: Props) {
         ...failure,
       }))
       if (!controller.signal.aborted) {
-        setTransitionError(error instanceof Error ? error.message : '六域交接候选生成失败')
+        setTransitionError(error instanceof Error ? error.message : '七域交接候选生成失败')
       }
       if (controller.signal.aborted) return
     } finally {
@@ -2717,7 +2749,10 @@ export default function ChapterEditor({ project, outlineNodeId }: Props) {
     // 2. summary + handoff 仍只调用一次模型，并由原子 CAS 写回 chapters。
     if (shouldRunStep(CHAPTER_POST_ADOPTION_STEP_IDS_V1.memory)) try {
       await ensureFresh()
-      const memoryAssembly = await assembledFor(CHAPTER_POST_ADOPTION_STEP_SOURCE_KEYS_V1.memory)
+      const memoryAssembly = await assembledFor(
+        CHAPTER_POST_ADOPTION_STEP_SOURCE_KEYS_V1.memory,
+        memoryRequestConfig,
+      )
       updateSnapshot(await beginChapterPostAdoptionStepV1({
         scope,
         snapshot,
@@ -2729,6 +2764,10 @@ export default function ChapterEditor({ project, outlineNodeId }: Props) {
           memoryAssembly,
         ),
         binding: { chapterId: task.chapterId, sourceTextHash: expectedSourceTextHash },
+        modelIdentity: {
+          provider: memoryRequestConfig.provider,
+          model: memoryRequestConfig.model,
+        },
       }))
       const result = await handleChapterMemory({
         chapterId: task.chapterId,
@@ -2870,10 +2909,6 @@ export default function ChapterEditor({ project, outlineNodeId }: Props) {
       setConsistencyRun(run)
       setConsistencyCurrent(true)
       useReviewResultStore.getState().setConsistency(task.chapterId, toConsistencyAuditResult(durableGuard))
-      if (snapshot.projection.steps[CHAPTER_POST_ADOPTION_STEP_IDS_V1.organization]?.status === 'succeeded') {
-        const verified = await verifyChapterPostAdoptionRunV1({ scope, runId: snapshot.run.id })
-        updateSnapshot(verified.snapshot)
-      }
     } catch (error) {
       const failure = await classifyAgentRunFailureV1(error)
       updateSnapshot(await failChapterPostAdoptionStepV1({
@@ -2884,9 +2919,133 @@ export default function ChapterEditor({ project, outlineNodeId }: Props) {
       }))
       setTransitionError(error instanceof Error ? error.message : '正文一致性守卫失败')
     }
+
+    const selectedStepIds = (snapshot.contract.automationAuthorization?.taskTypes
+      ?? ['organization', 'memory', 'retrieval', 'consistency']).map(taskType => (
+      taskType === 'organization' ? CHAPTER_POST_ADOPTION_STEP_IDS_V1.organization
+        : taskType === 'memory' ? CHAPTER_POST_ADOPTION_STEP_IDS_V1.memory
+          : taskType === 'retrieval' ? CHAPTER_POST_ADOPTION_STEP_IDS_V1.retrieval
+            : CHAPTER_POST_ADOPTION_STEP_IDS_V1.consistency
+    ))
+    if (selectedStepIds.every(stepId => snapshot.projection.steps[stepId]?.status === 'succeeded')) {
+      try {
+        const verified = await verifyChapterPostAdoptionRunV1({ scope, runId: snapshot.run.id })
+        updateSnapshot(verified.snapshot)
+      } catch (error) {
+        setTransitionError(error instanceof Error ? error.message : '章后终态验证失败')
+      }
+    }
     } finally {
       if (organizationAbortRef.current === controller) organizationAbortRef.current = null
       setOrganizingChapter(false)
+    }
+  }
+
+  const preparePostAdoptionAfterCommit = async (task: {
+    chapterId: number
+    chapterTitle: string
+    chapterContent: string
+    chapterPlainText: string
+    parent?: {
+      runId: number
+      receiptHash: string
+      artifactHash: string
+    }
+  }) => {
+    const scope = await resolveScopeLike(project.id!)
+    const invalidation = await invalidateChapterPostAdoptionDerivativesV1({
+      scope,
+      chapterId: task.chapterId,
+    })
+    setPostAdoptionInvalidation(invalidation)
+    const settings = await readWorkPostAdoptionSettingsV1(scope)
+    setPostAdoptionSettings(settings)
+    if (settings.policy === 'off') {
+      setPostAdoptionRunId(null)
+      setPostAdoptionChainState(null)
+      setTransitionError('正文已采纳并完成本地失效标记；当前 Work 已关闭章后 AI 任务。')
+      return
+    }
+    const sourceTextHash = await hashChapterText(task.chapterContent)
+    const organizationRoute = resolveRequestConfig(aiConfig, { category: 'chapter.organize' }).config
+    const memoryRoute = resolveRequestConfig(aiConfig, { category: 'chapter.memory' }).config
+    const authorization = await buildPostAdoptionAuthorizationSnapshotV1({
+      scope,
+      chapterId: task.chapterId,
+      sourceTextHash,
+      modelRoutes: [
+        { taskType: 'organization', provider: organizationRoute.provider, model: organizationRoute.model },
+        { taskType: 'memory', provider: memoryRoute.provider, model: memoryRoute.model },
+      ],
+      settings,
+    })
+    if (settings.policy === 'auto-with-budget') {
+      const preflight = preflightPostAdoptionAutoV1(authorization)
+      if (!preflight.allowed) {
+        setPostAdoptionRunId(null)
+        setPostAdoptionChainState(null)
+        setTransitionError(`章后自动任务已在调用前停止：${preflight.reason}`)
+        return
+      }
+    }
+    const chapter = await db.chapters.get(task.chapterId)
+    const transitionOutline = chapter?.outlineNodeId != null
+      ? await db.outlineNodes.get(chapter.outlineNodeId)
+      : null
+    const snapshot = await createChapterPostAdoptionDurableRunV1({
+      scope,
+      worldGroupId: transitionOutline?.worldGroupId ?? chapterWorldGroupId ?? null,
+      chapterId: task.chapterId,
+      parent: task.parent,
+      authorization,
+    })
+    updatePostAdoptionSnapshot(snapshot)
+    if (settings.policy === 'suggest') return
+    await handleAutoPostGenerate({ ...task, resumeRunId: snapshot.run.id })
+  }
+
+  const handleAuthorizePostAdoption = async () => {
+    if (!currentChapter?.id || postAdoptionRunId == null || organizingChapter) return
+    try {
+      const scope = await resolveScopeLike(project.id!)
+      let snapshot = await readAgentRunV1(scope, postAdoptionRunId)
+      snapshot = await authorizeChapterPostAdoptionV1({ scope, snapshot, source: 'author-click' })
+      updatePostAdoptionSnapshot(snapshot)
+      await handleAutoPostGenerate({
+        chapterId: currentChapter.id,
+        chapterTitle: outlineNode?.title || currentChapter.title || '未知章节',
+        chapterContent: currentChapter.content ?? content,
+        chapterPlainText: htmlToPlainText(currentChapter.content ?? content),
+        resumeRunId: snapshot.run.id,
+      })
+    } catch (error) {
+      setTransitionError(error instanceof Error ? error.message : '章后建议授权失败')
+    }
+  }
+
+  const handleRejectPostAdoption = async () => {
+    if (postAdoptionRunId == null) return
+    try {
+      const scope = await resolveScopeLike(project.id!)
+      const snapshot = await rejectChapterPostAdoptionAuthorizationV1({
+        scope,
+        snapshot: await readAgentRunV1(scope, postAdoptionRunId),
+      })
+      updatePostAdoptionSnapshot(snapshot)
+      setTransitionError('已保留本地失效标记，未启动章后模型任务。')
+    } catch (error) {
+      setTransitionError(error instanceof Error ? error.message : '章后建议拒绝失败')
+    }
+  }
+
+  const persistPostAdoptionSettings = async (next: ResolvedPostAdoptionSettingsV1) => {
+    try {
+      const scope = editorWorkspaceScope ?? await resolveScopeLike(project.id!)
+      const saved = await updateWorkPostAdoptionSettingsV1({ scope, settings: next })
+      setPostAdoptionSettings(saved)
+      setTransitionError('')
+    } catch (error) {
+      setTransitionError(error instanceof Error ? error.message : '章后策略保存失败')
     }
   }
 
@@ -2958,7 +3117,7 @@ export default function ChapterEditor({ project, outlineNodeId }: Props) {
         setContent(fullHtml)
         setPlainText(fullText)
         setSavedContent(fullHtml)
-        void handleAutoPostGenerate({
+        void preparePostAdoptionAfterCommit({
           chapterId: acceptedChapterId,
           chapterTitle: acceptedChapterTitle,
           chapterContent: fullHtml,
@@ -3017,7 +3176,7 @@ export default function ChapterEditor({ project, outlineNodeId }: Props) {
       setContent(fullHtml)
       setPlainText(fullText)
       setSavedContent(fullHtml)
-      void handleAutoPostGenerate({
+      void preparePostAdoptionAfterCommit({
         chapterId: acceptedChapterId,
         chapterTitle: acceptedChapterTitle,
         chapterContent: fullHtml,
@@ -3398,6 +3557,88 @@ export default function ChapterEditor({ project, outlineNodeId }: Props) {
         </div>
       )}
 
+      {postAdoptionSettings && (
+        <details className="mb-3 rounded-lg border border-border bg-bg-surface p-3 text-xs text-text-secondary">
+          <summary className="cursor-pointer font-medium text-text-primary">正文采纳后的演化策略</summary>
+          <div className="mt-3 space-y-3">
+            <label className="flex flex-wrap items-center gap-2">
+              <span>运行方式</span>
+              <select
+                value={postAdoptionSettings.policy}
+                onChange={event => void persistPostAdoptionSettings({
+                  ...postAdoptionSettings,
+                  policy: event.target.value as ResolvedPostAdoptionSettingsV1['policy'],
+                })}
+                className="rounded border border-border bg-bg-base px-2 py-1 text-text-primary"
+              >
+                <option value="off">关闭（只做本地失效标记）</option>
+                <option value="suggest">建议（默认，确认后运行）</option>
+                <option value="auto-with-budget">预算内自动运行</option>
+              </select>
+            </label>
+            <div className="flex flex-wrap gap-3">
+              {(['organization', 'memory', 'retrieval', 'consistency'] as const).map(taskType => (
+                <label key={taskType} className="inline-flex items-center gap-1">
+                  <input
+                    type="checkbox"
+                    checked={postAdoptionSettings.taskTypes.includes(taskType)}
+                    onChange={event => void persistPostAdoptionSettings({
+                      ...postAdoptionSettings,
+                      taskTypes: event.target.checked
+                        ? [...postAdoptionSettings.taskTypes, taskType]
+                        : postAdoptionSettings.taskTypes.filter(item => item !== taskType),
+                    })}
+                    className="accent-accent"
+                  />
+                  {taskType === 'organization' ? '七域候选'
+                    : taskType === 'memory' ? '章节记忆'
+                      : taskType === 'retrieval' ? '检索重建'
+                        : '一致性守卫'}
+                </label>
+              ))}
+            </div>
+            {postAdoptionSettings.policy === 'auto-with-budget' && (
+              <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                {([
+                  ['maxModelCalls', '调用上限', 1],
+                  ['maxInputTokens', '输入 token', 1000],
+                  ['maxOutputTokens', '输出 token', 1000],
+                  ['maxCostUsd', '费用上限 USD', 0.01],
+                ] as const).map(([key, label, step]) => (
+                  <label key={key} className="space-y-1">
+                    <span className="block text-text-muted">{label}</span>
+                    <input
+                      type="number"
+                      min={0}
+                      step={step}
+                      defaultValue={postAdoptionSettings.budget[key]}
+                      onBlur={event => void persistPostAdoptionSettings({
+                        ...postAdoptionSettings,
+                        budget: { ...postAdoptionSettings.budget, [key]: Number(event.target.value) },
+                      })}
+                      className="w-full rounded border border-border bg-bg-base px-2 py-1 text-text-primary"
+                    />
+                  </label>
+                ))}
+                <label className="col-span-2 inline-flex items-center gap-2 sm:col-span-4">
+                  <input
+                    type="checkbox"
+                    checked={postAdoptionSettings.budget.allowUnknownCost}
+                    onChange={event => void persistPostAdoptionSettings({
+                      ...postAdoptionSettings,
+                      budget: { ...postAdoptionSettings.budget, allowUnknownCost: event.target.checked },
+                    })}
+                    className="accent-accent"
+                  />
+                  允许免费或尚无可信价格表的模型在其它预算通过时自动运行
+                </label>
+              </div>
+            )}
+            <p className="text-text-muted">检索依赖章节记忆，一致性守卫依赖检索；保存时会自动补齐必要前置任务。</p>
+          </div>
+        </details>
+      )}
+
       {/* Phase A1/A3: 自动后处理状态指示 */}
       {autoProcessing !== 'idle' && (
         <div className="mb-3 p-3 bg-emerald-500/10 border border-emerald-500/20 rounded-lg">
@@ -3413,12 +3654,19 @@ export default function ChapterEditor({ project, outlineNodeId }: Props) {
           ? 'bg-amber-500/10 border-amber-500/20 text-amber-300'
           : 'bg-sky-500/10 border-sky-500/20 text-sky-300'}`}>
           <div>
-            章节后处理 Run #{postAdoptionRunId ?? transitionRunId ?? '—'} · 六域交接、章节记忆、检索与一致性守卫统一记录，可恢复
+            章节后处理 Run #{postAdoptionRunId ?? transitionRunId ?? '—'} · 七域交接、章节记忆、检索与一致性守卫统一记录，可恢复
           </div>
+          {postAdoptionInvalidation && (
+            <div className="mt-1">
+              本地失效：清理检索块 {postAdoptionInvalidation.deletedChunks}，标记摘要 {postAdoptionInvalidation.staleSummaries}，降级失证事实 {postAdoptionInvalidation.demotedFacts}。
+            </div>
+          )}
           {postAdoptionChainState && (
             <div className="mt-1">
               全链状态：{postAdoptionChainState === 'downstream-completed'
                 ? '正文与章后交接均已完成'
+                : postAdoptionChainState === 'downstream-suggested'
+                  ? '正文已完成，章后任务等待作者启动'
                 : postAdoptionChainState === 'downstream-awaiting-confirmation'
                   ? '正文已完成，章后交接等待作者确认'
                   : postAdoptionChainState === 'downstream-failed'
@@ -3433,12 +3681,44 @@ export default function ChapterEditor({ project, outlineNodeId }: Props) {
             </div>
           )}
           {organizationRun?.candidate.durable?.stepId === CHAPTER_POST_ADOPTION_STEP_IDS_V1.organization && (
-            <div className="mt-1">六域交接候选待作者确认，确认后才会写入状态、事实、物品、年表、关系与伏笔。</div>
+            <div className="mt-1">七域交接候选待作者确认，确认后才会写入状态、事实、物品、年表、关系、伏笔与故事线。</div>
           )}
           {transitionCandidate && transitionCandidate.stateDiffs.length > 0 && (
             <div className="mt-1">状态候选待作者确认：{transitionCandidate.stateDiffs.length} 条</div>
           )}
           {transitionError && <div className="mt-1">{transitionError}</div>}
+          {postAdoptionChainState === 'downstream-suggested' && transitionSnapshotRef.current?.contract.automationAuthorization && (
+            <div className="mt-2 rounded border border-sky-400/20 bg-sky-950/20 p-2">
+              <div>
+                预计 {transitionSnapshotRef.current.contract.automationAuthorization.estimate.modelCalls} 次模型调用；输入约 {transitionSnapshotRef.current.contract.automationAuthorization.estimate.inputTokensMin.toLocaleString()}–{transitionSnapshotRef.current.contract.automationAuthorization.estimate.inputTokensMax.toLocaleString()} tokens；输出约 {transitionSnapshotRef.current.contract.automationAuthorization.estimate.outputTokensMin.toLocaleString()}–{transitionSnapshotRef.current.contract.automationAuthorization.estimate.outputTokensMax.toLocaleString()} tokens。
+              </div>
+              <div className="mt-1 text-sky-200/80">
+                任务：{transitionSnapshotRef.current.contract.automationAuthorization.taskTypes.join('、')}；
+                路由：{transitionSnapshotRef.current.contract.automationAuthorization.modelRoutes?.map(route => `${route.taskType}=${route.provider}/${route.model}`).join('；') || '旧版运行未冻结'}；
+                预计费用：{transitionSnapshotRef.current.contract.automationAuthorization.estimate.costUsdMax == null
+                  ? '未知（自动模式需另行授权未知价格）'
+                  : `$${transitionSnapshotRef.current.contract.automationAuthorization.estimate.costUsdMin?.toFixed(4)}–$${transitionSnapshotRef.current.contract.automationAuthorization.estimate.costUsdMax.toFixed(4)}`}。
+              </div>
+              <div className="mt-2 flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  className="rounded bg-sky-500 px-2 py-1 text-[11px] font-medium text-white disabled:opacity-50"
+                  onClick={() => void handleAuthorizePostAdoption()}
+                  disabled={organizingChapter}
+                >
+                  确认并开始章后任务
+                </button>
+                <button
+                  type="button"
+                  className="rounded border border-sky-400/30 px-2 py-1 text-[11px] text-sky-200 disabled:opacity-50"
+                  onClick={() => void handleRejectPostAdoption()}
+                  disabled={organizingChapter}
+                >
+                  本次不运行
+                </button>
+              </div>
+            </div>
+          )}
           {postAdoptionChainState === 'downstream-failed' && (
             <button
               type="button"

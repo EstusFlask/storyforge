@@ -37,6 +37,10 @@ import {
   assertRecordInScope,
   readOwnedRows,
 } from '../../world-engine/scope'
+import {
+  preflightPostAdoptionAutoV1,
+  type PostAdoptionAuthorizationSnapshotV1,
+} from '../../prose/post-adoption-policy'
 
 /**
  * HARNESS-20: one durable barrier for the work that follows prose adoption.
@@ -45,6 +49,7 @@ import {
  * terminal receipt for the whole downstream chain.
  */
 export const CHAPTER_POST_ADOPTION_STEP_IDS_V1 = {
+  authorization: 'chapter-post-adoption:authorization',
   retrieval: 'chapter-post-adoption:retrieval',
   organization: 'chapter-post-adoption:organization',
   memory: 'chapter-post-adoption:memory',
@@ -68,6 +73,30 @@ export const CHAPTER_POST_ADOPTION_SOURCE_KEYS_V1 = Object.freeze([...new Set([
   ...resolveAgentSkillContextSourceKeysV1(CONSISTENCY_SKILL_V1),
 ])])
 
+const ORGANIZATION_WRITE_TARGETS_V1 = Object.freeze([
+  { table: 'stateCards', fields: ['category', 'entityName', 'fields', 'lastChapterId'], mode: 'author-confirmed' as const },
+  { table: 'temporalFacts', fields: [], mode: 'author-confirmed' as const, adoptionExtension: 'fact-ledger' },
+  { table: 'itemLedger', fields: ['itemName', 'action', 'quantity', 'heldByName', 'characterId', 'chapterId', 'chapterTitle', 'note'], mode: 'author-confirmed' as const },
+  { table: 'storyTimelineEvents', fields: ['title', 'storyTime', 'importance', 'description', 'chapterId', 'chapterTitle', 'order'], mode: 'author-confirmed' as const },
+  { table: 'characterRelations', fields: ['fromCharacterId', 'toCharacterId', 'relationType', 'label', 'description', 'isBidirectional'], mode: 'author-confirmed' as const },
+  { table: 'foreshadows', fields: ['status', 'plantChapterId', 'echoChapterIds', 'resolveChapterId', 'notes'], mode: 'author-confirmed' as const },
+  { table: 'storylineProgress', fields: ['arcId', 'currentStageId', 'status', 'progressNote', 'lastActiveChapterId', 'lastActiveChapterTitle', 'involvedEntities', 'evidenceQuote'], mode: 'author-confirmed' as const },
+  { table: 'storylineCrossings', fields: ['arcIdA', 'arcIdB', 'chapterId', 'chapterTitle', 'note', 'evidenceQuote'], mode: 'author-confirmed' as const },
+  { table: 'storyArcs', fields: ['name', 'type', 'description', 'stages'], mode: 'author-confirmed' as const },
+])
+
+const MEMORY_WRITE_TARGET_V1 = Object.freeze({
+  table: 'chapters',
+  fields: [
+    'summary',
+    'summarySourceTextHash',
+    'summaryTextNormalizationVersion',
+    'continuityHandoff',
+    'planReconciliation',
+  ],
+  mode: 'candidate-only' as const,
+})
+
 /** Context authorization is declared per executable step, not as one union
  * manifest reused by unrelated readers. */
 export const CHAPTER_POST_ADOPTION_STEP_SOURCE_KEYS_V1 = Object.freeze({
@@ -84,12 +113,25 @@ function sourceKeysForStep(stepId: ChapterPostAdoptionStepIdV1): readonly string
   return CHAPTER_POST_ADOPTION_STEP_SOURCE_KEYS_V1.retrieval
 }
 
+function authorizedContextSourceKeys(
+  taskTypes: readonly ReturnType<typeof taskTypeForStep>[],
+): string[] {
+  const stepIdsByTask = {
+    organization: CHAPTER_POST_ADOPTION_STEP_IDS_V1.organization,
+    memory: CHAPTER_POST_ADOPTION_STEP_IDS_V1.memory,
+    retrieval: CHAPTER_POST_ADOPTION_STEP_IDS_V1.retrieval,
+    consistency: CHAPTER_POST_ADOPTION_STEP_IDS_V1.consistency,
+  } as const
+  return [...new Set(taskTypes.flatMap(taskType => sourceKeysForStep(stepIdsByTask[taskType])))]
+}
+
 export const CHAPTER_POST_ADOPTION_VERIFIER_SET_V1 = 'chapter-post-adoption-terminal-v1'
 export const CHAPTER_POST_ADOPTION_VERIFIER_SET_V2 = 'chapter-post-adoption-terminal-v2'
 export const CHAPTER_POST_ADOPTION_PARENT_RELATION_V1 = 'prose-post-adoption'
 
 export type ChapterPostAdoptionChainStateV1 =
   | 'prose-completed'
+  | 'downstream-suggested'
   | 'downstream-processing'
   | 'downstream-awaiting-confirmation'
   | 'downstream-failed'
@@ -114,7 +156,21 @@ function stepIds(snapshot?: AgentRunSnapshotV1): ChapterPostAdoptionStepIdV1[] {
   const hasConsistency = snapshot?.contract.executionBindings?.some(binding => (
     binding.stepId === CHAPTER_POST_ADOPTION_STEP_IDS_V1.consistency
   ))
-  return hasConsistency ? [...base, CHAPTER_POST_ADOPTION_STEP_IDS_V1.consistency] : base
+  const available = hasConsistency ? [...base, CHAPTER_POST_ADOPTION_STEP_IDS_V1.consistency] : base
+  const allowed = snapshot?.contract.automationAuthorization?.taskTypes
+  return allowed ? available.filter(stepId => allowed.includes(taskTypeForStep(stepId))) : available
+}
+
+function taskTypeForStep(
+  stepId: ChapterPostAdoptionStepIdV1,
+): 'organization' | 'memory' | 'retrieval' | 'consistency' {
+  if (stepId === CHAPTER_POST_ADOPTION_STEP_IDS_V1.authorization) {
+    throw new Error('授权步骤不是章后任务类型。')
+  }
+  if (stepId === CHAPTER_POST_ADOPTION_STEP_IDS_V1.organization) return 'organization'
+  if (stepId === CHAPTER_POST_ADOPTION_STEP_IDS_V1.memory) return 'memory'
+  if (stepId === CHAPTER_POST_ADOPTION_STEP_IDS_V1.consistency) return 'consistency'
+  return 'retrieval'
 }
 
 function append(
@@ -134,20 +190,27 @@ function append(
 
 function assertChapterPostAdoptionExecutionBindingsV1(snapshot: AgentRunSnapshotV1): void {
   const bindings = new Map((snapshot.contract.executionBindings ?? []).map(binding => [binding.stepId, binding]))
+  const selected = new Set(snapshot.contract.automationAuthorization?.taskTypes
+    ?? ['organization', 'memory', 'retrieval', 'consistency'])
   const organization = bindings.get(CHAPTER_POST_ADOPTION_STEP_IDS_V1.organization)
   const memory = bindings.get(CHAPTER_POST_ADOPTION_STEP_IDS_V1.memory)
-  if (!organization || !memory) throw new Error('正文后处理缺少 Skill/Prompt 执行绑定。')
-  const { stepId: _organizationStepId, ...organizationBinding } = organization
-  const { stepId: _memoryStepId, ...memoryBinding } = memory
-  if (organizationBinding.version !== 1 || memoryBinding.version !== 1) {
-    throw new Error('正文后处理当前只接受历史 V1 Skill 执行绑定。')
+  if (selected.has('organization')) {
+    if (!organization) throw new Error('正文后处理缺少七域整理 Skill/Prompt 执行绑定。')
+    const { stepId: _organizationStepId, ...organizationBinding } = organization
+    if (organizationBinding.version !== 1) throw new Error('正文后处理当前只接受历史 V1 Skill 执行绑定。')
+    const organizationSkill = organizationBinding.promptVersion === 'chapter-organization-v1'
+      ? { ...ORGANIZATION_SKILL_V1, label: '章节六域证据整理', promptVersion: 'chapter-organization-v1' }
+      : ORGANIZATION_SKILL_V1
+    assertAgentSkillExecutionBindingV1(organizationBinding, organizationSkill, '章节七域整理执行绑定')
   }
-  assertAgentSkillExecutionBindingV1(organizationBinding, ORGANIZATION_SKILL_V1, '章节六域整理执行绑定')
-  assertAgentSkillExecutionBindingV1(memoryBinding, MEMORY_SKILL_V1, '章节记忆执行绑定')
+  if (selected.has('memory')) {
+    if (!memory) throw new Error('正文后处理缺少章节记忆 Skill/Prompt 执行绑定。')
+    const { stepId: _memoryStepId, ...memoryBinding } = memory
+    if (memoryBinding.version !== 1) throw new Error('正文后处理当前只接受历史 V1 Skill 执行绑定。')
+    assertAgentSkillExecutionBindingV1(memoryBinding, MEMORY_SKILL_V1, '章节记忆执行绑定')
+  }
   const consistency = bindings.get(CHAPTER_POST_ADOPTION_STEP_IDS_V1.consistency)
-  const requiresConsistency = snapshot.contract.verificationPlan.some(step => (
-    step.verifier === CHAPTER_POST_ADOPTION_VERIFIER_SET_V2
-  ))
+  const requiresConsistency = selected.has('consistency')
   if (requiresConsistency && !consistency) throw new Error('正文后处理缺少一致性守卫执行绑定。')
   if (consistency) {
     const { stepId: _consistencyStepId, ...consistencyBinding } = consistency
@@ -165,10 +228,24 @@ export function buildChapterPostAdoptionRunContractV1(input: {
     receiptHash: string
     artifactHash: string
   }
+  authorization?: PostAdoptionAuthorizationSnapshotV1
 }) {
+  const taskTypes = input.authorization?.taskTypes ?? ['organization', 'memory', 'retrieval', 'consistency']
+  const contextSourceKeys = authorizedContextSourceKeys(taskTypes)
+  const writeTargets = [
+    ...(taskTypes.includes('memory') ? [MEMORY_WRITE_TARGET_V1] : []),
+    ...(taskTypes.includes('organization') ? ORGANIZATION_WRITE_TARGETS_V1 : []),
+  ]
+  const criteria = [
+    ...(taskTypes.includes('retrieval') ? [{ id: 'chapter-post-adoption.retrieval', kind: 'deterministic-check' as const, required: true }] : []),
+    ...(taskTypes.includes('organization') ? [{ id: 'chapter-post-adoption.organization', kind: 'author-confirmed' as const, required: true }] : []),
+    ...(taskTypes.includes('memory') ? [{ id: 'chapter-post-adoption.memory', kind: 'adoption-committed' as const, required: true }] : []),
+    ...(taskTypes.includes('consistency') ? [{ id: 'chapter-post-adoption.consistency', kind: 'deterministic-check' as const, required: true }] : []),
+    { id: 'chapter-post-adoption.post-state', kind: 'post-state-matches' as const, required: true },
+  ]
   return {
     version: 1 as const,
-    objective: `完成章节 #${input.chapterId} 正文采纳后的六域交接、章节记忆、检索与确定性一致性守卫`,
+    objective: `完成章节 #${input.chapterId} 正文采纳后的七域交接、章节记忆、检索与确定性一致性守卫`,
     workflowKind: 'multi-domain-sequential' as const,
     ...(input.parent ? { lineage: {
       parent: {
@@ -184,67 +261,60 @@ export function buildChapterPostAdoptionRunContractV1(input: {
       chapterIds: [input.chapterId],
     },
     permissions: {
-      contextSourceKeys: [...CHAPTER_POST_ADOPTION_SOURCE_KEYS_V1],
-      writeTargets: [
-        {
-          table: 'chapters',
-          fields: [
-            'summary',
-            'summarySourceTextHash',
-            'summaryTextNormalizationVersion',
-            'continuityHandoff',
-            'planReconciliation',
-          ],
-          mode: 'candidate-only' as const,
-        },
-        { table: 'stateCards', fields: ['category', 'entityName', 'fields', 'lastChapterId'], mode: 'author-confirmed' as const },
-        { table: 'temporalFacts', fields: [], mode: 'author-confirmed' as const, adoptionExtension: 'fact-ledger' },
-        { table: 'itemLedger', fields: ['itemName', 'action', 'quantity', 'heldByName', 'characterId', 'chapterId', 'chapterTitle', 'note'], mode: 'author-confirmed' as const },
-        { table: 'storyTimelineEvents', fields: ['title', 'storyTime', 'importance', 'description', 'chapterId', 'chapterTitle', 'order'], mode: 'author-confirmed' as const },
-        { table: 'characterRelations', fields: ['fromCharacterId', 'toCharacterId', 'relationType', 'label', 'description', 'isBidirectional'], mode: 'author-confirmed' as const },
-        { table: 'foreshadows', fields: ['status', 'plantChapterId', 'echoChapterIds', 'resolveChapterId', 'notes'], mode: 'author-confirmed' as const },
-      ],
+      contextSourceKeys,
+      writeTargets,
     },
+    ...(input.authorization ? {
+      automationAuthorization: {
+        version: 1 as const,
+        mode: input.authorization.policy === 'auto-with-budget' ? 'preauthorized' as const : 'author-confirmed' as const,
+        policy: input.authorization.policy,
+        taskKey: input.authorization.taskKey,
+        settingsHash: input.authorization.settingsHash,
+        sourceTextHash: input.authorization.sourceTextHash,
+        taskTypes: [...input.authorization.taskTypes],
+        modelRoutes: input.authorization.modelRoutes.map(route => ({ ...route })),
+        maxCostUsd: input.authorization.budget.maxCostUsd,
+        allowUnknownCost: input.authorization.budget.allowUnknownCost,
+        estimate: {
+          modelCalls: input.authorization.estimate.modelCalls,
+          inputTokensMin: input.authorization.estimate.inputTokens.min,
+          inputTokensMax: input.authorization.estimate.inputTokens.max,
+          outputTokensMin: input.authorization.estimate.outputTokens.min,
+          outputTokensMax: input.authorization.estimate.outputTokens.max,
+          costUsdMin: input.authorization.estimate.costUsd?.min ?? null,
+          costUsdMax: input.authorization.estimate.costUsd?.max ?? null,
+        },
+      },
+    } : {}),
     executionBindings: [
-      {
+      ...(taskTypes.includes('organization') ? [{
         stepId: CHAPTER_POST_ADOPTION_STEP_IDS_V1.organization,
         ...createAgentSkillExecutionBindingV1(ORGANIZATION_SKILL_V1),
-      },
-      {
+      }] : []),
+      ...(taskTypes.includes('memory') ? [{
         stepId: CHAPTER_POST_ADOPTION_STEP_IDS_V1.memory,
         ...createAgentSkillExecutionBindingV1(MEMORY_SKILL_V1),
-      },
-      {
+      }] : []),
+      ...(taskTypes.includes('consistency') ? [{
         stepId: CHAPTER_POST_ADOPTION_STEP_IDS_V1.consistency,
         ...createAgentSkillExecutionBindingV1(CONSISTENCY_SKILL_V1),
-      },
+      }] : []),
     ],
     budget: {
-      maxModelCalls: 2,
+      maxModelCalls: input.authorization?.budget.maxModelCalls ?? 2,
       maxToolCalls: 0,
-      maxInputTokens: 48_000,
-      maxOutputTokens: 16_000,
+      maxInputTokens: input.authorization?.budget.maxInputTokens ?? 48_000,
+      maxOutputTokens: input.authorization?.budget.maxOutputTokens ?? 16_000,
       maxAttemptsPerStep: 2,
       maxProtocolErrors: 1,
     },
-    acceptance: [
-      { id: 'chapter-post-adoption.retrieval', kind: 'deterministic-check' as const, required: true },
-      { id: 'chapter-post-adoption.organization', kind: 'author-confirmed' as const, required: true },
-      { id: 'chapter-post-adoption.memory', kind: 'adoption-committed' as const, required: true },
-      { id: 'chapter-post-adoption.consistency', kind: 'deterministic-check' as const, required: true },
-      { id: 'chapter-post-adoption.post-state', kind: 'post-state-matches' as const, required: true },
-    ],
+    acceptance: criteria,
     verificationPlan: [{
       id: 'chapter-post-adoption.terminal',
       kind: 'terminal' as const,
       verifier: CHAPTER_POST_ADOPTION_VERIFIER_SET_V2,
-      criterionIds: [
-        'chapter-post-adoption.retrieval',
-        'chapter-post-adoption.organization',
-        'chapter-post-adoption.memory',
-        'chapter-post-adoption.consistency',
-        'chapter-post-adoption.post-state',
-      ],
+      criterionIds: criteria.map(criterion => criterion.id),
     }],
     failurePolicy: {
       onProtocolError: 'retry' as const,
@@ -263,6 +333,7 @@ export async function createChapterPostAdoptionDurableRunV1(input: {
     receiptHash: string
     artifactHash: string
   }
+  authorization?: PostAdoptionAuthorizationSnapshotV1
 }): Promise<AgentRunSnapshotV1> {
   const chapter = await db.chapters.get(input.chapterId)
   if (!chapter || !await assertRecordInScope(input.scope, 'chapters', chapter, { owner: 'work' })) {
@@ -270,6 +341,29 @@ export async function createChapterPostAdoptionDurableRunV1(input: {
   }
   if (input.parent && await hashChapterText(chapter.content ?? '') !== input.parent.artifactHash) {
     throw new Error('正文后处理创建前发现正文已脱离父 Run 的采纳产物。')
+  }
+  if (input.authorization) {
+    const currentSourceTextHash = await hashChapterText(chapter.content ?? '')
+    if (
+      input.authorization.chapterId !== input.chapterId
+      || input.authorization.sourceTextHash !== currentSourceTextHash
+    ) throw new Error('正文后处理授权快照与来源章节不匹配。')
+    if (input.authorization.policy === 'auto-with-budget') {
+      const preflight = preflightPostAdoptionAutoV1(input.authorization)
+      if (!preflight.allowed) throw new Error(`章后自动任务未通过预授权：${preflight.reason}`)
+    }
+    const runs = await readOwnedRows<Record<string, unknown>>(input.scope, 'agentRuns', { owner: 'work' })
+    for (const row of runs.sort((a, b) => Number(b.updatedAt ?? 0) - Number(a.updatedAt ?? 0))) {
+      if (typeof row.id !== 'number') continue
+      try {
+        const existing = await readAgentRunV1(input.scope, row.id)
+        if (existing.contract.automationAuthorization?.taskKey === input.authorization.taskKey) {
+          return ensureChapterPostAdoptionAuthorizationPreparedV1(input.scope, existing)
+        }
+      } catch {
+        // Corrupt or foreign evidence never hides a valid matching run.
+      }
+    }
   }
   if (input.parent) {
     const parent = await readAgentRunV1(input.scope, input.parent.runId)
@@ -296,11 +390,15 @@ export async function createChapterPostAdoptionDurableRunV1(input: {
         || existingParent.artifactHash !== input.parent.artifactHash) {
         throw new Error('正文后处理已有子 Run，但父回执或产物 hash 不一致。')
       }
-      return existing
+      if (
+        input.authorization
+        && existing.contract.automationAuthorization?.taskKey !== input.authorization.taskKey
+      ) throw new Error('正文后处理已有子 Run，但冻结的策略或预算已经变化。')
+      return ensureChapterPostAdoptionAuthorizationPreparedV1(input.scope, existing)
     }
   }
   try {
-    return await createAgentRunV1({
+    const created = await createAgentRunV1({
       scope: input.scope,
       worldGroupId: input.worldGroupId,
       contract: buildChapterPostAdoptionRunContractV1({
@@ -308,8 +406,10 @@ export async function createChapterPostAdoptionDurableRunV1(input: {
         worldGroupId: input.worldGroupId,
         chapterId: input.chapterId,
         parent: input.parent,
+        authorization: input.authorization,
       }),
     })
+    return ensureChapterPostAdoptionAuthorizationPreparedV1(input.scope, created)
   } catch (error) {
     // A second tab may win the unique lineage race after the read above.
     if (input.parent && error instanceof Error && error.name === 'ConstraintError') {
@@ -318,7 +418,7 @@ export async function createChapterPostAdoptionDurableRunV1(input: {
         parentRunId: input.parent.runId,
         relation: CHAPTER_POST_ADOPTION_PARENT_RELATION_V1,
       })
-      if (raced) return raced
+      if (raced) return ensureChapterPostAdoptionAuthorizationPreparedV1(input.scope, raced)
     }
     throw error
   }
@@ -344,8 +444,11 @@ async function assertChapterPostAdoptionLineageCurrentV1(
 export function chapterPostAdoptionChainStateV1(
   snapshot: AgentRunSnapshotV1 | null,
 ): ChapterPostAdoptionChainStateV1 {
-  if (!snapshot?.contract.lineage?.parent) return 'legacy-unlinked'
+  if (!snapshot) return 'legacy-unlinked'
   if (snapshot.projection.state === 'completed' && snapshot.projection.terminalReceiptHash) return 'downstream-completed'
+  const authorization = snapshot.projection.steps[CHAPTER_POST_ADOPTION_STEP_IDS_V1.authorization]
+  if (authorization?.status === 'awaiting_confirmation') return 'downstream-suggested'
+  if (!snapshot.contract.lineage?.parent) return 'legacy-unlinked'
   const steps = Object.values(snapshot.projection.steps)
   if (snapshot.projection.state === 'awaiting_confirmation' || steps.some(step => step.status === 'awaiting_confirmation')) {
     return 'downstream-awaiting-confirmation'
@@ -397,11 +500,10 @@ export async function readLatestChapterPostAdoptionRunV1(input: {
   scope: WorkspaceScope
   chapterId: number
 }): Promise<AgentRunSnapshotV1 | null> {
-  const rows = await db.agentRuns
-    .where('projectId').equals(input.scope.projectId)
-    .reverse().sortBy('updatedAt')
+  const rows = (await readOwnedRows<Record<string, unknown>>(input.scope, 'agentRuns', { owner: 'work' }))
+    .sort((left, right) => Number(right.updatedAt ?? 0) - Number(left.updatedAt ?? 0))
   for (const row of rows) {
-    if (row.parentRelation !== CHAPTER_POST_ADOPTION_PARENT_RELATION_V1 || row.id == null) continue
+    if (row.parentRelation !== CHAPTER_POST_ADOPTION_PARENT_RELATION_V1 || typeof row.id !== 'number') continue
     try {
       const snapshot = await readAgentRunV1(input.scope, row.id)
       if (snapshot.contract.scope.chapterIds?.includes(input.chapterId)) return snapshot
@@ -417,12 +519,94 @@ export async function scheduleChapterPostAdoptionStepsV1(input: {
   snapshot: AgentRunSnapshotV1
 }): Promise<AgentRunSnapshotV1> {
   let snapshot = input.snapshot
+  const authorization = snapshot.contract.automationAuthorization
+  if (authorization) {
+    const authorizationStep = snapshot.projection.steps[CHAPTER_POST_ADOPTION_STEP_IDS_V1.authorization]
+    if (authorizationStep?.status !== 'succeeded') {
+      throw new Error('章后任务尚未获得作者确认或有效预授权。')
+    }
+  }
   for (const stepId of stepIds(snapshot)) {
     if (!snapshot.projection.steps[stepId]) {
       snapshot = await append(input.scope, snapshot, 'step.scheduled', { stepId })
     }
   }
   return snapshot
+}
+
+async function ensureChapterPostAdoptionAuthorizationPreparedV1(
+  scope: WorkspaceScope,
+  input: AgentRunSnapshotV1,
+): Promise<AgentRunSnapshotV1> {
+  const authorization = input.contract.automationAuthorization
+  if (!authorization) return input
+  let snapshot = input
+  const stepId = CHAPTER_POST_ADOPTION_STEP_IDS_V1.authorization
+  let step = snapshot.projection.steps[stepId]
+  if (!step) {
+    snapshot = await append(scope, snapshot, 'step.scheduled', { stepId })
+    snapshot = await append(scope, snapshot, 'step.started', { stepId, attempt: 1 })
+    snapshot = await append(scope, snapshot, 'candidate.persisted', {
+      stepId,
+      attempt: 1,
+      candidateHash: authorization.taskKey,
+      requiresConfirmation: true,
+    })
+    step = snapshot.projection.steps[stepId]
+  }
+  if (authorization.mode === 'preauthorized' && step?.status === 'awaiting_confirmation') {
+    snapshot = await authorizeChapterPostAdoptionV1({ scope, snapshot, source: 'work-preauthorization' })
+  }
+  return snapshot
+}
+
+/** Durable and idempotent authorization boundary; it never calls a model. */
+export async function authorizeChapterPostAdoptionV1(input: {
+  scope: WorkspaceScope
+  snapshot: AgentRunSnapshotV1
+  source?: 'author-click' | 'work-preauthorization'
+}): Promise<AgentRunSnapshotV1> {
+  const authorization = input.snapshot.contract.automationAuthorization
+  if (!authorization) return input.snapshot
+  const chapterId = input.snapshot.contract.scope.chapterIds?.[0]
+  const chapter = chapterId == null ? null : await db.chapters.get(chapterId)
+  if (
+    !chapter
+    || !await assertRecordInScope(input.scope, 'chapters', chapter, { owner: 'work' })
+    || await hashChapterText(chapter.content ?? '') !== authorization.sourceTextHash
+  ) throw new Error('正文已变化，旧章后授权候选已过期。')
+  const stepId = CHAPTER_POST_ADOPTION_STEP_IDS_V1.authorization
+  const step = input.snapshot.projection.steps[stepId]
+  if (step?.status === 'succeeded') return input.snapshot
+  if (!step || step.status !== 'awaiting_confirmation' || step.candidateHash !== authorization.taskKey) {
+    throw new Error('章后授权候选与 durable Run 不一致。')
+  }
+  let snapshot = await append(input.scope, input.snapshot, 'confirmation.recorded', {
+    stepId,
+    candidateHash: authorization.taskKey,
+    decision: 'adopt',
+  })
+  snapshot = await append(input.scope, snapshot, 'step.succeeded', {
+    stepId,
+    attempt: step.attempt,
+    outputHash: authorization.settingsHash,
+  })
+  return snapshot
+}
+
+export async function rejectChapterPostAdoptionAuthorizationV1(input: {
+  scope: WorkspaceScope
+  snapshot: AgentRunSnapshotV1
+}): Promise<AgentRunSnapshotV1> {
+  const authorization = input.snapshot.contract.automationAuthorization
+  const stepId = CHAPTER_POST_ADOPTION_STEP_IDS_V1.authorization
+  const step = input.snapshot.projection.steps[stepId]
+  if (!authorization || !step || step.status !== 'awaiting_confirmation') return input.snapshot
+  return append(input.scope, input.snapshot, 'confirmation.recorded', {
+    stepId,
+    candidateHash: authorization.taskKey,
+    decision: 'reject',
+  })
 }
 
 export async function beginChapterPostAdoptionStepV1(input: {
@@ -432,6 +616,7 @@ export async function beginChapterPostAdoptionStepV1(input: {
   contextManifest: ContextManifestV1
   binding?: unknown
   model?: boolean
+  modelIdentity?: { provider: string; model: string }
 }): Promise<AgentRunSnapshotV1> {
   await assertChapterPostAdoptionLineageCurrentV1(input.scope, input.snapshot)
   if (input.contextManifest.runId !== input.snapshot.run.id || input.contextManifest.stepId !== input.stepId) {
@@ -458,8 +643,9 @@ export async function beginChapterPostAdoptionStepV1(input: {
   }
   if (input.stepId === CHAPTER_POST_ADOPTION_STEP_IDS_V1.memory) {
     const organization = input.snapshot.projection.steps[CHAPTER_POST_ADOPTION_STEP_IDS_V1.organization]
-    if (!organization || organization.status === 'scheduled') {
-      throw new Error('正文后处理章节记忆必须在六域整理尝试之后启动。')
+    const organizationRequired = input.snapshot.contract.automationAuthorization?.taskTypes.includes('organization') ?? true
+    if (organizationRequired && (!organization || organization.status === 'scheduled')) {
+      throw new Error('正文后处理章节记忆必须在七域整理尝试之后启动。')
     }
   }
   if (input.stepId === CHAPTER_POST_ADOPTION_STEP_IDS_V1.retrieval) {
@@ -472,6 +658,18 @@ export async function beginChapterPostAdoptionStepV1(input: {
     const retrieval = input.snapshot.projection.steps[CHAPTER_POST_ADOPTION_STEP_IDS_V1.retrieval]
     if (!retrieval || retrieval.status !== 'succeeded') {
       throw new Error('正文一致性守卫必须在检索与摘要重建成功之后启动。')
+    }
+  }
+  if (input.model !== false) {
+    const expectedRoute = input.snapshot.contract.automationAuthorization?.modelRoutes?.find(route => (
+      route.taskType === taskTypeForStep(input.stepId)
+    ))
+    if (expectedRoute && (
+      !input.modelIdentity
+      || input.modelIdentity.provider !== expectedRoute.provider
+      || input.modelIdentity.model !== expectedRoute.model
+    )) {
+      throw new Error(`正文后处理 step ${input.stepId} 的模型路由已变化，旧预算授权不可继续。`)
     }
   }
   let snapshot = await append(input.scope, input.snapshot, 'step.started', { stepId: input.stepId, attempt })
@@ -673,7 +871,7 @@ export async function beginChapterPostAdoptionOrganizationAdoptionV1(input: {
   let snapshot = await readAgentRunV1(input.scope, input.runId)
   const step = snapshot.projection.steps[CHAPTER_POST_ADOPTION_STEP_IDS_V1.organization]
   if (!step || step.candidateHash !== input.candidateHash) {
-    throw new Error('正文后处理六域交接候选与运行账本不一致。')
+    throw new Error('正文后处理七域交接候选与运行账本不一致。')
   }
   const wasFailed = step.status === 'failed'
   if (step.status === 'awaiting_confirmation') {
@@ -684,14 +882,14 @@ export async function beginChapterPostAdoptionOrganizationAdoptionV1(input: {
     })
   } else if (step.status === 'failed') {
     if (step.failureCode !== 'chapter_organization_partial_adoption') {
-      throw new Error('正文后处理六域交接步骤不是可恢复的部分采纳失败。')
+      throw new Error('正文后处理七域交接步骤不是可恢复的部分采纳失败。')
     }
     snapshot = await append(input.scope, snapshot, 'step.started', {
       stepId: CHAPTER_POST_ADOPTION_STEP_IDS_V1.organization,
       attempt: step.attempt + 1,
     })
   } else if (step.status !== 'running') {
-    throw new Error(`正文后处理六域交接当前状态 ${step.status} 不可开始采纳。`)
+    throw new Error(`正文后处理七域交接当前状态 ${step.status} 不可开始采纳。`)
   }
   const started = !wasFailed && snapshot.events.some(event => (
     event.type === 'adoption.started'
@@ -719,7 +917,7 @@ export async function rejectChapterPostAdoptionOrganizationAdoptionV1(input: {
 }): Promise<AgentRunSnapshotV1> {
   const step = input.snapshot.projection.steps[CHAPTER_POST_ADOPTION_STEP_IDS_V1.organization]
   if (!step || step.status !== 'running' || step.candidateHash !== input.candidateHash) {
-    throw new Error('正文后处理六域交接不在可记录失败的运行状态。')
+    throw new Error('正文后处理七域交接不在可记录失败的运行状态。')
   }
   return append(input.scope, input.snapshot, 'adoption.rejected', {
     stepId: CHAPTER_POST_ADOPTION_STEP_IDS_V1.organization,
@@ -743,15 +941,15 @@ export async function commitChapterPostAdoptionOrganizationV1(input: {
       scope: input.scope,
       runId: input.runId,
       candidateHash: input.candidate.durable.candidateHash,
-      reason: '正文 hash 已变化；六域交接候选不可提交。',
+      reason: '正文 hash 已变化；七域交接候选不可提交。',
     })
-    throw new Error('章节正文已变化，这批六域交接候选已过期；请重新运行。')
+    throw new Error('章节正文已变化，这批七域交接候选已过期；请重新运行。')
   }
   let snapshot = await readAgentRunV1(input.scope, input.runId)
   assertChapterPostAdoptionExecutionBindingsV1(snapshot)
   const step = snapshot.projection.steps[CHAPTER_POST_ADOPTION_STEP_IDS_V1.organization]
   if (!step || !['awaiting_confirmation', 'running'].includes(step.status) || step.candidateHash !== input.candidate.durable.candidateHash) {
-    throw new Error('正文后处理六域交接候选不在等待确认状态。')
+    throw new Error('正文后处理七域交接候选不在等待确认状态。')
   }
   if (step.status === 'awaiting_confirmation') {
     snapshot = await beginChapterPostAdoptionOrganizationAdoptionV1({
@@ -765,7 +963,7 @@ export async function commitChapterPostAdoptionOrganizationV1(input: {
       && event.payload.stepId === CHAPTER_POST_ADOPTION_STEP_IDS_V1.organization
       && event.payload.candidateHash === input.candidate.durable.candidateHash
   ))) {
-    throw new Error('正文后处理缺少六域交接 adoption.started 证据。')
+    throw new Error('正文后处理缺少七域交接 adoption.started 证据。')
   }
   snapshot = await append(input.scope, snapshot, 'adoption.committed', {
     stepId: CHAPTER_POST_ADOPTION_STEP_IDS_V1.organization,
@@ -788,7 +986,7 @@ export async function commitChapterPostAdoptionOrganizationV1(input: {
 
 async function postStateHash(input: { scope: WorkspaceScope; chapterId: number }): Promise<string> {
   const chapter = await db.chapters.get(input.chapterId)
-  const [chunks, summaries, stateCards, facts, inventory, timeline, relations, foreshadows] = await Promise.all([
+  const [chunks, summaries, stateCards, facts, inventory, timeline, relations, foreshadows, storylineProgress, storylineCrossings, storyArcs] = await Promise.all([
     readOwnedRows<Record<string, unknown>>(input.scope, 'retrievalChunks', { owner: 'work' }),
     readOwnedRows<Record<string, unknown>>(input.scope, 'narrativeSummaryNodes', { owner: 'work' }),
     readOwnedRows<Record<string, unknown>>(input.scope, 'stateCards', { owner: 'work' }),
@@ -797,6 +995,9 @@ async function postStateHash(input: { scope: WorkspaceScope; chapterId: number }
     readOwnedRows<Record<string, unknown>>(input.scope, 'storyTimelineEvents', { owner: 'work' }),
     readOwnedRows<Record<string, unknown>>(input.scope, 'characterRelations', { owner: 'world' }),
     readOwnedRows<Record<string, unknown>>(input.scope, 'foreshadows', { owner: 'work' }),
+    readOwnedRows<Record<string, unknown>>(input.scope, 'storylineProgress', { owner: 'work' }),
+    readOwnedRows<Record<string, unknown>>(input.scope, 'storylineCrossings', { owner: 'work' }),
+    readOwnedRows<Record<string, unknown>>(input.scope, 'storyArcs', { owner: 'work' }),
   ])
   const sortRows = (rows: Record<string, unknown>[]) => rows.sort((a, b) => Number(a.id ?? 0) - Number(b.id ?? 0))
   return hashCanonicalValue({
@@ -817,6 +1018,9 @@ async function postStateHash(input: { scope: WorkspaceScope; chapterId: number }
     timeline: sortRows(timeline.filter(row => row.chapterId === input.chapterId)),
     relations: sortRows(relations),
     foreshadows: sortRows(foreshadows),
+    storylineProgress: sortRows(storylineProgress),
+    storylineCrossings: sortRows(storylineCrossings.filter(row => row.chapterId === input.chapterId)),
+    storyArcs: sortRows(storyArcs),
   })
 }
 
@@ -881,8 +1085,10 @@ export async function verifyChapterPostAdoptionRunV1(input: {
   if (!chapter || !await assertRecordInScope(input.scope, 'chapters', chapter, { owner: 'work' })) {
     throw new Error('正文后处理终态校验找不到来源章节。')
   }
+  const selectedTasks = new Set(snapshot.contract.automationAuthorization?.taskTypes
+    ?? ['organization', 'memory', 'retrieval', 'consistency'])
   const memory = await getChapterDerivedMemoryStatus(chapter)
-  if (memory.summary !== 'verified' || memory.handoff !== 'verified') {
+  if (selectedTasks.has('memory') && (memory.summary !== 'verified' || memory.handoff !== 'verified')) {
     throw new Error('正文后处理终态校验发现 summary/handoff 缺失或已过期。')
   }
   const [chapterChunks, chapterSummaryNodes] = await Promise.all([
@@ -891,34 +1097,38 @@ export async function verifyChapterPostAdoptionRunV1(input: {
     readOwnedRows<Record<string, unknown>>(input.scope, 'narrativeSummaryNodes', { owner: 'work' })
       .then(rows => rows.filter(row => row.level === 'chapter' && row.sourceChapterId === chapterId)),
   ])
-  if (
+  if (selectedTasks.has('retrieval') && (
     chapterChunks.length === 0
     || chapterChunks.some(row => row.sourceTextHash !== memory.currentSourceTextHash)
     || chapterSummaryNodes.length === 0
     || chapterSummaryNodes.some(row => row.sourceHash !== memory.currentSourceTextHash)
     || chapterSummaryNodes.some(row => row.status !== 'verified')
-  ) {
+  )) {
     throw new Error('正文后处理终态校验发现检索块或叙事摘要未匹配当前正文。')
   }
-  const consistencyCandidateHash = await verifyPostAdoptionConsistencyEvidenceV1({
-    scope: input.scope,
-    snapshot,
-    chapterId,
-    sourceTextHash: memory.currentSourceTextHash,
-  })
+  const consistencyCandidateHash = selectedTasks.has('consistency')
+    ? await verifyPostAdoptionConsistencyEvidenceV1({
+        scope: input.scope,
+        snapshot,
+        chapterId,
+        sourceTextHash: memory.currentSourceTextHash,
+      })
+    : null
   const verifierSetVersion = snapshot.contract.verificationPlan.find(step => step.id === 'chapter-post-adoption.terminal')?.verifier
   if (![CHAPTER_POST_ADOPTION_VERIFIER_SET_V1, CHAPTER_POST_ADOPTION_VERIFIER_SET_V2].includes(verifierSetVersion ?? '')) {
     throw new Error('正文后处理终态 verifier 版本不受支持。')
   }
   const organizationStep = snapshot.projection.steps[CHAPTER_POST_ADOPTION_STEP_IDS_V1.organization]
-  const organizationCandidateHash = organizationStep?.candidateHash
-  if (!organizationCandidateHash) throw new Error('正文后处理缺少六域交接候选 hash。')
-  const organizationAdoption = snapshot.events.find(event => (
-    event.type === 'adoption.committed'
-      && event.payload.stepId === CHAPTER_POST_ADOPTION_STEP_IDS_V1.organization
-      && event.payload.candidateHash === organizationCandidateHash
-  ))
-  if (!organizationAdoption) throw new Error('正文后处理缺少六域交接采纳证据。')
+  const organizationCandidateHash = organizationStep?.candidateHash ?? null
+  if (selectedTasks.has('organization')) {
+    if (!organizationCandidateHash) throw new Error('正文后处理缺少七域交接候选 hash。')
+    const organizationAdoption = snapshot.events.find(event => (
+      event.type === 'adoption.committed'
+        && event.payload.stepId === CHAPTER_POST_ADOPTION_STEP_IDS_V1.organization
+        && event.payload.candidateHash === organizationCandidateHash
+    ))
+    if (!organizationAdoption) throw new Error('正文后处理缺少七域交接采纳证据。')
+  }
   const contextManifestHashes = stepIds(snapshot).map(stepId => (
     [...snapshot.events].reverse().find((event): event is Extract<typeof event, { type: 'context.assembled' }> => (
       event.type === 'context.assembled' && event.payload.stepId === stepId
@@ -945,9 +1155,9 @@ export async function verifyChapterPostAdoptionRunV1(input: {
     verifierSetVersion: verifierSetVersion!,
     ...(snapshot.contract.lineage?.parent ? { lineage: snapshot.contract.lineage.parent } : {}),
     criteria: [
-      { id: 'chapter-post-adoption.retrieval', status: 'passed', evidenceRefs: [`step:${CHAPTER_POST_ADOPTION_STEP_IDS_V1.retrieval}`] },
-      { id: 'chapter-post-adoption.organization', status: 'passed', evidenceRefs: [`event:${organizationCandidateHash}`] },
-      { id: 'chapter-post-adoption.memory', status: 'passed', evidenceRefs: [`step:${CHAPTER_POST_ADOPTION_STEP_IDS_V1.memory}`] },
+      ...(selectedTasks.has('retrieval') ? [{ id: 'chapter-post-adoption.retrieval', status: 'passed' as const, evidenceRefs: [`step:${CHAPTER_POST_ADOPTION_STEP_IDS_V1.retrieval}`] }] : []),
+      ...(selectedTasks.has('organization') && organizationCandidateHash ? [{ id: 'chapter-post-adoption.organization', status: 'passed' as const, evidenceRefs: [`event:${organizationCandidateHash}`] }] : []),
+      ...(selectedTasks.has('memory') ? [{ id: 'chapter-post-adoption.memory', status: 'passed' as const, evidenceRefs: [`step:${CHAPTER_POST_ADOPTION_STEP_IDS_V1.memory}`] }] : []),
       ...(consistencyCandidateHash ? [{
         id: 'chapter-post-adoption.consistency',
         status: 'passed' as const,

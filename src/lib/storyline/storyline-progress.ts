@@ -181,7 +181,7 @@ export function parseStorylineProgressResult(args: {
     const name = String(item.name ?? '').trim()
     const description = String(item.description ?? '').trim()
     const evidenceQuote = String(item.quote ?? item.evidenceQuote ?? '').trim()
-    const arcType = String(item.type ?? '').trim() as 'main' | 'sub'
+    const arcType = String(item.type ?? item.arcType ?? '').trim() as 'main' | 'sub'
     const key = normalizeName(name)
     if (
       !name || !description || (arcType !== 'main' && arcType !== 'sub')
