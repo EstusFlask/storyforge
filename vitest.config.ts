@@ -14,6 +14,11 @@ export default defineConfig({
     globals: true,
     environment: 'happy-dom',
     setupFiles: ['./tests/setup.ts'],
+    // The suite contains several CPU-heavy 100/1000-step deterministic
+    // simulations. Capping file workers prevents timer starvation and
+    // non-reproducible 40s timeouts on high-core developer machines.
+    maxWorkers: 4,
+    minWorkers: 1,
     include: [
       'tests/**/*.test.ts',
       'tests/**/*.test.tsx',

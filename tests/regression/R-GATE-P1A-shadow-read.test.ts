@@ -86,8 +86,13 @@ describe('GATE-P1A · shadow read phase gate', () => {
     const worldviewB = await db.worldviews.get(worldviewBId)
     const foreignWorldview = await db.worldviews.get(foreignWorldviewId)
     const before = await databaseHash()
+    const requiredSkill = getAgentSkillV1('world-origin.worldview-field')
+    const shadowSkill = {
+      ...requiredSkill,
+      contextGateway: { ...requiredSkill.contextGateway!, rollout: 'shadow' as const },
+    }
     const first = await compareContextGatewayShadowReadV1({
-      skill: getAgentSkillV1('world-origin.worldview-field'),
+      skill: shadowSkill,
       scope: fixture.scope,
       worldGroupId: groupA,
       query: '为潮民与盐翼族扩展社会关系',
@@ -108,7 +113,7 @@ describe('GATE-P1A · shadow read phase gate', () => {
     expect(first.comparison.reasonCodes).toContain('shadow-read-only')
 
     const replay = await compareContextGatewayShadowReadV1({
-      skill: getAgentSkillV1('world-origin.worldview-field'),
+      skill: shadowSkill,
       scope: fixture.scope,
       worldGroupId: groupA,
       query: '为潮民与盐翼族扩展社会关系',

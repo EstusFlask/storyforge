@@ -179,7 +179,7 @@ describe.sequential('R-HARNESS30 · 故事线 Agent Skill 与受治理采纳', (
     expect(getAgentSkillV1('outline.story-arcs')).toMatchObject({
       agentId: 'outline',
       executionMode: 'story-arcs',
-      promptVersion: 'story-arc-copilot-v6',
+      promptVersion: 'story-arc-copilot-v7',
       writeTargets: [{
         table: 'storyArcs',
         fields: [
@@ -197,6 +197,8 @@ describe.sequential('R-HARNESS30 · 故事线 Agent Skill 与受治理采纳', (
       const body = JSON.parse(String(init?.body))
       const prompt = body.messages.map((message: { content: string }) => message.content).join('\n')
       expect(prompt).toContain('依据现有设定生成一条主线故事线')
+      expect(prompt).toContain('【低权重灵感：作品名】\n潮汐纪元')
+      expect(prompt).toContain('不是主题命令、概念释义题或既定 Canon')
       expect(prompt).toContain('盐海每十年退潮一次')
       expect(prompt).toContain('绝不能放在故事线顶层')
       expect(prompt).toContain('3-5 个因果递进阶段')

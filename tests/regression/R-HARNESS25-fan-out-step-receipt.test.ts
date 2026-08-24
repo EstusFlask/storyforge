@@ -26,6 +26,9 @@ import {
 } from '../../src/lib/agent/run/master-step-verification'
 import { AgentTeamBudgetTracker } from '../../src/lib/agent/team-budget'
 import type { WorkspaceScope } from '../../src/lib/types'
+import { backfillResourceUidsV1 } from '../../src/lib/context-gateway/resource-identity'
+import { generateWorkCode, generateWorkspaceUid } from '../../src/lib/memory/identity'
+import { prepareRequiredMasterGatewayFixtureV1 } from '../helpers/master-agent-gateway'
 
 async function createWorkspace(label: string): Promise<{
   scope: WorkspaceScope
@@ -33,6 +36,7 @@ async function createWorkspace(label: string): Promise<{
 }> {
   const now = Date.now()
   const projectId = await db.projects.add({
+    workspaceUid: generateWorkspaceUid(),
     name: label,
     genre: 'fantasy',
     genres: ['fantasy'],
@@ -57,6 +61,7 @@ async function createWorkspace(label: string): Promise<{
     projectId,
     worldId,
     title: label,
+    code: generateWorkCode(),
     description: '',
     genres: ['fantasy'],
     status: 'drafting',
@@ -77,6 +82,7 @@ async function createWorkspace(label: string): Promise<{
     createdAt: now,
     updatedAt: now,
   } as any) as number
+  await backfillResourceUidsV1(projectId)
   return { scope: { projectId, worldId, workId }, worldGroupId }
 }
 
@@ -166,6 +172,13 @@ async function executeFixture(
     })
     options.budget.settleCall(reservation, output)
     const sources = sourcesFor(task.id)
+    const gateway = task.id === 'character-1'
+      ? await prepareRequiredMasterGatewayFixtureV1({
+          scope: options.scope,
+          worldGroupId: options.worldGroupId,
+          executionTrace: options.executionTrace,
+        }, task, output)
+      : undefined
     await options.executionTrace.candidateReady(task, {
       payload: {
         version: 1,
@@ -173,8 +186,8 @@ async function executeFixture(
         agentId: task.agentId,
         skillId: task.skillId,
         label: task.id,
-        contextSources: sources,
-        contextEvidence: {
+        contextSources: gateway?.contextSources ?? sources,
+        contextEvidence: gateway?.contextEvidence ?? {
           profile: 'balanced',
           included: sources,
           omitted: [],
@@ -194,6 +207,7 @@ async function executeFixture(
       draft: output,
       runtimeNode: {},
       runtimeOutput: output,
+      ...(gateway ? { contextGatewayRuntime: gateway.contextGatewayRuntime } : {}),
     })
   }
 }

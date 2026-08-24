@@ -104,6 +104,7 @@ export interface StoryArcCopilotSnapshot {
 
 export interface StoryArcCopilotInput {
   projectId: number
+  projectName: string
   scope?: WorkspaceScope
   worldGroupId: number | null
   authorRequest: string
@@ -1100,6 +1101,7 @@ function buildStoryArcMessages(input: StoryArcCopilotInput): ChatMessage[] {
 4. 每条故事线顶层只能有 name/type/description/stages 四个字段。turningPoint、startVolume、endVolume 只能放在 stages 数组内的阶段对象上，绝不能放在故事线顶层；只有确有卷级依据时才同时填写 startVolume/endVolume，均为从 1 开始的整数。
 5. 已有设定是硬约束；不得改变既定时限、能力、代价、因果或实体身份，也不得为未命名人物擅自命名。设定缺失时只做不与现有事实冲突的候选补全，不声称它已经成为 Canon。
 6. 避免复制已有故事线；支线必须有独立目标，也要说明与主线的因果交汇。
+6.1 作品名“${input.projectName}”只可作为低权重灵感，不是主题命令、概念释义题或既定 Canon；不得为了呼应标题牺牲行动、冲突、选择和状态变化。
 7. 只输出一个严格 JSON 对象，不输出 Markdown、解释或额外字段。顶层${input.creativeReliabilityEnabled !== false ? '必须有 storyArcs，可选 assumptions' : '只能有 storyArcs'}；最小结构严格使用：
 {"storyArcs":[{"name":"名称","type":"main|sub","description":"整体描述","stages":[{"title":"阶段标题","description":"阶段描述","keyEvents":["事件"]}]}]}
 8. 阶段对象内的 turningPoint、startVolume、endVolume 都是可选字段；turningPoint 如填写必须是描述转折的字符串，绝不能写 true/false；startVolume/endVolume 只有在两者都有明确卷级依据时才成对填写整数。没有明确依据就省略，不要输出占位值。
@@ -1110,6 +1112,7 @@ ${input.creativeReliabilityEnabled !== false
     role: 'user' as const,
     content: [
       input.inputGuidance,
+      `【低权重灵感：作品名】\n${input.projectName}`,
       `【作者要求】\n${input.authorRequest}${supplemental}`,
       ...(input.creativeReliabilityEnabled !== false
         ? [formatNarrativeBriefForPromptV1(input.narrativeBrief)]
@@ -1324,6 +1327,7 @@ export async function prepareStoryArcCopilot(
     ?? isCreativeReliabilityRuntimeEnabledV1()
   const nodeInput: StoryArcCopilotInput = {
     projectId: input.projectId,
+    projectName: project.name,
     scope,
     worldGroupId,
     authorRequest: request,

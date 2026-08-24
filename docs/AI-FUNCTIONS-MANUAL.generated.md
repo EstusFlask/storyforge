@@ -293,15 +293,15 @@ AI 输出经 `adopt({ target, data })` 写回,只有这里登记的字段可写(
 - `src/lib/agent/run/codex-extraction-durable.ts:779 · chat`
 - `src/lib/agent/run/history-agent-durable.ts:514 · chat`
 - `src/lib/agent/run/reference-derived-durable.ts:506 · chat`
-- `src/lib/agent/story-arc-copilot.ts:1347 · chat`
-- `src/lib/agent/story-arc-copilot.ts:1395 · chat`
+- `src/lib/agent/story-arc-copilot.ts:1351 · chat`
+- `src/lib/agent/story-arc-copilot.ts:1399 · chat`
 - `src/lib/agent/story-core-copilot.ts:556 · chat`
 - `src/lib/agent/storyline-progress-copilot.ts:375 · chat`
 - `src/lib/agent/world-game-copilot.ts:295 · chat`
 - `src/lib/agent/world-origin-copilot.ts:255 · chat`
 - `src/lib/agent/worldview-field-copilot.ts:889 · chat`
 - `src/lib/character-interaction/harness.ts:396 · chat`
-- `src/lib/evals/agent-harness/story-arc-main-path-browser.ts:97 · chat`
+- `src/lib/evals/agent-harness/story-arc-main-path-browser.ts:99 · chat`
 - `src/lib/evals/creative-reliability/browser.ts:88 · chat`
 - `src/lib/generation/workflow-generation-node.ts:23 · ai.start`
 - `src/lib/narrative-simulation/harness.ts:246 · chat`
@@ -350,4 +350,4 @@ AI 输出经 `adopt({ target, data })` 写回,只有这里登记的字段可写(
 
 ---
 
-生成时间基准:commit `b8e18af2`
+生成时间基准:commit `5045ce9b`

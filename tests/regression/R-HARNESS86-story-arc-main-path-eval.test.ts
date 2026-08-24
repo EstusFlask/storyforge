@@ -595,9 +595,7 @@ describe.sequential('R-HARNESS86 · 真实故事线主路径配对评测', { tim
       },
     })
     expect(agent.calls).toHaveLength(3)
-    expect(agent.durableEvidence?.contextSources).toEqual(expect.arrayContaining([
-      'projectStatus', 'worldview', 'storyCore', 'characters',
-    ]))
+    expect(agent.durableEvidence?.contextSources).toEqual(['ragSelection'])
     expect(await db.projects.filter(project => project.name.startsWith('[H86-EVAL] ')).count()).toBe(0)
     expect(await cleanupStrandedH86WorkspacesV1()).toBe(0)
     expect(fetchMock).toHaveBeenCalledTimes(4)

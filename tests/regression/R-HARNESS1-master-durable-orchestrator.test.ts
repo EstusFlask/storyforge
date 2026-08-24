@@ -8,6 +8,7 @@ import {
 import {
   buildMasterAgentRunContractV1,
   hashMasterAgentPlanV1,
+  MASTER_AGENT_REPLAN_STORAGE_KEY,
   parseMasterAgentPlanV1,
   restoreMasterAgentCandidatesV1,
   runDurableMasterAgentPlanV1,
@@ -34,6 +35,8 @@ import {
 import { AgentTeamBudgetTracker } from '../../src/lib/agent/team-budget'
 import type { MasterAgentPlan } from '../../src/lib/agent/orchestrator'
 import type { WorkspaceScope } from '../../src/lib/types'
+import { prepareRequiredMasterGatewayFixtureV1 } from '../helpers/master-agent-gateway'
+import { generateWorkCode, generateWorkspaceUid } from '../../src/lib/memory/identity'
 
 async function createWorkspace(label: string): Promise<{
   scope: WorkspaceScope
@@ -41,6 +44,7 @@ async function createWorkspace(label: string): Promise<{
 }> {
   const now = Date.now()
   const projectId = await db.projects.add({
+    workspaceUid: generateWorkspaceUid(),
     name: label,
     genre: 'fantasy',
     genres: ['fantasy'],
@@ -65,6 +69,7 @@ async function createWorkspace(label: string): Promise<{
     projectId,
     worldId,
     title: label,
+    code: generateWorkCode(),
     description: '',
     genres: ['fantasy'],
     status: 'drafting',
@@ -79,6 +84,7 @@ async function createWorkspace(label: string): Promise<{
   })
   const worldGroupId = await db.worldGroups.add({
     projectId,
+    worldId,
     name: '主世界',
     order: 0,
     createdAt: now,
@@ -115,21 +121,30 @@ function fakeExecutor(input: {
         maxOutputTokens: 100,
       })
       options.budget.settleCall(reservation, output)
+      const gateway = task.agentId === 'character'
+        ? await prepareRequiredMasterGatewayFixtureV1({
+            scope: options.scope,
+            worldGroupId: options.worldGroupId,
+            executionTrace: options.executionTrace,
+          }, task, output)
+        : undefined
       await options.executionTrace.candidateReady(task, {
         payload: {
           version: 1,
           taskId: task.id,
           agentId: task.agentId,
           label: task.agentId,
-          contextSources: ['worldview'],
-          contextEvidence: {
-            profile: 'balanced',
-            included: ['worldview'],
-            omitted: [],
-            trimmed: [],
-            estimatedInputTokens: 1,
-            inputBudgetTokens: 100,
-          },
+          contextSources: gateway?.contextSources ?? ['worldview'],
+          ...(gateway ? { contextEvidence: gateway.contextEvidence } : {
+            contextEvidence: {
+              profile: 'balanced',
+              included: ['worldview'],
+              omitted: [],
+              trimmed: [],
+              estimatedInputTokens: 1,
+              inputBudgetTokens: 100,
+            },
+          }),
           baseSnapshot: task.agentId === 'world-origin'
             ? { id: null, updatedAt: null, worldOrigin: '' }
             : {},
@@ -139,6 +154,7 @@ function fakeExecutor(input: {
         draft: output,
         runtimeNode: {} as any,
         runtimeOutput: output,
+        ...(gateway ? { contextGatewayRuntime: gateway.contextGatewayRuntime } : {}),
       })
       if (input.failAfterTask === task.id) throw new Error('模拟宿主中断')
     }
@@ -154,9 +170,11 @@ describe.sequential('R-HARNESS1-master-durable-orchestrator · 主 Agent durable
   beforeEach(async () => {
     await db.delete()
     await db.open()
+    localStorage.setItem(MASTER_AGENT_REPLAN_STORAGE_KEY, 'disabled')
   })
 
   afterEach(() => {
+    localStorage.removeItem(MASTER_AGENT_REPLAN_STORAGE_KEY)
     resetHarnessFaultInjectionV1()
     db.close()
   })
@@ -220,7 +238,7 @@ describe.sequential('R-HARNESS1-master-durable-orchestrator · 主 Agent durable
     })
     expect(contract.workflowKind).toBe('multi-domain-sequential')
     expect(contract.permissions.contextSourceKeys).toEqual(expect.arrayContaining([
-      'worldview', 'powerSystem', 'characters', 'characterRelations',
+      'worldview', 'powerSystem', 'characters', 'ragSelection',
     ]))
     expect(contract.permissions.writeTargets).toEqual(expect.arrayContaining([
       expect.objectContaining({ table: 'worldviews', fields: ['worldOrigin'] }),

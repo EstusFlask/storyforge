@@ -56,7 +56,7 @@ describe('R-HARNESS13 · Agent Skill 单一事实源', () => {
     ])
 
     expect(contract.permissions.contextSourceKeys).toContain('projectStatus')
-    expect(contract.permissions.contextSourceKeys).toContain('characterRelations')
+    expect(contract.permissions.contextSourceKeys).toContain('ragSelection')
     expect(contract.permissions.contextSourceKeys).toContain('chapterOutline')
     expect(contract.permissions.contextSourceKeys).not.toContain('characterKnowledge')
     expect(contract.permissions.writeTargets.map(target => target.table)).toEqual([
