@@ -402,7 +402,7 @@ export async function finalizeDetailedOutlineBatchGatewayStepV1(input: {
 }): Promise<{ snapshot: AgentRunSnapshotV1; manifest: ContextManifestV3 }> {
   const stepId = detailedOutlineBatchStepIdV1(input.outlineNodeId)
   const outputHash = await hashCanonicalValue(input.output)
-  let snapshot = await append(input.scope, input.snapshot, 'model.responded', {
+  const snapshot = await append(input.scope, input.snapshot, 'model.responded', {
     stepId, attempt: 1, outputHash,
   })
   const finalized = await finalizeContextGatewayAttemptEvidenceV1({

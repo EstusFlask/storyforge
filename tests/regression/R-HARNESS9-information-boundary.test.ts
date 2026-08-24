@@ -13,6 +13,7 @@ import {
 } from '../../src/lib/agent/run/prose-generation-durable'
 import { hashCanonicalValue } from '../../src/lib/agent/run/hash'
 import { hashChapterText } from '../../src/lib/ai/chapter-memory/text-normalization'
+import { backfillResourceUidsV1 } from '../../src/lib/context-gateway/resource-identity'
 import type { WorkspaceScope } from '../../src/lib/types'
 
 async function seedBoundaryProject(): Promise<{
@@ -199,6 +200,7 @@ async function seedBoundaryProject(): Promise<{
       updatedAt: now + 1,
     },
   ] as any)
+  await backfillResourceUidsV1(projectId)
   return {
     scope,
     currentChapterId,

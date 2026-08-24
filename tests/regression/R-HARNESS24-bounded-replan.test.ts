@@ -15,6 +15,7 @@ import type { WorkspaceScope } from '../../src/lib/types'
 import { backfillResourceUidsV1 } from '../../src/lib/context-gateway/resource-identity'
 import { generateWorkCode, generateWorkspaceUid } from '../../src/lib/memory/identity'
 import { prepareRequiredMasterGatewayFixtureV1 } from '../helpers/master-agent-gateway'
+import { resolveAgentSkillV1 } from '../../src/lib/agent/skill-registry'
 
 async function createWorkspace(label: string): Promise<{
   scope: WorkspaceScope
@@ -131,7 +132,8 @@ function executor(input: {
       }
       const output = outputFor(task.id)
       options.budget.settleCall(reservation, output)
-      const gateway = task.agentId === 'character'
+      const skill = resolveAgentSkillV1(task.agentId, task.skillId)
+      const gateway = skill.contextGateway?.rollout === 'required'
         ? await prepareRequiredMasterGatewayFixtureV1({
             scope: options.scope,
             worldGroupId: options.worldGroupId,

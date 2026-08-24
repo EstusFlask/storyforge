@@ -339,6 +339,7 @@ export function useDetailedOutlineGenerationController(
     aiConfig,
     creativeReliabilityEnabled,
     creativeQualityMode,
+    currentDetailed?.scenes,
     selectedOutlineNodeId,
     projectId,
     worldGroupId,
@@ -430,7 +431,6 @@ export function useDetailedOutlineGenerationController(
   }, [
     adoptDetailedPatch,
     ai,
-    buildDetailContext,
     enhanceAI,
     chapterSummary,
     currentDetailed?.scenes,

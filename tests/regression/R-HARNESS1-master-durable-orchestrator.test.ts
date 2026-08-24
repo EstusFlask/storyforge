@@ -37,6 +37,7 @@ import type { MasterAgentPlan } from '../../src/lib/agent/orchestrator'
 import type { WorkspaceScope } from '../../src/lib/types'
 import { prepareRequiredMasterGatewayFixtureV1 } from '../helpers/master-agent-gateway'
 import { generateWorkCode, generateWorkspaceUid } from '../../src/lib/memory/identity'
+import { backfillResourceUidsV1 } from '../../src/lib/context-gateway/resource-identity'
 
 async function createWorkspace(label: string): Promise<{
   scope: WorkspaceScope
@@ -208,13 +209,13 @@ describe.sequential('R-HARNESS1-master-durable-orchestrator · 主 Agent durable
       worldGroupId: fixture.worldGroupId,
       plan: withPerspective,
       budgetEvidence,
-    }).permissions.contextSourceKeys).toContain('characterKnowledge')
+    }).permissions.contextSourceKeys).toEqual(['ragSelection'])
     expect(buildMasterAgentRunContractV1({
       scope: fixture.scope,
       worldGroupId: fixture.worldGroupId,
       plan: withoutPerspective,
       budgetEvidence,
-    }).permissions.contextSourceKeys).not.toContain('characterKnowledge')
+    }).permissions.contextSourceKeys).toEqual(['ragSelection'])
     expect(() => parseMasterAgentPlanV1({
       summary: '无效视角。',
       tasks: [{
@@ -604,6 +605,7 @@ describe.sequential('R-HARNESS1-master-durable-orchestrator · 主 Agent durable
       createdAt: Date.now(),
       updatedAt: Date.now(),
     } as any) as number
+    await backfillResourceUidsV1(fixture.scope.projectId)
     const prepared = await prepareOutlineCopilot({
       projectId: fixture.scope.projectId,
       scope: fixture.scope,
@@ -638,13 +640,19 @@ describe.sequential('R-HARNESS1-master-durable-orchestrator · 主 Agent durable
       })
       const draft = JSON.stringify(items)
       options.budget.settleCall(reservation, draft)
+      const gateway = await prepareRequiredMasterGatewayFixtureV1({
+        scope: options.scope,
+        worldGroupId: options.worldGroupId,
+        executionTrace: options.executionTrace,
+      }, task, draft)
       await options.executionTrace.candidateReady(task, {
         payload: {
           version: 1,
           taskId: task.id,
           agentId: task.agentId,
           label: '章节大纲',
-          contextSources: ['storyCore'],
+          contextSources: gateway.contextSources,
+          contextEvidence: gateway.contextEvidence,
           baseSnapshot: prepared.snapshot,
           outlineMode: prepared.mode,
           outlineParentId: prepared.parentVolumeId,
@@ -654,6 +662,7 @@ describe.sequential('R-HARNESS1-master-durable-orchestrator · 主 Agent durable
         draft,
         runtimeNode: {} as any,
         runtimeOutput: draft,
+        contextGatewayRuntime: gateway.contextGatewayRuntime,
       })
     }})
     const candidate = result.candidates[0]
@@ -718,6 +727,7 @@ describe.sequential('R-HARNESS1-master-durable-orchestrator · 主 Agent durable
         order: 0,
         updatedAt: Date.now(),
       } as any) as number
+      await backfillResourceUidsV1(fixture.scope.projectId)
       const prepared = await prepareProseCopilot({
         projectId: fixture.scope.projectId,
         scope: fixture.scope,
@@ -748,13 +758,19 @@ describe.sequential('R-HARNESS1-master-durable-orchestrator · 主 Agent durable
           maxOutputTokens: 100,
         })
         options.budget.settleCall(reservation, draft)
+        const gateway = await prepareRequiredMasterGatewayFixtureV1({
+          scope: options.scope,
+          worldGroupId: options.worldGroupId,
+          executionTrace: options.executionTrace,
+        }, task, draft)
         await options.executionTrace.candidateReady(task, {
           payload: {
             version: 1,
             taskId: task.id,
             agentId: task.agentId,
             label: '第一章正文',
-            contextSources: ['chapterOutline'],
+            contextSources: gateway.contextSources,
+            contextEvidence: gateway.contextEvidence,
             baseSnapshot: prepared.snapshot,
             proseOperation: 'generate',
             proseOutlineNodeId: chapterOutlineId,
@@ -764,6 +780,7 @@ describe.sequential('R-HARNESS1-master-durable-orchestrator · 主 Agent durable
           draft,
           runtimeNode: {} as any,
           runtimeOutput: draft,
+          contextGatewayRuntime: gateway.contextGatewayRuntime,
         })
       }})
       const candidate = result.candidates[0]

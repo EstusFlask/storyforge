@@ -693,7 +693,7 @@ function semanticReviewTaskIdsForPlan(plan: MasterAgentPlan): string[] {
 
 function requiredContextGatewayWriteTargetForTaskV1(task: MasterAgentTask): string | undefined {
   const skill = resolveAgentSkillV1(task.agentId, task.skillId)
-  const writeTarget = skill.executionMode === 'worldview-field'
+  const specializedWriteTarget = skill.executionMode === 'worldview-field'
     ? `worldviews.${resolveWorldviewAgentFieldV1(task.instruction)}`
     : skill.executionMode === 'story-core'
       ? `storyCores.${resolveStoryCoreFieldV1(task.instruction)}`
@@ -706,7 +706,17 @@ function requiredContextGatewayWriteTargetForTaskV1(task: MasterAgentTask): stri
       : task.agentId === 'character' && skill.executionMode === 'lifecycle'
         ? 'characters.narrativeStatus'
     : undefined
-  return isContextGatewayRequiredForWriteTargetV1(skill, writeTarget) ? writeTarget : undefined
+  if (specializedWriteTarget
+    && isContextGatewayRequiredForWriteTargetV1(skill, specializedWriteTarget)) {
+    return specializedWriteTarget
+  }
+  // Required Gateway rollout is a Skill contract, not a hard-coded list of
+  // domains. Once outline/detail/prose Skills move to required, the Master
+  // Agent must derive their canary target from the same frozen write registry
+  // instead of silently retaining the pre-migration world/character allowlist.
+  return skill.writeTargets
+    .flatMap(target => target.fields.map(field => `${target.table}.${field}`))
+    .find(target => isContextGatewayRequiredForWriteTargetV1(skill, target))
 }
 
 export function buildMasterAgentRunContractV1(input: {
