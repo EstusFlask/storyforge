@@ -32,6 +32,8 @@ const entrypoints = [
   'src/lib/evals/agent-harness/paired-workflow.ts',
   // HARNESS-28 is the headless long-consistency fixture/verifier/artifact boundary; it remains report-only.
   'src/lib/evals/long-consistency/index.ts',
+  // PHASE4 is a headless engineering-scale gate; it remains report-only and never writes author Canon.
+  'src/lib/evals/index.ts',
   // FLOW-2 compatibility workspace remains intentionally reachable for old graphs and migration tests
   // while the product entry points use NodeAuthoringWorkspace.
   'src/components/node-flow/NodeModeWorkspace.tsx',

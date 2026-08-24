@@ -6,7 +6,7 @@ import {
   LONG_FORM_SCALE_TIERS_V1,
   verifyLongFormScaleGateArtifactV1,
   type LongFormScaleTierV1,
-} from '../../src/lib/evals/long-form-scale-gate'
+} from '../../src/lib/evals'
 import { prepareProseGatewayAssemblyV1 } from '../../src/lib/prose/gateway-context'
 import { generateWorkspaceUid } from '../../src/lib/memory/identity'
 import { ensureWorkspaceOwnership } from '../../src/lib/world-engine/ownership'
