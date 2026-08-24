@@ -916,6 +916,12 @@ export interface ExecuteMasterAgentPlanInput {
   signal?: AbortSignal
   completedTaskOutputs?: Readonly<Record<string, string>>
   completedTaskAssumptions?: Readonly<Record<string, readonly CreativeAssumptionV1[]>>
+  /**
+   * Tasks whose candidates have crossed the author-confirmation boundary and
+   * have been committed to Canon.  `staged-author-confirmed` uses this set as
+   * an execution barrier; persisted candidate output alone is not authority.
+   */
+  authorConfirmedTaskIds?: readonly string[]
   /** Ephemeral, caller-authorized connection freeze; never persisted in the plan or RunContract. */
   taskConfigOverrides?: Readonly<Record<string, AIConfig>>
   executionTrace?: MasterAgentExecutionTrace
@@ -957,9 +963,15 @@ async function executeSequentialMasterAgentPlan(
     runtimeAssumptions.set(taskId, scopeRuntimeAssumptionsV1(taskId, assumptions))
   }
   const orderedTasks = topologicalTasks(input.plan)
+  const stagedAuthorConfirmed = input.plan.workflow?.workflowId === 'staged-author-confirmed'
+  const authorConfirmedTaskIds = new Set(input.authorConfirmedTaskIds ?? [])
   for (let taskIndex = 0; taskIndex < orderedTasks.length; taskIndex += 1) {
     const task = orderedTasks[taskIndex]
     if (outputs.has(task.id)) continue
+    if (
+      stagedAuthorConfirmed
+      && task.dependsOn.some(taskId => !authorConfirmedTaskIds.has(taskId))
+    ) continue
     if (input.signal?.aborted) throw new DOMException('Aborted', 'AbortError')
     await input.executionTrace?.taskStarted?.(task)
     await input.onTask?.(task, 'running')
@@ -976,19 +988,32 @@ async function executeSequentialMasterAgentPlan(
           outputHash: await hashCanonicalValue(output),
         }
       }))
-      const upstream = task.dependsOn
-        .map(id => outputs.get(id))
-        .filter((value): value is string => Boolean(value?.trim()))
-        .join('\n\n')
-      const inheritedAssumptions = mergeProvisionalAssumptionsV1(
-        ...task.dependsOn.map(id => runtimeAssumptions.get(id) ?? []),
-      )
+      // A staged downstream task must re-read author-confirmed Canon through
+      // its registered Context Gateway.  Candidate prose and provisional
+      // assumptions remain lineage evidence, never downstream context.
+      const upstream = stagedAuthorConfirmed
+        ? ''
+        : task.dependsOn
+            .map(id => outputs.get(id))
+            .filter((value): value is string => Boolean(value?.trim()))
+            .join('\n\n')
+      const inheritedAssumptions = stagedAuthorConfirmed
+        ? []
+        : mergeProvisionalAssumptionsV1(
+            ...task.dependsOn.map(id => runtimeAssumptions.get(id) ?? []),
+          )
       const skill = resolveAgentSkillV1(task.agentId, task.skillId)
       const executionBinding = createAgentSkillExecutionBindingV1(skill)
       const contextProfile = contextProfiles[skill.contextTaskKind]
       const budgetSnapshot = budget.snapshot()
       const pendingGenerationCalls = runtime.requiredFutureModelCalls
-        ?? orderedTasks.slice(taskIndex).filter(item => !outputs.has(item.id)).length
+        ?? orderedTasks.slice(taskIndex).filter(item => (
+          !outputs.has(item.id)
+          && (
+            !stagedAuthorConfirmed
+            || item.dependsOn.every(taskId => authorConfirmedTaskIds.has(taskId))
+          )
+        )).length
       const contextCompressionRuntime = {
         budget,
         requiredFutureModelCalls: pendingGenerationCalls

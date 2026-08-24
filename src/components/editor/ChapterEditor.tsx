@@ -36,6 +36,10 @@ import { assembleContext } from '../../lib/registry/assemble-context'
 import { prepareProseGatewayAssemblyV1 } from '../../lib/prose/gateway-context'
 import { resolveChapterDisplayMeta } from '../../lib/outline/chapter-display'
 import { pickBestChapterForOutline } from '../../lib/chapters/selectors'
+import {
+  buildFutureEvolutionPlanV1,
+  type FutureEvolutionPlanV1,
+} from '../../lib/outline/future-evolution'
 import { useCreativeRulesStore } from '../../stores/project-singletons'
 import { useStoryArcStore } from '../../stores/story-arc'
 import { useForeshadowStore } from '../../stores/foreshadow'
@@ -298,6 +302,7 @@ export default function ChapterEditor({ project, outlineNodeId }: Props) {
   const [analyzingImpact, setAnalyzingImpact] = useState(false)
   const [impactGraph, setImpactGraph] = useState<EditImpactGraphV1 | null>(null)
   const [impactRemediationPlan, setImpactRemediationPlan] = useState<ImpactRemediationPlanV1 | null>(null)
+  const [futureEvolutionPlan, setFutureEvolutionPlan] = useState<FutureEvolutionPlanV1 | null>(null)
   const [impactRemediationBusy, setImpactRemediationBusy] = useState(false)
   const [impactRemediationReceipt, setImpactRemediationReceipt] = useState<string | null>(null)
   const [impactRemediationError, setImpactRemediationError] = useState('')
@@ -400,6 +405,7 @@ export default function ChapterEditor({ project, outlineNodeId }: Props) {
     let active = true
     setImpactGraph(null)
     setImpactRemediationPlan(null)
+    setFutureEvolutionPlan(null)
     setImpactRemediationReceipt(null)
     setImpactRemediationError('')
     setImpactPostCorrectionReplan(null)
@@ -1970,9 +1976,16 @@ export default function ChapterEditor({ project, outlineNodeId }: Props) {
       const graph = await buildEditImpactGraphV1(project.id, currentChapter.id)
       const remediationPlan = await buildImpactRemediationPlanV1(graph)
       const impactScope = await resolveScopeLike(project.id)
-      const reviewRecords = await readImpactAuthorReviewsV1({ scope: impactScope, plan: remediationPlan })
+      const [reviewRecords, futurePlan] = await Promise.all([
+        readImpactAuthorReviewsV1({ scope: impactScope, plan: remediationPlan }),
+        buildFutureEvolutionPlanV1({
+          scope: impactScope,
+          worldGroupId: chapterWorldGroupId ?? null,
+        }),
+      ])
       setImpactGraph(graph)
       setImpactRemediationPlan(remediationPlan)
+      setFutureEvolutionPlan(futurePlan)
       setImpactPostCorrectionReplan(null)
       setImpactDownstreamSchedule(null)
       setImpactRemediationReceipt(null)
@@ -2009,6 +2022,7 @@ export default function ChapterEditor({ project, outlineNodeId }: Props) {
         demotedFacts > 0 ? `其中 ${demotedFacts} 条证据已失效→标记 stale 待复核` : '证据均仍成立',
         `建议复核后续 ${graph.downstreamChapterIds.length} 章、${graph.nodes.filter(node => node.kind === 'summary').length} 个摘要节点`,
         `治理计划 ${remediationPlan.counts.deterministic} 项可确定性重建、${remediationPlan.counts.authorConfirmed} 项须作者确认`,
+        `未来边界保护 ${futurePlan.frontier.protectedOutlineNodeIds.length} 章、允许继续规划 ${futurePlan.frontier.futureOutlineNodeIds.length} 章`,
         `证据指纹 ${graph.graphHash.slice(0, 12)}`,
       ]
       setImpactInfo(parts.join('；'))
@@ -2030,6 +2044,7 @@ export default function ChapterEditor({ project, outlineNodeId }: Props) {
     setImpactInfo(null)
     setImpactGraph(null)
     setImpactRemediationPlan(null)
+    setFutureEvolutionPlan(null)
     setImpactPostCorrectionReplan(null)
     setImpactDownstreamSchedule(null)
     setImpactRemediationReceipt(null)
@@ -3300,6 +3315,7 @@ export default function ChapterEditor({ project, outlineNodeId }: Props) {
           analyzingImpact={analyzingImpact}
           impactInfo={impactInfo}
           impactRemediationPlan={impactRemediationPlan}
+          futureEvolutionPlan={futureEvolutionPlan}
           impactDownstreamSchedule={impactDownstreamSchedule}
           impactRemediationBusy={impactRemediationBusy}
           impactRemediationReceipt={impactRemediationReceipt}

@@ -2065,10 +2065,20 @@ export async function runDurableMasterAgentPlanV1(
   }
   const trace: MasterAgentExecutionTrace = {
     async taskStarted(task) {
-      activeTasks.set(task.id, task)
       const stepId = taskStepId(task.id)
       let step = snapshot.projection.steps[stepId]
       if (!step) fail(`主 Agent durable run 缺少步骤 ${stepId}`)
+      if (plan.workflow?.workflowId === 'staged-author-confirmed') {
+        const unconfirmedDependencies = task.dependsOn.filter(taskId => (
+          snapshot.projection.steps[taskStepId(taskId)]?.status !== 'succeeded'
+        ))
+        if (unconfirmedDependencies.length) {
+          fail(
+            `主 Agent 分阶段任务 ${task.id} 的上游 ${unconfirmedDependencies.join('、')} 尚未完成作者采纳，已阻止下游模型调用`,
+          )
+        }
+      }
+      activeTasks.set(task.id, task)
       if (step.status === 'awaiting_confirmation' || step.status === 'succeeded') {
         fail(`主 Agent durable run 步骤 ${stepId} 已有候选或已完成，不得重复调用`)
       }
@@ -2626,6 +2636,9 @@ export async function runDurableMasterAgentPlanV1(
       budget,
       signal: input.signal,
       completedTaskOutputs: restored.outputs,
+      authorConfirmedTaskIds: plan.tasks
+        .filter(task => snapshot.projection.steps[taskStepId(task.id)]?.status === 'succeeded')
+        .map(task => task.id),
       completedTaskAssumptions: Object.fromEntries(restored.candidates.map(candidate => [
         candidate.payload.taskId,
         candidate.payload.creativeArtifact?.assumptions

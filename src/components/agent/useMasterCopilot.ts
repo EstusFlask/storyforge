@@ -681,6 +681,35 @@ export function useMasterCopilot(input: {
           worldGroupId,
         })
         message = adoption.message
+        if (
+          adoption.snapshot.projection.state === 'running'
+          && Object.values(adoption.snapshot.projection.steps).some(step => step.status === 'scheduled')
+        ) {
+          try {
+            const advanced = await runDurableMasterAgentPlanV1({
+              scope: workspaceScope!,
+              worldGroupId,
+              runId: persistedCandidate.payload.runId!,
+              onTask: recordTask,
+            })
+            const generated = advanced.candidates.filter(item => (
+              item.event.id != null
+              && item.event.id !== persistedCandidate.event.id
+              && item.runtime != null
+            ))
+            for (const item of generated) {
+              runtimeCandidates.current.set(item.event.id!, item.runtime!)
+            }
+            if (generated.length) {
+              message = `${message} 已基于采纳后的最新正式内容生成下一阶段候选。`
+            }
+          } catch (advanceError) {
+            message = `${message} 下一阶段尚未生成，可从当前运行继续：${
+              advanceError instanceof Error ? advanceError.message : String(advanceError)
+            }`
+            setRecoveryAvailable(true)
+          }
+        }
         const pendingLifecycle = buildPendingHarnessLifecycleEvidenceV1({
           runId: persistedCandidate.payload.runId,
           candidateEventId: persistedCandidate.event.id,
@@ -796,7 +825,7 @@ export function useMasterCopilot(input: {
       if (shouldReload) await reload(conversationId)
       notifyMasterCopilotSync(scopeKey)
     }
-  }, [busy, candidateDraftKey, conversationId, project.id, reload, scopeKey, workspaceScope, worldGroupId])
+  }, [busy, candidateDraftKey, conversationId, project.id, recordTask, reload, scopeKey, workspaceScope, worldGroupId])
 
   const stop = useCallback(() => abortRef.current?.abort(), [])
 

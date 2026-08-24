@@ -16,6 +16,7 @@ async function mount(patch: Record<string, unknown> = {}) {
     analyzingImpact: false,
     impactInfo: null,
     impactRemediationPlan: null,
+    futureEvolutionPlan: null,
     impactDownstreamSchedule: null,
     impactRemediationBusy: false,
     impactRemediationReceipt: null,
@@ -336,6 +337,36 @@ describe('AUDIT-6 / HEALTH-4 · 正文编辑器工具栏', () => {
     await act(async () => button(host, '刷新计划').click())
     expect(props.onReplanImpactRemediation).toHaveBeenCalledOnce()
     expect(props.onCreateImpactPatch).not.toHaveBeenCalled()
+  })
+
+  it('把未来保护边界、阶段链和产品反馈回路显示给作者', async () => {
+    const { host } = await mount({
+      impactInfo: '未来演化计划已生成',
+      futureEvolutionPlan: {
+        frontier: {
+          protectedOutlineNodeIds: [1, 2],
+          futureOutlineNodeIds: [3, 4, 5],
+        },
+        futureTargets: [
+          { detailStatus: 'present' },
+          { detailStatus: 'missing' },
+          { detailStatus: 'missing' },
+        ],
+        stages: [
+          { id: 'foundation', label: '未来故事线与新角色', readiness: 'ready', purpose: '新增未来基座' },
+          { id: 'detail', label: '未来细纲', readiness: 'ready', purpose: '生成未写细纲' },
+          { id: 'product-projection', label: '游戏、跑团与角色聊天投影', readiness: 'empty-target', purpose: '消费发布' },
+        ],
+        planHash: 'f'.repeat(64),
+      },
+    })
+    expect(host.querySelector('[aria-label="FUTURE-1 未来演化边界"]')).not.toBeNull()
+    expect(host.textContent).toContain('历史保护 2 章')
+    expect(host.textContent).toContain('未来章纲 3 章')
+    expect(host.textContent).toContain('缺细纲 2 章')
+    expect(host.textContent).toContain('未来故事线与新角色')
+    expect(host.textContent).toContain('游戏、跑团与角色聊天投影（待上游）')
+    expect(host.textContent).toContain('反馈重新进入本循环')
   })
 
   it('作者复核项只转发决定和理由，不冒充正式修正', async () => {

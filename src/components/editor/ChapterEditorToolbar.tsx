@@ -9,6 +9,7 @@ import type {
   ImpactReviewDecisionV1,
 } from '../../lib/agent/run/impact-review-durable'
 import type { ImpactRemediationPlanV1 } from '../../lib/consistency/impact-remediation-plan'
+import type { FutureEvolutionPlanV1 } from '../../lib/outline/future-evolution'
 
 interface ImpactPatchTarget {
   id: number
@@ -43,6 +44,7 @@ interface Props {
   analyzingImpact: boolean
   impactInfo: string | null
   impactRemediationPlan: ImpactRemediationPlanV1 | null
+  futureEvolutionPlan?: FutureEvolutionPlanV1 | null
   impactDownstreamSchedule: ImpactDownstreamScheduleV1 | null
   impactRemediationBusy: boolean
   impactRemediationReceipt: string | null
@@ -125,6 +127,7 @@ export default function ChapterEditorToolbar({
   analyzingImpact,
   impactInfo,
   impactRemediationPlan,
+  futureEvolutionPlan = null,
   impactDownstreamSchedule,
   impactRemediationBusy,
   impactRemediationReceipt,
@@ -272,6 +275,36 @@ export default function ChapterEditorToolbar({
                 <RefreshCw className={`h-3 w-3 ${impactRemediationBusy ? 'animate-spin' : ''}`} />
                 刷新计划
               </button>
+            </div>
+          )}
+          {futureEvolutionPlan && (
+            <div
+              aria-label="FUTURE-1 未来演化边界"
+              className="space-y-1.5 rounded border border-emerald-400/20 bg-emerald-400/5 px-2 py-2 text-[11px] text-text-secondary"
+            >
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                <span className="text-emerald-200">未来演化只向前</span>
+                <span>历史保护 {futureEvolutionPlan.frontier.protectedOutlineNodeIds.length} 章</span>
+                <span>未来章纲 {futureEvolutionPlan.frontier.futureOutlineNodeIds.length} 章</span>
+                <span>缺细纲 {futureEvolutionPlan.futureTargets.filter(target => target.detailStatus === 'missing').length} 章</span>
+                <span className="ml-auto text-text-muted">计划 {futureEvolutionPlan.planHash.slice(0, 12)}</span>
+              </div>
+              <div className="flex flex-wrap gap-1">
+                {futureEvolutionPlan.stages.map((stage, index) => (
+                  <span
+                    key={stage.id}
+                    className={`rounded border px-1.5 py-0.5 ${stage.readiness === 'ready'
+                      ? 'border-emerald-400/20 text-emerald-100/90'
+                      : 'border-border text-text-muted'}`}
+                    title={`${stage.purpose}；进入下一阶段前必须完成作者采纳并重算计划`}
+                  >
+                    {index + 1}. {stage.label}{stage.readiness === 'empty-target' ? '（待上游）' : ''}
+                  </span>
+                ))}
+              </div>
+              <div className="text-emerald-100/70">
+                每一阶段只使用注册 Skill；上游采纳后重读最新 Canon。游戏、跑团与角色聊天只消费不可变发布，反馈重新进入本循环。
+              </div>
             </div>
           )}
           {impactDownstreamSchedule && (

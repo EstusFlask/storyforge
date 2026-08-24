@@ -84,6 +84,17 @@ function plan(): MasterAgentPlan {
   }
 }
 
+function stagedPlan(): MasterAgentPlan {
+  return {
+    ...plan(),
+    workflow: {
+      version: 1,
+      workflowId: 'staged-author-confirmed',
+      reasonCodes: ['outline-prose-confirmation-barrier', 'multiple-explicit-domains'],
+    },
+  }
+}
+
 async function executeFixture(options: any): Promise<void> {
   for (const task of options.plan.tasks) {
     if (options.completedTaskOutputs?.[task.id]) continue
@@ -187,6 +198,91 @@ describe.sequential('R-HARNESS22 · 主 Agent 同代依赖 join', { timeout: 15_
       .projection.steps['master:character-1']
     expect(downstreamStep.status).toBe('awaiting_confirmation')
     expect(downstreamStep.confirmation).toBeUndefined()
+  })
+
+  it('作者确认分阶段工作流在上游采纳前不启动下游，采纳后从最新 Canon 继续', async () => {
+    const fixture = await createWorkspace('分阶段确认屏障')
+    const conversation = await getOrCreateAgentConversation({
+      projectId: fixture.scope.projectId,
+      worldGroupId: fixture.worldGroupId,
+      scope: fixture.scope,
+    })
+    const started: string[] = []
+    const observedCanon: string[] = []
+    const executeStaged = async (options: any): Promise<void> => {
+      const confirmed = new Set<string>(options.authorConfirmedTaskIds ?? [])
+      for (const task of options.plan.tasks) {
+        if (options.completedTaskOutputs?.[task.id]) continue
+        if (task.dependsOn.some((taskId: string) => !confirmed.has(taskId))) continue
+        started.push(task.id)
+        if (task.id === 'character-1') {
+          observedCanon.push((await db.worldviews.toArray())[0]?.worldOrigin ?? '')
+        }
+        await emitFixtureTask(options, task)
+      }
+    }
+
+    const first = await runDurableMasterAgentPlanV1({
+      scope: fixture.scope,
+      worldGroupId: fixture.worldGroupId,
+      conversationId: conversation.id,
+      plan: stagedPlan(),
+      budget: new AgentTeamBudgetTracker('balanced'),
+    }, { execute: executeStaged as any })
+    expect(started).toEqual(['world-1'])
+    expect(first.candidates.map(item => item.payload.taskId)).toEqual(['world-1'])
+    expect(first.projection.steps['master:character-1']).toMatchObject({ status: 'scheduled', attempt: 0 })
+
+    const world = first.candidates[0]
+    const revisedWorld = '潮汐改由月轮与海底钟阵共同维持，旧海神只是失真的民间传说。'
+    await updateAgentEventCandidate(
+      world.event.id!,
+      fixture.scope.projectId,
+      revisedWorld,
+      fixture.scope,
+    )
+    await commitMasterAgentCandidateAdoptionV1({
+      scope: fixture.scope,
+      runId: first.runId,
+      candidateEventId: world.event.id!,
+    })
+
+    const resumed = await runDurableMasterAgentPlanV1({
+      scope: fixture.scope,
+      worldGroupId: fixture.worldGroupId,
+      runId: first.runId,
+    }, { execute: executeStaged as any })
+    expect(started).toEqual(['world-1', 'character-1'])
+    expect(observedCanon).toEqual([revisedWorld])
+    expect(resumed.candidates.map(item => item.payload.taskId)).toEqual(['world-1', 'character-1'])
+  })
+
+  it('durable trace 对绕过分阶段屏障的执行器 fail-closed，且下游没有 model.requested', async () => {
+    const fixture = await createWorkspace('恶意绕过分阶段屏障')
+    const conversation = await getOrCreateAgentConversation({
+      projectId: fixture.scope.projectId,
+      worldGroupId: fixture.worldGroupId,
+      scope: fixture.scope,
+    })
+    await expect(runDurableMasterAgentPlanV1({
+      scope: fixture.scope,
+      worldGroupId: fixture.worldGroupId,
+      conversationId: conversation.id,
+      plan: stagedPlan(),
+      budget: new AgentTeamBudgetTracker('balanced'),
+    }, {
+      execute: (async (options: any) => {
+        await emitFixtureTask(options, options.plan.tasks[0])
+        await options.executionTrace.taskStarted(options.plan.tasks[1])
+      }) as any,
+    })).rejects.toThrow('尚未完成作者采纳')
+
+    const run = (await db.agentRuns.toArray())[0]
+    const snapshot = await readAgentRunV1(fixture.scope, run.id!)
+    expect(snapshot.events.some(event => (
+      event.type === 'model.requested'
+      && event.payload.stepId === 'master:character-1'
+    ))).toBe(false)
   })
 
   it('作者编辑上游后可完成上游采纳，但旧版本生成的下游被确定性阻断', async () => {
