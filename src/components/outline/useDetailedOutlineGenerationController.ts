@@ -2,7 +2,6 @@ import { useCallback, useEffect, useState } from 'react'
 import { useAIStream } from '../../hooks/useAIStream'
 import { useAIConfigStore } from '../../stores/ai-config'
 import { createAISessionKey } from '../../stores/ai-generation-session'
-import { assembleContext } from '../../lib/registry/assemble-context'
 import { adopt } from '../../lib/registry/adopt'
 import { db } from '../../lib/db/schema'
 import { resolveScopeLike } from '../../lib/world-engine/scope'
@@ -14,10 +13,11 @@ import {
 import {
   buildAgentSkillInputGuidanceV1,
   getAgentSkillV1,
-  resolveAgentSkillInputStateV1,
 } from '../../lib/agent/skill-registry'
+import { projectContextGatewayInputStateV1 } from '../../lib/agent/context-gateway-input'
 import {
   buildDetailedOutlineCopilotPatchV1,
+  buildDetailedOutlineSceneMergeGuidanceV1,
   createDetailedOutlineCreativeArtifactV1,
   detailedOutlinePostStateMatchesPatchV1,
   revalidateDetailedOutlineCreativeDraftV1,
@@ -30,20 +30,17 @@ import {
 } from '../../lib/agent/narrative-brief'
 import { resolveRequestConfig } from '../../lib/ai/client'
 import {
-  beginDetailedOutlineGenerationStepV1,
+  beginDetailedOutlineGenerationGatewayStepV1,
   commitDetailedOutlineGenerationAdoptionV1,
   createDetailedOutlineGenerationDurableRunV1,
-  detailedOutlineManifestV1,
+  finalizeDetailedOutlineGenerationGatewayStepV1,
   failDetailedOutlineGenerationStepV1,
-  hashDetailedOutlineGenerationCandidateV1,
   hashDetailedOutlineSourceSummaryV1,
   persistDetailedOutlineGenerationCandidateV1,
   readLatestDetailedOutlineGenerationCandidateV1,
   recordDetailedOutlineGenerationCandidateV1,
-  recordDetailedOutlineGenerationModelOutputV1,
   rejectDetailedOutlineGenerationCandidateV1,
   DETAILED_OUTLINE_GENERATION_CANDIDATE_TYPE_V1,
-  DETAILED_OUTLINE_GENERATION_SOURCE_KEYS_V1,
   DETAILED_OUTLINE_GENERATION_STEP_ID_V1,
   type DetailedOutlineGenerationCandidateV1,
   type DetailedOutlineGenerationOperationV1,
@@ -54,6 +51,8 @@ import {
   assertWorkspaceContentRevisionFreshV1,
   captureWorkspaceContentRevisionV1,
 } from '../../lib/authoring/content-revision'
+import { prepareDetailedOutlineGatewayAssemblyV1 } from '../../lib/outline/detail-gateway-context'
+import { assertDetailedOutlineTargetsUnwrittenFutureV1 } from '../../lib/outline/future-boundary'
 
 interface PendingDetailedOutlineCandidate {
   candidate: DetailedOutlineGenerationCandidateV1
@@ -169,29 +168,26 @@ export function useDetailedOutlineGenerationController(
     outlineNodeId: number,
     scope?: WorkspaceScope,
     contextWorldGroupId: number | null = worldGroupId,
+    operation: DetailedOutlineGenerationOperationV1 = 'enhanced',
   ) => {
-    const assembled = await assembleContext({
+    const assembled = await prepareDetailedOutlineGatewayAssemblyV1({
       projectId,
       scope,
       worldGroupId: contextWorldGroupId,
       outlineNodeId,
-      provider: aiConfig.provider,
-      model: aiConfig.model,
-      sourceKeys: [...DETAILED_OUTLINE_GENERATION_SOURCE_KEYS_V1],
+      operation,
+      authorRequest: operation === 'scenes'
+        ? `把《${chapterTitle}》拆成可执行场景。`
+        : `完善《${chapterTitle}》的场景、冲突、情绪变化和结尾压力。`,
+      config: aiConfig,
     })
-    const characterIndex = assembled.included.indexOf('characters')
-    const foreshadowIndex = assembled.included.indexOf('foreshadows')
     return {
-      worldContext: assembled.segments
-        .filter((_, index) => index !== characterIndex && index !== foreshadowIndex)
-        .map(segment => segment.content)
-        .filter(Boolean)
-        .join('\n\n'),
-      characterContext: characterIndex >= 0 ? assembled.segments[characterIndex]?.content ?? '' : '',
-      foreshadowContext: foreshadowIndex >= 0 ? assembled.segments[foreshadowIndex]?.content ?? '' : '',
+      worldContext: assembled.text,
+      characterContext: '',
+      foreshadowContext: '',
       assembled,
     }
-  }, [aiConfig.model, aiConfig.provider, projectId, worldGroupId])
+  }, [aiConfig, chapterTitle, projectId, worldGroupId])
 
   const run = useCallback(async (operation: DetailedOutlineGenerationOperationV1) => {
     const outlineNodeId = selectedOutlineNodeId
@@ -199,11 +195,18 @@ export function useDetailedOutlineGenerationController(
     await flushPendingEditsV1()
     const scope = await resolveScopeLike(projectId)
     const contentRevision = await captureWorkspaceContentRevisionV1({ scope, worldGroupId })
-    const context = await buildDetailContext(outlineNodeId, scope)
+    const context = await buildDetailContext(outlineNodeId, scope, worldGroupId, operation)
     await assertWorkspaceContentRevisionFreshV1(contentRevision, { scope, worldGroupId })
     const skill = getAgentSkillV1('outline.details', 'outline')
-    const inputState = resolveAgentSkillInputStateV1(skill, [context.assembled])
-    const guidance = buildAgentSkillInputGuidanceV1(skill, inputState)
+    const inputState = projectContextGatewayInputStateV1(
+      skill,
+      context.assembled.contextGatewayExecution,
+      context.assembled,
+    )
+    const guidance = [
+      buildAgentSkillInputGuidanceV1(skill, inputState),
+      buildDetailedOutlineSceneMergeGuidanceV1(currentDetailed?.scenes ?? []),
+    ].filter(Boolean).join('\n\n')
     const baseMessages = operation === 'scenes'
       ? buildDetailSceneGeneratePrompt(
           chapterTitle,
@@ -241,23 +244,20 @@ export function useDetailedOutlineGenerationController(
       outlineNodeId,
       operation,
     })
-    const manifest = await detailedOutlineManifestV1({
-      runId: snapshot.run.id,
+    const begun = await beginDetailedOutlineGenerationGatewayStepV1({
       scope,
+      snapshot,
       worldGroupId,
       outlineNodeId,
       assembled: context.assembled,
-    })
-    snapshot = await beginDetailedOutlineGenerationStepV1({
-      scope,
-      snapshot,
-      contextManifest: manifest,
+      messages,
       binding: {
         operation,
         sourceSummaryHash: await hashDetailedOutlineSourceSummaryV1(chapterSummary),
         promptHash: await hashCanonicalValue(messages),
       },
     })
+    snapshot = begun.snapshot
     const target = operation === 'scenes' ? ai : enhanceAI
     let output = ''
     const startedAt = Date.now()
@@ -270,7 +270,6 @@ export function useDetailedOutlineGenerationController(
           formalEntryId: 'outline.detail.enhance', category: 'detail.enhance', projectId,
         })
       if (!output.trim()) throw new Error('模型没有返回可用的细纲内容。')
-      snapshot = await recordDetailedOutlineGenerationModelOutputV1({ scope, snapshot, output })
     } catch (error) {
       await failDetailedOutlineGenerationStepV1({
         scope,
@@ -280,6 +279,14 @@ export function useDetailedOutlineGenerationController(
       })
       throw error
     }
+    const finalized = await finalizeDetailedOutlineGenerationGatewayStepV1({
+      scope,
+      snapshot,
+      attempt: begun.attempt,
+      output,
+    })
+    snapshot = finalized.snapshot
+    const manifest = finalized.manifest
     const category = operation === 'scenes' ? 'detail.scene' : 'detail.enhance'
     const modelIdentity = resolveRequestConfig(aiConfig, { category }).config
     const creativeArtifact = creativeReliabilityEnabled
@@ -304,20 +311,13 @@ export function useDetailedOutlineGenerationController(
       output,
       outputHash: await hashCanonicalValue(output),
       contextManifestHash: manifest.manifestHash,
+      gatewayEvidenceVersion: 3,
       contentRevision,
       ...(creativeArtifact ? { creativeArtifact, narrativeBrief } : {}),
       workspaceScope: scope,
       createdAt: Date.now(),
     }
-    const candidateHash = await hashDetailedOutlineGenerationCandidateV1({
-      ...baseCandidate,
-      durable: {
-        runId: snapshot.run.id,
-        stepId: DETAILED_OUTLINE_GENERATION_STEP_ID_V1,
-        attempt: 1,
-        candidateHash: '',
-      },
-    })
+    const candidateHash = baseCandidate.outputHash
     const candidate: DetailedOutlineGenerationCandidateV1 = {
       ...baseCandidate,
       durable: {
@@ -403,22 +403,13 @@ export function useDetailedOutlineGenerationController(
       validForeshadowIds,
     })
     const scope = await resolveScopeLike(projectId)
+    await assertDetailedOutlineTargetsUnwrittenFutureV1({ scope, worldGroupId, outlineNodeId })
     await commitDetailedOutlineGenerationAdoptionV1({
       scope,
       runId: pending.candidate.durable.runId,
       candidate: pending.candidate,
       output,
       currentSourceSummaryHash: () => hashDetailedOutlineSourceSummaryV1(chapterSummary),
-      currentContextManifestHash: async () => {
-        const current = await buildDetailContext(outlineNodeId, scope)
-        return (await detailedOutlineManifestV1({
-          runId: pending.candidate.durable.runId,
-          scope,
-          worldGroupId,
-          outlineNodeId,
-          assembled: current.assembled,
-        })).manifestHash
-      },
       adopt: async () => {
         const result = await adoptDetailedPatch(outlineNodeId, patch, scope)
         if (

@@ -43,6 +43,7 @@ export function buildEnhancedDetailPrompt(
 
 输出严格 JSON，不要加 markdown 代码块：
 {
+  "scenePlanMode": "replace|merge-proposal",
   "openingHook": "从上一章结尾自然过渡的开头描述（1-2句）",
   "endingCliffhanger": "本章结尾悬念设计（1-2句）",
   "sceneLocation": "本章主要场景地点",
@@ -51,6 +52,8 @@ export function buildEnhancedDetailPrompt(
   "foreshadowIds": [1, 2],
   "scenes": [
     {
+      "action": "retain|modify|add|delete",
+      "sceneId": "已有场景稳定 ID；add 时省略",
       "title": "场景标题",
       "summary": "一句话概要",
       "location": "地点",
@@ -74,7 +77,8 @@ export function buildEnhancedDetailPrompt(
 2. endingCliffhanger 要吸引读者继续阅读
 3. 出场角色从提供的角色列表中选取合适的（用 ID）
 4. 伏笔关联从伏笔列表中选取本章相关的（用 ID）
-5. 拆分 3-6 个场景，每个场景估算合理字数`
+5. 拆分 3-6 个场景，每个场景估算合理字数
+6. 严格遵守用户消息中的场景协议；已有场景必须逐一声明 retain/modify/delete，新场景声明 add，禁止简单追加`
 
   const parts: string[] = [
     `【章节】${chapterTitle}`,

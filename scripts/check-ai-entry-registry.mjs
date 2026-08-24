@@ -168,14 +168,18 @@ for (const entry of registry.entries ?? []) {
 }
 
 const actualCalls = []
-for (const dir of ['src/components', 'src/hooks', 'src/pages', 'src/lib/generation', 'src/lib/outline']) {
-  for (const file of walk(dir)) {
+const scannedFiles = [
+  ...['src/components', 'src/hooks', 'src/pages', 'src/lib/generation', 'src/lib/outline'].flatMap(dir => walk(dir)),
+  // DETAIL-1: this service is itself a formal generation entry and must not
+  // remain outside the UI/generation scanners merely because it predates them.
+  'src/lib/ai/batch-detail-runner.ts',
+]
+for (const file of [...new Set(scannedFiles)]) {
     if (file === 'src/lib/agent/formal-ai-entry.ts') continue
     const source = fs.readFileSync(path.join(root, file), 'utf8')
     const analysis = analyzeAIEntrySource(source, file)
     actualCalls.push(...analysis.calls)
     failures.push(...analysis.violations)
-  }
 }
 
 const used = new Set()

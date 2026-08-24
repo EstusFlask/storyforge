@@ -25,6 +25,8 @@ const ENHANCED_KEYS = [
   'scenes',
 ] as const
 const SCENE_KEYS = [
+  'action',
+  'sceneId',
   'title',
   'summary',
   'location',
@@ -33,6 +35,10 @@ const SCENE_KEYS = [
   'estimatedWords',
   'characterIds',
 ] as const
+
+const SCENE_ACTIONS = ['retain', 'modify', 'add', 'delete'] as const
+type DetailedSceneActionV1 = typeof SCENE_ACTIONS[number]
+export type DetailedScenePlanModeV1 = 'replace' | 'merge-proposal'
 
 export type DetailedOutlineCopilotOperationV1 = 'scenes' | 'enhanced'
 
@@ -44,14 +50,17 @@ export interface DetailedOutlineCopilotDraftV1 {
   appearingCharacterIds?: number[]
   foreshadowIds?: number[]
   prohibitions?: string[]
+  scenePlanMode: DetailedScenePlanModeV1
   scenes: Array<{
-    title: string
-    summary: string
-    location: string
-    conflict: string
-    pace: ScenePace
-    estimatedWords: number
-    characterIds: number[]
+    action: DetailedSceneActionV1
+    sceneId?: string
+    title?: string
+    summary?: string
+    location?: string
+    conflict?: string
+    pace?: ScenePace
+    estimatedWords?: number
+    characterIds?: number[]
   }>
 }
 
@@ -99,12 +108,28 @@ function stringList(value: unknown, label: string): string[] {
   return items
 }
 
+function parseScenePlanMode(value: unknown): DetailedScenePlanModeV1 {
+  if (value === undefined) return 'replace'
+  if (value !== 'replace' && value !== 'merge-proposal') fail('scenePlanMode 必须是 replace 或 merge-proposal')
+  return value
+}
+
 function parseScenes(value: unknown): DetailedOutlineCopilotDraftV1['scenes'] {
   if (!Array.isArray(value)) fail('scenes 必须是数组')
   if (value.length < 1 || value.length > 12) fail('scenes 数量必须在 1 到 12 之间')
   return value.map((item, index) => {
     if (!item || typeof item !== 'object' || Array.isArray(item)) fail(`scenes[${index}] 必须是对象`)
     const scene = item as Record<string, unknown>
+    exactKeys(scene, SCENE_KEYS, [], `scenes[${index}]`)
+    const actionValue = scene.action === undefined ? 'add' : scene.action
+    if (!SCENE_ACTIONS.includes(actionValue as DetailedSceneActionV1)) fail(`scenes[${index}].action 不在允许范围`)
+    const action = actionValue as DetailedSceneActionV1
+    const sceneId = scene.sceneId === undefined ? undefined : text(scene.sceneId, `scenes[${index}].sceneId`, 200)
+    if ((action === 'retain' || action === 'modify' || action === 'delete') && !sceneId) {
+      fail(`scenes[${index}] 的 ${action} 动作必须声明 sceneId`)
+    }
+    if (action === 'add' && sceneId) fail(`scenes[${index}] 的 add 动作不得伪造 sceneId`)
+    if (action === 'retain' || action === 'delete') return { action, sceneId }
     exactKeys(
       scene,
       SCENE_KEYS,
@@ -121,6 +146,8 @@ function parseScenes(value: unknown): DetailedOutlineCopilotDraftV1['scenes'] {
       fail(`scenes[${index}].estimatedWords 必须是 0 到 100000 的整数`)
     }
     return {
+      action,
+      ...(sceneId ? { sceneId } : {}),
       title,
       summary,
       location,
@@ -157,18 +184,20 @@ export function parseDetailedOutlineCopilotDraftV1(
       target: operation === 'scenes' ? 'detailedOutlines.scenes' : 'detailedOutlines.enhanced',
       root: 'object',
       maxChars: 100_000,
-      allowedRootFields: operation === 'scenes' ? ['scenes'] : [...ENHANCED_KEYS],
+      allowedRootFields: operation === 'scenes' ? ['scenePlanMode', 'scenes'] : ['scenePlanMode', ...ENHANCED_KEYS],
       requiredRootFields: required,
     },
     parse: parsed => {
       const value = parsed as Record<string, unknown>
+      const scenePlanMode = parseScenePlanMode(value.scenePlanMode)
       if (operation === 'scenes') {
-        exactKeys(value, ['scenes'], ['scenes'], '场景拆分候选')
-        return { scenes: parseScenes(value.scenes) }
+        exactKeys(value, ['scenePlanMode', 'scenes'], ['scenes'], '场景拆分候选')
+        return { scenePlanMode, scenes: parseScenes(value.scenes) }
       }
-      exactKeys(value, ENHANCED_KEYS, required, '增强细纲候选')
+      exactKeys(value, ['scenePlanMode', ...ENHANCED_KEYS], required, '增强细纲候选')
       if (!VALID_EMOTION_ARCS.includes(value.emotionArc as EmotionArc)) fail('emotionArc 不在允许范围')
       return {
+        scenePlanMode,
         openingHook: text(value.openingHook, 'openingHook'),
         endingCliffhanger: text(value.endingCliffhanger, 'endingCliffhanger'),
         sceneLocation: text(value.sceneLocation, 'sceneLocation'),
@@ -284,6 +313,97 @@ function filterIds(ids: number[], validIds: ReadonlySet<number>): number[] {
   return ids.filter(id => validIds.has(id))
 }
 
+function sceneContent(
+  operation: DetailedOutlineCopilotDraftV1['scenes'][number],
+  validCharacterIds: ReadonlySet<number>,
+): Omit<DetailedScene, 'sceneId'> {
+  if (operation.action !== 'add' && operation.action !== 'modify') {
+    fail(`${operation.action} 场景没有可写正文`)
+  }
+  const normalized = normalizeParsedScenes([{
+    title: operation.title ?? '',
+    summary: operation.summary ?? '',
+    location: operation.location ?? '',
+    conflict: operation.conflict ?? '',
+    pace: operation.pace ?? 'medium',
+    estimatedWords: operation.estimatedWords ?? 0,
+    characterIds: operation.characterIds ?? [],
+  }], ids => filterIds(ids, validCharacterIds))[0]
+  if (!normalized) fail('场景正文无法归一化')
+  const { sceneId: _sceneId, ...content } = normalized
+  return content
+}
+
+function mergeDetailedScenesV1(input: {
+  planMode: DetailedScenePlanModeV1
+  operations: DetailedOutlineCopilotDraftV1['scenes']
+  currentScenes: readonly DetailedScene[]
+  validCharacterIds: ReadonlySet<number>
+}): DetailedScene[] {
+  if (!input.currentScenes.length) {
+    if (input.planMode !== 'replace') fail('空细纲首次生成必须声明 scenePlanMode=replace')
+    if (input.operations.some(operation => operation.action !== 'add')) fail('首次生成只能声明 add 场景')
+    return normalizeParsedScenes(input.operations.map(operation => ({
+      title: operation.title ?? '',
+      summary: operation.summary ?? '',
+      location: operation.location ?? '',
+      conflict: operation.conflict ?? '',
+      pace: operation.pace ?? 'medium',
+      estimatedWords: operation.estimatedWords ?? 0,
+      characterIds: operation.characterIds ?? [],
+    })), ids => filterIds(ids, input.validCharacterIds))
+  }
+  if (input.planMode !== 'merge-proposal') {
+    fail('已有场景时必须声明 scenePlanMode=merge-proposal，禁止无条件追加或覆盖')
+  }
+  const byId = new Map(input.currentScenes.map(scene => [scene.sceneId, scene]))
+  if (byId.size !== input.currentScenes.length || byId.has('')) fail('已有场景缺少唯一稳定 sceneId')
+  const decisions = new Map<string, DetailedOutlineCopilotDraftV1['scenes'][number]>()
+  const additions: DetailedScene[] = []
+  for (const operation of input.operations) {
+    if (operation.action === 'add') {
+      const normalized = normalizeParsedScenes([{
+        title: operation.title ?? '', summary: operation.summary ?? '', location: operation.location ?? '',
+        conflict: operation.conflict ?? '', pace: operation.pace ?? 'medium',
+        estimatedWords: operation.estimatedWords ?? 0, characterIds: operation.characterIds ?? [],
+      }], ids => filterIds(ids, input.validCharacterIds))[0]
+      if (!normalized) fail('新增场景无法归一化')
+      additions.push(normalized)
+      continue
+    }
+    const sceneId = operation.sceneId!
+    if (!byId.has(sceneId)) fail(`模型返回未知 sceneId ${sceneId}`)
+    if (decisions.has(sceneId)) fail(`sceneId ${sceneId} 被重复声明`)
+    decisions.set(sceneId, operation)
+  }
+  const missing = input.currentScenes.find(scene => !decisions.has(scene.sceneId))
+  if (missing) fail(`已有场景 ${missing.sceneId} 未声明保留、修改或删除`)
+  const merged = input.currentScenes.flatMap(scene => {
+    const decision = decisions.get(scene.sceneId)!
+    if (decision.action === 'delete') return []
+    if (decision.action === 'retain') return [{ ...scene }]
+    return [{ sceneId: scene.sceneId, ...sceneContent(decision, input.validCharacterIds) }]
+  }).concat(additions)
+  const signatures = merged.map(scene => [scene.title, scene.summary, scene.location, scene.conflict]
+    .map(value => value.trim().toLocaleLowerCase()).join('\u0000'))
+  if (new Set(signatures).size !== signatures.length) fail('合并结果包含重复场景')
+  return merged
+}
+
+export function buildDetailedOutlineSceneMergeGuidanceV1(
+  currentScenes: readonly DetailedScene[],
+): string {
+  if (!currentScenes.length) {
+    return '场景协议：输出 scenePlanMode="replace"；每个 scenes 项声明 action="add"，不得提供 sceneId。'
+  }
+  return [
+    '场景协议：已有场景时输出 scenePlanMode="merge-proposal"。',
+    '必须对下面每个 sceneId 恰好声明一次 action="retain"|"modify"|"delete"；新增场景用 action="add" 且不得提供 sceneId。',
+    'retain/delete 只需 action 与 sceneId；modify/add 还需完整 title/summary/location/conflict/pace/estimatedWords/characterIds。',
+    `已有场景：${JSON.stringify(currentScenes)}`,
+  ].join('\n')
+}
+
 export function buildDetailedOutlineCopilotPatchV1(input: {
   raw: string
   operation: DetailedOutlineCopilotOperationV1
@@ -293,13 +413,15 @@ export function buildDetailedOutlineCopilotPatchV1(input: {
   validForeshadowIds: ReadonlySet<number>
 }): Partial<DetailedOutline> {
   const draft = parseDetailedOutlineCopilotDraftV1(input.raw, input.operation)
-  const scenes = normalizeParsedScenes(
-    draft.scenes,
-    ids => filterIds(ids, input.validCharacterIds),
-  )
+  const scenes = mergeDetailedScenesV1({
+    planMode: draft.scenePlanMode,
+    operations: draft.scenes,
+    currentScenes: input.currentScenes,
+    validCharacterIds: input.validCharacterIds,
+  })
   if (input.operation === 'scenes') {
     return {
-      scenes: [...input.currentScenes, ...scenes],
+      scenes,
       lastUsedSummary: input.chapterSummary,
     }
   }

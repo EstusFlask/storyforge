@@ -8,7 +8,9 @@ const INPUT_SOURCE_BY_TABLE: Readonly<Record<string, string>> = {
   storyCores: 'storyCore',
   characters: 'characters',
   storyArcs: 'storyArcs',
+  storylineProgress: 'storylineProgress',
   outlineNodes: 'existingVolumeOutlines',
+  detailedOutlines: 'detailedOutline',
   chapters: 'writtenChapterProgress',
   codexEntries: 'codex',
 }
@@ -61,6 +63,16 @@ export function contextGatewayInputStateSourceKeysV1(
     skill.inputPolicy.sourceKeys.includes('targetCharacter')
     && execution.contextPacket.sourceRefs.some(ref => ref.table === 'characters')
   ) available.add('targetCharacter')
+  if (skill.inputPolicy.sourceKeys.includes('chapterOutline')
+    && execution.contextPacket.sourceRefs.some(ref => ref.table === 'outlineNodes')) {
+    available.add('chapterOutline')
+  }
+  if (skill.inputPolicy.sourceKeys.includes('activeNarrativeBlueprint')
+    && execution.contextPacket.sourceRefs.some(ref => [
+      'narrativeModules', 'narrativeNodes', 'narrativeBeats', 'narrativeChoices',
+    ].includes(ref.table))) {
+    available.add('activeNarrativeBlueprint')
+  }
   return skill.inputPolicy.sourceKeys.filter(key => available.has(key))
 }
 

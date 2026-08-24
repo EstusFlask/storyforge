@@ -7,7 +7,11 @@ import { ToastProvider } from '../../src/components/shared/Toast'
 import ScenePanel from '../../src/components/outline/ScenePanel'
 import { db } from '../../src/lib/db/schema'
 import { readAgentRunV1 } from '../../src/lib/agent/run/event-store'
-import { buildDetailedOutlineGenerationRunContractV1 } from '../../src/lib/agent/run/detailed-outline-generation-durable'
+import {
+  buildDetailedOutlineGenerationRunContractV1,
+  readLatestDetailedOutlineGenerationCandidateV1,
+} from '../../src/lib/agent/run/detailed-outline-generation-durable'
+import { verifyContextGatewayCandidateEvidenceV1 } from '../../src/lib/context-gateway/attempt-evidence'
 import {
   buildDetailedOutlineCopilotPatchV1,
   detailedOutlinePostStateMatchesPatchV1,
@@ -18,6 +22,8 @@ import { useDetailedOutlineStore } from '../../src/stores/detailed-outline'
 import { useCharacterStore } from '../../src/stores/character'
 import { useForeshadowStore } from '../../src/stores/foreshadow'
 import type { Project, WorkspaceScope } from '../../src/lib/types'
+import { generateWorkspaceUid, generateWorkCode } from '../../src/lib/memory/identity'
+import { backfillResourceUidsV1 } from '../../src/lib/context-gateway/resource-identity'
 
 const mocks = vi.hoisted(() => ({
   starts: [] as string[],
@@ -176,9 +182,11 @@ async function seedWorkspace(): Promise<{
   project: Project
   scope: WorkspaceScope
   outlineNodeId: number
+  narrativeModuleId: number
 }> {
   const now = Date.now()
   const projectId = await db.projects.add({
+    workspaceUid: generateWorkspaceUid(),
     name: '潮门纪事',
     genre: 'fantasy',
     genres: ['fantasy'],
@@ -202,6 +210,7 @@ async function seedWorkspace(): Promise<{
   const workId = await db.works.add({
     projectId,
     worldId,
+    code: generateWorkCode(),
     title: '潮门纪事',
     description: '',
     genres: ['fantasy'],
@@ -217,6 +226,7 @@ async function seedWorkspace(): Promise<{
   })
   const worldGroupId = await db.worldGroups.add({
     projectId,
+    worldId,
     name: '主世界',
     order: 0,
     createdAt: now,
@@ -234,12 +244,36 @@ async function seedWorkspace(): Promise<{
     createdAt: now,
     updatedAt: now,
   } as any) as number
+  const narrativeModuleId = await db.narrativeModules.add({
+    projectId, workId, kind: 'main', title: '潮门蓝图', description: '细纲必须读取的激活蓝图',
+    status: 'ready', sourceProjection: 'custom', sourceRefId: null, entryNodeKey: 'entry',
+    createdAt: now, updatedAt: now,
+  } as any) as number
+  await db.narrativeNodes.add({
+    projectId, workId, moduleId: narrativeModuleId, key: 'entry', kind: 'entry', title: '进入潮门',
+    summary: '守灯人必须选择是否进入潮门', conditionJson: '{}', effectsJson: '[]',
+    successorKeysJson: '[]', sourceOutlineNodeId: outlineNodeId, order: 0, createdAt: now, updatedAt: now,
+  } as any)
+  await db.narrativeBeats.add({
+    projectId, workId, moduleId: narrativeModuleId, nodeKey: 'entry', beatKey: 'arrival',
+    kind: 'narration', speakerCharacterId: null, text: '潮门发出回响。', order: 0,
+    createdAt: now, updatedAt: now,
+  } as any)
+  await db.narrativeChoices.add({
+    projectId, workId, moduleId: narrativeModuleId, sourceNodeKey: 'entry', choiceKey: 'enter',
+    text: '进入潮门', description: '', unavailableReason: '', targetNodeKey: 'entry',
+    displayConditionJson: '{}', availableConditionJson: '{}', effectsJson: '[]', tagsJson: '[]',
+    order: 0, createdAt: now, updatedAt: now,
+  } as any)
+  await db.works.update(workId, { activeNarrativeModuleId: narrativeModuleId })
+  await backfillResourceUidsV1(projectId)
   const project = await db.projects.get(projectId) as Project
   useOutlineStore.setState({ nodes: [await db.outlineNodes.get(outlineNodeId)!] as any })
   return {
     project,
     scope: { projectId, worldId, workId },
     outlineNodeId,
+    narrativeModuleId,
   }
 }
 
@@ -304,8 +338,7 @@ describe.sequential('R-HARNESS37 · 章节页场景细纲 Agent/Harness 收口',
       outlineNodeId: 3,
       operation: 'scenes',
     })
-    expect(contract.permissions.contextSourceKeys).toContain('detailedOutline')
-    expect(contract.permissions.contextSourceKeys).toContain('chapterOutline')
+    expect(contract.permissions.contextSourceKeys).toEqual(['ragSelection'])
     expect(contract.permissions.writeTargets).toEqual([expect.objectContaining({
       table: 'detailedOutlines',
       mode: 'author-confirmed',
@@ -313,7 +346,7 @@ describe.sequential('R-HARNESS37 · 章节页场景细纲 Agent/Harness 收口',
     expect(contract.executionBindings).toEqual([expect.objectContaining({
       stepId: 'detailed-outline.generate',
       skillId: 'outline.details',
-      promptVersion: 'detailed-outline-copilot-v1',
+      promptVersion: 'detailed-outline-copilot-v2',
     })])
   })
 
@@ -333,6 +366,30 @@ describe.sequential('R-HARNESS37 · 章节页场景细纲 Agent/Harness 收口',
     expect(mocks.starts).toHaveLength(1)
     expect(mocks.starts[0]).toContain('detail.scene')
     expect(await db.detailedOutlines.count()).toBe(0)
+    const pending = await readLatestDetailedOutlineGenerationCandidateV1({
+      scope: fixture.scope,
+      outlineNodeId: fixture.outlineNodeId,
+    })
+    expect(pending?.candidate.gatewayEvidenceVersion).toBe(3)
+    expect(pending?.snapshot.contract.version).toBe(3)
+    expect(pending?.snapshot.contract.executionBindings?.[0]?.version).toBe(2)
+    expect(pending?.snapshot.contract.executionBindings?.[0]?.formalEntry?.entryId).toBe('outline.detail.scene')
+    const gatewayEvidence = await verifyContextGatewayCandidateEvidenceV1({
+      scope: fixture.scope,
+      runId: pending!.candidate.durable.runId,
+      stepId: pending!.candidate.durable.stepId,
+      attempt: 1,
+      candidateHash: pending!.candidate.durable.candidateHash,
+    })
+    expect(gatewayEvidence.manifest.manifestHash).toBe(pending?.candidate.contextManifestHash)
+    const module = await db.narrativeModules.get(fixture.narrativeModuleId)
+    expect(gatewayEvidence.manifest.gateway.retrievalTrace.mandatory
+      .map(item => item.resourceKey)).toContain(`narrative-blueprint:${module!.ragDocumentId}`)
+    const contextPacket = JSON.parse(Object.entries(gatewayEvidence.artifactBodies)
+      .find(([key]) => key.startsWith('context-packet:'))![1])
+    expect(contextPacket.sourceRefs.some((ref: { table: string }) => ref.table === 'narrativeNodes')).toBe(true)
+    expect(contextPacket.sourceRefs.some((ref: { table: string }) => ref.table === 'narrativeBeats')).toBe(true)
+    expect(contextPacket.sourceRefs.some((ref: { table: string }) => ref.table === 'narrativeChoices')).toBe(true)
 
     await unmountLatest()
     host = await mountScenePanel(fixture)

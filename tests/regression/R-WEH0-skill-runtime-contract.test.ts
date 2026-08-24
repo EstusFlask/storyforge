@@ -213,12 +213,21 @@ describe('WEH-0A · Skill → formal Run 单向派生', () => {
     expect(() => assertAgentSkillBindingMatchesAssemblyV2(binding, assembly)).toThrow('实际来源集合')
   })
 
-  it('正式 UI 不再拥有 prose/outline 手写来源数组', () => {
+  it('正式 UI 与批量细纲不再拥有 prose/outline/detail 手写来源数组', () => {
     const chapterEditor = readFileSync(resolve(process.cwd(), 'src/components/editor/ChapterEditor.tsx'), 'utf8')
     const outlinePanel = readFileSync(resolve(process.cwd(), 'src/components/outline/OutlinePanel.tsx'), 'utf8')
+    const detailController = readFileSync(resolve(process.cwd(), 'src/components/outline/useDetailedOutlineGenerationController.ts'), 'utf8')
+    const batchDetailRunner = readFileSync(resolve(process.cwd(), 'src/lib/ai/batch-detail-runner.ts'), 'utf8')
     expect(chapterEditor).not.toContain('PROSE_GENERATION_SOURCE_KEYS_V1')
     expect(chapterEditor).toContain('sourceKeys: generationBinding.contextSourceKeys')
     expect(outlinePanel).not.toContain('OUTLINE_GENERATION_SOURCE_KEYS')
     expect(outlinePanel).toContain('prepareOutlineGatewayAssemblyV1')
+    expect(detailController).not.toContain('DETAILED_OUTLINE_GENERATION_SOURCE_KEYS_V1')
+    expect(detailController).not.toContain('sourceKeys: [')
+    expect(detailController).toContain('prepareDetailedOutlineGatewayAssemblyV1')
+    expect(batchDetailRunner).not.toContain('contextResolver')
+    expect(batchDetailRunner).not.toContain('sourceKeys: [')
+    expect(batchDetailRunner).toContain('prepareDetailedOutlineGatewayAssemblyV1')
+    expect(batchDetailRunner).toContain("executeRegisteredAIEntryV1(\n          'outline.detail.batch'")
   })
 })

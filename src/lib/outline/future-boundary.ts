@@ -53,3 +53,25 @@ export async function assertOutlineRequestTargetsUnwrittenFutureV1(input: {
     )
   }
 }
+
+/** Detail planning may only target a chapter whose prose has not been written. */
+export async function assertDetailedOutlineTargetsUnwrittenFutureV1(input: {
+  scope: WorkspaceScope
+  worldGroupId: number | null
+  outlineNodeId: number
+}): Promise<void> {
+  const target = await db.outlineNodes.get(input.outlineNodeId)
+  if (!target
+    || target.type !== 'chapter'
+    || !await assertRecordInScope(input.scope, 'outlineNodes', target, { owner: 'work' })
+    || !sameWorldGroup(target, input.worldGroupId)) {
+    throw new Error('细纲目标章节不存在或越出当前世界作用域。')
+  }
+  const written = (await readOwnedRows<Chapter>(input.scope, 'chapters', { owner: 'work' }))
+    .find(chapter => chapter.outlineNodeId === input.outlineNodeId && chapter.content.trim().length > 0)
+  if (written) {
+    throw new Error(
+      `细纲目标位于已写正文保护区（${written.title || `章节 #${written.id ?? '?'}`}），请进入独立改稿流程。`,
+    )
+  }
+}

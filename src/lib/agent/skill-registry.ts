@@ -475,25 +475,7 @@ export const OUTLINE_IMPACT_REGENERATION_CONTEXT_SOURCE_KEYS = [
   'consistencyReport',
 ] as const
 
-export const OUTLINE_DETAIL_CONTEXT_SOURCE_KEYS = [
-  'canonAssertions',
-  'chapterOutline',
-  'adjacentChapterOutlines',
-  'detailedOutline',
-  'worldview',
-  'storyCore',
-  'activeNarrativeBlueprint',
-  'characterDrivenPlan',
-  'powerSystem',
-  'cultivationProgress',
-  'codex',
-  'characters',
-  'creativeRules',
-  'worldRules',
-  'historical',
-  'locations',
-  'foreshadows',
-] as const
+export const OUTLINE_DETAIL_CONTEXT_SOURCE_KEYS = ['ragSelection'] as const
 
 const PROSE_CONTEXT_SOURCE_KEYS = [
   'contextMemo',
@@ -860,7 +842,13 @@ const OUTLINE_CHAPTER_INPUT_POLICY = {
 } as const satisfies AgentSkillInputPolicyV1
 
 const OUTLINE_DETAIL_INPUT_POLICY = {
-  sourceKeys: ['chapterOutline', 'storyCore', 'characters'],
+  sourceKeys: [
+    'chapterOutline',
+    'storyArcs',
+    'storylineProgress',
+    'writtenChapterProgress',
+    'activeNarrativeBlueprint',
+  ],
   states: {
     empty: {
       handling: 'require-upstream',
@@ -1062,21 +1050,7 @@ const OUTLINE_CHARACTER_REVISION_COMPRESSION_POLICY = compressionPolicy([
 const OUTLINE_IMPACT_REGENERATION_COMPRESSION_POLICY = compressionPolicy(
   OUTLINE_IMPACT_REGENERATION_CONTEXT_SOURCE_KEYS,
 )
-const OUTLINE_DETAIL_COMPRESSION_POLICY = compressionPolicy([
-  'detailedOutline',
-  'worldview',
-  'storyCore',
-  'activeNarrativeBlueprint',
-  'characterDrivenPlan',
-  'powerSystem',
-  'codex',
-  'characters',
-  'creativeRules',
-  'worldRules',
-  'historical',
-  'locations',
-  'foreshadows',
-])
+const OUTLINE_DETAIL_COMPRESSION_POLICY = compressionPolicy(['ragSelection'])
 const PROSE_COMPRESSION_POLICY = compressionPolicy([
   'worldview',
   'storyCore',
@@ -2169,7 +2143,7 @@ export const AGENT_SKILLS = [
     defaultForAgent: false,
     label: '单章场景细纲',
     owner: 'outline-agent',
-    promptVersion: 'detailed-outline-copilot-v1',
+    promptVersion: 'detailed-outline-copilot-v2',
     executionMode: 'details',
     contextTaskKind: 'agent-outline',
     readToolNames: [],
@@ -2177,6 +2151,20 @@ export const AGENT_SKILLS = [
     optionalContextSourceKeys: [],
     inputPolicy: OUTLINE_DETAIL_INPUT_POLICY,
     contextCompression: OUTLINE_DETAIL_COMPRESSION_POLICY,
+    contextGateway: {
+      ...OUTLINE_CONTEXT_GATEWAY_POLICY,
+      requiredWriteTargets: [
+        'detailedOutlines.scenes',
+        'detailedOutlines.openingHook',
+        'detailedOutlines.endingCliffhanger',
+        'detailedOutlines.sceneLocation',
+        'detailedOutlines.appearingCharacterIds',
+        'detailedOutlines.foreshadowIds',
+        'detailedOutlines.emotionArc',
+        'detailedOutlines.prohibitions',
+        'detailedOutlines.lastUsedSummary',
+      ],
+    },
     maxOutputTokens: 8_000,
     writeTargets: [{
       table: 'detailedOutlines',
@@ -2192,7 +2180,7 @@ export const AGENT_SKILLS = [
         'lastUsedSummary',
       ],
     }],
-    lastVerifiedAt: '2026-08-09',
+    lastVerifiedAt: '2026-08-24',
     regressionTests: [
       'R-HARNESS8-detailed-outline-generation-durable',
       'R-HARNESS37-detailed-outline-entry',

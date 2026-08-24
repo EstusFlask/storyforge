@@ -418,6 +418,10 @@ for (const file of walk('src/lib')) {
 // ── ⑬ 正文/大纲正式生成来源只能由 Agent Skill binding 派生 ──
 const chapterEditorSource = read('src/components/editor/ChapterEditor.tsx')
 const outlinePanelSource = read('src/components/outline/OutlinePanel.tsx')
+const detailedOutlineControllerSource = read('src/components/outline/useDetailedOutlineGenerationController.ts')
+const batchDetailRunnerGovernanceSource = read('src/lib/ai/batch-detail-runner.ts')
+const detailedOutlineDurableSource = read('src/lib/agent/run/detailed-outline-generation-durable.ts')
+const detailedOutlineBatchDurableSource = read('src/lib/agent/run/detailed-outline-batch-durable.ts')
 const proseDurableSource = read('src/lib/agent/run/prose-generation-durable.ts')
 const outlineHarnessSource = read('src/lib/outline/harness.ts')
 if (/\bPROSE_GENERATION_SOURCE_KEYS_V1\b/.test(chapterEditorSource)) {
@@ -435,6 +439,21 @@ if (!/prepareOutlineGatewayAssemblyV1\s*\(/.test(outlinePanelSource)) {
 if (/resolveOutlineGenerationSourceKeysV2\s*\(/.test(outlinePanelSource)) {
   violations.push('[⑬Gateway来源旁路] OutlinePanel 不得重新使用页面层来源 resolver')
 }
+if (/\bDETAILED_OUTLINE_GENERATION_SOURCE_KEYS_V1\b|sourceKeys:\s*\[/.test(detailedOutlineControllerSource)) {
+  violations.push('[⑬Gateway来源旁路] 细纲正式 controller 不得持有来源数组')
+}
+if (!/prepareDetailedOutlineGatewayAssemblyV1\s*\(/.test(detailedOutlineControllerSource)) {
+  violations.push('[⑬Gateway来源派生] 细纲正式 controller 未调用共享 Detail Gateway')
+}
+if (/\bassembleContext\b|contextResolver\s*:|sourceKeys:\s*\[|parseEnhancedDetailResult\s*\(|\bnanoid\s*\(/.test(batchDetailRunnerGovernanceSource)) {
+  violations.push('[⑬Gateway批量旁路] 批量细纲不得保留手工来源、旧解析器或无条件 sceneId 追加路径')
+}
+if (!/prepareDetailedOutlineGatewayAssemblyV1\s*\(/.test(batchDetailRunnerGovernanceSource)
+  || !/beginDetailedOutlineBatchGatewayStepV1\s*\(/.test(batchDetailRunnerGovernanceSource)
+  || !/finalizeDetailedOutlineBatchGatewayStepV1\s*\(/.test(batchDetailRunnerGovernanceSource)
+  || !/executeRegisteredAIEntryV1\s*\(\s*['"]outline\.detail\.batch['"]/.test(batchDetailRunnerGovernanceSource)) {
+  violations.push('[⑬Gateway批量收口] 批量细纲必须复用 shared Detail Gateway、exact V3 evidence 和正式 AI 入口')
+}
 if (!/PROSE_GENERATION_SOURCE_KEYS_V1[\s\S]*?resolveAgentSkillContextSourceKeysV1\s*\([\s\S]*?getAgentSkillV1\('prose\.generate'/.test(proseDurableSource)) {
   violations.push('[⑬Skill来源别名] prose 历史来源别名必须只读派生自 prose.generate Skill')
 }
@@ -447,6 +466,10 @@ if (!/version:\s*2[\s\S]*?executionBindings:\s*stepBindings/.test(proseDurableSo
 }
 if (!/version:\s*3[\s\S]*?executionBindings:\s*\[\{\s*stepId,\s*\.\.\.binding\s*\}\]/.test(outlineHarnessSource)) {
   violations.push('[⑬Skill运行契约] 大纲正式 durable contract 必须冻结 V2 execution binding')
+}
+if (!/buildDetailedOutlineGenerationRunContractV3[\s\S]*?version:\s*3[\s\S]*?executionBoundary:\s*'formal'/.test(detailedOutlineDurableSource)
+  || !/buildDetailedOutlineBatchRunContractV3[\s\S]*?version:\s*3[\s\S]*?executionBoundary:\s*'formal'/.test(detailedOutlineBatchDurableSource)) {
+  violations.push('[⑬Skill运行契约] 单章与批量细纲正式 durable contract 必须冻结 V2 Skill/Gateway binding')
 }
 
 // ── ⑭ 大纲 formal 入口必须 fail-closed，UI 不得拆开 durable adoption ──
@@ -485,7 +508,6 @@ if (!/正式大纲运行必须启用 durable Harness/.test(outlineHarnessSource)
 const pendingEditSource = read('src/lib/authoring/pending-edit-coordinator.ts')
 const contentRevisionSource = read('src/lib/authoring/content-revision.ts')
 const masterCopilotSource = read('src/components/agent/useMasterCopilot.ts')
-const detailedOutlineControllerSource = read('src/components/outline/useDetailedOutlineGenerationController.ts')
 const worldGroupSwitcherSource = read('src/components/world-group/WorldGroupSwitcher.tsx')
 if (!pendingEditSource.includes('registerPendingDraftFlusherV1')
   || !pendingEditSource.includes('flushPendingEditsV1')
@@ -671,7 +693,6 @@ const formalEntryRegistrySource = read('src/lib/agent/ai-entry-registry.json')
 const formalEntrySource = read('src/lib/agent/formal-ai-entry.ts')
 const useAIStreamSource = read('src/hooks/useAIStream.ts')
 const formalEntryCheckSource = read('scripts/check-ai-entry-registry.mjs')
-const detailedOutlineDurableSource = read('src/lib/agent/run/detailed-outline-generation-durable.ts')
 if (!/"version":\s*2/.test(formalEntryRegistrySource)
   || !/"bindingVersion":\s*1/.test(formalEntryRegistrySource)
   || /"calls":\s*\d+/.test(formalEntryRegistrySource)

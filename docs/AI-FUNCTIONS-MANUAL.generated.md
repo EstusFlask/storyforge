@@ -227,7 +227,7 @@ AI 输出经 `adopt({ target, data })` 写回,只有这里登记的字段可写(
 
 ## 四、AI 调用点（消耗统计 category · 在哪触发)
 
-共 40 个 category。
+共 39 个 category。
 未分类调用: 0 个。动态 category 调用: 32 个。
 
 | category | 触发文件 |
@@ -245,7 +245,6 @@ AI 输出经 `adopt({ target, data })` 写回,只有这里登记的字段可写(
 | `chapter.toolbar` | `src/lib/agent/run/selection-edit-durable.ts:567` |
 | `cultivation.progress` | `src/lib/agent/run/cultivation-progress-extraction-durable.ts:558` |
 | `detail.chapter-planning` | `src/lib/node-authoring/domain-execution.ts:371` |
-| `detail.scene` | `src/lib/ai/batch-detail-runner.ts:193` |
 | `emotion.beat` | `src/lib/agent/run/emotion-beat-durable.ts:396` |
 | `foreshadow.suggest` | `src/lib/agent/run/foreshadow-suggestions-durable.ts:569` |
 | `geography.concept-map` | `src/components/geography/GeographyPanel.tsx:127` |
@@ -310,7 +309,7 @@ AI 输出经 `adopt({ target, data })` 写回,只有这里登记的字段可写(
 
 ## 五、正式 AI 入口（FormalAIEntryBindingV1）
 
-共 33 个操作级绑定。运行时按 entryId 校验 category 和 Skill；采纳权限不由文字说明决定。
+共 34 个操作级绑定。运行时按 entryId 校验 category 和 Skill；采纳权限不由文字说明决定。
 
 | entryId | Skill | category | 边界 | 候选 | 采纳目标 | 调用方 |
 |---|---|---|---|---|---|---|
@@ -336,6 +335,7 @@ AI 输出经 `adopt({ target, data })` 写回,只有这里登记的字段可写(
 | `outline.chapter.generate` | `outline.chapters` | `outline.chapter` | formal / durable-run | `chapter-outline-candidate` | `outlineNodes` | `src/lib/outline/generation-node.ts` |
 | `outline.detail.scene` | `outline.details` | `detail.scene` | formal / durable-run | `detailed-outline-candidate` | `detailedOutlines` | `src/components/outline/useDetailedOutlineGenerationController.ts` |
 | `outline.detail.enhance` | `outline.details` | `detail.enhance` | formal / durable-run | `detailed-outline-enhancement` | `detailedOutlines` | `src/components/outline/useDetailedOutlineGenerationController.ts` |
+| `outline.detail.batch` | `outline.details` | `detail.enhance` | formal / durable-run | `detailed-outline-batch-candidate` | `detailedOutlines` | `src/lib/ai/batch-detail-runner.ts` |
 | `world.scene.verify` | `world-origin.review` | `scene.verify` | auxiliary / read-only | `scene-verification-report` | 禁止 | `src/components/scene/SceneVerifyPanel.tsx` |
 | `eval.context-compression` | `prose.review` | `eval.h17.compression`<br/>`eval.h17.generation` | evaluation / eval-only | `context-compression-eval-artifact` | 禁止 | `src/components/settings/HarnessEvalPanel.tsx` |
 | `eval.long-consistency.verifier` | `prose.review` | `eval.h4.verifier` | evaluation / eval-only | `long-consistency-verdict` | 禁止 | `src/components/settings/HarnessEvalPanel.tsx` |
@@ -350,4 +350,4 @@ AI 输出经 `adopt({ target, data })` 写回,只有这里登记的字段可写(
 
 ---
 
-生成时间基准:commit `a062b45c`
+生成时间基准:commit `2b0caeb3`

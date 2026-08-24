@@ -6,33 +6,42 @@
  * 支持进度回调、AbortSignal 中途停止、单章失败留证和父任务终态验证。
  */
 
-import { chat } from './client'
 import { useAIConfigStore } from '../../stores/ai-config'
-import { buildEnhancedDetailPrompt, parseEnhancedDetailResult } from './adapters/detail-scene-adapter'
+import { buildEnhancedDetailPrompt } from './adapters/detail-scene-adapter'
 import type { OutlineNode, DetailedOutline, WorkspaceScope } from '../types'
-import type { AssembleContextResult } from '../registry/types'
-import type { ScenePace } from '../types/detailed-outline'
-import { nanoid } from '../utils/id'
 import { hashCanonicalValue } from '../agent/run/hash'
 import { hashDetailedOutlineSourceSummaryV1 } from '../agent/run/detailed-outline-generation-durable'
 import {
-  beginDetailedOutlineBatchStepV1,
+  beginDetailedOutlineBatchGatewayStepV1,
   cancelDetailedOutlineBatchRunV1,
   commitDetailedOutlineBatchCandidateV1,
   createDetailedOutlineBatchDurableRunV1,
-  detailedOutlineBatchManifestV1,
   detailedOutlineBatchStepIdV1,
   failDetailedOutlineBatchStepV1,
-  hashDetailedOutlineBatchCandidateV1,
+  finalizeDetailedOutlineBatchGatewayStepV1,
   pauseDetailedOutlineBatchRunV1,
   persistDetailedOutlineBatchCandidateV1,
   recordDetailedOutlineBatchCandidateV1,
-  recordDetailedOutlineBatchModelOutputV1,
   rejectDetailedOutlineBatchCandidateV1,
   verifyDetailedOutlineBatchRunV1,
   DETAILED_OUTLINE_BATCH_GENERATION_CANDIDATE_TYPE_V1,
   type DetailedOutlineBatchCandidateV1,
 } from '../agent/run/detailed-outline-batch-durable'
+import { executeRegisteredAIEntryV1 } from '../agent/formal-ai-entry'
+import {
+  buildAgentSkillInputGuidanceV1,
+  getAgentSkillV1,
+} from '../agent/skill-registry'
+import { projectContextGatewayInputStateV1 } from '../agent/context-gateway-input'
+import {
+  buildDetailedOutlineCopilotPatchV1,
+  buildDetailedOutlineSceneMergeGuidanceV1,
+  detailedOutlinePostStateMatchesPatchV1,
+} from '../agent/detailed-outline-copilot'
+import { prepareDetailedOutlineGatewayAssemblyV1 } from '../outline/detail-gateway-context'
+import { readOwnedRows } from '../world-engine/scope'
+import { flushPendingEditsV1 } from '../authoring/pending-edit-coordinator'
+import { db } from '../db/schema'
 
 // ── 公共类型 ─────────────────────────────────────────────────────
 
@@ -58,14 +67,6 @@ export interface BatchDetailOptions {
   onSave: (outlineNodeId: number, data: Partial<DetailedOutline>) => Promise<void>
   /** H10：批量任务必须绑定当前 Work，不允许以 projectId 猜测写入范围。 */
   scope: WorkspaceScope
-  /** H10：逐章提供真实 assembleContext 结果，供 Context Manifest 留证。 */
-  contextResolver: (chapterNodeId: number) => Promise<{
-    worldGroupId: number | null
-    worldContext: string
-    characterContext?: string
-    foreshadowContext?: string
-    assembled: AssembleContextResult
-  }>
   /** 候选落入 durable ledger 后等待作者逐章确认；未确认绝不调用 onSave。 */
   onCandidate: (input: {
     chapter: OutlineNode
@@ -98,13 +99,19 @@ export async function batchGenerateDetails(
     onProgress,
     signal,
     scope,
-    contextResolver,
     onCandidate,
     onPostState,
     onRunCreated,
   } = opts
   const config = useAIConfigStore.getState().config
   const start = Date.now()
+  await flushPendingEditsV1()
+  const [characters, foreshadows] = await Promise.all([
+    readOwnedRows<{ id?: number }>(scope, 'characters', { owner: 'work' }),
+    readOwnedRows<{ id?: number }>(scope, 'foreshadows', { owner: 'work' }),
+  ])
+  const validCharacterIds = new Set(characters.flatMap(row => row.id == null ? [] : [row.id]))
+  const validForeshadowIds = new Set(foreshadows.flatMap(row => row.id == null ? [] : [row.id]))
 
   // 过滤出需要生成的
   const detailNodeIds = new Set(existingDetails.filter(d => d.scenes.length > 0).map(d => d.outlineNodeId))
@@ -158,42 +165,57 @@ export async function batchGenerateDetails(
       })
 
       try {
-        const context = await contextResolver(ch.id!)
-        if (context.worldGroupId !== worldGroupId) {
-          throw new Error('批量细纲逐章上下文与父任务世界作用域不一致。')
-        }
+        const currentScenes = existingDetails.find(detail => detail.outlineNodeId === ch.id)?.scenes ?? []
+        const assembled = await prepareDetailedOutlineGatewayAssemblyV1({
+          projectId: scope.projectId,
+          scope,
+          worldGroupId,
+          outlineNodeId: ch.id!,
+          operation: 'enhanced',
+          authorRequest: `批量完善《${ch.title}》的场景、冲突、情绪变化和结尾压力。`,
+          config,
+          signal,
+        })
+        const skill = getAgentSkillV1('outline.details', 'outline')
+        const inputState = projectContextGatewayInputStateV1(
+          skill,
+          assembled.contextGatewayExecution,
+          assembled,
+        )
+        const guidance = [
+          buildAgentSkillInputGuidanceV1(skill, inputState),
+          buildDetailedOutlineSceneMergeGuidanceV1(currentScenes),
+        ].filter(Boolean).join('\n\n')
         const messages = buildEnhancedDetailPrompt(
           ch.title,
           ch.summary || '',
           '',
           '',
-          context.worldContext,
-          context.characterContext ?? '',
-          context.foreshadowContext ?? '',
+          assembled.text,
+          '',
+          '',
+          guidance,
         )
-        const manifest = await detailedOutlineBatchManifestV1({
-          runId: snapshot.run.id,
-          scope,
-          worldGroupId,
-          outlineNodeId: ch.id!,
-          assembled: context.assembled,
-        })
         const sourceSummaryHash = await hashDetailedOutlineSourceSummaryV1(ch.summary || '')
-        snapshot = await beginDetailedOutlineBatchStepV1({
+        const begun = await beginDetailedOutlineBatchGatewayStepV1({
           scope,
           snapshot,
-          contextManifest: manifest,
+          worldGroupId,
+          outlineNodeId: ch.id!,
+          assembled,
+          messages,
           binding: {
-            outlineNodeId: ch.id!,
             sourceSummaryHash,
             promptHash: await hashCanonicalValue(messages),
           },
         })
+        snapshot = begun.snapshot
 
-        const rawOutput = await chat(
+        const rawOutput = await executeRegisteredAIEntryV1(
+          'outline.detail.batch',
           messages,
           config,
-          { category: 'detail.scene', projectId: ch.projectId, contextOverflowPolicy: 'reject' },
+          { category: 'detail.enhance', projectId: ch.projectId, contextOverflowPolicy: 'reject' },
           signal,
         )
         if (signal?.aborted) {
@@ -208,50 +230,23 @@ export async function batchGenerateDetails(
           }
         }
 
-        snapshot = await recordDetailedOutlineBatchModelOutputV1({
+        const finalized = await finalizeDetailedOutlineBatchGatewayStepV1({
           scope,
           snapshot,
           outlineNodeId: ch.id!,
+          attempt: begun.attempt,
           output: rawOutput,
         })
-        const parsed = parseEnhancedDetailResult(rawOutput)
-        if (!parsed?.scenes?.length) {
-          snapshot = await failDetailedOutlineBatchStepV1({
-            scope,
-            snapshot,
-            outlineNodeId: ch.id!,
-            code: 'invalid_structured_detail_output',
-            retryable: true,
-          })
-          failed++
-          groupFailed = true
-          failures.push(ch.title)
-          continue
-        }
-
-        const data: Partial<DetailedOutline> = {}
-        if (parsed.openingHook) data.openingHook = parsed.openingHook
-        if (parsed.endingCliffhanger) data.endingCliffhanger = parsed.endingCliffhanger
-        if (parsed.sceneLocation) data.sceneLocation = parsed.sceneLocation
-        if (parsed.emotionArc) data.emotionArc = parsed.emotionArc as DetailedOutline['emotionArc']
-        if (parsed.appearingCharacterIds) data.appearingCharacterIds = parsed.appearingCharacterIds
-        if (parsed.foreshadowIds) data.foreshadowIds = parsed.foreshadowIds
-        // Phase 30.3: 快照大纲摘要
-        data.lastUsedSummary = ch.summary || ''
-
-        if (parsed.scenes && parsed.scenes.length > 0) {
-          data.scenes = parsed.scenes.map(s => ({
-            sceneId: nanoid(),
-            title: s.title,
-            summary: s.summary,
-            characterIds: s.characterIds || [],
-            location: s.location || '',
-            conflict: s.conflict || '',
-            pace: (s.pace || 'medium') as ScenePace,
-            estimatedWords: s.estimatedWords || 0,
-            notes: '',
-          }))
-        }
+        snapshot = finalized.snapshot
+        const data = buildDetailedOutlineCopilotPatchV1({
+          raw: rawOutput,
+          operation: 'enhanced',
+          currentScenes,
+          chapterSummary: ch.summary || '',
+          validCharacterIds,
+          validForeshadowIds,
+        })
+        const outputHash = await hashCanonicalValue(rawOutput)
 
         const baseCandidate: Omit<DetailedOutlineBatchCandidateV1, 'durable'> = {
           version: 1,
@@ -264,8 +259,9 @@ export async function batchGenerateDetails(
           operation: 'enhanced',
           sourceSummaryHash,
           output: rawOutput,
-          outputHash: await hashCanonicalValue(rawOutput),
-          contextManifestHash: manifest.manifestHash,
+          outputHash,
+          contextManifestHash: finalized.manifest.manifestHash,
+          gatewayEvidenceVersion: 3,
           workspaceScope: scope,
           createdAt: Date.now(),
         }
@@ -275,16 +271,10 @@ export async function batchGenerateDetails(
             runId: snapshot.run.id,
             stepId: detailedOutlineBatchStepIdV1(ch.id!),
             attempt: 1,
-            candidateHash: '',
+            candidateHash: outputHash,
           },
         }
-        const candidate: DetailedOutlineBatchCandidateV1 = {
-          ...draftCandidate,
-          durable: {
-            ...draftCandidate.durable,
-            candidateHash: await hashDetailedOutlineBatchCandidateV1(draftCandidate),
-          },
-        }
+        const candidate: DetailedOutlineBatchCandidateV1 = draftCandidate
         await persistDetailedOutlineBatchCandidateV1({ scope, candidate })
         snapshot = await recordDetailedOutlineBatchCandidateV1({ scope, snapshot, candidate })
         onProgress?.({
@@ -318,9 +308,13 @@ export async function batchGenerateDetails(
           runId: snapshot.run.id,
           candidate,
           output: rawOutput,
-          currentSourceSummaryHash: () => hashDetailedOutlineSourceSummaryV1(ch.summary || ''),
+          currentSourceSummaryHash: async () => {
+            const current = await db.outlineNodes.get(ch.id!)
+            return hashDetailedOutlineSourceSummaryV1(current?.summary || '')
+          },
           adopt: () => onSave(ch.id!, data),
           postState: () => onPostState(ch.id!),
+          postStateMatches: state => detailedOutlinePostStateMatchesPatchV1(state, ch.id!, data),
         })
         acceptedCandidates.push(candidate)
         postStates.push(await onPostState(ch.id!))

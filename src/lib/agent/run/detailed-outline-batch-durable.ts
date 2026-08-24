@@ -1,7 +1,13 @@
 import { db } from '../../db/schema'
-import type { AgentConversation, AgentEvent, WorkspaceScope } from '../../types'
+import type { AgentConversation, AgentEvent, ChatMessage, WorkspaceScope } from '../../types'
 import type { AssembleContextResult } from '../../registry/types'
-import type { ContextManifestV1 } from '../../types/agent-run'
+import type {
+  AgentRunFormalAIEntryBindingV1,
+  AgentRunContractV3,
+  ContextManifestV1,
+  ContextManifestV2,
+  ContextManifestV3,
+} from '../../types/agent-run'
 import {
   appendAgentEvent,
   getOrCreateAgentConversation,
@@ -15,16 +21,37 @@ import {
 } from './event-store'
 import { createVerificationReceiptV1 } from './verification-receipt'
 import { hashCanonicalValue } from './hash'
-import { createContextManifestFromAssemblyV1 } from './context-manifest'
+import { createContextManifestFromAssemblyV1, createContextManifestV2FromV1 } from './context-manifest'
 import {
   assertRecordInScope,
   readOwnedRows,
 } from '../../world-engine/scope'
 import { DETAILED_OUTLINE_GENERATION_SOURCE_KEYS_V1 } from './detailed-outline-generation-durable'
+import {
+  assertAgentSkillExecutionBindingIntegrityV2,
+  createAgentSkillExecutionBindingV1,
+  createAgentSkillExecutionBindingV2,
+  assertAgentSkillExecutionBindingV1,
+} from '../execution-binding'
+import { getAgentSkillV1, resolveAgentSkillContextSourceKeysV1 } from '../skill-registry'
+import {
+  assertFormalAIEntrySnapshotIntegrityV1,
+  freezeFormalAIEntryBindingV1,
+} from '../formal-ai-entry'
+import {
+  finalizeContextGatewayAttemptEvidenceV1,
+  recordContextGatewayPreflightEvidenceV1,
+  type ContextGatewayPreflightEvidenceV1,
+} from '../../context-gateway/attempt-evidence'
+import type { ContextGatewayExecutionV1 } from '../../context-gateway/execution'
+import { assertContextGatewayCandidateAdoptableV1 } from '../../context-gateway/execution'
+import { detailedOutlineGatewayExecutionFromAssemblyV1 } from '../../outline/detail-gateway-context'
+import { assertDetailedOutlineTargetsUnwrittenFutureV1 } from '../../outline/future-boundary'
 
 export const DETAILED_OUTLINE_BATCH_GENERATION_CONVERSATION_PURPOSE_V1 = 'detailed-outline-batch-generation'
 export const DETAILED_OUTLINE_BATCH_GENERATION_CANDIDATE_TYPE_V1 = 'detailed-outline-batch-candidate'
 export const DETAILED_OUTLINE_BATCH_GENERATION_VERIFIER_V1 = 'detailed-outline-batch-terminal-v1'
+export const DETAILED_OUTLINE_BATCH_FORMAL_ENTRY_ID_V1 = 'outline.detail.batch'
 
 export type DetailedOutlineBatchOperationV1 = 'enhanced'
 
@@ -45,6 +72,7 @@ export interface DetailedOutlineBatchCandidateV1 {
   output: string
   outputHash: string
   contextManifestHash: string
+  gatewayEvidenceVersion?: 3
   workspaceScope: WorkspaceScope
   createdAt: number
   durable: {
@@ -69,6 +97,7 @@ function isCandidate(value: unknown): value is DetailedOutlineBatchCandidateV1 {
     && typeof candidate.output === 'string'
     && typeof candidate.outputHash === 'string'
     && typeof candidate.contextManifestHash === 'string'
+    && (candidate.gatewayEvidenceVersion === undefined || candidate.gatewayEvidenceVersion === 3)
     && !!candidate.workspaceScope
     && candidate.workspaceScope.projectId === candidate.projectId
     && !!candidate.durable
@@ -81,6 +110,10 @@ function isCandidate(value: unknown): value is DetailedOutlineBatchCandidateV1 {
 export async function hashDetailedOutlineBatchCandidateV1(
   candidate: DetailedOutlineBatchCandidateV1,
 ): Promise<string> {
+  if (candidate.gatewayEvidenceVersion === 3
+    && candidate.durable.candidateHash === candidate.outputHash) {
+    return candidate.outputHash
+  }
   return hashCanonicalValue({
     draft: candidate.output,
     payload: {
@@ -95,6 +128,7 @@ export async function hashDetailedOutlineBatchCandidateV1(
       sourceSummaryHash: candidate.sourceSummaryHash,
       outputHash: candidate.outputHash,
       contextManifestHash: candidate.contextManifestHash,
+      ...(candidate.gatewayEvidenceVersion ? { gatewayEvidenceVersion: candidate.gatewayEvidenceVersion } : {}),
       workspaceScope: candidate.workspaceScope,
     },
   })
@@ -104,9 +138,11 @@ export function buildDetailedOutlineBatchRunContractV1(input: {
   projectId: number
   worldGroupId: number | null
   outlineNodeIds: number[]
+  formalEntry?: AgentRunFormalAIEntryBindingV1
 }) {
   const ids = [...new Set(input.outlineNodeIds)]
   if (!ids.length) throw new Error('批量细纲任务至少需要一个章节。')
+  const skill = getAgentSkillV1('outline.details', 'outline')
   return {
     version: 1 as const,
     objective: `批量生成 ${ids.length} 个章节的细纲候选，并逐章等待作者确认`,
@@ -117,23 +153,19 @@ export function buildDetailedOutlineBatchRunContractV1(input: {
       outlineNodeIds: ids,
     },
     permissions: {
-      contextSourceKeys: [...DETAILED_OUTLINE_GENERATION_SOURCE_KEYS_V1],
-      writeTargets: [{
-        table: 'detailedOutlines',
-        fields: [
-          'scenes',
-          'openingHook',
-          'endingCliffhanger',
-          'sceneLocation',
-          'emotionArc',
-          'appearingCharacterIds',
-          'foreshadowIds',
-          'prohibitions',
-          'lastUsedSummary',
-        ],
+      contextSourceKeys: resolveAgentSkillContextSourceKeysV1(skill),
+      writeTargets: skill.writeTargets.map(target => ({
+        table: target.table,
+        fields: [...target.fields],
         mode: 'author-confirmed' as const,
-      }],
+        ...(target.adoptionExtension ? { adoptionExtension: target.adoptionExtension } : {}),
+      })),
     },
+    executionBindings: ids.map(outlineNodeId => ({
+      stepId: detailedOutlineBatchStepIdV1(outlineNodeId),
+      ...createAgentSkillExecutionBindingV1(skill),
+      ...(input.formalEntry ? { formalEntry: input.formalEntry } : {}),
+    })),
     budget: {
       maxModelCalls: ids.length,
       maxToolCalls: 0,
@@ -167,11 +199,47 @@ export function buildDetailedOutlineBatchRunContractV1(input: {
   }
 }
 
+/** Formal batch DETAIL-1 contract freezes the same V2 Skill/Gateway snapshot per chapter step. */
+export async function buildDetailedOutlineBatchRunContractV3(input: {
+  projectId: number
+  worldGroupId: number | null
+  outlineNodeIds: number[]
+  formalEntry: AgentRunFormalAIEntryBindingV1
+}): Promise<AgentRunContractV3> {
+  const legacy = buildDetailedOutlineBatchRunContractV1(input)
+  const skill = getAgentSkillV1('outline.details', 'outline')
+  const binding = await createAgentSkillExecutionBindingV2(skill, {
+    writeTargets: skill.writeTargets.map(target => ({
+      table: target.table,
+      fields: [...target.fields],
+      mode: 'author-confirmed' as const,
+      ...(target.adoptionExtension ? { adoptionExtension: target.adoptionExtension } : {}),
+    })),
+  })
+  await assertAgentSkillExecutionBindingIntegrityV2(binding, '批量细纲正式 binding')
+  const ids = [...new Set(input.outlineNodeIds)]
+  return {
+    ...legacy,
+    version: 3,
+    executionBoundary: 'formal',
+    permissions: {
+      contextSourceKeys: [...binding.contextSourceKeys],
+      writeTargets: binding.writeTargets.map(target => ({ ...target, fields: [...target.fields] })),
+    },
+    executionBindings: ids.map(outlineNodeId => ({
+      stepId: detailedOutlineBatchStepIdV1(outlineNodeId),
+      ...binding,
+      formalEntry: input.formalEntry,
+    })),
+  }
+}
+
 export async function createDetailedOutlineBatchDurableRunV1(input: {
   scope: WorkspaceScope
   worldGroupId: number | null
   outlineNodeIds: number[]
 }): Promise<AgentRunSnapshotV1> {
+  const formalEntry = await freezeFormalAIEntryBindingV1(DETAILED_OUTLINE_BATCH_FORMAL_ENTRY_ID_V1)
   const conversation = await getOrCreateAgentConversation({
     projectId: input.scope.projectId,
     worldGroupId: input.worldGroupId,
@@ -183,12 +251,33 @@ export async function createDetailedOutlineBatchDurableRunV1(input: {
     scope: input.scope,
     worldGroupId: input.worldGroupId,
     conversationId: conversation.id ?? null,
-    contract: buildDetailedOutlineBatchRunContractV1({
+    contract: await buildDetailedOutlineBatchRunContractV3({
       projectId: input.scope.projectId,
       worldGroupId: input.worldGroupId,
       outlineNodeIds: input.outlineNodeIds,
+      formalEntry,
     }),
   })
+}
+
+function assertDetailedOutlineBatchExecutionBindingV1(
+  snapshot: AgentRunSnapshotV1,
+  outlineNodeId: number,
+): void {
+  if (!snapshot.contract.executionBindings) return
+  const stepId = detailedOutlineBatchStepIdV1(outlineNodeId)
+  const binding = snapshot.contract.executionBindings.find(item => item.stepId === stepId)
+  if (!binding) throw new Error(`批量细纲 RunContract 缺少 ${stepId} 执行绑定。`)
+  const { stepId: _stepId, formalEntry: _formalEntry, ...skillBinding } = binding
+  if (skillBinding.version === 2) {
+    if (skillBinding.skillId !== 'outline.details'
+      || !skillBinding.contextSourceKeys.includes('ragSelection')
+      || !skillBinding.writeTargets.some(target => target.table === 'detailedOutlines')) {
+      throw new Error('批量细纲 V2 Skill 执行绑定与 required Gateway/写目标不匹配。')
+    }
+    return
+  }
+  assertAgentSkillExecutionBindingV1(skillBinding, getAgentSkillV1('outline.details', 'outline'), '批量细纲')
 }
 
 async function append(
@@ -233,6 +322,106 @@ export async function beginDetailedOutlineBatchStepV1(input: {
     attempt: 1,
     bindingHash: await hashCanonicalValue(input.binding),
   })
+}
+
+export interface DetailedOutlineBatchGatewayAttemptV1 {
+  execution: ContextGatewayExecutionV1
+  baseManifest: ContextManifestV2
+  preflight: ContextGatewayPreflightEvidenceV1
+}
+
+/** Batch DETAIL-1 path: exact Gateway preflight is durable before the model request. */
+export async function beginDetailedOutlineBatchGatewayStepV1(input: {
+  scope: WorkspaceScope
+  snapshot: AgentRunSnapshotV1
+  worldGroupId: number | null
+  outlineNodeId: number
+  assembled: AssembleContextResult
+  messages: ChatMessage[]
+  binding: {
+    sourceSummaryHash: string
+    promptHash: string
+  }
+}): Promise<{ snapshot: AgentRunSnapshotV1; attempt: DetailedOutlineBatchGatewayAttemptV1 }> {
+  assertDetailedOutlineBatchExecutionBindingV1(input.snapshot, input.outlineNodeId)
+  const frozenSkillBinding = input.snapshot.contract.executionBindings
+    ?.find(item => item.stepId === detailedOutlineBatchStepIdV1(input.outlineNodeId))
+  if (frozenSkillBinding?.version === 2) {
+    const { stepId: _stepId, formalEntry: _formalEntry, ...skillBinding } = frozenSkillBinding
+    await assertAgentSkillExecutionBindingIntegrityV2(skillBinding, '批量细纲 required Gateway binding')
+  }
+  const execution = detailedOutlineGatewayExecutionFromAssemblyV1(input.assembled)
+  if (!execution) throw new Error('正式批量细纲缺少 required Context Gateway 执行结果。')
+  const stepId = detailedOutlineBatchStepIdV1(input.outlineNodeId)
+  const formalEntry = input.snapshot.contract.executionBindings
+    ?.find(item => item.stepId === stepId)?.formalEntry
+  if (!formalEntry) throw new Error('批量细纲 RunContract 缺少 FormalAIEntry snapshot。')
+  const entry = await assertFormalAIEntrySnapshotIntegrityV1(formalEntry)
+  if (entry.entryId !== DETAILED_OUTLINE_BATCH_FORMAL_ENTRY_ID_V1
+    || entry.skillId !== 'outline.details' || !entry.adoptAllowed
+    || !entry.adoptionTargets.includes('detailedOutlines')) {
+    throw new Error('批量细纲 FormalAIEntry 与 Skill/采纳目标不匹配。')
+  }
+  const manifestV1 = await detailedOutlineBatchManifestV1({
+    runId: input.snapshot.run.id,
+    scope: input.scope,
+    worldGroupId: input.worldGroupId,
+    outlineNodeId: input.outlineNodeId,
+    assembled: input.assembled,
+  })
+  const baseManifest = await createContextManifestV2FromV1({ manifest: manifestV1, scope: input.scope })
+  let snapshot = await append(input.scope, input.snapshot, 'step.scheduled', { stepId })
+  snapshot = await append(input.scope, snapshot, 'step.started', { stepId, attempt: 1 })
+  const recorded = await recordContextGatewayPreflightEvidenceV1({
+    scope: input.scope,
+    runId: snapshot.run.id,
+    stepId,
+    attempt: 1,
+    contextPacket: execution.contextPacket,
+    selector: execution.selector,
+    renderedRequest: input.messages,
+    sourceSnapshots: execution.sourceSnapshots,
+    toolTranscript: execution.toolTranscript,
+    expectedLastSequence: snapshot.projection.lastSequence,
+  })
+  snapshot = await append(input.scope, recorded.snapshot, 'model.requested', {
+    stepId,
+    attempt: 1,
+    bindingHash: await hashCanonicalValue({ outlineNodeId: input.outlineNodeId, ...input.binding }),
+  })
+  return { snapshot, attempt: { execution, baseManifest, preflight: recorded.evidence } }
+}
+
+/** Finalizes the exact batch response and ContextManifestV3 before candidate.persisted. */
+export async function finalizeDetailedOutlineBatchGatewayStepV1(input: {
+  scope: WorkspaceScope
+  snapshot: AgentRunSnapshotV1
+  outlineNodeId: number
+  attempt: DetailedOutlineBatchGatewayAttemptV1
+  output: string
+}): Promise<{ snapshot: AgentRunSnapshotV1; manifest: ContextManifestV3 }> {
+  const stepId = detailedOutlineBatchStepIdV1(input.outlineNodeId)
+  const outputHash = await hashCanonicalValue(input.output)
+  let snapshot = await append(input.scope, input.snapshot, 'model.responded', {
+    stepId, attempt: 1, outputHash,
+  })
+  const finalized = await finalizeContextGatewayAttemptEvidenceV1({
+    scope: input.scope,
+    runId: snapshot.run.id,
+    stepId,
+    attempt: 1,
+    baseManifest: input.attempt.baseManifest,
+    preflight: input.attempt.preflight,
+    selector: input.attempt.execution.selector,
+    sufficiency: input.attempt.execution.sufficiency,
+    retrievalTrace: input.attempt.execution.retrievalTrace,
+    gatewayVersionHash: input.attempt.execution.contextPacket.gatewayVersionHash,
+    policyHash: input.attempt.execution.contextPacket.policyHash,
+    rawResponse: input.output,
+    candidateHash: outputHash,
+    expectedLastSequence: snapshot.projection.lastSequence,
+  })
+  return { snapshot: finalized.snapshot, manifest: finalized.manifest }
 }
 
 export async function recordDetailedOutlineBatchModelOutputV1(input: {
@@ -344,6 +533,9 @@ export async function persistDetailedOutlineBatchCandidateV1(input: {
       sourceSummaryHash: input.candidate.sourceSummaryHash,
       outputHash: input.candidate.outputHash,
       contextManifestHash: input.candidate.contextManifestHash,
+      ...(input.candidate.gatewayEvidenceVersion
+        ? { gatewayEvidenceVersion: input.candidate.gatewayEvidenceVersion }
+        : {}),
       workspaceScope: input.candidate.workspaceScope,
       candidateHash: input.candidate.durable.candidateHash,
     },
@@ -387,7 +579,9 @@ export async function recordDetailedOutlineBatchCandidateV1(input: {
   return append(input.scope, next, 'candidate.persisted', {
     stepId: input.candidate.stepId,
     attempt: input.candidate.durable.attempt,
-    candidateHash: input.candidate.durable.candidateHash,
+    candidateHash: input.candidate.gatewayEvidenceVersion === 3
+      ? input.candidate.outputHash
+      : input.candidate.durable.candidateHash,
     requiresConfirmation: true,
   })
 }
@@ -420,6 +614,7 @@ export async function readLatestDetailedOutlineBatchCandidatesV1(input: {
         output: event.content,
         outputHash: raw.outputHash,
         contextManifestHash: raw.contextManifestHash,
+        gatewayEvidenceVersion: raw.gatewayEvidenceVersion,
         workspaceScope: raw.workspaceScope,
         createdAt: event.createdAt,
         durable: {
@@ -509,7 +704,13 @@ export async function commitDetailedOutlineBatchCandidateV1(input: {
   currentSourceSummaryHash: () => Promise<string>
   adopt: () => Promise<void>
   postState: () => Promise<unknown>
+  postStateMatches?: (postState: unknown) => boolean
 }): Promise<AgentRunSnapshotV1> {
+  await assertDetailedOutlineTargetsUnwrittenFutureV1({
+    scope: input.scope,
+    worldGroupId: input.candidate.worldGroupId,
+    outlineNodeId: input.candidate.outlineNodeId,
+  })
   if (input.output !== input.candidate.output
     || await hashDetailedOutlineBatchCandidateV1(input.candidate) !== input.candidate.durable.candidateHash) {
     throw new Error('批量细纲候选已变化或 hash 校验失败。')
@@ -525,6 +726,19 @@ export async function commitDetailedOutlineBatchCandidateV1(input: {
       })
     }
     throw new Error('章节大纲已变化，批量细纲候选已过期。')
+  }
+  if (input.candidate.gatewayEvidenceVersion === 3) {
+    await assertContextGatewayCandidateAdoptableV1({
+      skill: getAgentSkillV1('outline.details', 'outline'),
+      writeTarget: 'detailedOutlines.scenes',
+      scope: input.scope,
+      worldGroupId: input.candidate.worldGroupId,
+      runId: input.runId,
+      stepId: input.candidate.stepId,
+      attempt: input.candidate.durable.attempt,
+      candidateHash: input.candidate.durable.candidateHash,
+      contextManifestHash: input.candidate.contextManifestHash,
+    })
   }
   let snapshot = await readAgentRunV1(input.scope, input.runId)
   const step = snapshot.projection.steps[input.candidate.stepId]
@@ -545,6 +759,9 @@ export async function commitDetailedOutlineBatchCandidateV1(input: {
     await input.adopt()
     const postState = await input.postState()
     if (postState == null) throw new Error('批量细纲采纳后正式数据不存在。')
+    if (input.postStateMatches && !input.postStateMatches(postState)) {
+      throw new Error('批量细纲采纳后的正式数据与作者确认候选不一致。')
+    }
     const postStateHash = await hashCanonicalValue(postState)
     snapshot = await append(input.scope, snapshot, 'adoption.committed', {
       stepId: input.candidate.stepId,
