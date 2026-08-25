@@ -91,6 +91,16 @@ export interface CommunityWorldOrigin {
   importedAt: number
 }
 
+/**
+ * MASTER-0: project-owned rollout consent. These flags are deliberately part
+ * of the portable project root so an export/import never silently widens or
+ * loses the author's experimental capability choices.
+ */
+export interface GamePlatformProjectOptInsV1 {
+  gameProductionV3?: boolean
+  ttrpgAiGmExperimental?: boolean
+}
+
 /** 项目 */
 export interface Project {
   id?: number
@@ -144,6 +154,9 @@ export interface Project {
 
   /** STORY-1：作者明确设为后续 AI 参考的角色驱动方案；不自动猜最近方案。 */
   activeCharacterDrivenPlanId?: number | null
+
+  /** 游戏平台的项目级显式授权；缺失与 false 等价，旧项目默认不加入实验。 */
+  gamePlatformOptIns?: GamePlatformProjectOptInsV1
 
   createdAt: number        // timestamp
   updatedAt: number        // timestamp

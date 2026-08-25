@@ -53,6 +53,7 @@ import {
   validateStoryGameContent,
 } from '../../lib/text-game/content'
 import { useDialog } from '../shared/Dialog'
+import { resolveLegacyManualPublicationPolicyV1 } from '../../lib/game-production/legacy-entry-governance'
 
 type WorkbenchView = 'game' | 'content' | 'graph' | 'preview' | 'release' | 'help'
 
@@ -169,7 +170,7 @@ function ChoiceEditor(props: {
   </article>
 }
 
-export default function StoryGameWorkbench(props: { scope: WorkspaceScope }) {
+export default function StoryGameWorkbench(props: { scope: WorkspaceScope; onOpenProduction?: () => void }) {
   const dialog = useDialog()
   const [snapshot, setSnapshot] = useState<StoryGameAuthoringSnapshot>(EMPTY_SNAPSHOT)
   const [selectedDefinitionId, setSelectedDefinitionId] = useState<number | null>(null)
@@ -221,6 +222,11 @@ export default function StoryGameWorkbench(props: { scope: WorkspaceScope }) {
   const beats = useMemo(() => snapshot.beats.filter(item => item.moduleId === module?.id && item.nodeKey === selectedNode?.key).sort((a, b) => a.order - b.order), [module?.id, selectedNode?.key, snapshot.beats])
   const choices = useMemo(() => snapshot.choices.filter(item => item.moduleId === module?.id && item.sourceNodeKey === selectedNode?.key).sort((a, b) => a.order - b.order), [module?.id, selectedNode?.key, snapshot.choices])
   const releases = useMemo(() => snapshot.releases.filter(item => item.gameDefinitionId === definition?.id), [definition?.id, snapshot.releases])
+  const manualPublicationPolicy = resolveLegacyManualPublicationPolicyV1({
+    releases,
+    productionRouteAvailable: props.onOpenProduction != null,
+    legacyDraftPresent: definition != null,
+  })
 
   useEffect(() => {
     if (!definition || !module) return
@@ -324,6 +330,10 @@ export default function StoryGameWorkbench(props: { scope: WorkspaceScope }) {
   }
   const publish = () => run(async () => {
     if (!definition) return
+    if (!manualPublicationPolicy.directPublicationAllowed && props.onOpenProduction) {
+      props.onOpenProduction()
+      return
+    }
     const confirmed = await dialog.confirm({ title: `发布“${definition.title}”？`, message: '将依次冻结新的 WorldRevision、WorldRelease 与不可变 GameRelease；旧版本和存档不会被覆盖。', confirmText: '检查并发布' })
     if (!confirmed) return
     const published = await publishStoryGameDraft({ scope: props.scope, gameDefinitionId: definition.id!, label: `${definition.title} v${releases.length + 1}` })
@@ -340,9 +350,7 @@ export default function StoryGameWorkbench(props: { scope: WorkspaceScope }) {
     <aside className="storygame-author-sidebar">
       <div className="storygame-author-sidebar-head"><strong>游戏草稿</strong><button type="button" aria-label="刷新作者工作台" onClick={() => void run(refresh)}><RefreshCw className="h-3.5 w-3.5" /></button></div>
       <div className="storygame-author-game-list">{snapshot.definitions.map(item => <button type="button" className={item.id === definition?.id ? 'active' : ''} key={item.id} onClick={() => setSelectedDefinitionId(item.id!)}><strong>{item.title}</strong><small>{item.gameKey} · {item.status === 'draft' ? '草稿' : '已归档'}</small></button>)}</div>
-      <button type="button" className="storygame-author-create" onClick={createBlank} disabled={busy}><FilePlus2 className="h-4 w-4" />新建空白游戏</button>
-      <button type="button" className="storygame-author-create sample" onClick={createSample} disabled={busy}><Sparkles className="h-4 w-4" />载入验收样例</button>
-      <p>样例包含 3 章、25 节点、45 Beat、30 Choice、2+ 次汇流、条件选项与 3 个结局。</p>
+      {!props.onOpenProduction && <><button type="button" className="storygame-author-create" onClick={createBlank} disabled={busy}><FilePlus2 className="h-4 w-4" />新建空白游戏</button><button type="button" className="storygame-author-create sample" onClick={createSample} disabled={busy}><Sparkles className="h-4 w-4" />载入验收样例</button><p>样例包含 3 章、25 节点、45 Beat、30 Choice、2+ 次汇流、条件选项与 3 个结局。</p></>}
     </aside>
     <div className="storygame-author-main">
       <header className="storygame-author-toolbar">
@@ -354,7 +362,7 @@ export default function StoryGameWorkbench(props: { scope: WorkspaceScope }) {
         </nav>
       </header>
       {(error || message) && <div className={`storygame-author-notice ${error ? 'error' : 'success'}`} role={error ? 'alert' : 'status'}>{error ? <AlertTriangle className="h-4 w-4" /> : <CheckCircle2 className="h-4 w-4" />}<span>{error || message}</span><button type="button" aria-label="关闭提示" onClick={() => { setError(''); setMessage('') }}>×</button></div>}
-      {!definition && view !== 'help' ? <div className="storygame-author-empty"><BookOpenCheck className="h-8 w-8" /><h2>创建第一个分支故事</h2><p>可从两节点空白游戏开始，也可载入完整验收样例学习条件、效果与汇流。</p></div> : view === 'game' && definition && module ? <div className="storygame-author-pane">
+      {!definition && view !== 'help' ? <div className="storygame-author-empty"><BookOpenCheck className="h-8 w-8" /><h2>{props.onOpenProduction ? '没有需要维护的旧草稿' : '创建第一个分支故事'}</h2><p>{props.onOpenProduction ? '新游戏统一从制作中心开始，会自动生成 Build、预览并原子发布。' : '可从两节点空白游戏开始，也可载入完整验收样例学习条件、效果与汇流。'}</p>{props.onOpenProduction && <button type="button" className="storygame-author-create" onClick={props.onOpenProduction}><Rocket className="h-4 w-4" />进入制作中心</button>}</div> : view === 'game' && definition && module ? <div className="storygame-author-pane">
         <div className="storygame-author-heading"><div><small>GAME DEFINITION</small><h2>游戏与入口模块</h2></div><div className="storygame-author-actions"><button type="button" onClick={saveGame} disabled={busy}><Save className="h-4 w-4" />保存设置</button><button type="button" className="danger" onClick={removeGame} disabled={busy}><Trash2 className="h-4 w-4" />删除草稿</button></div></div>
         <div className="storygame-author-form-grid"><label>游戏标题<input value={gameTitle} onChange={event => setGameTitle(event.target.value)} /></label><label>稳定 gameKey<input value={definition.gameKey} readOnly /></label><label className="wide">游戏简介<textarea rows={3} value={gameDescription} onChange={event => setGameDescription(event.target.value)} /></label><label>模块标题<input value={moduleTitle} onChange={event => setModuleTitle(event.target.value)} /></label><label>入口节点<select value={entryNodeKey} onChange={event => setEntryNodeKey(event.target.value)}>{nodes.map(node => <option key={node.key} value={node.key}>{node.title} · {node.key}</option>)}</select></label><label className="wide">模块说明<textarea rows={3} value={moduleDescription} onChange={event => setModuleDescription(event.target.value)} /></label><label className="wide">初始变量 JSON<textarea rows={5} value={initialVariables} onChange={event => setInitialVariables(event.target.value)} spellCheck={false} /></label></div>
         <div className="storygame-author-contract"><ShieldCheck className="h-5 w-5" /><div><strong>稳定身份与发布边界</strong><p>gameKey、节点 key、Beat key 与 Choice key 创建后保持稳定；玩家只读取不可变 GameRelease，草稿修改不会反写旧存档。</p></div></div>
@@ -376,7 +384,7 @@ export default function StoryGameWorkbench(props: { scope: WorkspaceScope }) {
         <div className="storygame-preview-note"><ShieldCheck className="h-4 w-4" />试玩直接复用正式事件回放的条件、效果和进入节点语义，但不创建 SIM 存档、不写事件，也不伪装成发布版本。</div>
         {preview && previewNode ? <section className="storygame-draft-player"><div className="storygame-draft-meta"><span>{preview.state.moduleTitle}</span><span>{preview.state.visitedNodeKeys.length} 个节点 · {(preview.state.choiceHistory ?? []).length} 次选择</span></div><small>{NODE_LABELS[previewNode.kind]} · {previewNode.key}</small><h2>{previewNode.title}</h2>{previewNode.summary && <p className="summary">{previewNode.summary}</p>}<div className="storygame-draft-beats">{previewBeats.map(beat => <article key={beat.beatKey}><strong>{beat.kind === 'dialogue' ? preview.speakerNames[beat.speakerKey ?? ''] ?? '未知角色' : BEAT_LABELS[beat.kind]}</strong><p>{beat.text}</p></article>)}</div>{preview.state.completed ? <div className="storygame-draft-ending"><CheckCircle2 className="h-6 w-6" /><strong>已抵达结局</strong><button type="button" onClick={() => void startPreview()}>重新试玩</button></div> : <div className="storygame-draft-choices">{previewChoices.map(choice => { const available = preview.state.availableChoiceKeys?.includes(choice.choiceKey) ?? false; return <div key={choice.choiceKey}><button type="button" onClick={() => choosePreview(choice.choiceKey)} disabled={!available}><strong>{choice.text}</strong><span>{choice.description}</span></button>{!available && <small>{choice.unavailableReason || '当前条件未满足。'}</small>}</div> })}</div>}</section> : <div className="storygame-author-empty compact"><Eye className="h-7 w-7" /><h2>选择起点开始草稿试玩</h2><p>可以从模块入口完整走一遍，也可以从中段节点快速检查内容。</p></div>}
       </div> : view === 'release' && definition && module ? <div className="storygame-author-pane">
-        <div className="storygame-author-heading"><div><small>IMMUTABLE RELEASE</small><h2>检查、冻结与版本</h2></div><div className="storygame-author-actions"><button type="button" onClick={checkGraph} disabled={busy}><ShieldCheck className="h-4 w-4" />发布检查</button><button type="button" onClick={publish} disabled={busy || report?.valid !== true}>{busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Rocket className="h-4 w-4" />}发布新版本</button></div></div>
+        <div className="storygame-author-heading"><div><small>IMMUTABLE RELEASE</small><h2>检查、冻结与版本</h2></div><div className="storygame-author-actions"><button type="button" onClick={checkGraph} disabled={busy}><ShieldCheck className="h-4 w-4" />发布检查</button><button type="button" onClick={publish} disabled={busy || report?.valid !== true}>{busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Rocket className="h-4 w-4" />}{manualPublicationPolicy.mode === 'production-required' ? '交由制作中心发布' : props.onOpenProduction ? '发布维护版本' : '发布新版本'}</button></div></div>
         <div className="storygame-release-pipeline"><article><span>1</span><div><strong>内容图检查</strong><p>入口、断链、目标、可达性、结局、死路、循环与 JSON 语法。</p></div></article><article><span>2</span><div><strong>WorldRevision / WorldRelease</strong><p>调用现有世界发布系统冻结注册表派生的便携快照。</p></div></article><article><span>3</span><div><strong>GameRelease</strong><p>绑定世界哈希并冻结 GameDefinition、节点、Beat 与 Choice。</p></div></article></div>
         <div className="storygame-version-list"><div className="storygame-author-section-head"><div><h3>不可变版本</h3><small>旧版本始终保留，现有玩家存档继续绑定原内容哈希</small></div><span>{releases.length}</span></div>{releases.map(release => <article key={release.id}><div><strong>v{release.version} · {release.label}</strong><span>{new Date(release.createdAt).toLocaleString('zh-CN')}</span></div><code>{release.contentHash.slice(0, 16)}…</code><span>WorldRelease #{release.worldReleaseId}</span></article>)}{releases.length === 0 && <div className="storygame-author-empty compact"><Rocket className="h-7 w-7" /><h2>尚未正式发布</h2><p>先运行检查，再发布第一个不可变版本。</p></div>}</div>
       </div> : view === 'help' ? <div className="storygame-author-pane storygame-author-help">

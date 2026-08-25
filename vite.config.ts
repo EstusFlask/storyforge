@@ -14,6 +14,12 @@ function resolveBuildSha(): string {
 }
 
 export default defineConfig({
+  // Frozen E2E workspaces symlink node_modules. Give each disposable copy its
+  // own optimizer cache so it cannot reuse or mutate the live dev server's
+  // prebundled Tiptap graph (which registers editor extensions globally).
+  cacheDir: process.env.STORYFORGE_E2E_SNAPSHOT === '1'
+    ? '.vite-e2e-cache'
+    : 'node_modules/.vite',
   define: {
     __STORYFORGE_BUILD_SHA__: JSON.stringify(resolveBuildSha()),
   },
@@ -167,16 +173,149 @@ export default defineConfig({
         // 不可在此用 manualChunks 固定它们——否则会被并入主包静态引用、反而变回首屏 eager 加载。
         // Phase 3.5:把大的静态依赖拆成独立 vendor chunk。
         // 好处:① 主包变小、解析更快 ② 这些库很少变,浏览器可长期缓存(应用更新不必重下)。
-        manualChunks: {
-          'vendor-react': ['react', 'react-dom', 'react-router'],
-          'vendor-editor': ['@tiptap/react', '@tiptap/starter-kit', '@tiptap/extension-placeholder'],
-          'vendor-db': ['dexie'],
-          'vendor-d3': ['d3-hierarchy'],
-          // 侧栏与工作区共享大量图标；独立缓存，避免每次功能加一个图标都把入口包推过预算。
-          'vendor-icons': ['lucide-react'],
-          // 上下文装配被首页、写作与多个懒加载面板共同引用；单独缓存可避免
-          // 每次扩展项目数据源都推高首屏入口包，同时不改变其同步调用语义。
-          'ai-context': ['./src/lib/ai/context-builder.ts'],
+        manualChunks(id) {
+          // Object-form manual chunks also absorb dependencies. That made React
+          // absorb editor modules and the simulation interpreter absorb product
+          // runtimes, producing circular chunks. File ownership keeps the same
+          // cache boundaries without moving transitive dependencies across them.
+          const normalizedId = id.replaceAll('\\', '/')
+          if (/\/node_modules\/(?:react|react-dom|react-router)\//.test(normalizedId)) return 'vendor-react'
+          if (normalizedId.includes('/node_modules/@tiptap/')) return 'vendor-editor'
+          if (normalizedId.includes('/node_modules/dexie/')) return 'vendor-db'
+          if (normalizedId.includes('/node_modules/d3-hierarchy/')) return 'vendor-d3'
+          if (normalizedId.includes('/node_modules/lucide-react/')) return 'vendor-icons'
+
+          const aiContextModules = [
+            '/src/lib/ai/context-builder.ts',
+            '/src/lib/knowledge-ledger/knowledge-ledger.ts',
+            '/src/lib/cultivation/progress.ts',
+            '/src/lib/foreshadow/suggestions.ts',
+            '/src/lib/foreshadow/context.ts',
+            '/src/lib/storyline/storyline-progress.ts',
+          ]
+          if (aiContextModules.some(modulePath => normalizedId.endsWith(modulePath))) return 'ai-context'
+          if (normalizedId.endsWith('/src/lib/ai/prompt-seeds.ts')) return 'prompt-seeds-core'
+          if (normalizedId.endsWith('/src/lib/simulation/runtime.ts')) return 'simulation-platform-runtime'
+          if (normalizedId.endsWith('/src/lib/game-production/runtime-package.ts')
+            || normalizedId.endsWith('/src/lib/game-production/preview-manifest.ts')) {
+            return 'game-runtime-package'
+          }
+
+          const simulationStoryModules = [
+            '/src/lib/adventure/runtime.ts',
+            '/src/lib/avg/runtime.ts',
+            '/src/lib/character-interaction/runtime.ts',
+            '/src/lib/narrative-simulation/runtime.ts',
+            '/src/lib/open-world/runtime.ts',
+          ]
+          if (simulationStoryModules.some(modulePath => normalizedId.endsWith(modulePath))) {
+            return 'simulation-story-products'
+          }
+
+          // TTRPG authoring/compilation is intentionally a separate boundary
+          // from the live simulation interpreter. The runtime preview adapter
+          // may load a frozen Build, but producing that Build (Brief, compiler,
+          // media adoption and publication checks) is not part of every turn.
+          // Keeping these acyclic modules together prevents the product layer
+          // from being absorbed into simulation-platform-runtime as the TTRPG
+          // production surface grows.
+          const ttrpgProductionModules = [
+            '/src/lib/ttrpg/production-service.ts',
+            '/src/lib/ttrpg/production-brief.ts',
+            '/src/lib/ttrpg/production-compiler.ts',
+            '/src/lib/ttrpg/production-source.ts',
+            '/src/lib/ttrpg/production-kernel.ts',
+            '/src/lib/ttrpg/production-media.ts',
+            '/src/lib/ttrpg/release.ts',
+            '/src/lib/ttrpg/campaign-proposal.ts',
+            '/src/lib/ttrpg/house-rule.ts',
+            '/src/lib/ttrpg/d20-fantasy-rule-pack.ts',
+            '/src/lib/ttrpg/d100-investigation-rule-pack.ts',
+            '/src/lib/ttrpg/rank-lite-rule-pack.ts',
+            '/src/lib/ttrpg/storyforge-rule-pack.ts',
+          ]
+          if (ttrpgProductionModules.some(modulePath => normalizedId.endsWith(modulePath))) {
+            return 'ttrpg-production'
+          }
+
+          const simulationTtrpgModules = [
+            '/src/lib/ttrpg/campaign.ts',
+            '/src/lib/ttrpg/rule-pack.ts',
+            '/src/lib/ttrpg/runtime.ts',
+            '/src/lib/ttrpg/action-feedback.ts',
+            '/src/lib/ttrpg/viewer-projection.ts',
+            '/src/lib/ttrpg/continuity-state.ts',
+            '/src/lib/ttrpg/action-requirement.ts',
+            '/src/lib/ttrpg/action-economy.ts',
+            '/src/lib/ttrpg/ability-ledger.ts',
+            '/src/lib/ttrpg/item-ledger.ts',
+            '/src/lib/ttrpg/effect-runtime.ts',
+          ]
+          if (simulationTtrpgModules.some(modulePath => normalizedId.endsWith(modulePath))) {
+            return 'simulation-ttrpg-products'
+          }
+
+          const gameReleaseModules = [
+            '/src/lib/game-production/preview-source.ts',
+            '/src/lib/text-game/releases.ts',
+          ]
+          if (gameReleaseModules.some(modulePath => normalizedId.endsWith(modulePath))) {
+            return 'simulation-platform-runtime'
+          }
+
+          // These modules are one source-level strongly connected component:
+          // registry readers -> simulation/release verification -> authoring /
+          // portable lifecycle -> registry readers. Keeping the SCC together
+          // avoids cross-chunk ESM initialization cycles.
+          if (normalizedId.endsWith('/src/lib/registry/context-sources.ts')
+            || normalizedId.endsWith('/src/lib/ttrpg/gm-context.ts')) {
+            return 'simulation-platform-runtime'
+          }
+
+          // Large, acyclic dependencies of the platform runtime can safely use
+          // a separate cache boundary. They never import the SCC above, so this
+          // reduces the runtime chunk without manufacturing circular chunks.
+          const simulationPlatformSupportModules = [
+            '/src/lib/simulation/canon-snapshot.ts',
+            '/src/lib/text-game/content.ts',
+            '/src/lib/retrieval/retrieval.ts',
+            '/src/lib/retrieval/rag-library.ts',
+            '/src/lib/narrative/blueprint.ts',
+            '/src/lib/agent/run/event-schema.ts',
+            '/src/lib/agent/run/projection.ts',
+            '/src/lib/agent/creative-reliability.ts',
+            '/src/lib/game-production/media-blob-store.ts',
+            '/src/lib/memory/consistency-dossier.ts',
+            '/src/lib/consistency/impact-analysis.ts',
+            '/src/lib/ai/world-rules-manifest.ts',
+            '/src/lib/style/learning-agent.ts',
+            '/src/lib/agent/read-sources.ts',
+            '/src/lib/node-authoring/contracts.ts',
+            '/src/lib/agent/run/verification-receipt.ts',
+            '/src/lib/reference-analysis/merge-analysis.ts',
+            '/src/lib/agent/context-policy.ts',
+            '/src/lib/history/agent-baseline.ts',
+            '/src/lib/inspiration/workspace.ts',
+            '/src/lib/consistency/held-items.ts',
+            '/src/lib/reference-analysis/derived-agent-baseline.ts',
+            '/src/lib/style/style-learning.ts',
+            '/src/lib/world-engine/works.ts',
+            '/src/lib/world-engine/lifecycle.ts',
+            '/src/lib/game-production/media-resolver.ts',
+            '/src/stores/ai-config.ts',
+            '/src/lib/character-interaction/world-grounding.ts',
+            '/src/lib/character-interaction/source-character.ts',
+            '/src/lib/text-game/agent-contract.ts',
+            '/src/lib/utils/sanitize-svg.ts',
+            '/src/lib/ai/chapter-memory/handoff-format.ts',
+            '/src/lib/utils/world-portals.ts',
+            '/src/lib/codex/extraction.ts',
+            '/src/lib/ai/codex-context.ts',
+            '/src/lib/ai/cultivation-context.ts',
+          ]
+          if (simulationPlatformSupportModules.some(modulePath => normalizedId.endsWith(modulePath))) {
+            return 'simulation-platform-support'
+          }
         },
       },
     },

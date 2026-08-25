@@ -69,6 +69,14 @@ import {
   parseCharacterDrivenPlotVolumes,
 } from '../types/character-driven-plan'
 import type { ContextSource } from './types'
+import {
+  readGameProductionArtifactInputs,
+  readGameProductionBriefContext,
+  readGameProductionConsultationSource,
+  readGameProductionEvolutionBase,
+  readGameProductionQualityFeedback,
+} from '../game-production/context'
+import { readCharacterInteractionProductionContextV1 } from '../character-interaction/production'
 import { countWords, htmlToPlainText } from '../utils/html'
 import {
   formatStyleCalibrationFeedback,
@@ -95,6 +103,9 @@ import type { AssembleContextInput } from './types'
 import { readOwnedRows, resolveScope, assertRecordInScope } from '../world-engine/scope'
 import type { WorkspaceScope } from '../types/world-ownership'
 import { parseWorldGameAuthoringRequestV1 } from '../text-game/agent-contract'
+import { readTtrpgCharacterAuthoringContextV2, readTtrpgProductContext } from '../ttrpg/context'
+import { readTtrpgGmRuntimeContextV1 } from '../ttrpg/gm-context'
+import { readTtrpgPlayerRuntimeContextV1 } from '../ttrpg/player-context'
 
 async function readSimulationStateForContext(sessionId: number) {
   const { readSimulationState } = await import('../simulation/runtime')
@@ -1111,6 +1122,57 @@ async function readCharacterPassages(projectId: number, name?: string, worldGrou
 
 export const CONTEXT_SOURCES: ContextSource[] = [
   {
+    key: 'ttrpg.product-authoring', label: 'TTRPG 规则与战役包', scope: 'project', layer: 'L0',
+    ownerFrom: 'work', budgetTokens: 16_000, protectedFromTrim: true,
+    enabled: input => Number.isInteger(input.ttrpgRulePackId) || Number.isInteger(input.ttrpgCampaignModuleId),
+    read: readTtrpgProductContext,
+  },
+  {
+    key: 'ttrpg.character-authoring', label: 'TTRPG 单角色安全车卡制作上下文', scope: 'project', layer: 'L0',
+    ownerFrom: 'work', budgetTokens: 12_000, protectedFromTrim: true,
+    enabled: input => Number.isInteger(input.ttrpgCampaignModuleId) && !!input.ttrpgCharacterKey?.trim(),
+    read: readTtrpgCharacterAuthoringContextV2,
+  },
+  {
+    key: 'ttrpgRuntime', label: '正式 TTRPG 主持人运行视角', scope: 'runtime', layer: 'L0',
+    ownerFrom: 'work', budgetTokens: 10_000, protectedFromTrim: true,
+    requiresSimulationSessionId: true,
+    read: readTtrpgGmRuntimeContextV1,
+  },
+  {
+    key: 'ttrpgPlayerRuntime', label: '正式 TTRPG 单角色玩家运行视角', scope: 'runtime', layer: 'L0',
+    ownerFrom: 'work', budgetTokens: 10_000, protectedFromTrim: true,
+    requiresSimulationSessionId: true,
+    enabled: input => !!input.ttrpgPlayerActorKey?.trim(),
+    read: readTtrpgPlayerRuntimeContextV1,
+  },
+  {
+    key: 'game-production.consultation-source', label: '游戏生产会谈来源', scope: 'project', layer: 'L0',
+    ownerFrom: 'world', budgetTokens: 6000, protectedFromTrim: true,
+    enabled: input => Number.isInteger(input.gameWorldReleaseId), read: readGameProductionConsultationSource,
+  },
+  {
+    key: 'game-production.brief', label: '已授权游戏生产 Brief', scope: 'project', layer: 'L0',
+    ownerFrom: 'work', budgetTokens: 8000, protectedFromTrim: true,
+    enabled: input => Number.isInteger(input.gameProductionId), read: readGameProductionBriefContext,
+  },
+  {
+    key: 'game-production.artifact-inputs', label: '游戏生产任务依赖', scope: 'project', layer: 'L1',
+    ownerFrom: 'work', budgetTokens: 10_000,
+    enabled: input => Number.isInteger(input.gameBuildId) && !!input.gameArtifactKeys?.length,
+    read: readGameProductionArtifactInputs,
+  },
+  {
+    key: 'game-production.quality-feedback', label: '游戏生产质量反馈', scope: 'project', layer: 'L1',
+    ownerFrom: 'work', budgetTokens: 6000,
+    enabled: input => Number.isInteger(input.gameBuildId), read: readGameProductionQualityFeedback,
+  },
+  {
+    key: 'game-production.evolution-base', label: '游戏持续演化基线', scope: 'project', layer: 'L0',
+    ownerFrom: 'work', budgetTokens: 12_000, protectedFromTrim: true,
+    enabled: input => Number.isInteger(input.gameBuildId), read: readGameProductionEvolutionBase,
+  },
+  {
     key: 'worldGameAuthoring',
     label: '冻结世界游戏创作包',
     scope: 'project',
@@ -1158,6 +1220,20 @@ export const CONTEXT_SOURCES: ContextSource[] = [
     protectedFromTrim: true,
     requiresSimulationSessionId: true,
     read: readOpenWorldRuntimeContext,
+  },
+  {
+    key: 'characterInteractionProduction',
+    label: '角色互动冻结生产上下文',
+    scope: 'project',
+    layer: 'L0',
+    ownerFrom: 'work',
+    budgetTokens: 16_000,
+    protectedFromTrim: true,
+    enabled: input => Number.isInteger(input.characterInteractionProductionId),
+    read: input => readCharacterInteractionProductionContextV1({
+      scope: input.scope!,
+      productionId: input.characterInteractionProductionId!,
+    }),
   },
   {
     key: 'interactionRuntime',

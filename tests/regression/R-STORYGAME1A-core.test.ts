@@ -5,6 +5,7 @@ import { addNarrativeNode, createNarrativeModule } from '../../src/lib/narrative
 import {
   branchSimulationSession,
   commitNarrativeChoice,
+  commitNarrativeChoiceWithStateV1,
   createSimulationCheckpoint,
   readSimulationState,
   readSimulationStateVersion,
@@ -188,14 +189,18 @@ describe('STORYGAME-1A · content and execution kernel', () => {
       expect.objectContaining({ choiceKey: 'hidden-door', visible: false, available: false }),
     ]))
     const baseline = await readSimulationStateVersion(session.id!)
-    const first = await commitNarrativeChoice({
+    const firstCommit = await commitNarrativeChoiceWithStateV1({
       sessionId: session.id!,
       choiceKey: 'open-door',
       commandId: 'choice-command-1',
       baseSequence: baseline.sequence,
       baseStateHash: baseline.stateHash,
     })
+    const first = firstCommit.event
     expect(first).toMatchObject({ type: 'narrative.choice.committed', sequence: 3 })
+    expect(firstCommit.appendedEvents.map(event => event.type))
+      .toEqual(['narrative.choice.committed', 'narrative.node.entered'])
+    expect(firstCommit.state.narrative?.currentNodeKey).toBe('welcome')
     expect(await commitNarrativeChoice({
       sessionId: session.id!,
       choiceKey: 'open-door',

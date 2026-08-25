@@ -7,9 +7,15 @@
 import { db } from '../../src/lib/db/schema'
 import { PROJECT_TABLES } from '../../src/lib/registry/project-tables'
 import { canonicalStringify, hashCanonicalValue } from '../../src/lib/agent/run/hash'
+import { createAgentRunV1 } from '../../src/lib/agent/run/event-store'
 import { replayAgentRunEventsV1, toAgentRunProjectionBodyV1 } from '../../src/lib/agent/run/projection'
 import { createNarrativeSimulationAcceptanceContent } from '../../src/lib/narrative-simulation/authoring'
-import type { AnyAgentRunEventV1 } from '../../src/lib/types'
+import type { AnyAgentRunEventV1, GameProductionBriefV3 } from '../../src/lib/types'
+import { hashGameProductionValueV2 } from '../../src/lib/game-production/hash'
+import { GAME_BROWSER_PERFORMANCE_POLICY_V1 } from '../../src/lib/game-production/browser-performance'
+import { recordGameBrowserPerformanceMeasurementV1 } from '../../src/lib/game-production/quality-receipts'
+import { createStoryForgeRulePackV1 } from '../../src/lib/ttrpg/storyforge-rule-pack'
+import { hashCharacterInteractionProductReleaseManifestV1 } from '../../src/lib/character-interaction/production-pipeline'
 
 const now = 1_700_000_000_000 // 固定时间戳,保证派生/手写两版导出可逐字段比对
 
@@ -204,6 +210,115 @@ export async function seedFullProject() {
     sourceWorldCode: 'world-full-fixture',
     createdAt: now,
   } as any) as number
+
+  // ── CHATGAME-3C 角色互动专属来源 / Production / Brief 谱系 ──
+  const characterInteractionProduction = await db.characterInteractionProductions.add({
+    projectId, worldId, workId,
+    productionKey: 'full-fixture-character-interaction',
+    title: '青云山门角色互动', status: 'brief-confirmed',
+    activeSourceSelectionId: null, activeBriefId: null,
+    createdAt: now, updatedAt: now,
+  }) as number
+  const characterInteractionSelectionValue = {
+    schema: 'storyforge.character-interaction-world-source-selection', version: 1,
+    productType: 'character-interaction', contractVersion: 1,
+    worldReleaseId: worldRelease, sourceWorldCode: 'world-full-fixture',
+    worldContentHash: 'fixture-release-hash', sourceWorldExportId: 0,
+    sourceWorkExportId: 0, sourceMappingVersion: 1,
+    participantCharacterExportIds: [0], recordSelections: [], guestCharacterKeys: [],
+    selectionHash: '1'.repeat(64),
+  }
+  const characterInteractionSelectionHash = await hashCanonicalValue(characterInteractionSelectionValue)
+  const characterInteractionSourceSelection = await db.characterInteractionSourceSelections.add({
+    projectId, worldId, workId, productionId: characterInteractionProduction,
+    revision: 1, status: 'frozen', sourceWorldReleaseId: worldRelease,
+    selectionJson: canonicalStringify(characterInteractionSelectionValue),
+    selectionHash: characterInteractionSelectionHash,
+    worldContentHash: 'fixture-release-hash', createdAt: now,
+  }) as number
+  const characterInteractionBriefValue = {
+    schema: 'storyforge.character-interaction-brief', version: 1,
+    productType: 'character-interaction', contractVersion: 1,
+    source: {
+      worldReleaseId: worldRelease,
+      worldContentHash: 'fixture-release-hash',
+      selectionHash: characterInteractionSelectionHash,
+    },
+    title: '青云山门角色互动', userInstruction: '与林惊羽在山门重逢并决定是否同行。',
+    userRole: 'self',
+    participants: [{ participantKey: 'world.character.0', source: 'world', displayName: '林惊羽', reason: '核心互动角色' }],
+    guests: [],
+    setting: {
+      storyMode: 'parallel-timeline', timeContext: '日落前', locationContext: '青云山门',
+      historicalContext: '世界 v1', chatGoal: '确认是否同行', desiredDirections: ['建立信任'],
+      safetyBoundaries: ['不替用户决定情感'],
+    },
+    knowledgePolicy: { publicKnowledge: ['山门即将关闭'], privateKnowledge: [], prohibitedDisclosure: ['镜界誓言'] },
+    relationshipPolicy: { dimensions: ['trust'], largeChangeNeedsEvidence: true },
+    runtime: { sceneCount: 1, maxTurnsPerScene: 12, directorBudget: 2, endingStrategy: 'user-decides' },
+    media: { tier: 'text-core' },
+    worldFeedback: { allowCandidate: true, autoWriteback: false },
+  }
+  const characterInteractionRunContract = {
+    schema: 'storyforge.character-interaction-production-run-contract', version: 1,
+    productType: 'character-interaction', contractVersion: 1,
+    sourceWorldReleaseId: worldRelease,
+    sourceSelectionHash: characterInteractionSelectionHash,
+    briefHash: await hashCanonicalValue(characterInteractionBriefValue),
+    allowedContextSourceKeys: ['characterInteractionProduction'],
+    allowedSteps: ['character-capsules', 'knowledge-and-relationship-seeds', 'scene-plan', 'narrative-links', 'media-bible', 'integration', 'counterexample-validation', 'author-preview'],
+    writeMode: 'candidate-only', worldWritebackAllowed: false, formalMediaWriteAllowed: false,
+    requiredHumanConfirmations: ['author-preview'],
+  }
+  const characterInteractionBrief = await db.characterInteractionBriefs.add({
+    projectId, worldId, workId, productionId: characterInteractionProduction,
+    sourceSelectionId: characterInteractionSourceSelection, revision: 1, status: 'confirmed',
+    briefJson: canonicalStringify(characterInteractionBriefValue),
+    briefHash: await hashCanonicalValue(characterInteractionBriefValue),
+    runContractJson: canonicalStringify(characterInteractionRunContract),
+    runContractHash: await hashCanonicalValue(characterInteractionRunContract),
+    confirmedAt: now, createdAt: now,
+  }) as number
+  await db.characterInteractionProductions.update(characterInteractionProduction, {
+    activeSourceSelectionId: characterInteractionSourceSelection,
+    activeBriefId: characterInteractionBrief,
+  })
+  const characterInteractionArtifactPayload = {
+    schema: 'storyforge.character-interaction-character-capsules', version: 1,
+    capsules: [{
+      participantKey: 'world.character.0', characterKey: 'release-character:0', name: '林惊羽',
+      source: 'world', roleLabel: '核心互动角色', identitySummary: '青云山门守门人',
+      voiceRules: '克制、直接', publicStance: '愿意同行', privateAnchor: '守住镜界誓言', maxMemoryEntries: 24,
+    }],
+  }
+  const characterInteractionArtifactHash = await hashCanonicalValue(characterInteractionArtifactPayload)
+  const characterInteractionArtifact = await db.characterInteractionArtifacts.add({
+    projectId, worldId, workId, productionId: characterInteractionProduction,
+    stepKey: 'character-capsules', artifactKey: 'character-capsules', revision: 1,
+    kind: 'character-capsules', status: 'confirmed', sourceSelectionHash: characterInteractionSelectionHash,
+    briefHash: await hashCanonicalValue(characterInteractionBriefValue), dependencyHash: await hashCanonicalValue([]),
+    payloadJson: canonicalStringify(characterInteractionArtifactPayload), payloadHash: characterInteractionArtifactHash,
+    producerRunId: null, sourceSessionId: null,
+    confirmationJson: canonicalStringify({ authorConfirmed: true, confirmedAt: now }), createdAt: now, confirmedAt: now,
+  }) as number
+  await db.characterInteractionProductionSteps.add({
+    projectId, worldId, workId, productionId: characterInteractionProduction,
+    stepKey: 'character-capsules', attempt: 1, status: 'confirmed', inputHash: '2'.repeat(64),
+    candidateArtifactId: characterInteractionArtifact, confirmedArtifactId: characterInteractionArtifact,
+    producerRunId: null,
+    checkpointJson: canonicalStringify({ artifactKey: 'character-capsules', revision: 1, payloadHash: characterInteractionArtifactHash }),
+    errorJson: null, startedAt: now, completedAt: now, updatedAt: now,
+  })
+  await db.characterInteractionMediaAssets.add({
+    projectId, worldId, workId, productionId: characterInteractionProduction,
+    slotKey: 'portrait:world.character.0', assetKey: 'portrait.world.character.0', version: 1,
+    kind: 'portrait', targetRef: 'world.character.0', productionRequired: true, status: 'planned',
+    specJson: canonicalStringify({ schema: 'fixture.character-interaction-media-slot', version: 1 }),
+    specHash: '3'.repeat(64), fallbackText: '林惊羽（文字头像）', altText: '林惊羽的角色头像',
+    blobObjectId: null, mimeType: null, byteSize: 0, contentHash: null, producerRunId: null,
+    rightsJson: canonicalStringify({ status: 'unresolved' }), failureJson: null, createdAt: now, updatedAt: now,
+  })
+
   const gameDefinition = await db.gameDefinitions.add({
     projectId, worldId, workId, gameKey: 'full-fixture-story', productType: 'storygame',
     title: '青云山门', description: '全表往返游戏定义', status: 'draft',
@@ -237,6 +352,31 @@ export async function seedFullProject() {
     manifestJson: JSON.stringify({ schema: 'storyforge.game-release', version: 1 }),
     contentHash: 'fixture-game-release-hash', createdAt: now,
   }) as number
+  const characterInteractionProductReleaseManifest = {
+    schema: 'storyforge.character-interaction-product-release' as const, version: 1 as const,
+    productType: 'character-interaction' as const, releaseVersion: 1,
+    source: {
+      worldReleaseId: worldRelease, worldContentHash: 'fixture-release-hash',
+      selectionHash: characterInteractionSelectionHash, selection: characterInteractionSelectionValue,
+    },
+    brief: { content: characterInteractionBriefValue as any, contentHash: await hashCanonicalValue(characterInteractionBriefValue) },
+    artifacts: [{ artifactKey: 'character-capsules', kind: 'character-capsules' as const, payload: characterInteractionArtifactPayload, payloadHash: characterInteractionArtifactHash }],
+    media: [],
+    gameRelease: { contentHash: 'fixture-game-release-hash' },
+    integrity: { artifactManifestHash: '4'.repeat(64), mediaManifestHash: await hashCanonicalValue([]), releaseInputHash: '5'.repeat(64) },
+    compatibility: { productionContract: 1 as const, runtimeProtocol: 1 as const, minimumPlayerVersion: 1 as const },
+    createdAt: now,
+  }
+  const characterInteractionProductRelease = await db.characterInteractionProductReleases.add({
+    projectId, worldId, workId, productionId: characterInteractionProduction,
+    sourceSelectionId: characterInteractionSourceSelection, sourceWorldReleaseId: worldRelease,
+    briefId: characterInteractionBrief, gameReleaseId: gameRelease, version: 1,
+    label: '青云山门角色互动 v1', manifestJson: canonicalStringify(characterInteractionProductReleaseManifest),
+    contentHash: await hashCharacterInteractionProductReleaseManifestV1(characterInteractionProductReleaseManifest), createdAt: now,
+  }) as number
+  await db.characterInteractionProductions.update(characterInteractionProduction, {
+    currentProductReleaseId: characterInteractionProductRelease,
+  })
   const adventureGameDefinition = await db.gameDefinitions.add({
     projectId, worldId, workId, gameKey: 'full-fixture-adventure', productType: 'adventure',
     title: '青云山门 · 冒险版', description: '全表往返文字冒险定义', status: 'draft',
@@ -660,6 +800,32 @@ export async function seedFullProject() {
     stateHash: 'fixture-hash',
     createdAt: now,
   })
+  await db.ttrpgSessionParticipants.add({
+    projectId, worldGroupId: wgA, worldId, workId, sessionId: simulationParent,
+    seatKey: 'player.1', role: 'player', controller: 'human', actorKey: 'release-character:0',
+    viewerKey: 'viewer.player.1', assignmentState: 'claimed', humanAssignmentPolicy: 'owner',
+    activation: 'manual', substitutionPolicy: 'never', aiProfile: null,
+    consent: {
+      safetyBoundariesAccepted: true, aiIdentityDisclosed: true, aiAdviceAllowed: false,
+      aiSubstitutionAllowed: false, pvpAllowed: false, characterDeathAllowed: false,
+      sessionLoggingAllowed: true, generatedPortraitAllowed: false, publicSharingAllowed: false,
+    },
+    sessionZeroAcceptedAtSequence: null, revision: 1,
+    lastCommandId: 'fixture.participant', lastCommandFingerprint: 'fixture.participant',
+    createdAt: now, updatedAt: now,
+  })
+  await db.ttrpgRuntimeAssetRequests.add({
+    projectId, worldGroupId: wgA, worldId, workId, sessionId: simulationParent,
+    requestKey: 'fixture.runtime-media', slotKey: 'scene.fixture', kind: 'scene', targetRef: 'scene.fixture',
+    audience: 'party', requesterViewerKey: 'viewer.player.1', prompt: '全量生命周期测试场景', negativePrompt: '',
+    fallbackText: '媒资不可用时继续显示这段文字。', altText: '测试场景图',
+    styleBibleHash: '7'.repeat(64), inputHash: '8'.repeat(64), adapterId: 'fixture.media.v1',
+    status: 'available', priority: 10, attemptCount: 1, maximumAttempts: 3, maximumSessionCostUsd: 1,
+    estimatedCostUsd: 0, costReservationUsd: 0, actualCostUsd: 0, estimatedStorageBytes: avgMediaData.byteLength,
+    mediaAssetId: avgMediaAsset, mediaAssetVersion: 1, mediaContentHash: avgMediaHash,
+    processorLeaseId: null, processorLeaseExpiresAt: null, lastErrorCode: null, lastErrorDetail: null,
+    requestedAtSequence: 0, terminalEventSequence: 1, revision: 2, createdAt: now, updatedAt: now,
+  })
 
   // ── NS-4 时序事实账本（带分类型 FK，供全表往返覆盖） ──
   const temporalFact = await db.temporalFacts.add({ projectId, worldGroupId: wgA, characterId: char1, subjectName: '林惊羽', predicate: 'powerStage', factKind: 'state', value: '炼气一层', sourceType: 'chapter', sourceChapterId: chapter, validFromChapterId: chapter, status: 'confirmed', locked: false, createdAt: now, updatedAt: now } as any) as number
@@ -670,6 +836,278 @@ export async function seedFullProject() {
     knowledgeKey: 'self.power_stage', statement: '林惊羽已达到炼气一层',
     factId: temporalFact, action: 'learn', sourceType: 'chapter', sourceChapterId: chapter,
     sourceQuote: '废墟中睁眼', status: 'confirmed', createdAt: now, updatedAt: now,
+  })
+
+  // ── GAMEPROD-1 六表生产控制/证据/共享媒资闭包 ──
+  const mediaBlobObject = await db.mediaBlobObjects.add({
+    projectId, worldId, workId, contentHash: avgMediaHash, mimeType: 'image/svg+xml',
+    byteSize: avgMediaData.byteLength, backend: 'indexeddb', storageState: 'ready',
+    data: avgMediaData, opfsPath: null, leaseOwner: null, leaseExpiresAt: null,
+    lastVerifiedAt: now, createdAt: now, updatedAt: now,
+  }) as number
+  await db.avgMediaBlobs.where('mediaAssetId').equals(avgMediaAsset).modify({ blobObjectId: mediaBlobObject })
+  const gameProduction = await db.gameProductions.add({
+    projectId, worldId, workId, productionKey: 'full-fixture-production', title: '全量生产流程',
+    status: 'preview-ready', stateRevision: 3, controlEpoch: 1, currentBriefRevision: 1,
+    currentBuildNumber: 1, currentGameDefinitionId: gameDefinition, currentGameReleaseId: gameRelease,
+    lastErrorJson: '{}', createdAt: now, updatedAt: now,
+  }) as number
+  const fixtureWorldContentHash = 'a'.repeat(64)
+  const fixtureBrief: GameProductionBriefV3 = {
+    schema: 'storyforge.game-production-brief', version: 3,
+    source: {
+      worldReleaseId: worldRelease, worldContentHash: fixtureWorldContentHash,
+      selection: {
+        schema: 'storyforge.world-game-source', version: 2, productType: 'storygame',
+        worldContentHash: fixtureWorldContentHash, narrativeModuleExportIds: [0],
+        characterExportIds: [0], characterRelationExportIds: [], importantLocationExportIds: [],
+        artifactExportIds: [], codexEntryExportIds: [], storyArcExportIds: [], avgMediaAssetExportIds: [],
+        productSource: { kind: 'storygame', narrativeModuleExportIds: [0] },
+      },
+      startingPoint: {
+        kind: 'mainline', title: '青云山门', summary: '从冻结主线起点开始',
+        sourceRefs: ['narrative:0'], protagonistRefs: ['character:0'], openingConflict: '山门将在日落时关闭。',
+      },
+    },
+    intent: {
+      productType: 'storygame', playerRole: '扮演林惊羽', protagonistRefs: ['character:0'],
+      openingSituation: '在山门关闭前作出选择。', coreExperience: ['选择与后果'],
+      requiredFacts: ['山门日落关闭'], forbiddenChanges: ['不得改写冻结世界'],
+      contentBoundaries: ['不含未授权露骨内容'], tone: ['克制', '紧张'],
+    },
+    scale: { scope: 'scene', targetPlayMinutes: 20, targetWordCount: 3_000, targetEndingCount: 2 },
+    media: {
+      visualLevel: 'none', audioLevel: 'none', imageCount: 0, musicTrackCount: 0,
+      sfxCount: 0, voiceLineCount: 0, requiredMediaKinds: [],
+    },
+    consultationBudget: {
+      maximumModelCalls: 2, maximumInputTokens: 20_000, maximumOutputTokens: 5_000, maximumCostUsd: null,
+    },
+    productionBudget: {
+      maximumModelCalls: 10, maximumInputTokens: 100_000, maximumOutputTokens: 30_000,
+      maximumCostUsd: null, maximumMediaCalls: 0, maximumDurationMs: 3_600_000,
+      maximumStorageBytes: 100_000_000,
+    },
+    qualityProfile: 'prototype', capabilityRequirements: [],
+    externalDataPolicy: {
+      allowedDataClasses: ['world-selection'], forbiddenDataClasses: ['api-key'],
+      allowReferenceImages: false, allowVoiceScripts: false,
+    },
+    fallbackPolicy: {
+      allowTextOnly: true, allowExistingProjectMedia: true, allowProceduralAudio: true,
+      onRequiredCapabilityMissing: 'pause',
+    },
+    completionContract: {
+      requiresPlayablePreview: true, requiredGateIds: ['runtime.playable'],
+      minimumMediaCoverage: 0, allowSoftWaivers: true,
+    },
+    unresolvedDecisionKeys: [],
+  }
+  const fixtureBriefHash = await hashGameProductionValueV2(fixtureBrief)
+  const gameProductionBrief = await db.gameProductionBriefs.add({
+    projectId, worldId, workId, productionId: gameProduction, revision: 1, parentRevision: null,
+    status: 'authorized', sourceWorldReleaseId: worldRelease, sourceWorldContentHash: fixtureWorldContentHash,
+    userIntentSummary: '从主线起点制作一段有画面的文字游戏', unresolvedJson: '[]',
+    estimateJson: '{"qualityProfile":"prototype"}', briefJson: JSON.stringify(fixtureBrief),
+    briefHash: fixtureBriefHash, authorizedAt: now, createdAt: now,
+  }) as number
+  const gameProductionCommand = await db.gameProductionCommands.add({
+    projectId, worldId, workId, productionId: gameProduction, commandId: 'fixture-preview',
+    type: 'request-preview', payloadHash: '2'.repeat(64), expectedStateRevision: 2,
+    status: 'succeeded', resultJson: '{"buildNumber":1}', errorCode: null,
+    createdAt: now, completedAt: now,
+  }) as number
+  const gameBuild = await db.gameBuilds.add({
+    projectId, worldId, workId, productionId: gameProduction, buildNumber: 1, briefRevision: 1,
+    briefHash: fixtureBriefHash, parentBuildNumber: null, sourceGameReleaseId: null,
+    status: 'preview-ready', resumeState: null, stateRevision: 4, controlEpoch: 1,
+    planRevision: 1, planJson: '{"version":1}', planHash: '3'.repeat(64), budgetLedgerJson: '{}',
+    manifestJson: '{"version":2}', manifestHash: '4'.repeat(64), packageHash: '5'.repeat(64),
+    previewManifestJson: '{"version":1}', previewHash: '6'.repeat(64),
+    qualityReportJson: '{"valid":true}', qualityReportHash: '7'.repeat(64), compatibilityJson: '{}',
+    rootTerminalReceiptHash: null, adoptionIntentHash: null, adoptedGameDefinitionId: null,
+    releasedGameReleaseId: null, failureJson: '{}', authorizedAt: now, startedAt: now,
+    completedAt: now, createdAt: now, updatedAt: now,
+  }) as number
+  const gameQualityGateReceipt = await recordGameBrowserPerformanceMeasurementV1({
+    scope: { projectId, worldId, workId },
+    gameBuildId: gameBuild,
+    measurement: {
+      browserName: 'chromium', browserVersion: 'fixture', platform: 'desktop',
+      viewport: { width: 1440, height: 900 },
+      packageHash: '5'.repeat(64), previewHash: '6'.repeat(64),
+      firstInteractiveBytes: 2 * 1024 * 1024,
+      cachedSceneLatenciesMs: Array.from({ length: 20 }, (_, index) => 40 + index),
+      choiceInputLatenciesMs: Array.from({ length: 20 }, (_, index) => 20 + index),
+      memorySamples: [
+        { elapsedMs: GAME_BROWSER_PERFORMANCE_POLICY_V1.warmupDurationMs, usedHeapBytes: 100 * 1024 * 1024 },
+        { elapsedMs: GAME_BROWSER_PERFORMANCE_POLICY_V1.minimumLongRunDurationMs, usedHeapBytes: 108 * 1024 * 1024 },
+      ],
+      measuredAt: now,
+    },
+  })
+  const productionAgentRunSnapshot = await createAgentRunV1({
+    scope: { projectId, worldId, workId },
+    gameBuildId: gameBuild,
+    now,
+    contract: {
+      version: 1,
+      objective: '验证全量项目中的生产 Build Run 便携生命周期',
+      workflowKind: 'long-running-resumable',
+      scope: {
+        projectId,
+        worldGroupId: null,
+        gameProduction: {
+          gameBuildId: gameBuild,
+          buildNumber: 1,
+          controlEpoch: 1,
+          planHash: '3'.repeat(64),
+          taskKey: '$root',
+        },
+      },
+      permissions: {
+        contextSourceKeys: ['game-production.brief'],
+        writeTargets: [{
+          table: 'gameBuilds',
+          fields: [],
+          mode: 'candidate-only',
+          adoptionExtension: 'game-production-builds',
+        }],
+      },
+      dependencyReceiptPolicy: {
+        requiredForJoin: true,
+        verifierSetVersion: 'game-production-root-v1',
+      },
+      budget: {
+        maxModelCalls: 1,
+        maxToolCalls: 0,
+        maxInputTokens: 1,
+        maxOutputTokens: 1,
+        maxAttemptsPerStep: 1,
+      },
+      acceptance: [
+        { id: 'game-production.children', kind: 'deterministic-check', required: true },
+        { id: 'game-production.package', kind: 'gate-passed', required: true },
+      ],
+      verificationPlan: [{
+        id: 'game-production.root-terminal',
+        kind: 'terminal',
+        verifier: 'game-production-root-v1',
+        criterionIds: ['game-production.children', 'game-production.package'],
+      }],
+      failurePolicy: {
+        onProtocolError: 'fail',
+        onVerificationFailure: 'fail',
+        onStaleInput: 'pause-for-author',
+      },
+    },
+  })
+  const productionAgentRun = productionAgentRunSnapshot.run.id
+  const gameBuildArtifact = await db.gameBuildArtifacts.add({
+    projectId, worldId, workId, buildId: gameBuild, artifactKey: 'visual.background.full-fixture',
+    requirementKey: 'visual.background', version: 1, kind: 'image', mediaKind: 'background',
+    status: 'accepted', producerRunId: productionAgentRun, producerReceiptHash: null, controlEpoch: 1,
+    inputHash: '8'.repeat(64), contentHash: avgMediaHash, payloadJson: '{}', metadataJson: '{}',
+    qualityJson: '{"valid":true}', rightsJson: '{"status":"cleared"}', blobObjectId: mediaBlobObject,
+    mimeType: 'image/svg+xml', byteSize: avgMediaData.byteLength, parentArtifactHash: null,
+    carriedFrom: null, createdAt: now, updatedAt: now,
+  }) as number
+
+  // ── TTRPG-2A RulePack / CampaignPack 作者闭包 ──
+  const fixtureRulePack = createStoryForgeRulePackV1()
+  const gameRulePack = await db.gameRulePacks.add({
+    projectId, worldId, workId,
+    ruleSystemId: fixtureRulePack.ruleSystemId,
+    ruleSystemVersion: fixtureRulePack.ruleSystemVersion,
+    title: fixtureRulePack.title,
+    status: 'validated',
+    rulePackJson: JSON.stringify(fixtureRulePack),
+    contentHash: await hashGameProductionValueV2(fixtureRulePack),
+    createdAt: now,
+    updatedAt: now,
+  }) as number
+  const fixtureCampaign = {
+    schema: 'storyforge.ttrpg-campaign', version: 1,
+    campaignKey: 'full-fixture-campaign', title: '全量跑团战役',
+    sourceWorld: { contentHash: 'world-release-hash', bundleHash: '9'.repeat(64) },
+  }
+  const ttrpgCampaignModule = await db.ttrpgCampaignModules.add({
+    projectId, worldId, workId,
+    campaignKey: fixtureCampaign.campaignKey,
+    title: fixtureCampaign.title,
+    status: 'draft',
+    sourceWorldReleaseId: worldRelease,
+    rulePackId: gameRulePack,
+    contentJson: JSON.stringify(fixtureCampaign),
+    contentHash: await hashGameProductionValueV2(fixtureCampaign),
+    createdAt: now,
+    updatedAt: now,
+  }) as number
+
+  // ── TTRPG-4B 产品专属来源 / Brief / 步骤 / Build / Release 谱系 ──
+  const ttrpgProduction = await db.ttrpgProductions.add({
+    projectId, worldId, workId, productionKey: 'full-fixture-ttrpg-production', title: '全量跑团产品生产',
+    status: 'released', activeSourceSelectionId: null, activeBriefId: null,
+    currentBuildId: null, currentProductReleaseId: null, createdAt: now, updatedAt: now,
+  }) as number
+  const ttrpgSourceCatalog = { schema: 'fixture.ttrpg-source', version: 1, title: '全量正式来源' }
+  const ttrpgSelection = { schema: 'fixture.ttrpg-selection', version: 1, sourceKey: 'full-fixture-source' }
+  const ttrpgSourceSelection = await db.ttrpgSourceSelections.add({
+    projectId, worldId, workId, productionId: ttrpgProduction, revision: 1,
+    sourceKind: 'world-release', developmentOnly: false, sourceWorldReleaseId: worldRelease,
+    sourceKey: 'full-fixture-source', sourceContentHash: 'a'.repeat(64),
+    sourceCatalogJson: JSON.stringify(ttrpgSourceCatalog),
+    sourceCatalogHash: await hashGameProductionValueV2(ttrpgSourceCatalog),
+    selectionJson: JSON.stringify(ttrpgSelection), selectionHash: await hashGameProductionValueV2(ttrpgSelection),
+    status: 'frozen', createdAt: now,
+  }) as number
+  const ttrpgBriefValue = { schema: 'fixture.ttrpg-brief', version: 1, title: '全量 Brief' }
+  const ttrpgProductionBrief = await db.ttrpgProductionBriefs.add({
+    projectId, worldId, workId, productionId: ttrpgProduction, sourceSelectionId: ttrpgSourceSelection,
+    revision: 1, briefJson: JSON.stringify(ttrpgBriefValue),
+    briefHash: await hashGameProductionValueV2(ttrpgBriefValue), status: 'confirmed', createdAt: now,
+  }) as number
+  await db.ttrpgProductionSteps.add({
+    projectId, worldId, workId, productionId: ttrpgProduction, buildId: null, stepKey: 'author-preview', attempt: 1,
+    status: 'completed', inputHash: 'b'.repeat(64), outputHash: 'c'.repeat(64),
+    checkpointJson: '{"accepted":true}', errorJson: null,
+    startedAt: now, completedAt: now, updatedAt: now,
+  })
+  const ttrpgBuildValue = { rulePack: fixtureRulePack, campaign: fixtureCampaign }
+  const ttrpgProductionBuild = await db.ttrpgProductionBuilds.add({
+    projectId, worldId, workId, productionId: ttrpgProduction,
+    sourceSelectionId: ttrpgSourceSelection, briefId: ttrpgProductionBrief, buildNumber: 1,
+    status: 'release-ready', developmentOnly: false,
+    rulePackJson: JSON.stringify(fixtureRulePack), rulePackHash: await hashGameProductionValueV2(fixtureRulePack),
+    campaignJson: JSON.stringify(fixtureCampaign), campaignHash: await hashGameProductionValueV2(fixtureCampaign),
+    validationJson: '{"valid":true}', buildHash: await hashGameProductionValueV2(ttrpgBuildValue),
+    errorJson: null, createdAt: now, updatedAt: now,
+  }) as number
+  await db.ttrpgProductionMediaAssets.add({
+    projectId, worldId, workId, buildId: ttrpgProductionBuild,
+    slotKey: 'scene.full-fixture', assetKey: 'scene.full-fixture', version: 1,
+    kind: 'scene', targetRef: 'scene.full-fixture', audience: 'party', productionRequired: true,
+    status: 'available', specHash: 'd'.repeat(64), prompt: '全量跑团场景素材', negativePrompt: '',
+    fallbackText: '全量跑团场景文字降级。', altText: '全量跑团场景图', width: null, height: null,
+    blobObjectId: mediaBlobObject, mimeType: 'image/svg+xml', byteSize: avgMediaData.byteLength,
+    contentHash: avgMediaHash, producerRunId: null, providerAdapterId: 'fixture.media.v1',
+    providerRequestId: 'fixture-request', providerModelId: 'fixture-model', providerReceiptHash: 'e'.repeat(64),
+    rightsPolicyVersion: 'fixture-rights-v1', rightsJson: '{"authorConfirmed":true}', failureJson: null,
+    createdAt: now, updatedAt: now,
+  })
+  const ttrpgReleaseManifest = { schema: 'fixture.ttrpg-product-release', version: 1, buildHash: await hashGameProductionValueV2(ttrpgBuildValue) }
+  const ttrpgProductRelease = await db.ttrpgProductReleases.add({
+    projectId, worldId, workId, productionId: ttrpgProduction,
+    sourceSelectionId: ttrpgSourceSelection, sourceWorldReleaseId: worldRelease,
+    briefId: ttrpgProductionBrief, buildId: ttrpgProductionBuild, version: 1,
+    label: '全量跑团产品 v1', manifestJson: JSON.stringify(ttrpgReleaseManifest),
+    contentHash: await hashGameProductionValueV2(ttrpgReleaseManifest), createdAt: now,
+  }) as number
+  await db.ttrpgProductions.update(ttrpgProduction, {
+    activeSourceSelectionId: ttrpgSourceSelection,
+    activeBriefId: ttrpgProductionBrief,
+    currentBuildId: ttrpgProductionBuild,
+    currentProductReleaseId: ttrpgProductRelease,
   })
 
   // 旧共享种子最初只带 projectId；在全量备份边界前按 PROJECT_TABLES
@@ -708,6 +1146,10 @@ export async function seedFullProject() {
     narrativeModule, worldRevision, worldRelease, gameDefinition, gameRelease,
     adventureGameDefinition, avgGameDefinition, narrativeSimulationDefinition, openWorldGameDefinition, avgMediaAsset,
     interactionCharacterProfile, interactionSceneTemplate, agentRun, agentRunCheckpoint,
+    gameProduction, gameProductionBrief, gameProductionCommand, gameBuild,
+    gameQualityGateReceipt: gameQualityGateReceipt.row.id, gameBuildArtifact, mediaBlobObject,
+    productionAgentRun,
+    gameRulePack, ttrpgCampaignModule,
   }
 }
 

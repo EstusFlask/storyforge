@@ -58,6 +58,12 @@ export async function portableizeAgentRunContractV1(input: {
   await assertHash(source, input.contractHash)
   const contract = parseAgentRunContractV1({
     ...source,
+    ...(source.ownership ? {
+      ownership: {
+        ...source.ownership,
+        parentRunId: portableId(source.ownership.parentRunId, 'agentRuns', input.idMaps),
+      },
+    } : {}),
     ...(source.lineage ? {
       lineage: {
         parent: {
@@ -86,6 +92,12 @@ export async function portableizeAgentRunContractV1(input: {
           ),
         },
       } : {}),
+      ...(source.scope.gameProduction ? {
+        gameProduction: {
+          ...source.scope.gameProduction,
+          gameBuildId: portableId(source.scope.gameProduction.gameBuildId, 'gameBuilds', input.idMaps),
+        },
+      } : {}),
     },
   })
   const contractHash = await hashCanonicalValue(contract)
@@ -103,6 +115,12 @@ export async function rebindPortableAgentRunContractV1(input: {
   if (portable.scope.projectId !== 1) fail('便携 RunContract.projectId 必须为逻辑根 1')
   const contract = parseAgentRunContractV1({
     ...portable,
+    ...(portable.ownership ? {
+      ownership: {
+        ...portable.ownership,
+        parentRunId: reboundId(portable.ownership.parentRunId, 'agentRuns', input.idMaps),
+      },
+    } : {}),
     ...(portable.lineage ? {
       lineage: {
         parent: {
@@ -127,6 +145,12 @@ export async function rebindPortableAgentRunContractV1(input: {
             'simulationSessions',
             input.idMaps,
           ),
+        },
+      } : {}),
+      ...(portable.scope.gameProduction ? {
+        gameProduction: {
+          ...portable.scope.gameProduction,
+          gameBuildId: reboundId(portable.scope.gameProduction.gameBuildId, 'gameBuilds', input.idMaps),
         },
       } : {}),
     },

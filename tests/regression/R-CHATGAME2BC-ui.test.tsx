@@ -26,6 +26,18 @@ async function click(host: ParentNode, text: string) {
   await act(async () => { button(host, text).click(); await new Promise(resolve => setTimeout(resolve, 0)) })
 }
 
+async function fill(host: ParentNode, placeholder: string, value: string) {
+  const field = host.querySelector<HTMLInputElement | HTMLTextAreaElement>(`[placeholder="${placeholder}"]`)
+  if (!field) throw new Error(`找不到输入框:${placeholder}`)
+  await act(async () => {
+    const setter = Object.getOwnPropertyDescriptor(field instanceof HTMLTextAreaElement
+      ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype, 'value')?.set
+    setter?.call(field, value)
+    field.dispatchEvent(new Event('input', { bubbles: true }))
+    await new Promise(resolve => setTimeout(resolve, 0))
+  })
+}
+
 async function waitFor(assertion: () => void | Promise<void>) {
   const start = Date.now(); let last: unknown
   while (Date.now() - start < 8_000) {
@@ -77,8 +89,24 @@ describe('CHATGAME-2B/2C · author and player UI', () => {
       await new Promise(resolve => setTimeout(resolve, 0))
     })
     await waitFor(() => expect(host.textContent).toContain('用所选角色创建'))
+    await fill(host, '聊天起点地点（可选）', '停战后的旧港口')
+    await fill(host, '聊天起点时间（可选）', '故事终局十年后')
+    await fill(host, '聊天背景/为什么会在这里（可选）', '用户带着一封旧信来访。')
+    await fill(host, '希望这次聊天向哪里发展（可选）', '决定是否重查当年的失踪案。')
     await click(host, '用所选角色创建')
     await waitFor(() => expect(host.textContent).toContain('3 角色 · 1 场景'))
+    expect(await db.interactionSceneTemplates.toCollection().first()).toMatchObject({
+      location: '停战后的旧港口',
+      timeLabel: '故事终局十年后',
+      purpose: '用户带着一封旧信来访。',
+      goalsJson: '["决定是否重查当年的失踪案。"]',
+    })
+    await fill(host, '新角色姓名', '洛舟')
+    await fill(host, '身份、作用或与玩家的关系', '来自终局之外的访客')
+    await click(host, '创建专属角色')
+    await waitFor(() => expect(host.textContent).toContain('已创建互动专属角色 洛舟'))
+    expect(await db.characters.count()).toBe(3)
+    expect((await db.interactionCharacterProfiles.toArray()).filter(item => item.characterId == null)).toHaveLength(1)
     await click(host, '上下文检查')
     const inspect = Array.from(host.querySelectorAll('button')).find(item => item.textContent?.includes('检查 汀兰'))
     expect(inspect).toBeTruthy()
@@ -119,6 +147,8 @@ describe('CHATGAME-2B/2C · author and player UI', () => {
     const session = await db.simulationSessions.where('projectId').equals(seeded.scope.projectId).first()
     expect((await readSimulationState(session!.id!)).interaction?.relationshipHistory[0]).toMatchObject({ ruleKey: 'promise.broken', after: -2 })
     expect(host.textContent).toContain('未配置 AI')
+    expect(host.textContent).toContain('形成世界回流候选')
+    expect(host.textContent).toContain('不会自动修改世界引擎')
   }, 20_000)
 
   it('在产品页列出并只读回放无 World/Work 归属的 CHATGAME-1 存档', async () => {

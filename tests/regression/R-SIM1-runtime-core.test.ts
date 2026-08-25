@@ -208,6 +208,13 @@ describe('SIM-1A · 共享互动运行时核心', () => {
       narratives: [],
       lastSequence: 0,
     }, forged)).toThrow('合计')
+
+    await expect(resolveSimulationDice({
+      sessionId: first.id!, expression: '1d100', nonce: '百分骰',
+    })).resolves.toMatchObject({ type: 'random.resolved' })
+    await expect(resolveSimulationDice({
+      sessionId: first.id!, expression: '1d101', nonce: '非法百分骰',
+    })).rejects.toThrow('d2～d100')
   })
 
   it('并发追加仍形成连续唯一序号，记忆自动绑定真实事件序号', async () => {

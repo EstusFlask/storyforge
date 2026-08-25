@@ -147,8 +147,9 @@ describe('R-HARNESS1-project-lifecycle · run 全生命周期', () => {
       worldGroupId: 1,
       outlineNodeIds: [1],
     })
+    const portableRunHashes = new Map(exported.agentRuns!.map(run => [run._exportId, run.contractHash]))
     expect(exported.agentRunEvents?.every(event => (
-      event.contractHash === exported.agentRuns![0].contractHash
+      event.contractHash === portableRunHashes.get(event._agentRunExportId)
     ))).toBe(true)
 
     const importedProjectId = await importProjectJSON(exported)

@@ -389,7 +389,8 @@ if (!/const PROJECT_TABLE_REGISTRATIONS:[\s\S]*?export const PROJECT_TABLES:[\s\
   violations.push('[⑪记忆分类] PROJECT_TABLES 必须从唯一注册表登记派生 100% memoryClassification')
 }
 for (const classification of ['editable', 'evidence', 'derived-none', 'not-applicable']) {
-  if (!registrySrc.includes(`classification: '${classification}'`)) {
+  const quotedClassification = new RegExp(`classification:\\s*["']${classification}["']`)
+  if (!quotedClassification.test(registrySrc)) {
     violations.push(`[⑪记忆分类] PROJECT_TABLES 缺少 ${classification} 明确策略`)
   }
 }

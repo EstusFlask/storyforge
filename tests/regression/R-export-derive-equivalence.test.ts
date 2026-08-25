@@ -125,6 +125,38 @@ function normalize(data: any) {
   delete data.avgPresentationModules
   delete data.narrativeSimulationModules
   delete data.openWorldModules
+  // GAMEPROD-1 production control/evidence/shared media also postdate legacy v3.
+  // Their exact portable lifecycle is locked by R-GAMEPROD1A1 and full coverage.
+  delete data.gameProductions
+  delete data.gameProductionBriefs
+  delete data.gameProductionCommands
+  delete data.gameBuilds
+  delete data.gameBuildArtifacts
+  delete data.gameQualityGateReceipts
+  delete data.mediaBlobObjects
+  // CHATGAME-3C product-owned production contracts postdate legacy v3.
+  // Their scope/remap/roundtrip behavior is covered by dedicated lifecycle tests.
+  delete data.characterInteractionSourceSelections
+  delete data.characterInteractionBriefs
+  delete data.characterInteractionProductions
+  delete data.characterInteractionProductionSteps
+  delete data.characterInteractionArtifacts
+  delete data.characterInteractionMediaAssets
+  delete data.characterInteractionProductReleases
+  // TTRPG-2A authoring tables postdate the historical v3 fixture.
+  delete data.gameRulePacks
+  delete data.ttrpgCampaignModules
+  delete data.ttrpgSessionParticipants
+  delete data.ttrpgRuntimeAssetRequests
+  // TTRPG-4 product-owned source, production, Build, media and release contracts
+  // are strict-v4 additions; their exact lifecycle has dedicated regression coverage.
+  delete data.ttrpgSourceSelections
+  delete data.ttrpgProductions
+  delete data.ttrpgProductionBriefs
+  delete data.ttrpgProductionBuilds
+  delete data.ttrpgProductionSteps
+  delete data.ttrpgProductionMediaAssets
+  delete data.ttrpgProductReleases
   delete data.project?._activeWorldExportId
   delete data.project?._activeWorkExportId
   for (const row of data.characters ?? []) {

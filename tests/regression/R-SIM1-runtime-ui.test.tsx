@@ -261,7 +261,7 @@ describe('SIM-1B · 互动运行时 UI', () => {
     })
     await clickWhenEnabled(host, '技能检定')
     await viWaitFor(() => expect((readSimulationState(session.id!)).then(state => state.ttrpg?.checks.length)).resolves.toBe(1))
-    expect(host.textContent).toContain('检定：感知')
+    await viWaitFor(() => expect(host.textContent).toContain('检定：感知'))
   })
 
   it('跑团面板可创建战斗遭遇并执行攻击、资源与状态操作', async () => {
@@ -306,6 +306,7 @@ describe('SIM-1B · 互动运行时 UI', () => {
     })
     await clickWhenEnabled(host, '直接开始遭遇')
     await viWaitFor(() => expect((readSimulationState(session.id!)).then(state => state.ttrpg?.encounter?.title)).resolves.toBe('门厅伏击'))
+    await viWaitFor(() => expect(host.querySelector('input[aria-label="攻击骰式"]')).not.toBeNull())
     await act(async () => {
       changeValue(host.querySelector<HTMLInputElement>('input[aria-label="攻击骰式"]')!, '1d20+100')
       changeValue(host.querySelector<HTMLInputElement>('input[aria-label="伤害骰式"]')!, '1d4')

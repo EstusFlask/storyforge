@@ -13,6 +13,7 @@ import { EMPTY_SIMULATION_STATE, type Project } from '../../src/lib/types'
 import { useStoryGamePlayerStore } from '../../src/stores/story-game-player'
 import { useSimulationRuntimeStore } from '../../src/stores/simulation-runtime'
 import { createSimulationSession } from '../../src/lib/simulation/runtime'
+import { createStoryGameInstance } from '../../src/lib/world-engine/instances'
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true
 
@@ -253,6 +254,31 @@ describe('STORYGAME-1B · player loop', () => {
     manifest.records.characters.push({ ...protagonist, name: '另一位主角' })
     expect(parseWorldReleasePlayerCharacter(JSON.stringify(manifest))).toBeNull()
   })
+
+  it('同场景长循环采用增量投影且不会制造平方增长的自动检查点', async () => {
+    const loopModule = await createNarrativeModule({ scope, owner: 'work', kind: 'main', title: '信号回廊' })
+    await addNarrativeNode({ scope, moduleId: loopModule.id!, key: 'loop', kind: 'entry', title: '信号回廊' })
+    await addNarrativeNode({ scope, moduleId: loopModule.id!, key: 'ending', kind: 'ending', title: '公开记录' })
+    await addNarrativeBeat({ scope, moduleId: loopModule.id!, nodeKey: 'loop', beatKey: 'loop.beat', kind: 'narration', text: '信号再次亮起。' })
+    await addNarrativeChoice({ scope, moduleId: loopModule.id!, sourceNodeKey: 'loop', choiceKey: 'loop.repeat', text: '继续检查', targetNodeKey: 'loop' })
+    await addNarrativeChoice({ scope, moduleId: loopModule.id!, sourceNodeKey: 'loop', choiceKey: 'loop.finish', text: '公开记录', targetNodeKey: 'ending', order: 1 })
+    const definition = await createGameDefinition({ scope, gameKey: 'bounded-loop', title: '有界长循环', narrativeModuleId: loopModule.id! })
+    const revision = await createWorldRevision({ scope, label: '长循环性能来源', selectedNarrativeModuleIds: [loopModule.id!] })
+    const worldRelease = await publishWorldRevision(revision.id!)
+    const release = await publishGameDefinition({ scope, gameDefinitionId: definition.id!, worldReleaseId: worldRelease.id! })
+    const session = await createStoryGameInstance({ scope, gameReleaseId: release.id!, title: '长循环存档' })
+
+    await useStoryGamePlayerStore.getState().load(scope, null)
+    await useStoryGamePlayerStore.getState().select(session.id!)
+    for (let index = 0; index < 120; index += 1) {
+      await useStoryGamePlayerStore.getState().choose('loop.repeat')
+    }
+
+    const state = useStoryGamePlayerStore.getState()
+    expect(state.runtimeState.narrative?.choiceHistory).toHaveLength(120)
+    expect(state.events).toHaveLength(242)
+    expect(await db.simulationCheckpoints.where('sessionId').equals(session.id!).count()).toBe(0)
+  }, 20_000)
 
   it('从中段检查点 fork 后改选另一结局且原存档保持不变', async () => {
     await renderPlayer()

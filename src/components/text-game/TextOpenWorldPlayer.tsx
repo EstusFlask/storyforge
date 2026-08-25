@@ -6,13 +6,13 @@ import type { Project, WorkspaceScope } from '../../lib/types'
 import { useAIConfigStore } from '../../stores/ai-config'
 import { selectTextOpenWorldAdventureActions, useTextOpenWorldPlayerStore } from '../../stores/text-open-world-player'
 
-export default function TextOpenWorldPlayer(props: { project: Project; scope: WorkspaceScope; worldGroupId: number | null }) {
+export default function TextOpenWorldPlayer(props: { project: Project; scope: WorkspaceScope; worldGroupId: number | null; initialSessionId?: number | null }) {
   const store = useTextOpenWorldPlayerStore()
   const { config } = useAIConfigStore()
   const [checkpointName, setCheckpointName] = useState('')
   const [localError, setLocalError] = useState('')
-  useEffect(() => { void store.load(props.scope, props.worldGroupId) // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [props.scope.projectId, props.scope.worldId, props.scope.workId, props.worldGroupId])
+  useEffect(() => { void store.load(props.scope, props.worldGroupId).then(async () => { if (props.initialSessionId != null) await store.select(props.initialSessionId) }) // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [props.scope.projectId, props.scope.worldId, props.scope.workId, props.worldGroupId, props.initialSessionId])
   const selected = store.sessions.find(item => item.id === store.selectedSessionId) ?? null
   const world = store.runtimeState.openWorld
   const manifest = store.selectedManifest

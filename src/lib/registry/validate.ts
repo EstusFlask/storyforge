@@ -114,6 +114,7 @@ export function checkRegistry(): RegistryValidationResult {
   }
 
   const fieldKeys = new Set<string>()
+  const candidateIds = new Set<string>()
   for (const field of FIELD_REGISTRY) {
     if (!REGISTRY_BY_NAME.has(field.target)) {
       errors.push(`FIELD_REGISTRY 指向不存在的表: ${field.target}.${field.field}`)
@@ -121,6 +122,10 @@ export function checkRegistry(): RegistryValidationResult {
     const key = `${field.target}.${field.field}`
     if (fieldKeys.has(key)) errors.push(`FIELD_REGISTRY 字段重复登记: ${key}`)
     fieldKeys.add(key)
+    if (field.candidateId) {
+      if (candidateIds.has(field.candidateId)) errors.push(`FIELD_REGISTRY candidateId 重复登记: ${field.candidateId}`)
+      candidateIds.add(field.candidateId)
+    }
     if (field.type === 'enum' && (!field.enums || field.enums.length === 0)) {
       errors.push(`FIELD_REGISTRY enum 缺少枚举值: ${key}`)
     }

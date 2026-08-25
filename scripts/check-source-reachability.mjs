@@ -33,6 +33,13 @@ const entrypoints = [
   // FLOW-2 compatibility workspace remains intentionally reachable for old graphs and migration tests
   // while the product entry points use NodeAuthoringWorkspace.
   'src/components/node-flow/NodeModeWorkspace.tsx',
+  // Server-only commercial/community/online adapters and external creator tooling live behind a
+  // headless boundary. It must stay independently reachable without entering the pure browser bundle.
+  'src/lib/game-platform/headless-platform.ts',
+  // CHATGAME-2 legacy authoring compatibility is retained only for migration/regression evidence while
+  // ProductHub routes new work through the frozen-source production studio. Delete this explicit
+  // entrypoint after legacy migration coverage no longer imports the old workbench directly.
+  'src/components/character-interaction/InteractionGameWorkbench.tsx',
 ].map(file => path.resolve(root, file))
 
 const graph = new Map()

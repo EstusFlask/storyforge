@@ -1,10 +1,12 @@
 # CHATGAME-2 · 角色互动与关系叙事完整开发方案
 
-> 状态：`IMPLEMENTED · 2026-08-14`
+> 状态：`LEGACY RUNTIME IMPLEMENTED · CI-1/CI-2 FROZEN SOURCE PRODUCTION READY · 2026-08-22`
 >
 > 产品定位：角色能记住共同经历、关系会发展、可进行多人场景的长期文字互动
 >
 > 前置：CHATGAME-1、STORYGAME-1 共享底座、HARNESS-RUNTIME-1
+>
+> 当前裁决：既有不可变 GameRelease 与旧存档继续读取、运行和回放；本文件原作者生产链没有产品专属 SourceSelection，且会从活动世界表创建草稿，因此不再作为新正式生产入口。Product Hub 已接入角色互动专属 WorldRelease Source Picker、原子冻结 SourceSelection、Brief revision 与候选只写 Run Contract；角色胶囊及后续正式产物仍须按《CHATGAME 世界数据对齐审计》CI-3 继续开发。
 
 ## 1. 做成后玩家能玩到什么
 

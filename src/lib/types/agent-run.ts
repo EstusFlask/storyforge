@@ -22,6 +22,14 @@ export interface AgentRunScopeV1 {
     visibilityHash: string
     releaseHash: string
   }
+  /** GAMEPROD-1 immutable Build/task boundary for Work-owned production runs. */
+  gameProduction?: {
+    gameBuildId: number
+    buildNumber: number
+    controlEpoch: number
+    planHash: string
+    taskKey: string
+  }
 }
 
 export interface AgentSkillExecutionBindingV1 {
@@ -108,6 +116,15 @@ export interface AgentRunContractV1 {
   version: 1
   objective: string
   workflowKind: AgentRunWorkflowKind
+  /**
+   * Durable ownership/budget tree. Unlike lineage, this relation does not
+   * consume a completed parent receipt, so a production root Run can own
+   * concurrent child task Runs and sign its terminal join afterwards.
+   */
+  ownership?: {
+    parentRunId: number
+    relation: string
+  }
   /** Absent on root/legacy runs; immutable once a child run is created. */
   lineage?: {
     parent: AgentRunParentLineageV1
@@ -320,9 +337,11 @@ export interface AgentRunRecord {
   workId?: number | null
   /** Exactly one of workId / simulationSessionId owns every non-legacy run. */
   simulationSessionId?: number | null
+  /** GAMEPROD-1 build owner; build runs remain Work-owned and never use this as a second owner. */
+  gameBuildId?: number | null
   worldGroupId?: number | null
   conversationId?: number | null
-  /** Materialized index for querying child runs; mirrors contract.lineage.parent. */
+  /** Materialized child index; mirrors contract.ownership or legacy lineage.parent. */
   parentRunId?: number | null
   parentRelation?: string | null
   parentReceiptHash?: string | null

@@ -149,7 +149,7 @@ function deriveImportOrder(specs: TableSpec[]): TableSpec[] {
     for (const spec of specs) {
       if (done.has(spec.name)) continue
       const fieldDeps = (spec.exportRemap ?? [])
-        .filter(rm => !rm.selfTree && rm.remapVia !== spec.name)
+        .filter(rm => !rm.deferImport && !rm.selfTree && rm.remapVia !== spec.name)
         .map(rm => rm.remapVia)
       const refDeps = (spec.exportRefRemap ?? [])
         .filter(ref => ref.remapVia !== spec.name)
@@ -237,6 +237,37 @@ async function assertPortableBinaryIntegrity(
   const digest = await Dexie.waitFor(crypto.subtle.digest('SHA-256', data))
   const hash = Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, '0')).join('')
   if (metadata[integrity.hashField] !== hash) throw new Error(`[deriveImport] ${spec.name} 二进制哈希与元数据不一致`)
+}
+
+async function restorePortableSharedMediaObject(
+  spec: TableSpec,
+  row: Record<string, any>,
+): Promise<void> {
+  const portable = spec.portableData
+  if (portable?.kind !== 'shared-media-object') return
+  if (row[portable.stateField] !== 'ready') {
+    throw new Error(`[deriveImport] ${spec.name} 只接受 ready 共享媒资`)
+  }
+  const data = restorePortableBinaryBlob(row[portable.dataField], `${spec.name}.${portable.dataField}`)
+  if (row[portable.sizeField] !== data.byteLength) {
+    throw new Error(`[deriveImport] ${spec.name} 二进制大小与记录不一致`)
+  }
+  const mimeType = row[portable.mimeField]
+  if (typeof mimeType !== 'string' || !mimeType.trim()) {
+    throw new Error(`[deriveImport] ${spec.name} 缺少 MIME 类型`)
+  }
+  const digest = await Dexie.waitFor(crypto.subtle.digest('SHA-256', data))
+  const hash = Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, '0')).join('')
+  if (row[portable.hashField] !== hash) {
+    throw new Error(`[deriveImport] ${spec.name} 二进制哈希与记录不一致`)
+  }
+  row[portable.dataField] = data
+  row[portable.backendField] = 'indexeddb'
+  row[portable.stateField] = 'ready'
+  row[portable.pathField] = null
+  row[portable.leaseOwnerField] = null
+  row[portable.leaseExpiresAtField] = null
+  row[portable.lastVerifiedAtField] = Date.now()
 }
 
 /**
@@ -355,12 +386,20 @@ export async function deriveImportProjectJSON(data: ProjectExportData): Promise<
 
         if (spec.owner === 'project') obj.projectId = newProjectId
         if (spec.portableData?.kind === 'binary-blob') {
-          const binary = restorePortableBinaryBlob(
-            obj[spec.portableData.field],
-            `${spec.name}.${spec.portableData.field}`,
-          )
-          await assertPortableBinaryIntegrity(spec, obj, binary)
-          obj[spec.portableData.field] = binary
+          if (obj[spec.portableData.field] == null && spec.portableData.allowMissingWhen
+            && obj[spec.portableData.allowMissingWhen.importField] != null) {
+            obj[spec.portableData.field] = null
+          } else {
+            const binary = restorePortableBinaryBlob(
+              obj[spec.portableData.field],
+              `${spec.name}.${spec.portableData.field}`,
+            )
+            await assertPortableBinaryIntegrity(spec, obj, binary)
+            obj[spec.portableData.field] = binary
+          }
+        }
+        if (spec.portableData?.kind === 'shared-media-object') {
+          await restorePortableSharedMediaObject(spec, obj)
         }
         if (spec.portableData?.kind === 'agent-run-root') {
           const contractIdMaps = new Map(newIdMaps)
@@ -431,13 +470,21 @@ export async function deriveImportProjectJSON(data: ProjectExportData): Promise<
               ? remapPortableIdArray(portableRefs, refMap, rr.storage === 'json-string')
               : rr.kind === 'scene-character-ids'
                 ? await remapSceneCharacterIndexes((db as any)[spec.name], pending.newId, rr.field, portableRefs, refMap)
-                : await remapCharacterPlanArcIndexes(
-                  (db as any)[spec.name],
-                  pending.newId,
-                  rr.field,
-                  portableRefs,
-                  refMap,
-                )
+                : rr.kind === 'character-plan-arcs'
+                  ? await remapCharacterPlanArcIndexes(
+                    (db as any)[spec.name],
+                    pending.newId,
+                    rr.field,
+                    portableRefs,
+                    refMap,
+                  )
+                  : remapPortableJsonIdPaths(
+                    portableRefs,
+                    rr.paths,
+                    refMap,
+                    rr.onUnmapped === 'require',
+                    `${spec.name}.${rr.field}`,
+                  )
             if (patch !== undefined) {
               await (db as any)[spec.name].update(pending.newId, { [rr.field]: patch })
             }
@@ -487,6 +534,44 @@ export async function deriveImportProjectJSON(data: ProjectExportData): Promise<
   // atomic stamping without guessing external IDs.
   if (data.version < STRICT_EXPORT_VERSION) await ensureWorkspaceOwnership(importedProjectId)
   return importedProjectId
+}
+
+function remapPortableJsonIdPaths(
+  value: unknown,
+  paths: readonly string[],
+  idMap: Map<number, number>,
+  required: boolean,
+  label: string,
+): string | null | undefined {
+  if (value == null) return value === null ? null : undefined
+  let parsed: unknown
+  try { parsed = typeof value === 'string' ? JSON.parse(value) : structuredClone(value) } catch {
+    throw new Error(`[deriveImport] ${label} 不是合法便携 JSON`)
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error(`[deriveImport] ${label} 必须是 JSON 对象`)
+  }
+  for (const path of paths) {
+    const parts = path.split('.').filter(Boolean)
+    let owner = parsed as Record<string, unknown>
+    for (const part of parts.slice(0, -1)) {
+      const child = owner[part]
+      if (!child || typeof child !== 'object' || Array.isArray(child)) {
+        if (required) throw new Error(`[deriveImport] ${label}.${path} 缺失`)
+        owner = {}
+        break
+      }
+      owner = child as Record<string, unknown>
+    }
+    const field = parts[parts.length - 1]
+    if (!field) continue
+    const portableId = owner[field]
+    if (portableId == null) { owner[field] = null; continue }
+    const localId = typeof portableId === 'number' ? idMap.get(portableId) : undefined
+    if (localId == null && required) throw new Error(`[deriveImport] ${label}.${path} 缺少本地映射`)
+    owner[field] = localId ?? null
+  }
+  return JSON.stringify(parsed)
 }
 
 function remapPortableIdArray(value: unknown, idMap: Map<number, number>, stringify: boolean): number[] | string {

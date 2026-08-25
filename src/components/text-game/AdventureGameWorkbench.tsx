@@ -25,6 +25,7 @@ import {
   type AdventureAuthoringSnapshot,
   type AdventureDraftReport,
 } from '../../lib/adventure/authoring'
+import { resolveLegacyManualPublicationPolicyV1 } from '../../lib/game-production/legacy-entry-governance'
 import {
   availableAdventureActions,
   createInitialAdventureState,
@@ -56,7 +57,7 @@ function messages(report: AdventureDraftReport | null): string[] {
   ]
 }
 
-export default function AdventureGameWorkbench(props: { scope: WorkspaceScope }) {
+export default function AdventureGameWorkbench(props: { scope: WorkspaceScope; onOpenProduction?: () => void }) {
   const dialog = useDialog()
   const [snapshot, setSnapshot] = useState(EMPTY)
   const [selectedId, setSelectedId] = useState<number | null>(null)
@@ -92,6 +93,11 @@ export default function AdventureGameWorkbench(props: { scope: WorkspaceScope })
   const definition = snapshot.definitions.find(item => item.id === selectedId) ?? null
   const module = snapshot.adventureModules.find(item => item.gameDefinitionId === selectedId) ?? null
   const releases = snapshot.releases.filter(item => item.gameDefinitionId === selectedId)
+  const manualPublicationPolicy = resolveLegacyManualPublicationPolicyV1({
+    releases,
+    productionRouteAvailable: props.onOpenProduction != null,
+    legacyDraftPresent: definition != null,
+  })
   const parsed = useMemo(() => {
     try { return { content: parseAdventureContent(editor), error: '' } }
     catch (reason) { return { content: null, error: reason instanceof Error ? reason.message : String(reason) } }
@@ -145,6 +151,10 @@ export default function AdventureGameWorkbench(props: { scope: WorkspaceScope })
   })
   const publish = () => run(async () => {
     if (!definition) return
+    if (!manualPublicationPolicy.directPublicationAllowed && props.onOpenProduction) {
+      props.onOpenProduction()
+      return
+    }
     const result = await publishAdventureGameDraft({ scope: props.scope, gameDefinitionId: definition.id! })
     setReport(result.report); await refresh(); setView('release')
     setMessage(`已冻结 GameRelease v${result.gameRelease.version}；后续草稿修改不会改变该发布。`)
@@ -171,7 +181,7 @@ export default function AdventureGameWorkbench(props: { scope: WorkspaceScope })
     <aside className="storygame-author-sidebar">
       <div className="storygame-author-sidebar-head"><strong>文字冒险草稿</strong><button title="刷新" onClick={() => void refresh()}><RefreshCw className="h-3.5 w-3.5" /></button></div>
       <div className="storygame-author-game-list">{snapshot.definitions.map(item => <button key={item.id} className={item.id === selectedId ? 'active' : ''} onClick={() => setSelectedId(item.id!)}><strong>{item.title}</strong><small>{item.gameKey}</small></button>)}</div>
-      <button className="storygame-author-create sample" disabled={busy} onClick={() => void createSample()}><Plus className="h-3.5 w-3.5" />创建验收冒险</button>
+      {!props.onOpenProduction && <button className="storygame-author-create sample" disabled={busy} onClick={() => void createSample()}><Plus className="h-3.5 w-3.5" />创建验收冒险</button>}
       <p>内容保存在 AdventureModule；发布复用 WorldRevision、WorldRelease 与统一 GameRelease。</p>
     </aside>
     <main className="storygame-author-main">
@@ -181,13 +191,13 @@ export default function AdventureGameWorkbench(props: { scope: WorkspaceScope })
       {message && <div className="storygame-author-notice success"><CheckCircle2 className="h-4 w-4" /><span>{message}</span></div>}
       {error && <div className="storygame-author-notice error" role="alert"><AlertTriangle className="h-4 w-4" /><span>{error}</span></div>}
       {loading && <div className="storygame-empty"><Loader2 className="h-7 w-7 animate-spin" /><p>正在加载作者数据…</p></div>}
-      {!loading && !definition && <div className="storygame-empty"><Map className="h-8 w-8" /><h2>创建第一份有限地点冒险</h2><p>验收模板提供 6 个地点、4 条任务、物品/资源/能力判定、替代解法和三种状态驱动结局。</p><button className="storygame-author-create" onClick={() => void createSample()}><Plus className="h-4 w-4" />创建验收冒险</button></div>}
+      {!loading && !definition && <div className="storygame-empty"><Map className="h-8 w-8" /><h2>{props.onOpenProduction ? '没有需要维护的旧草稿' : '创建第一份有限地点冒险'}</h2><p>{props.onOpenProduction ? '新游戏统一从制作中心开始。' : '验收模板提供 6 个地点、4 条任务、物品/资源/能力判定、替代解法和三种状态驱动结局。'}</p><button className="storygame-author-create" onClick={() => props.onOpenProduction ? props.onOpenProduction() : void createSample()}>{props.onOpenProduction ? <Rocket className="h-4 w-4" /> : <Plus className="h-4 w-4" />}{props.onOpenProduction ? '进入制作中心' : '创建验收冒险'}</button></div>}
       {!loading && definition && <>
         {view === 'overview' && <section className="storygame-author-pane"><div className="storygame-author-heading"><div><small>GAME DEFINITION</small><h2>冒险定义与内容概览</h2></div><div className="storygame-author-actions"><button onClick={() => void save()} disabled={busy || !!parsed.error}><Save className="h-3.5 w-3.5" />保存</button><button className="danger" onClick={() => void remove()} disabled={busy}><Trash2 className="h-3.5 w-3.5" />删除</button></div></div><div className="storygame-author-form-grid"><label>标题<input value={title} onChange={event => setTitle(event.target.value)} /></label><label>稳定标识<input value={definition.gameKey} readOnly /></label><label className="wide">简介<textarea rows={3} value={description} onChange={event => setDescription(event.target.value)} /></label></div><div className="storygame-author-summary-grid">{counts.map(([label, value]) => <article key={label}><strong>{value}</strong><span>{label}</span></article>)}</div><div className="storygame-author-contract"><ShieldCheck className="h-5 w-5" /><div><strong>统一架构边界</strong><p>世界事实来自 WorldRelease；故事走 NarrativeModule/Node/Beat/Choice；运行状态只写 SIM 事件流；AI 自由输入仅产生待确认的 action key 候选。</p></div></div></section>}
         {view === 'content' && <section className="storygame-author-pane"><div className="storygame-author-heading"><div><small>ADVENTURE MODULE</small><h2>正式内容契约</h2></div><button disabled={busy || !!parsed.error} onClick={() => void save()}><Save className="h-3.5 w-3.5" />校验并保存</button></div>{parsed.error && <div className="storygame-author-notice error"><AlertTriangle className="h-4 w-4" /><span>{parsed.error}</span></div>}<label className="storygame-json-editor">AdventureContentV1<textarea aria-label="AdventureContentV1 JSON" rows={34} spellCheck={false} value={editor} onChange={event => setEditor(event.target.value)} /></label>{draftReport && <div className={`storygame-author-notice ${draftReport.valid ? 'success' : 'error'}`}><FileJson2 className="h-4 w-4" /><span>{draftReport.valid ? '结构、引用、可达性和任务替代路线有效。' : draftReport.errors.join('；')}</span></div>}</section>}
         {view === 'preview' && <section className="storygame-author-pane"><div className="storygame-author-heading"><div><small>DRAFT STATE PREVIEW</small><h2>从任意地点检查初始可玩状态</h2></div><Play className="h-5 w-5 text-accent" /></div>{parsed.content && preview && <><div className="storygame-preview-start"><label>预览地点<select value={preview.location.key} onChange={event => setPreviewLocation(event.target.value)}>{parsed.content.locations.map(item => <option key={item.key} value={item.key}>{item.title} · {item.key}</option>)}</select></label></div><div className="storygame-author-card-grid"><article className="storygame-author-card"><small>CURRENT LOCATION</small><h3>{preview.location.title}</h3><p>{preview.location.description}</p><code>{preview.location.key}</code></article><article className="storygame-author-card"><small>INITIAL STATE</small><p>物品 {preview.state.inventory.length} · 任务 {preview.state.quests.length} · 能力 {Object.keys(preview.state.abilities).length} · 资源 {Object.keys(preview.state.resources).length}</p></article></div><h3 className="storygame-author-subheading">该状态下的地点行动</h3><div className="storygame-author-card-grid">{preview.actions.map(item => <article key={item.action.key} className="storygame-author-card"><div className="storygame-author-card-head"><strong>{item.action.label}</strong><code>{item.action.kind}</code></div><p>{item.action.description}</p><small>{item.available ? '初始可用' : item.reason}</small></article>)}</div></>}</section>}
         {view === 'diagnostics' && <section className="storygame-author-pane"><div className="storygame-author-heading"><div><small>GRAPH & RELEASE GATE</small><h2>发布前诊断</h2></div><button disabled={busy} onClick={() => void validate()}>{busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ShieldCheck className="h-3.5 w-3.5" />}运行校验</button></div>{!report && <div className="storygame-empty"><GitBranch className="h-7 w-7" /><p>检查断链、无效目标、不可达地点/节点、任务锁死、缺失结局与循环风险。</p></div>}{report && <><div className={`storygame-author-notice ${report.valid ? 'success' : 'error'}`}>{report.valid ? <CheckCircle2 className="h-4 w-4" /> : <AlertTriangle className="h-4 w-4" />}<span>{report.valid ? '所有发布闸门通过。' : '存在阻断问题。'}</span></div><div className="storygame-diagnostic-list">{messages(report).map((item, index) => <article key={`${index}:${item}`}><AlertTriangle className="h-3.5 w-3.5" /><span>{item}</span></article>)}{report.valid && !messages(report).length && <article><CheckCircle2 className="h-3.5 w-3.5" /><span>没有错误或警告。</span></article>}</div></>}</section>}
-        {view === 'release' && <section className="storygame-author-pane"><div className="storygame-author-heading"><div><small>IMMUTABLE GAME RELEASE</small><h2>发布冻结</h2></div><button disabled={busy} onClick={() => void publish()}><Rocket className="h-3.5 w-3.5" />校验并发布</button></div><div className="storygame-author-contract"><ShieldCheck className="h-5 w-5" /><div><strong>发布只冻结正式依赖</strong><p>当前 WorldRevision 与 Narrative/Adventure 内容被复制进带 hash 的 GameRelease；玩家实例始终绑定该不可变版本。</p></div></div><div className="storygame-release-list-author">{releases.map(item => <article key={item.id}><div><strong>v{item.version} · {item.label}</strong><small>{new Date(item.createdAt).toLocaleString()} · {item.contentHash.slice(0, 12)}</small></div><CheckCircle2 className="h-4 w-4" /></article>)}{!releases.length && <p>尚无正式发布。</p>}</div></section>}
+        {view === 'release' && <section className="storygame-author-pane"><div className="storygame-author-heading"><div><small>IMMUTABLE GAME RELEASE</small><h2>发布冻结</h2></div><button disabled={busy} onClick={() => void publish()}><Rocket className="h-3.5 w-3.5" />{manualPublicationPolicy.mode === 'production-required' ? '交由制作中心发布' : props.onOpenProduction ? '校验并发布维护版' : '校验并发布'}</button></div><div className="storygame-author-contract"><ShieldCheck className="h-5 w-5" /><div><strong>发布只冻结正式依赖</strong><p>当前 WorldRevision 与 Narrative/Adventure 内容被复制进带 hash 的 GameRelease；玩家实例始终绑定该不可变版本。</p></div></div><div className="storygame-release-list-author">{releases.map(item => <article key={item.id}><div><strong>v{item.version} · {item.label}</strong><small>{new Date(item.createdAt).toLocaleString()} · {item.contentHash.slice(0, 12)}</small></div><CheckCircle2 className="h-4 w-4" /></article>)}{!releases.length && <p>尚无正式发布。</p>}</div></section>}
       </>}
     </main>
   </div>

@@ -2,12 +2,12 @@ import { create } from 'zustand'
 import { db } from '../lib/db/schema'
 import {
   branchSimulationSession,
-  commitNarrativeChoice,
+  commitNarrativeChoiceWithStateV1,
   advanceSimulationNarrative,
   createSimulationCheckpoint,
   deleteSimulationSession,
+  hashSimulationRuntimeStateV1,
   readSimulationState,
-  readSimulationStateVersion,
   verifySimulationCheckpoint,
 } from '../lib/simulation/runtime'
 import {
@@ -133,6 +133,11 @@ async function ensureAutomaticCheckpoint(sessionId: number): Promise<void> {
       name: `自动 · ${node.title}`,
       throughSequence: state.lastSequence,
     })
+    const automatic = (await db.simulationCheckpoints.where('sessionId').equals(sessionId).toArray())
+      .filter(checkpoint => checkpoint.name.startsWith('自动 · '))
+      .sort((left, right) => right.createdAt - left.createdAt || (right.id ?? 0) - (left.id ?? 0))
+    const staleIds = automatic.slice(20).flatMap(checkpoint => checkpoint.id ?? [])
+    if (staleIds.length) await db.simulationCheckpoints.bulkDelete(staleIds)
   }
 }
 
@@ -248,21 +253,28 @@ export const useStoryGamePlayerStore = create<StoryGamePlayerState>((set, get) =
       set({ busy: true, error: '' })
       try {
         await assertStoryGameSession(scope, sessionId)
-        const base = await readSimulationStateVersion(sessionId)
-        await commitNarrativeChoice({
+        const baseState = get().runtimeState
+        const baseNodeKey = baseState.narrative?.currentNodeKey ?? null
+        const result = await commitNarrativeChoiceWithStateV1({
           sessionId,
           choiceKey,
           commandId: `storygame:${sessionId}:${crypto.randomUUID()}`,
-          baseSequence: base.sequence,
-          baseStateHash: base.stateHash,
+          baseSequence: baseState.lastSequence,
+          baseStateHash: await hashSimulationRuntimeStateV1(baseState),
         })
-        await ensureAutomaticCheckpoint(sessionId)
-        await refreshSelected()
-        set(state => ({
-          sessions: state.sessions.map(session => session.id === sessionId
-            ? { ...session, updatedAt: Date.now() }
-            : session),
-        }))
+        const nextNodeKey = result.state.narrative?.currentNodeKey ?? null
+        if (nextNodeKey !== baseNodeKey) {
+          await ensureAutomaticCheckpoint(sessionId)
+          await refreshSelected()
+        } else {
+          set(state => ({
+            runtimeState: result.state,
+            events: [...state.events, ...result.appendedEvents],
+            sessions: state.sessions.map(session => session.id === sessionId
+              ? { ...session, updatedAt: Date.now() }
+              : session),
+          }))
+        }
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error)
         set({ error: message })

@@ -12,6 +12,8 @@ import type {
 import { AVG_MEDIA_KINDS } from '../types'
 import { createWorldRevision, listWorldRevisions, publishWorldRevision } from '../world-engine/releases'
 import { assertRecordInScope, resolveScope, scopeTransactionTables, stampNewRecord } from '../world-engine/scope'
+import { putMediaBlobObject, readAvgMediaBlobData } from '../game-production/media-blob-store'
+import { sanitizeSvg } from '../utils/sanitize-svg'
 import { freezeAvgMediaAsset, parseAvgPresentationContent, validateAvgPresentation } from './runtime'
 
 const STABLE_KEY = /^[a-zA-Z0-9._:-]+$/
@@ -157,25 +159,45 @@ export async function importAvgMediaAsset(input: {
   const scope = await resolveScope({ scope: input.scope })
   const assetKey = key(input.assetKey, 'assetKey')
   if (!AVG_MEDIA_KINDS.includes(input.kind) || !input.name.trim() || input.blob.size > 100 * 1024 * 1024) throw new Error('[avg] 媒资输入无效或超过 100MB')
-  const data = await input.blob.arrayBuffer()
+  const rawData = await input.blob.arrayBuffer()
+  const isSvg = input.blob.type.toLowerCase() === 'image/svg+xml'
+  const data = isSvg
+    ? (() => {
+        const sanitized = sanitizeSvg(new TextDecoder().decode(rawData))
+        if (!sanitized) throw new Error('[avg] SVG 媒资无法安全解析')
+        return new TextEncoder().encode(sanitized).buffer
+      })()
+    : rawData
   const contentHash = await hashBlob(new Blob([data]))
   const existing = (await db.avgMediaAssets.where('workId').equals(scope.workId).filter(row => row.assetKey === assetKey).toArray())
   const duplicate = existing.find(row => row.contentHash === contentHash)
   const latestVersion = Math.max(0, ...existing.map(row => row.version))
   if (duplicate && (!input.forceLatest || duplicate.version === latestVersion)) return duplicate
+  const blobObject = await putMediaBlobObject({
+    scope,
+    data,
+    mimeType: input.blob.type.toLowerCase() || 'application/octet-stream',
+    expectedContentHash: contentHash,
+    sanitizedSvg: isSvg,
+  })
   const version = latestVersion + 1
   const now = Date.now()
-  return db.transaction('rw', scopeTransactionTables(db.avgMediaAssets, db.avgMediaBlobs), async () => {
+  return db.transaction('rw', scopeTransactionTables(db.avgMediaAssets, db.avgMediaBlobs, db.mediaBlobObjects), async () => {
+    const currentBlobObject = await db.mediaBlobObjects.get(blobObject.id!)
+    if (!currentBlobObject || currentBlobObject.workId !== scope.workId || currentBlobObject.storageState !== 'ready') {
+      throw new Error('[avg] 共享媒资在绑定前丢失或不可用')
+    }
     const row = stampNewRecord(scope, 'avgMediaAssets', {
       projectId: scope.projectId, worldId: scope.worldId, workId: scope.workId, assetKey, version, kind: input.kind,
-      name: input.name.trim(), mimeType: input.blob.type.toLowerCase() || 'application/octet-stream', byteSize: input.blob.size,
+      name: input.name.trim(), mimeType: input.blob.type.toLowerCase() || 'application/octet-stream', byteSize: data.byteLength,
       width: input.width ?? null, height: input.height ?? null, durationMs: input.durationMs ?? null, contentHash,
       source: input.source?.trim() ?? '', license: input.license?.trim() ?? '', altText: input.altText?.trim() ?? '',
       characterTag: input.characterTag?.trim() ?? '', sceneTag: input.sceneTag?.trim() ?? '', createdAt: now, updatedAt: now,
     } satisfies AvgMediaAsset, { owner: 'work' })
     const id = await db.avgMediaAssets.add(row) as number
     const blobRow = stampNewRecord(scope, 'avgMediaBlobs', {
-      projectId: scope.projectId, worldId: scope.worldId, workId: scope.workId, mediaAssetId: id, data, createdAt: now,
+      projectId: scope.projectId, worldId: scope.worldId, workId: scope.workId,
+      mediaAssetId: id, blobObjectId: currentBlobObject.id!, data: null, createdAt: now,
     } satisfies AvgMediaBlob, { owner: 'work' })
     await db.avgMediaBlobs.add(blobRow)
     return { ...row, id }
@@ -212,7 +234,14 @@ export async function validateAvgGame(scopeInput: WorkspaceScope, gameDefinition
   const binaryErrors: string[] = []
   for (const asset of latestRows.filter(row => referenced.has(row.assetKey))) {
     const blob = await db.avgMediaBlobs.where('mediaAssetId').equals(asset.id!).first()
-    if (!blob || blob.data.byteLength !== asset.byteSize || await hashBlob(new Blob([blob.data])) !== asset.contentHash) {
+    try {
+      if (!blob) throw new Error('missing')
+      await readAvgMediaBlobData({
+        scope,
+        blob,
+        expected: { contentHash: asset.contentHash, byteSize: asset.byteSize, mimeType: asset.mimeType },
+      })
+    } catch {
       binaryErrors.push(`[avg] 媒资二进制缺失或完整性失败:${asset.assetKey}@${asset.version}`)
     }
   }

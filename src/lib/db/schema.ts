@@ -77,12 +77,37 @@ import type {
   NarrativeChoice,
   InteractionCharacterProfile,
   InteractionSceneTemplate,
+  CharacterInteractionProductionRecordV1,
+  CharacterInteractionSourceSelectionRecordV1,
+  CharacterInteractionBriefRecordV1,
+  CharacterInteractionProductionStepRecordV1,
+  CharacterInteractionArtifactRecordV1,
+  CharacterInteractionMediaAssetRecordV1,
+  CharacterInteractionProductReleaseRecordV1,
   AdventureModule,
   AvgMediaAsset,
   AvgMediaBlob,
   AvgPresentationModule,
   NarrativeSimulationModule,
   OpenWorldModule,
+  GameProductionRecordV1,
+  GameProductionBriefRecordV1,
+  GameProductionCommandRecordV1,
+  GameBuildRecordV1,
+  GameBuildArtifactRecordV1,
+  GameQualityGateReceiptRecordV1,
+  MediaBlobObjectRecordV1,
+  GameRulePackRecordV1,
+  TtrpgCampaignModuleRecordV1,
+  TtrpgSessionParticipantRecordV2,
+  TtrpgRuntimeAssetRequestRecordV1,
+  TtrpgProductionRecordV1,
+  TtrpgSourceSelectionRecordV1,
+  TtrpgProductionBriefRecordV1,
+  TtrpgProductionStepRecordV1,
+  TtrpgProductionBuildRecordV1,
+  TtrpgProductionMediaAssetRecordV1,
+  TtrpgProductReleaseRecordV1,
 } from '../types'
 import type { AIUsageEntry } from '../ai/usage-log'
 import type { TemporalFact } from '../types/temporal-fact'
@@ -214,6 +239,8 @@ class StoryForgeDB extends Dexie {
   simulationSessions!: Table<SimulationSession, number>
   simulationEvents!: Table<SimulationEvent, number>
   simulationCheckpoints!: Table<SimulationCheckpoint, number>
+  ttrpgSessionParticipants!: Table<TtrpgSessionParticipantRecordV2, number>
+  ttrpgRuntimeAssetRequests!: Table<TtrpgRuntimeAssetRequestRecordV1, number>
   narrativeModules!: Table<NarrativeModule, number>
   narrativeNodes!: Table<NarrativeNode, number>
   worldRevisions!: Table<WorldRevision, number>
@@ -229,12 +256,39 @@ class StoryForgeDB extends Dexie {
   narrativeChoices!: Table<NarrativeChoice, number>
   interactionCharacterProfiles!: Table<InteractionCharacterProfile, number>
   interactionSceneTemplates!: Table<InteractionSceneTemplate, number>
+  characterInteractionProductions!: Table<CharacterInteractionProductionRecordV1, number>
+  characterInteractionSourceSelections!: Table<CharacterInteractionSourceSelectionRecordV1, number>
+  characterInteractionBriefs!: Table<CharacterInteractionBriefRecordV1, number>
+  characterInteractionProductionSteps!: Table<CharacterInteractionProductionStepRecordV1, number>
+  characterInteractionArtifacts!: Table<CharacterInteractionArtifactRecordV1, number>
+  characterInteractionMediaAssets!: Table<CharacterInteractionMediaAssetRecordV1, number>
+  characterInteractionProductReleases!: Table<CharacterInteractionProductReleaseRecordV1, number>
   adventureModules!: Table<AdventureModule, number>
   avgMediaAssets!: Table<AvgMediaAsset, number>
   avgMediaBlobs!: Table<AvgMediaBlob, number>
   avgPresentationModules!: Table<AvgPresentationModule, number>
   narrativeSimulationModules!: Table<NarrativeSimulationModule, number>
   openWorldModules!: Table<OpenWorldModule, number>
+
+  // GAMEPROD-1 —— user-authorized, resumable multi-lane game production.
+  gameProductions!: Table<GameProductionRecordV1, number>
+  gameProductionBriefs!: Table<GameProductionBriefRecordV1, number>
+  gameProductionCommands!: Table<GameProductionCommandRecordV1, number>
+  gameBuilds!: Table<GameBuildRecordV1, number>
+  gameBuildArtifacts!: Table<GameBuildArtifactRecordV1, number>
+  gameQualityGateReceipts!: Table<GameQualityGateReceiptRecordV1, number>
+  mediaBlobObjects!: Table<MediaBlobObjectRecordV1, number>
+
+  // TTRPG-2A —— author-owned declarative rules and campaign content.
+  gameRulePacks!: Table<GameRulePackRecordV1, number>
+  ttrpgCampaignModules!: Table<TtrpgCampaignModuleRecordV1, number>
+  ttrpgProductions!: Table<TtrpgProductionRecordV1, number>
+  ttrpgSourceSelections!: Table<TtrpgSourceSelectionRecordV1, number>
+  ttrpgProductionBriefs!: Table<TtrpgProductionBriefRecordV1, number>
+  ttrpgProductionSteps!: Table<TtrpgProductionStepRecordV1, number>
+  ttrpgProductionBuilds!: Table<TtrpgProductionBuildRecordV1, number>
+  ttrpgProductionMediaAssets!: Table<TtrpgProductionMediaAssetRecordV1, number>
+  ttrpgProductReleases!: Table<TtrpgProductReleaseRecordV1, number>
 
   constructor() {
     super('storyforge')
@@ -636,6 +690,111 @@ class StoryForgeDB extends Dexie {
         if (!Object.prototype.hasOwnProperty.call(run, 'simulationSessionId')) {
           run.simulationSessionId = null
         }
+      })
+    })
+
+    // v63 / GAMEPROD-1A: production root, immutable Briefs, idempotent commands,
+    // Build/Artifact evidence and shared content-addressed media storage. Existing
+    // product rows remain valid; the new links are additive and nullable.
+    this.version(63).stores({
+      gameProductions: '++id, projectId, worldId, workId, &[workId+productionKey], status, currentGameDefinitionId, currentGameReleaseId, updatedAt',
+      gameProductionBriefs: '++id, projectId, worldId, workId, productionId, &[productionId+revision], &[productionId+briefHash], [productionId+status], sourceWorldReleaseId, createdAt',
+      gameProductionCommands: '++id, projectId, worldId, workId, productionId, &[productionId+commandId], [productionId+status], type, createdAt',
+      gameBuilds: '++id, projectId, worldId, workId, productionId, &[productionId+buildNumber], [productionId+status], sourceGameReleaseId, packageHash, previewHash, releasedGameReleaseId, updatedAt',
+      gameBuildArtifacts: '++id, projectId, worldId, workId, buildId, &[buildId+artifactKey+version], [buildId+status], [buildId+requirementKey], producerRunId, blobObjectId, contentHash, createdAt',
+      mediaBlobObjects: '++id, projectId, worldId, workId, &[workId+contentHash], storageState, leaseExpiresAt, byteSize, updatedAt',
+      avgMediaBlobs: '++id, projectId, worldId, workId, &mediaAssetId, blobObjectId',
+      agentRuns: '++id, projectId, workId, simulationSessionId, gameBuildId, worldGroupId, conversationId, parentRunId, &[parentRunId+parentRelation], status, updatedAt',
+      simulationSessions: '++id, projectId, worldGroupId, worldId, workId, worldReleaseId, gameReleaseId, gameBuildId, runtimeSourceHash, narrativeModuleId, kind, status, parentSessionId, updatedAt',
+    }).upgrade(async tx => {
+      await tx.table('avgMediaBlobs').toCollection().modify(row => {
+        if (!Object.prototype.hasOwnProperty.call(row, 'blobObjectId')) row.blobObjectId = null
+      })
+      await tx.table('agentRuns').toCollection().modify(run => {
+        if (!Object.prototype.hasOwnProperty.call(run, 'gameBuildId')) run.gameBuildId = null
+      })
+      await tx.table('simulationSessions').toCollection().modify(session => {
+        if (!Object.prototype.hasOwnProperty.call(session, 'gameBuildId')) session.gameBuildId = null
+        if (!Object.prototype.hasOwnProperty.call(session, 'runtimeSourceHash')) session.runtimeSourceHash = null
+      })
+    })
+
+    // v64 / TTRPG-2A: inert RulePack DSL and strict Work-owned CampaignPack.
+    // Runtime state remains in the existing SIM tables; formal play binds a
+    // unified gameRelease instead of creating a parallel TTRPG release table.
+    this.version(64).stores({
+      gameRulePacks: '++id, projectId, worldId, workId, &[workId+ruleSystemId+ruleSystemVersion], [workId+status], contentHash, updatedAt',
+      ttrpgCampaignModules: '++id, projectId, worldId, workId, &[workId+campaignKey], [workId+status], sourceWorldReleaseId, rulePackId, contentHash, updatedAt',
+    })
+
+    // v65 / GAMEPROD-1I: immutable per-Build quality-gate receipts. Browser
+    // smoke, failed and commercial-pass evidence share one lifecycle, while a
+    // threshold/profile upgrade appends a new receipt instead of rewriting one.
+    this.version(65).stores({
+      gameQualityGateReceipts: '++id, projectId, worldId, workId, buildId, &[buildId+gateId+receiptHash], [buildId+gateId], [buildId+status], gateId, status, createdAt',
+    })
+
+    // v66 / TTRPG-3A: instance-owned seat/controller/consent authority. The
+    // table starts empty for legacy sessions; no account identity or consent is
+    // guessed from old event prose. New TTRPG instances create explicit rows.
+    this.version(66).stores({
+      ttrpgSessionParticipants: '++id, projectId, worldGroupId, worldId, workId, sessionId, &[sessionId+seatKey], &[sessionId+viewerKey], [sessionId+actorKey], role, controller, assignmentState, updatedAt',
+    })
+
+    // v67 / TTRPG-3B: durable runtime media jobs. Binary objects remain in
+    // mediaBlobObjects/avgMediaBlobs; this table stores only recoverable queue,
+    // budget, provenance binding and terminal event evidence.
+    this.version(67).stores({
+      ttrpgRuntimeAssetRequests: '++id, projectId, worldGroupId, worldId, workId, sessionId, &[sessionId+requestKey], [sessionId+slotKey], [sessionId+status], priority, mediaAssetId, processorLeaseExpiresAt, updatedAt',
+    })
+
+    // v68 / TTRPG-4B: product-owned production lineage. Development fixtures
+    // may create frozen selections, Briefs and playable Builds, but the service
+    // refuses to insert a ProductRelease until a verified WorldRelease adapter
+    // supplies a non-development source.
+    this.version(68).stores({
+      ttrpgProductions: '++id, projectId, worldId, workId, &[workId+productionKey], [workId+status], activeSourceSelectionId, activeBriefId, currentBuildId, currentProductReleaseId, updatedAt',
+      ttrpgSourceSelections: '++id, projectId, worldId, workId, productionId, &[productionId+revision], &[productionId+selectionHash], [productionId+status], sourceKind, sourceWorldReleaseId, createdAt',
+      ttrpgProductionBriefs: '++id, projectId, worldId, workId, productionId, sourceSelectionId, &[productionId+revision], &[productionId+briefHash], [productionId+status], createdAt',
+      ttrpgProductionSteps: '++id, projectId, worldId, workId, productionId, buildId, &[productionId+stepKey+attempt], [productionId+status], [productionId+stepKey], updatedAt',
+      ttrpgProductionBuilds: '++id, projectId, worldId, workId, productionId, sourceSelectionId, briefId, &[productionId+buildNumber], [productionId+status], buildHash, updatedAt',
+      ttrpgProductReleases: '++id, projectId, worldId, workId, productionId, sourceSelectionId, sourceWorldReleaseId, briefId, buildId, &[productionId+version], &[productionId+contentHash], createdAt',
+      simulationSessions: '++id, projectId, worldGroupId, worldId, workId, worldReleaseId, gameReleaseId, gameBuildId, ttrpgBuildId, runtimeSourceHash, narrativeModuleId, kind, status, parentSessionId, updatedAt',
+    }).upgrade(async tx => {
+      await tx.table('simulationSessions').toCollection().modify(session => {
+        if (!Object.prototype.hasOwnProperty.call(session, 'ttrpgBuildId')) session.ttrpgBuildId = null
+      })
+    })
+
+    // v69 / TTRPG-4F: product-owned, versioned production media bindings.
+    // Binary bytes remain deduplicated in mediaBlobObjects; the TTRPG table is
+    // the product contract and never depends on another product's Build table.
+    this.version(69).stores({
+      ttrpgProductionMediaAssets: '++id, projectId, worldId, workId, buildId, &[buildId+slotKey+version], [buildId+slotKey], [buildId+status], blobObjectId, contentHash, updatedAt',
+    })
+
+    // v70 / CHATGAME-CI-1+2: product-owned production root, immutable frozen
+    // World SourceSelection revisions and author-confirmed Brief/Run Contract.
+    // No live world table is copied or inferred during migration; all tables
+    // start empty and formal side effects remain gated by the product service.
+    this.version(70).stores({
+      characterInteractionProductions: '++id, projectId, worldId, workId, &[workId+productionKey], [workId+status], activeSourceSelectionId, activeBriefId, updatedAt',
+      characterInteractionSourceSelections: '++id, projectId, worldId, workId, productionId, &[productionId+revision], &[productionId+selectionHash], [productionId+status], sourceWorldReleaseId, worldContentHash, createdAt',
+      characterInteractionBriefs: '++id, projectId, worldId, workId, productionId, sourceSelectionId, &[productionId+revision], [productionId+briefHash], [productionId+status], createdAt',
+    })
+
+    // v71 / CHATGAME-CI-3..5: product-owned durable production attempts,
+    // immutable artifacts, media bindings and immutable Product Releases.
+    // Existing CI-1/2 rows are preserved and receive only a nullable release pointer.
+    this.version(71).stores({
+      characterInteractionProductions: '++id, projectId, worldId, workId, &[workId+productionKey], [workId+status], activeSourceSelectionId, activeBriefId, currentProductReleaseId, updatedAt',
+      characterInteractionProductionSteps: '++id, projectId, worldId, workId, productionId, &[productionId+stepKey+attempt], [productionId+status], [productionId+stepKey], candidateArtifactId, confirmedArtifactId, producerRunId, updatedAt',
+      characterInteractionArtifacts: '++id, projectId, worldId, workId, productionId, &[productionId+artifactKey+revision], [productionId+status], [productionId+stepKey], kind, producerRunId, sourceSessionId, payloadHash, createdAt',
+      characterInteractionMediaAssets: '++id, projectId, worldId, workId, productionId, &[productionId+slotKey+version], [productionId+slotKey], [productionId+status], blobObjectId, contentHash, updatedAt',
+      characterInteractionProductReleases: '++id, projectId, worldId, workId, productionId, sourceSelectionId, sourceWorldReleaseId, briefId, gameReleaseId, &[productionId+version], &[productionId+contentHash], createdAt',
+    }).upgrade(async tx => {
+      await tx.table('characterInteractionProductions').toCollection().modify(row => {
+        if (!Object.prototype.hasOwnProperty.call(row, 'currentProductReleaseId')) row.currentProductReleaseId = null
       })
     })
   }

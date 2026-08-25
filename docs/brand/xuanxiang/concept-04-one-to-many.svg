@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" role="img" aria-labelledby="title desc">
+  <title id="title">悬象方案四：一念四生</title>
+  <desc id="desc">中心创意星火连接四个内容产品节点，并由开放世界轨道环绕。</desc>
+  <g fill="none" stroke="#A45137" stroke-width="8" stroke-linecap="round">
+    <path d="M128 105V64"/>
+    <path d="M151 128h41"/>
+    <path d="M128 151v41"/>
+    <path d="M105 128H64"/>
+  </g>
+  <g fill="#D7A452" stroke="#F5F0E7" stroke-width="5">
+    <circle cx="128" cy="52" r="14"/>
+    <circle cx="204" cy="128" r="14"/>
+    <circle cx="128" cy="204" r="14"/>
+    <circle cx="52" cy="128" r="14"/>
+  </g>
+  <path d="M128 91c4 18 17 31 35 37-18 5-31 19-35 37-5-18-18-32-36-37 18-6 31-19 36-37Z" fill="#A45137"/>
+  <circle cx="128" cy="128" r="7" fill="#F5F0E7"/>
+  <g fill="none" stroke="#253A35" stroke-width="12" stroke-linecap="round">
+    <path d="M70 42A102 102 0 0 1 214 92"/>
+    <path d="M214 164A102 102 0 0 1 70 214"/>
+  </g>
+</svg>

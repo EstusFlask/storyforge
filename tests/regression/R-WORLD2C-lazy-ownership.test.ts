@@ -55,6 +55,29 @@ async function createLegacyProject(name = '旧分步骤项目') {
 
 async function stripC1Roots(projectId: number) {
   // 模拟真实的 pre-C1 项目：正式游戏发布及其 World/Work 内容不可能早于根存在。
+  await db.ttrpgProductReleases.where('projectId').equals(projectId).delete()
+  await db.ttrpgProductionMediaAssets.where('projectId').equals(projectId).delete()
+  await db.ttrpgProductionSteps.where('projectId').equals(projectId).delete()
+  await db.ttrpgProductionBuilds.where('projectId').equals(projectId).delete()
+  await db.ttrpgProductionBriefs.where('projectId').equals(projectId).delete()
+  await db.ttrpgSourceSelections.where('projectId').equals(projectId).delete()
+  await db.ttrpgProductions.where('projectId').equals(projectId).delete()
+  await db.characterInteractionProductReleases.where('projectId').equals(projectId).delete()
+  await db.characterInteractionMediaAssets.where('projectId').equals(projectId).delete()
+  await db.characterInteractionProductionSteps.where('projectId').equals(projectId).delete()
+  await db.characterInteractionArtifacts.where('projectId').equals(projectId).delete()
+  await db.characterInteractionBriefs.where('projectId').equals(projectId).delete()
+  await db.characterInteractionSourceSelections.where('projectId').equals(projectId).delete()
+  await db.characterInteractionProductions.where('projectId').equals(projectId).delete()
+  await db.gameQualityGateReceipts.where('projectId').equals(projectId).delete()
+  await db.gameBuildArtifacts.where('projectId').equals(projectId).delete()
+  await db.gameBuilds.where('projectId').equals(projectId).delete()
+  await db.gameProductionCommands.where('projectId').equals(projectId).delete()
+  await db.gameProductionBriefs.where('projectId').equals(projectId).delete()
+  await db.gameProductions.where('projectId').equals(projectId).delete()
+  await db.mediaBlobObjects.where('projectId').equals(projectId).delete()
+  await db.ttrpgCampaignModules.where('projectId').equals(projectId).delete()
+  await db.gameRulePacks.where('projectId').equals(projectId).delete()
   await db.gameReleases.where('projectId').equals(projectId).delete()
   await db.interactionCharacterProfiles.where('projectId').equals(projectId).delete()
   await db.interactionSceneTemplates.where('projectId').equals(projectId).delete()
@@ -71,6 +94,8 @@ async function stripC1Roots(projectId: number) {
   await db.narrativeModules.where('projectId').equals(projectId).delete()
   await db.worldReleases.where('projectId').equals(projectId).delete()
   await db.worldRevisions.where('projectId').equals(projectId).delete()
+  await db.ttrpgRuntimeAssetRequests.where('projectId').equals(projectId).delete()
+  await db.ttrpgSessionParticipants.where('projectId').equals(projectId).delete()
   for (const spec of PROJECT_TABLES) {
     const locator = spec.domainOwner?.locator
     const isLegacyStamped = locator?.kind !== 'parent'

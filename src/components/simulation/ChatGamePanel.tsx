@@ -3,6 +3,7 @@ import {
   Bot,
   Check,
   GitBranch,
+  FileOutput,
   Loader2,
   MapPin,
   MessageCircle,
@@ -20,11 +21,13 @@ import { resolveRequestConfig } from '../../lib/ai/client'
 import type { Project, WorkspaceScope } from '../../lib/types'
 import { useAIConfigStore } from '../../stores/ai-config'
 import { useInteractionGamePlayerStore } from '../../stores/interaction-game-player'
+import { createCharacterInteractionWorldFeedbackCandidateV1 } from '../../lib/character-interaction/production-pipeline'
 
 export default function ChatGamePanel(props: {
   project: Project
   worldGroupId: number | null
   workspaceScope?: WorkspaceScope
+  initialSessionId?: number | null
 }) {
   const store = useInteractionGamePlayerStore()
   const { config } = useAIConfigStore()
@@ -32,11 +35,15 @@ export default function ChatGamePanel(props: {
   const [checkpointName, setCheckpointName] = useState('')
   const [branchTitle, setBranchTitle] = useState('')
   const [localError, setLocalError] = useState('')
+  const [worldFeedbackInstruction, setWorldFeedbackInstruction] = useState('')
+  const [worldFeedbackReceipt, setWorldFeedbackReceipt] = useState('')
 
   useEffect(() => {
-    if (props.workspaceScope) void store.load(props.workspaceScope, props.worldGroupId)
+    if (props.workspaceScope) void store.load(props.workspaceScope, props.worldGroupId).then(async () => {
+      if (props.initialSessionId != null) await store.select(props.initialSessionId)
+    })
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [props.workspaceScope?.projectId, props.workspaceScope?.worldId, props.workspaceScope?.workId, props.worldGroupId])
+  }, [props.workspaceScope?.projectId, props.workspaceScope?.worldId, props.workspaceScope?.workId, props.worldGroupId, props.initialSessionId])
 
   const selected = store.sessions.find(item => item.id === store.selectedSessionId) ?? null
   const interaction = store.runtimeState.interaction
@@ -108,6 +115,7 @@ export default function ChatGamePanel(props: {
         {store.runtimeState.narrative?.version === 2 && !store.runtimeState.narrative.completed && <section className="rounded border border-border bg-bg-surface p-4"><h2 className="mb-3 text-sm font-semibold">Narrative Choice 连接</h2><div className="flex flex-wrap gap-2">{(store.runtimeState.narrative.choices ?? []).filter(choice => store.runtimeState.narrative?.visibleChoiceKeys?.includes(choice.choiceKey)).map(choice => <button key={choice.choiceKey} disabled={!store.runtimeState.narrative?.availableChoiceKeys?.includes(choice.choiceKey) || store.busy} onClick={() => void run(async () => { await store.chooseNarrative(choice.choiceKey) })} className="rounded border border-border px-3 py-2 text-xs disabled:opacity-40">{choice.text}</button>)}</div></section>}
 
         <section className="grid gap-3 md:grid-cols-2"><div className="rounded border border-border bg-bg-surface p-4"><div className="mb-3 flex items-center gap-2 text-sm font-semibold"><Save className="h-4 w-4 text-accent" />检查点</div><div className="flex gap-2"><input value={checkpointName} onChange={event => setCheckpointName(event.target.value)} placeholder="检查点名称" className="min-w-0 flex-1 rounded border border-border bg-bg-base px-2 py-1.5 text-xs" /><button disabled={!checkpointName.trim()} onClick={() => void run(async () => { await store.saveCheckpoint(checkpointName); setCheckpointName('') })} className="rounded border border-border px-3 text-xs">保存</button></div><div className="mt-2 space-y-1">{store.checkpoints.map(item => <button key={item.id} onClick={() => void run(async () => { await store.forkCheckpoint(item.id!) })} className="block w-full rounded bg-bg-base px-2 py-1 text-left text-[10px] text-text-muted">{item.name} · #{item.throughSequence} → 分支</button>)}</div></div><div className="rounded border border-border bg-bg-surface p-4"><div className="mb-3 flex items-center gap-2 text-sm font-semibold"><GitBranch className="h-4 w-4 text-accent" />当前时间线分支</div><div className="flex gap-2"><input value={branchTitle} onChange={event => setBranchTitle(event.target.value)} placeholder="分支名称" className="min-w-0 flex-1 rounded border border-border bg-bg-base px-2 py-1.5 text-xs" /><button disabled={!branchTitle.trim()} onClick={() => void run(async () => { await store.forkCurrent(branchTitle); setBranchTitle('') })} className="rounded border border-border px-3 text-xs">建立分支</button></div></div></section>
+        <section className="rounded border border-border bg-bg-surface p-4"><div className="mb-2 flex items-center gap-2 text-sm font-semibold"><FileOutput className="h-4 w-4 text-accent" />形成世界回流候选</div><p className="mb-3 text-xs text-text-muted">只汇总本 Instance 中已有证据，不会自动修改世界引擎。产品 Brief 未授权时会明确拒绝；候选仍需作者审阅并走 adopt 治理。</p><div className="flex flex-col gap-2 sm:flex-row"><input value={worldFeedbackInstruction} onChange={event => setWorldFeedbackInstruction(event.target.value)} placeholder="例如：整理角色接受的记忆、重大关系变化和已解决线索" className="min-w-0 flex-1 rounded border border-border bg-bg-base px-2 py-1.5 text-xs" /><button disabled={store.busy || !worldFeedbackInstruction.trim()} onClick={() => void run(async () => { const artifact = await createCharacterInteractionWorldFeedbackCandidateV1({ scope: props.workspaceScope!, simulationSessionId: selected.id!, authorInstruction: worldFeedbackInstruction }); setWorldFeedbackReceipt(`候选 ${artifact.payloadHash.slice(0, 16)}… 已保存，世界表零写入。`); setWorldFeedbackInstruction('') })} className="flex items-center justify-center gap-1 rounded border border-border px-3 py-1.5 text-xs disabled:opacity-40"><FileOutput className="h-3 w-3" />创建候选</button></div>{worldFeedbackReceipt && <p className="mt-2 text-xs text-accent">{worldFeedbackReceipt}</p>}</section>
         {!!store.recoverableRunIds.length && <section className="rounded border border-warning/30 bg-warning/5 p-4"><h2 className="text-sm font-semibold">Harness 可恢复候选</h2><p className="my-2 text-xs text-text-muted">上次运行已持久化候选但未完成采用，可从同一检查点继续，不重复调用模型。</p><div className="flex flex-wrap gap-2">{store.recoverableRunIds.map(runId => <button key={runId} disabled={store.busy} onClick={() => void run(async () => { await store.resumeRun(runId) })} className="rounded border border-border px-3 py-1.5 text-xs"> 恢复 Run #{runId}</button>)}</div></section>}
       </>}
     </div></main>

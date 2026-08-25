@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { deleteAvgMediaAsset, importAvgMediaAsset, publishAvgGame, seedAvgAcceptanceGame, updateAvgPresentation, validateAvgGame } from '../../src/lib/avg/authoring'
 import { applyAvgCue, EMPTY_AVG_STAGE, parseAvgPresentationContent, validateAvgPresentation } from '../../src/lib/avg/runtime'
 import { db } from '../../src/lib/db/schema'
@@ -20,6 +20,14 @@ async function reach(sessionId: number, beatKey: string) {
 
 describe('AVG-1 · governed visual narrative', () => {
   beforeAll(async () => { await db.delete(); await db.open() })
+  beforeEach(async () => {
+    // Keep one Dexie connection for the suite. Repeated delete/versionchange
+    // cycles can leave fake-indexeddb waiting under the full coverage run;
+    // these cases only need row isolation between scenarios.
+    await db.transaction('rw', db.tables, async () => {
+      await Promise.all(db.tables.map(table => table.clear()))
+    })
+  })
   afterAll(() => db.close())
 
   it('只接受声明式白名单 Cue，并诊断断链、格式、替代文本与长等待', () => {
@@ -84,7 +92,7 @@ describe('AVG-1 · governed visual narrative', () => {
   }, 30_000)
 
   it('发布前拒绝元数据与本地二进制不一致，且不创建世界修订', async () => {
-    const owned = await workspace('AVG 发布完整性'); const definition = await seedAvgAcceptanceGame({ scope: owned.scope }); const asset = await db.avgMediaAssets.where('[workId+assetKey+version]').equals([owned.scope.workId, 'bg.harbor-night', 1]).first(); const blob = await db.avgMediaBlobs.where('mediaAssetId').equals(asset!.id!).first(); const damaged = blob!.data.slice(0); new Uint8Array(damaged)[0] ^= 0xff; await db.avgMediaBlobs.update(blob!.id!, { data: damaged })
+    const owned = await workspace('AVG 发布完整性'); const definition = await seedAvgAcceptanceGame({ scope: owned.scope }); const asset = await db.avgMediaAssets.where('[workId+assetKey+version]').equals([owned.scope.workId, 'bg.harbor-night', 1]).first(); const blob = await db.avgMediaBlobs.where('mediaAssetId').equals(asset!.id!).first(); const shared = await db.mediaBlobObjects.get(blob!.blobObjectId!); const damaged = shared!.data!.slice(0); new Uint8Array(damaged)[0] ^= 0xff; await db.mediaBlobObjects.update(shared!.id!, { data: damaged })
     await expect(publishAvgGame({ scope: owned.scope, gameDefinitionId: definition.id! })).rejects.toThrow('二进制缺失或完整性失败'); expect(await db.worldRevisions.where('worldId').equals(owned.scope.worldId).count()).toBe(0); expect(await db.gameReleases.where('workId').equals(owned.scope.workId).count()).toBe(0)
   }, 30_000)
 })
