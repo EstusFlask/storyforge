@@ -239,9 +239,9 @@ AI 输出经 `adopt({ target, data })` 写回,只有这里登记的字段可写(
 | `chapter.content` | `src/lib/generation/chapter-generation-node.ts:23` |
 | `chapter.continue` | `src/lib/generation/chapter-generation-node.ts:26` |
 | `chapter.continuity` | `src/lib/node-authoring/domain-execution.ts:552`<br/>`src/lib/node-authoring/domain-execution.ts:616` |
-| `chapter.deai` | `src/components/editor/ChapterEditor.tsx:1665` |
-| `chapter.expand` | `src/components/editor/ChapterEditor.tsx:1643` |
-| `chapter.polish` | `src/components/editor/ChapterEditor.tsx:1633` |
+| `chapter.deai` | `src/components/editor/ChapterEditor.tsx:1673` |
+| `chapter.expand` | `src/components/editor/ChapterEditor.tsx:1651` |
+| `chapter.polish` | `src/components/editor/ChapterEditor.tsx:1641` |
 | `chapter.toolbar` | `src/lib/agent/run/selection-edit-durable.ts:567` |
 | `cultivation.progress` | `src/lib/agent/run/cultivation-progress-extraction-durable.ts:558` |
 | `detail.chapter-planning` | `src/lib/node-authoring/domain-execution.ts:371` |
@@ -265,7 +265,7 @@ AI 输出经 `adopt({ target, data })` 写回,只有这里登记的字段可写(
 | `review.outline-workshop` | `src/lib/outline/workshop.ts:457` |
 | `review.quality` | `src/components/editor/ReviewPanel.tsx:112` |
 | `review.readability` | `src/components/editor/ReviewPanel.tsx:133` |
-| `review.revise` | `src/components/editor/ChapterEditor.tsx:1693` |
+| `review.revise` | `src/components/editor/ChapterEditor.tsx:1701` |
 | `scene.verify` | `src/components/scene/SceneVerifyPanel.tsx:81` |
 | `story.timeline` | `src/lib/agent/run/impact-story-timeline-regeneration-durable.ts:670`<br/>`src/lib/agent/run/story-timeline-extraction-durable.ts:758` |
 | `style.learn` | `src/lib/agent/run/style-learning-durable.ts:493` |
@@ -350,4 +350,4 @@ AI 输出经 `adopt({ target, data })` 写回,只有这里登记的字段可写(
 
 ---
 
-生成时间基准:commit `90fcdf9b`
+生成时间基准:commit `ef6b79fa`
