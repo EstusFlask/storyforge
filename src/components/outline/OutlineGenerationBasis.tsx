@@ -46,6 +46,7 @@ export default function OutlineGenerationBasis({
   if (!context) return null
 
   const storyCore = contextExcerpt(context, 'storyCore')
+  const storyArcs = contextExcerpt(context, 'storyArcs')
   const existingVolumes = contextExcerpt(context, 'existingVolumeOutlines')
 
   return (
@@ -69,8 +70,10 @@ export default function OutlineGenerationBasis({
 
       {storyCore ? (
         <p className="leading-5 text-text-secondary"><span className="text-text-muted">故事核心：</span>{storyCore}</p>
+      ) : storyArcs ? (
+        <p className="leading-5 text-text-secondary"><span className="text-text-muted">已确认故事线：</span>{storyArcs}</p>
       ) : (
-        <p className="leading-5 text-warning">未填写故事主线，AI 将主要依据世界观、角色、已有大纲与额外要求生成。</p>
+        <p className="leading-5 text-warning">未填写故事核心或故事线，AI 将主要依据世界观、角色、已有大纲与额外要求生成。</p>
       )}
       {existingVolumes && (
         <p className="leading-5 text-text-secondary"><span className="text-text-muted">已有卷纲：</span>{existingVolumes}</p>

@@ -72,10 +72,25 @@ describe('CF-20260702-3 · 大纲生成依据面板', () => {
     expect(host.textContent).toContain('故事核心')
     expect(host.textContent).toContain('世界观')
     expect(host.textContent).toContain('守住最后的星门')
-    expect(host.textContent).not.toContain('未填写故事主线')
+    expect(host.textContent).not.toContain('未填写故事核心或故事线')
   })
 
-  it('没有故事核心时说明主线缺失且未采纳灵感不会进入上下文', async () => {
+  it('没有故事核心但已有正式故事线时展示已确认故事线，不误报主线缺失', async () => {
+    const host = await renderBasis(makeContext({
+      included: ['storyArcs'],
+      segments: [{
+        label: '故事线', layer: 'L1', content: '【故事线】\n主线：守灯人追查古钟', tokens: 9, trimmable: true,
+      }],
+      omitted: ['storyCore'],
+      totalInputTokens: 9,
+    }))
+
+    expect(host.textContent).toContain('已确认故事线')
+    expect(host.textContent).toContain('守灯人追查古钟')
+    expect(host.textContent).not.toContain('未填写故事核心或故事线')
+  })
+
+  it('故事核心和故事线都没有时说明依据缺失且未采纳灵感不会进入上下文', async () => {
     const host = await renderBasis(makeContext({
       included: ['worldview'],
       segments: [
@@ -86,7 +101,7 @@ describe('CF-20260702-3 · 大纲生成依据面板', () => {
       totalInputTokens: 8,
     }))
 
-    expect(host.textContent).toContain('未填写故事主线')
+    expect(host.textContent).toContain('未填写故事核心或故事线')
     expect(host.textContent).toContain('未采纳的灵感草稿不会进入生成上下文')
     expect(host.textContent).toContain('无可用内容：故事核心、角色档案')
     expect(host.textContent).toContain('因模型上下文预算未发送：历史时间线')
