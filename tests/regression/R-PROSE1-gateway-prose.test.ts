@@ -16,10 +16,16 @@ import {
 import { buildChapterInformationBoundaryV1 } from '../../src/lib/agent/information-boundary'
 import { hashCanonicalValue } from '../../src/lib/agent/run/hash'
 import { hashChapterText } from '../../src/lib/ai/chapter-memory/text-normalization'
+import { normalizeProseForEditorV1, plainTextToHtml } from '../../src/lib/utils/html'
 import { generateWorkspaceUid } from '../../src/lib/memory/identity'
 import { ensureWorkspaceOwnership } from '../../src/lib/world-engine/ownership'
 import { stampNewRecord, type WorkspaceScope } from '../../src/lib/world-engine/scope'
 import { useAIConfigStore } from '../../src/stores/ai-config'
+import { prepareProseCopilot } from '../../src/lib/agent/prose-copilot'
+import {
+  resolveAgentSkillV1,
+  validateAgentSkillContextEvidenceV1,
+} from '../../src/lib/agent/skill-registry'
 
 const now = 1_787_905_000_000
 
@@ -193,6 +199,14 @@ describe.sequential('PROSE-1 · 正文 Gateway 单一上下文与 exact adoption
   beforeEach(async () => { await db.delete(); await db.open() })
   afterEach(() => db.close())
 
+  it('正文候选含空行时，候选哈希与编辑器实际写入 HTML 使用同一规范化结果', async () => {
+    const output = '潮水退去。  \r\n\r\n古钟第一次响起。\n\n'
+    const normalized = normalizeProseForEditorV1(output)
+    expect(normalized).toBe('潮水退去。\n古钟第一次响起。')
+    expect(await hashChapterText(plainTextToHtml(normalized)))
+      .toBe(await hashChapterText(normalized))
+  })
+
   it('强制装入章纲/细纲禁止项/阶段进度/直接连续性/POV 认知/硬事实/蓝图与一致性档案，并隔离其它世界', async () => {
     const fixture = await seed()
     const assembled = await assemblyFor(fixture)
@@ -223,6 +237,29 @@ describe.sequential('PROSE-1 · 正文 Gateway 单一上下文与 exact adoption
     expect(assembled.sourceEvidence?.map(item => item.key)).toEqual(['ragSelection'])
     expect(assembled.contextGatewayExecution.contextPacket.sourceRefs.some(ref => ref.table === 'narrativeBeats')).toBe(true)
     expect(assembled.contextGatewayExecution.contextPacket.sourceRefs.some(ref => ref.table === 'narrativeChoices')).toBe(true)
+  })
+
+  it('主 Agent 正文候选把 Gateway 实际来源写入输入状态证据并通过严格 Skill 校验', async () => {
+    const fixture = await seed()
+    await db.projects.update(fixture.projectId, { enableMultiWorld: true })
+    const prepared = await prepareProseCopilot({
+      projectId: fixture.projectId,
+      scope: fixture.scope,
+      worldGroupId: fixture.groupId,
+      authorRequest: '写第二章正文',
+      skillId: 'prose.generate',
+      perspectiveCharacterId: fixture.characterId,
+      creativeReliabilityEnabled: false,
+    })
+    expect(prepared.contextEvidence.inputStateSourceKeys).toEqual(expect.arrayContaining([
+      'chapterOutline', 'detailedOutline', 'storyArcs', 'storylineProgress',
+      'activeNarrativeBlueprint', 'chapterContinuityHandoff', 'characterKnowledge',
+      'currentFacts', 'consistencyDossier',
+    ]))
+    expect(() => validateAgentSkillContextEvidenceV1(
+      resolveAgentSkillV1('prose', 'prose.generate'),
+      prepared.contextEvidence,
+    )).not.toThrow()
   })
 
   it('ContextManifestV3 候选可采纳；任一必读来源变化都会在写正文前阻断旧候选', async () => {

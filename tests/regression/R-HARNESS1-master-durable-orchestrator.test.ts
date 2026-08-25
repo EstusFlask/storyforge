@@ -761,6 +761,8 @@ describe.sequential('R-HARNESS1-master-durable-orchestrator · 主 Agent durable
         const gateway = await prepareRequiredMasterGatewayFixtureV1({
           scope: options.scope,
           worldGroupId: options.worldGroupId,
+          chapterId: prepared.snapshot.chapterId,
+          characterId: prepared.perspectiveCharacterId ?? null,
           executionTrace: options.executionTrace,
         }, task, draft)
         await options.executionTrace.candidateReady(task, {
@@ -774,6 +776,7 @@ describe.sequential('R-HARNESS1-master-durable-orchestrator · 主 Agent durable
             baseSnapshot: prepared.snapshot,
             proseOperation: 'generate',
             proseOutlineNodeId: chapterOutlineId,
+            perspectiveCharacterId: prepared.perspectiveCharacterId,
             workspaceScope: options.scope,
             dependsOnTaskIds: [],
           },

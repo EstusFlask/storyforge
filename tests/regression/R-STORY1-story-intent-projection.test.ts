@@ -89,6 +89,20 @@ afterEach(async () => {
 })
 
 describe.sequential('STORY-1 · 故事意图与可执行故事线投影', () => {
+  it('空项目故事线把无故事核心记录视为有效冻结基线，后来新增意图才标记 stale', async () => {
+    const empty = await readStoryCoreIntentSnapshotV1((await ensureWorkspaceOwnership(
+      await db.projects.add({
+        workspaceUid: generateWorkspaceUid(), name: '空意图基线', genre: 'fantasy', genres: ['fantasy'],
+        description: '', status: 'drafting', targetWordCount: 100_000, createdAt: NOW, updatedAt: NOW,
+      } as never) as number,
+    )).scope)
+    const arc = {
+      origin: 'ai', sourceStoryCoreId: null, sourceStoryCoreHash: empty.hash, lastAlignedHash: empty.hash,
+    } as StoryArc
+    expect(storyArcIntentAlignmentV1(arc, empty)).toBe('aligned')
+    expect(storyArcIntentAlignmentV1(arc, { ...empty, storyCoreId: 1, hash: 'a'.repeat(64) })).toBe('stale')
+  })
+
   it('七字段能力、UI、Skill 写集和 Gateway required 目标完全同源', () => {
     const registered = STORY_CORE_GENERATABLE_FIELD_SPECS.map(spec => spec.field)
     const skill = getAgentSkillV1('world-origin.story-core')

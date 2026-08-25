@@ -1,4 +1,5 @@
 import { db } from '../db/schema'
+import { normalizeChapterText } from '../ai/chapter-memory/text-normalization'
 import type { Chapter, OutlineNode, WorkspaceScope } from '../types'
 import { assertRecordInScope, readOwnedRows } from '../world-engine/scope'
 import type { OutlineGenerationRequest } from './generation-request'
@@ -46,7 +47,10 @@ export async function assertOutlineRequestTargetsUnwrittenFutureV1(input: {
     ? descendantIds(outlines, targetId)
     : new Set([targetId])
   const written = (await readOwnedRows<Chapter>(input.scope, 'chapters', { owner: 'work' }))
-    .find(chapter => protectedOutlineIds.has(chapter.outlineNodeId) && chapter.content.trim().length > 0)
+    .find(chapter => (
+      protectedOutlineIds.has(chapter.outlineNodeId)
+      && normalizeChapterText(chapter.content).length > 0
+    ))
   if (written) {
     throw new Error(
       `大纲目标位于已写正文保护区（${written.title || `章节 #${written.id ?? '?'}`}），只能规划未写未来，已阻止生成或采纳。`,
@@ -68,7 +72,10 @@ export async function assertDetailedOutlineTargetsUnwrittenFutureV1(input: {
     throw new Error('细纲目标章节不存在或越出当前世界作用域。')
   }
   const written = (await readOwnedRows<Chapter>(input.scope, 'chapters', { owner: 'work' }))
-    .find(chapter => chapter.outlineNodeId === input.outlineNodeId && chapter.content.trim().length > 0)
+    .find(chapter => (
+      chapter.outlineNodeId === input.outlineNodeId
+      && normalizeChapterText(chapter.content).length > 0
+    ))
   if (written) {
     throw new Error(
       `细纲目标位于已写正文保护区（${written.title || `章节 #${written.id ?? '?'}`}），请进入独立改稿流程。`,

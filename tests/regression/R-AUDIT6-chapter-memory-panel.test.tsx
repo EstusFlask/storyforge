@@ -33,6 +33,8 @@ async function mount(patch: Record<string, unknown> = {}) {
     summary: undefined,
     hasText: true,
     memoryBusy: false,
+    reconciliationBusy: null,
+    reconciliationError: '',
     reconciliation: undefined,
     reconciliationCurrent: false,
     onGenerateMemory: vi.fn(),
@@ -95,5 +97,17 @@ describe('AUDIT-6 · 章节记忆与计划对账视图', () => {
     await act(async () => button(current.host, '用候选更新本章章纲').click())
     expect(current.props.onConfirmActualProgress).toHaveBeenCalledOnce()
     expect(current.props.onApplyOutlineCandidate).toHaveBeenCalledOnce()
+  })
+
+  it('对账写队列未完成时显示明确忙碌态、阻止重复动作并呈现错误', async () => {
+    const busy = await mount({
+      reconciliation,
+      reconciliationCurrent: true,
+      reconciliationBusy: 'actual-progress',
+      reconciliationError: '写入队列失败',
+    })
+    expect(button(busy.host, '正在附加实际进展约束...').disabled).toBe(true)
+    expect(button(busy.host, '用候选更新本章章纲').disabled).toBe(true)
+    expect(busy.host.querySelector('[role="alert"]')?.textContent).toContain('写入队列失败')
   })
 })

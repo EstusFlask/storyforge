@@ -43,7 +43,12 @@ import {
 import { useCreativeRulesStore } from '../../stores/project-singletons'
 import { useStoryArcStore } from '../../stores/story-arc'
 import { useForeshadowStore } from '../../stores/foreshadow'
-import { htmlToPlainText, plainTextToHtml, countWords } from '../../lib/utils/html'
+import {
+  countWords,
+  htmlToPlainText,
+  normalizeProseForEditorV1,
+  plainTextToHtml,
+} from '../../lib/utils/html'
 import AIStreamOutput from '../shared/AIStreamOutput'
 import ContextBudgetBar from '../shared/ContextBudgetBar'
 import { useDialog } from '../shared/Dialog'
@@ -365,6 +370,8 @@ export default function ChapterEditor({ project, outlineNodeId }: Props) {
   const [proseCandidate, setProseCandidate] = useState<ProseGenerationCandidateV1 | null>(null)
   const [proseGenerationError, setProseGenerationError] = useState('')
   const [planReconciliationCurrent, setPlanReconciliationCurrent] = useState(false)
+  const [reconciliationAction, setReconciliationAction] = useState<'actual-progress' | 'outline' | null>(null)
+  const [reconciliationActionError, setReconciliationActionError] = useState('')
   const [organizationRun, setOrganizationRun] = useState<ChapterOrganizationRun | null>(null)
   const [organizationCurrent, setOrganizationCurrent] = useState(false)
   const [organizingChapter, setOrganizingChapter] = useState(false)
@@ -1354,10 +1361,11 @@ export default function ChapterEditor({ project, outlineNodeId }: Props) {
             gatewayEvidenceVersion: 3 as const,
             expectedContentHash: await hashChapterText(
               input.operation === 'continue'
-                ? [normalizeChapterText(sourceChapter.content ?? ''), normalizeChapterText(outputText)]
-                    .filter(Boolean)
-                    .join('\n')
-                : outputText,
+                ? [
+                    normalizeChapterText(sourceChapter.content ?? ''),
+                    normalizeProseForEditorV1(outputText),
+                  ].filter(Boolean).join('\n')
+                : normalizeProseForEditorV1(outputText),
             ),
             informationBoundaryHash: input.informationBoundary.manifestHash,
             perspectiveCharacterId,
@@ -2509,7 +2517,7 @@ export default function ChapterEditor({ project, outlineNodeId }: Props) {
   }
 
   const handleConfirmActualProgress = async () => {
-    if (!currentChapter?.id || !currentChapter.planReconciliation) return
+    if (!currentChapter?.id || !currentChapter.planReconciliation || reconciliationAction) return
     const reconciliation = currentChapter.planReconciliation
     const confirmedActualProgress = [
       ...reconciliation.completedGoals.map(item => `已完成：${item.text}`),
@@ -2517,27 +2525,43 @@ export default function ChapterEditor({ project, outlineNodeId }: Props) {
       ...reconciliation.newConstraints.map(item => `新增约束：${item.text}`),
       ...reconciliation.unfinishedGoals.map(item => `仍未完成：${item.text}`),
     ].join('；')
-    await updateChapter(currentChapter.id, {
-      planReconciliation: {
-        ...reconciliation,
-        reviewStatus: 'confirmed-constraint',
-        confirmedActualProgress,
-        reviewedAt: Date.now(),
-      },
-    })
+    setReconciliationAction('actual-progress')
+    setReconciliationActionError('')
+    try {
+      await updateChapter(currentChapter.id, {
+        planReconciliation: {
+          ...reconciliation,
+          reviewStatus: 'confirmed-constraint',
+          confirmedActualProgress,
+          reviewedAt: Date.now(),
+        },
+      })
+    } catch (error) {
+      setReconciliationActionError(error instanceof Error ? error.message : '实际进展约束写入失败，请重试。')
+    } finally {
+      setReconciliationAction(null)
+    }
   }
 
   const handleApplyOutlineCandidate = async () => {
     const reconciliation = currentChapter?.planReconciliation
-    if (!currentChapter?.id || !outlineNode?.id || !reconciliation?.proposedOutlineSummary) return
-    await updateNode(outlineNode.id, { summary: reconciliation.proposedOutlineSummary })
-    await updateChapter(currentChapter.id, {
-      planReconciliation: {
-        ...reconciliation,
-        reviewStatus: 'applied-outline',
-        reviewedAt: Date.now(),
-      },
-    })
+    if (!currentChapter?.id || !outlineNode?.id || !reconciliation?.proposedOutlineSummary || reconciliationAction) return
+    setReconciliationAction('outline')
+    setReconciliationActionError('')
+    try {
+      await updateNode(outlineNode.id, { summary: reconciliation.proposedOutlineSummary })
+      await updateChapter(currentChapter.id, {
+        planReconciliation: {
+          ...reconciliation,
+          reviewStatus: 'applied-outline',
+          reviewedAt: Date.now(),
+        },
+      })
+    } catch (error) {
+      setReconciliationActionError(error instanceof Error ? error.message : '本章章纲更新失败，请重试。')
+    } finally {
+      setReconciliationAction(null)
+    }
   }
 
   // HARNESS-20/41: 正文采纳后的单一 post-adoption barrier。
@@ -3093,10 +3117,8 @@ export default function ChapterEditor({ project, outlineNodeId }: Props) {
       })
       return
     }
-    // G6：去掉段落之间的多余空行——丢弃纯空行，每个非空行成一段，段间距交给 CSS（不要空段落）
-    const normalizeProse = (t: string) =>
-      t.split(/\r?\n/).map(l => l.trimEnd()).filter(l => l.trim().length > 0).join('\n')
-    const html = plainTextToHtml(normalizeProse(text))
+    // G6：候选哈希和编辑器写入复用同一个纯文本规范化规则。
+    const html = plainTextToHtml(normalizeProseForEditorV1(text))
     const shouldAutoProcess = aiAction === 'generate' || aiAction === 'continue'
 
     // H7:正文生成/续写的确认先经过 durable candidate + adopt(CAS)，再更新编辑器。
@@ -3105,7 +3127,7 @@ export default function ChapterEditor({ project, outlineNodeId }: Props) {
     if (durableCandidate && durableCandidate.operation === aiAction) {
       const beforeHtml = editorRef.current.getHTML()
       let fullHtml = html
-      let fullText = normalizeProse(text)
+      let fullText = normalizeProseForEditorV1(text)
       if (aiAction === 'continue') {
         editorRef.current.appendContent(html)
         fullHtml = editorRef.current.getHTML()
@@ -3753,6 +3775,8 @@ export default function ChapterEditor({ project, outlineNodeId }: Props) {
         summary={currentChapter.summary}
         hasText={!!plainText}
         memoryBusy={autoProcessing === 'memory' || memoryAI.isStreaming}
+        reconciliationBusy={reconciliationAction}
+        reconciliationError={reconciliationActionError}
         reconciliation={currentChapter.planReconciliation}
         reconciliationCurrent={planReconciliationCurrent}
         onGenerateMemory={() => { void handleManualMemory() }}

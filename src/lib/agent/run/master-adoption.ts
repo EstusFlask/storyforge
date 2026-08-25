@@ -157,6 +157,24 @@ async function assertRequiredSemanticReviewFresh(
   }
 }
 
+function masterCandidateGatewayScopeAxesV1(
+  payload: MasterAgentDurableCandidateV1['payload'],
+): { chapterId?: number | null; characterId?: number | null } {
+  if (payload.agentId !== 'prose') return {}
+  const chapterId = (payload.baseSnapshot as { chapterId?: unknown } | null)?.chapterId
+  if (
+    chapterId !== null
+    && chapterId !== undefined
+    && (!Number.isInteger(chapterId) || Number(chapterId) < 1)
+  ) {
+    throw new Error('正文候选的 Gateway 章节作用域无效')
+  }
+  return {
+    chapterId: chapterId == null ? null : Number(chapterId),
+    characterId: payload.perspectiveCharacterId ?? null,
+  }
+}
+
 async function assertRequiredContextGatewayFresh(
   input: MasterAgentCandidateAdoptionRefV1,
   resolved: ResolvedMasterCandidateV1,
@@ -167,6 +185,7 @@ async function assertRequiredContextGatewayFresh(
     writeTarget: masterCandidateWriteTargetV1(payload),
     scope: input.scope,
     worldGroupId: resolved.snapshot.run.worldGroupId ?? null,
+    ...masterCandidateGatewayScopeAxesV1(payload),
     runId: resolved.snapshot.run.id,
     stepId: resolved.stepId,
     attempt: resolved.snapshot.projection.steps[resolved.stepId].attempt,

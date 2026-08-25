@@ -16,7 +16,10 @@ import {
   prepareProseGatewayAssemblyV1,
   type ProseGatewayAssemblyV1,
 } from '../prose/gateway-context'
-import { projectContextGatewayInputStateV1 } from './context-gateway-input'
+import {
+  contextGatewayInputStateSourceKeysV1,
+  projectContextGatewayInputStateV1,
+} from './context-gateway-input'
 import type { AIConfig, Chapter, ChatMessage, OutlineNode, Project, WorkspaceScope } from '../types'
 import { countWords, htmlToPlainText, plainTextToHtml } from '../utils/html'
 import {
@@ -604,6 +607,10 @@ export async function prepareProseCopilot(input: {
   const contextEvidence = attachAgentContextInputStateV1(
     evidenceFromContextResult(contextProfile, assembled),
     inputState,
+  )
+  contextEvidence.inputStateSourceKeys = contextGatewayInputStateSourceKeysV1(
+    skill,
+    assembled.contextGatewayExecution,
   )
   const inputGuidance = buildAgentSkillInputGuidanceV1(skill, inputState)
   const narrativeBrief = buildNarrativeBriefV1({

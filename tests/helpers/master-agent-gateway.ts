@@ -15,6 +15,8 @@ import { ensureWorkspaceOwnership } from '../../src/lib/world-engine/ownership'
 interface MasterGatewayFixtureOptions {
   scope: WorkspaceScope
   worldGroupId: number | null
+  chapterId?: number | null
+  characterId?: number | null
   executionTrace: MasterAgentExecutionTrace
   excludedResourceKinds?: readonly ContextResourceDescriptorV1['kind'][]
 }
@@ -43,6 +45,8 @@ export async function prepareRequiredMasterGatewayFixtureV1(
     skill,
     scope: options.scope,
     worldGroupId: options.worldGroupId,
+    chapterId: options.chapterId,
+    characterId: options.characterId,
     query: task.instruction,
     budgetTokens: Math.min(8_000, skill.contextGateway.maxRetrievedTokens),
     additionalReadsEnabled: false,

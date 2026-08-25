@@ -425,6 +425,7 @@ const detailedOutlineDurableSource = read('src/lib/agent/run/detailed-outline-ge
 const detailedOutlineBatchDurableSource = read('src/lib/agent/run/detailed-outline-batch-durable.ts')
 const proseDurableSource = read('src/lib/agent/run/prose-generation-durable.ts')
 const outlineHarnessSource = read('src/lib/outline/harness.ts')
+const htmlUtilsSource = read('src/lib/utils/html.ts')
 if (/\bPROSE_GENERATION_SOURCE_KEYS_V1\b/.test(chapterEditorSource)) {
   violations.push('[⑬Skill来源旁路] ChapterEditor 不得拥有 PROSE_GENERATION_SOURCE_KEYS_V1；正式来源必须取 generationBinding.contextSourceKeys')
 }
@@ -478,6 +479,14 @@ if (!/version:\s*3[\s\S]*?executionBindings:\s*\[\{\s*stepId,\s*\.\.\.binding\s*
 if (!/buildDetailedOutlineGenerationRunContractV3[\s\S]*?version:\s*3[\s\S]*?executionBoundary:\s*'formal'/.test(detailedOutlineDurableSource)
   || !/buildDetailedOutlineBatchRunContractV3[\s\S]*?version:\s*3[\s\S]*?executionBoundary:\s*'formal'/.test(detailedOutlineBatchDurableSource)) {
   violations.push('[⑬Skill运行契约] 单章与批量细纲正式 durable contract 必须冻结 V2 Skill/Gateway binding')
+}
+const proseNormalizationCalls = chapterEditorSource.match(/\bnormalizeProseForEditorV1\s*\(/g)?.length ?? 0
+if (!/export function normalizeProseForEditorV1\s*\(/.test(htmlUtilsSource)
+  || proseNormalizationCalls < 3
+  || !/expectedContentHash:\s*await hashChapterText\([\s\S]{0,500}normalizeProseForEditorV1\(outputText\)/.test(chapterEditorSource)
+  || !/plainTextToHtml\(normalizeProseForEditorV1\(text\)\)/.test(chapterEditorSource)
+  || /const\s+normalizeProse\s*=/.test(chapterEditorSource)) {
+  violations.push('[⑬正文规范化单源] 候选预期哈希与编辑器采纳必须复用 lib/utils/html 的 normalizeProseForEditorV1')
 }
 
 // ── ⑭ 大纲 formal 入口必须 fail-closed，UI 不得拆开 durable adoption ──
@@ -1080,9 +1089,11 @@ if (!contextGatewayIndexSource.includes("from './attempt-evidence'")) {
 // ── ㉘ CTXG-7 正式 Skill/Runner 快慢路径与 V3 采纳门 ──
 const contextExecutionSource = read('src/lib/context-gateway/execution.ts')
 const contextSkillPolicySource = read('src/lib/context-gateway/skill-policy.ts')
+const futureBoundarySource = read('src/lib/outline/future-boundary.ts')
 const agentSkillSource = read('src/lib/agent/skill-registry.ts')
 const agentProtocolSource = read('src/lib/agent/protocol.ts')
 const agentClientAdapterSource = read('src/lib/agent/client-adapter.ts')
+const masterAdoptionSource = read('src/lib/agent/run/master-adoption.ts')
 for (const token of [
   'contextGateway?: AgentSkillContextGatewayPolicyV1',
   "rollout: 'shadow' | 'required'",
@@ -1128,6 +1139,17 @@ if (!contextAttemptEvidenceSource.includes('硬证据义务未满足')) {
 if (!contextGatewayIndexSource.includes("from './execution'")
   || !contextGatewayIndexSource.includes("from './skill-policy'")) {
   violations.push('[㉘公开入口] 快慢路径与 Skill policy 必须从唯一 Context Gateway headless 边界导出')
+}
+for (const token of [
+  'masterCandidateGatewayScopeAxesV1', 'chapterId:', 'characterId:',
+]) {
+  if (!masterAdoptionSource.includes(token)) {
+    violations.push(`[㉘采纳作用域复原] 主采纳入口缺少 ${token}`)
+  }
+}
+if (!futureBoundarySource.includes('normalizeChapterText(chapter.content)')
+  || futureBoundarySource.includes('chapter.content.trim().length > 0')) {
+  violations.push('[㉘未来保护边界] 必须按规范正文文本判定已写状态，不得把空 HTML 占位误判为正文')
 }
 
 // ── ㉙ CTXG-8 Provider 缓存必须可丢弃、实时失效且 derived retrieval 不得升权 ──

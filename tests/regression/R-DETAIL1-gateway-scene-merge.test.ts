@@ -187,6 +187,23 @@ describe('DETAIL-1 · 细纲 Gateway 与场景合并治理', () => {
     })).rejects.toThrow('已写正文保护区')
   })
 
+  it('编辑器空段落占位不被误判为已写正文', async () => {
+    const fixture = await seed()
+    await addScoped(fixture.scope, 'chapters', {
+      outlineNodeId: fixture.targetId, title: '第二章', content: '<p><br></p>',
+      wordCount: 0, status: 'outline', order: 1, notes: '',
+    }, 'work')
+    await expect(prepareDetailedOutlineGatewayAssemblyV1({
+      projectId: fixture.projectId,
+      scope: fixture.scope,
+      worldGroupId: fixture.groupId,
+      outlineNodeId: fixture.targetId,
+      operation: 'scenes',
+      authorRequest: '拆分场景',
+      config: useAIConfigStore.getState().config,
+    })).resolves.toMatchObject({ contextGatewayExecution: { path: 'deterministic-fast' } })
+  })
+
   it('已有场景只能按稳定 sceneId 显式保留、修改、新增或删除，不允许无条件追加', () => {
     const currentScenes = [
       { sceneId: 'scene-a', title: '入门', summary: '守灯人进入潮门。', characterIds: [], location: '潮门', conflict: '是否前进', pace: 'medium' as const, estimatedWords: 800, notes: '保留' },

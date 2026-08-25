@@ -58,7 +58,12 @@ export function storyArcIntentAlignmentV1(
   current: StoryCoreIntentSnapshotV1,
 ): StoryArcIntentAlignmentV1 {
   if (arc.origin !== 'ai' || !arc.sourceStoryCoreHash || !arc.lastAlignedHash) return 'untracked'
-  if (arc.sourceStoryCoreId == null || current.storyCoreId !== arc.sourceStoryCoreId) return 'source-missing'
+  // An empty project is a valid, frozen intent baseline. No source record at
+  // generation time is different from a once-present source being deleted.
+  if (arc.sourceStoryCoreId == null) {
+    return current.storyCoreId == null && current.hash === arc.lastAlignedHash ? 'aligned' : 'stale'
+  }
+  if (current.storyCoreId !== arc.sourceStoryCoreId) return 'source-missing'
   return current.hash === arc.lastAlignedHash ? 'aligned' : 'stale'
 }
 

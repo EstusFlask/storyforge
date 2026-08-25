@@ -24,6 +24,21 @@ export function plainTextToHtml(text: string): string {
     .join('')
 }
 
+/**
+ * 正文候选写入富文本编辑器前的唯一纯文本规范化规则。
+ *
+ * 候选哈希和作者采纳必须复用同一规则，否则模型输出包含空行时，
+ * 生成端按原文计算的哈希会与编辑器实际写入的 HTML 不一致。
+ */
+export function normalizeProseForEditorV1(text: string): string {
+  return text
+    .replace(/\r\n?/g, '\n')
+    .split('\n')
+    .map(line => line.trimEnd())
+    .filter(line => line.trim().length > 0)
+    .join('\n')
+}
+
 /** 将任意内容（可能是 HTML 或纯文本）标准化为 HTML */
 export function toHtml(content: string): string {
   if (!content) return ''
