@@ -19,10 +19,6 @@ import { migrateStateCardsToTemporalFactCandidates } from '../migrations/state-c
 import type { TableSpec } from '../registry/types'
 import type { ProjectExportData } from './json-export'
 import { normalizeCharacterAxes } from '../character/character-axes'
-import {
-  parseCharacterDrivenPlanArcs,
-  stringifyCharacterDrivenPlanArcs,
-} from '../types/character-driven-plan'
 import { ensureWorkspaceOwnership } from '../world-engine/ownership'
 import { rebindPortableAgentRunContractV1 } from '../agent/run/contract-portability'
 import { finalizeImportedAgentRunLedgersV1 } from '../agent/run/ledger-portability'
@@ -33,8 +29,18 @@ import {
   isWorkCode,
 } from '../memory/identity'
 import { assertAgentRunArtifactRecordIntegrityV1 } from '../memory/artifact-record'
+import { assertStoredWorkClassification } from '../world-engine/work-kind'
+import { assertAdaptationProjectInvariant } from '../adaptation/contracts'
+import { validateScreenplayBlocksV1 } from '../screenplay/contracts'
+import { assertComicLetteringV1, assertComicMediaAssetV1, assertNormalizedFrameV1, framesOverlap } from '../comic/contracts'
+import type { AdaptationProject, ComicLetteringItemV1, ComicMediaAsset, ScreenplayBlock, Work } from '../types'
 
-const STRICT_EXPORT_VERSION = 4
+const PORTABLE_OWNER_VERSION = 4
+const WORK_CLASSIFICATION_VERSION = 5
+const ADAPTATION_VERSION = 6
+const SCREENPLAY_VERSION = 7
+const COMIC_STORYBOARD_VERSION = 8
+const COMIC_MEDIA_VERSION = 9
 
 function strictOwnerShadow(spec: TableSpec, row: Record<string, any>): {
   kind: 'world' | 'work' | 'instance'
@@ -73,7 +79,7 @@ function strictOwnerShadow(spec: TableSpec, row: Record<string, any>): {
 }
 
 function validateStrictOwnership(data: ProjectExportData): void {
-  if (data.version !== STRICT_EXPORT_VERSION) return
+  if (data.version < PORTABLE_OWNER_VERSION) return
   const value = data as unknown as Record<string, any>
   if (!Array.isArray(value.worlds) || !value.worlds.length || !Array.isArray(value.works) || !value.works.length) {
     throw new Error('[deriveImport] v4 备份缺少 World/Work 根')
@@ -89,6 +95,19 @@ function validateStrictOwnership(data: ProjectExportData): void {
   if (!ownership || !worldIds.has(ownership.worldExportId) || !workIds.has(ownership.workExportId)) {
     throw new Error('[deriveImport] v4 active owner 指针缺失或越界')
   }
+  if (data.version >= WORK_CLASSIFICATION_VERSION) {
+    for (const row of value.works as Array<Record<string, unknown>>) {
+      try {
+        assertStoredWorkClassification(row as any)
+      } catch (error) {
+        throw new Error(`[deriveImport] v5 Work 分类非法：${error instanceof Error ? error.message : String(error)}`)
+      }
+    }
+  }
+  if (data.version >= ADAPTATION_VERSION) validateAdaptationBackup(value)
+  if (data.version >= SCREENPLAY_VERSION) validateScreenplayBackup(value)
+  if (data.version >= COMIC_STORYBOARD_VERSION) validateComicStoryboardBackup(value)
+  if (data.version >= COMIC_MEDIA_VERSION) validateComicMediaBackup(value)
   for (const spec of PROJECT_TABLES) {
     if (!spec.exportable || spec.name === 'projects' || spec.name === 'worlds' || spec.name === 'works') continue
     const rows = value[spec.name]
@@ -104,13 +123,199 @@ function validateStrictOwnership(data: ProjectExportData): void {
   }
 }
 
+function validateAdaptationBackup(value: Record<string, any>): void {
+  if (!Array.isArray(value.adaptationProjects) || !Array.isArray(value.adaptationSourceUnits)) {
+    throw new Error('[deriveImport] v6 备份缺少改编必需表')
+  }
+  const works = new Map<number, Record<string, any>>((value.works ?? []).map((row: Record<string, any>) => [row._exportId, row]))
+  const roots = new Map<number, Record<string, any>>()
+  for (const row of value.adaptationProjects as Record<string, any>[]) {
+    if (!Number.isInteger(row._exportId) || roots.has(row._exportId)) throw new Error('[deriveImport] v6 adaptationProject 便携 ID 重复或无效')
+    const target = works.get(row._workExportId)
+    const source = row._sourceWorkExportId == null ? null : works.get(row._sourceWorkExportId)
+    if (!target || (row._sourceWorkExportId != null && !source)) throw new Error('[deriveImport] v6 改编 Work 引用越界')
+    const root = {
+      ...row,
+      id: row._exportId,
+      projectId: 1,
+      worldId: row._worldExportId,
+      workId: row._workExportId,
+      sourceWorkId: row._sourceWorkExportId ?? null,
+      sourceOutlineRootId: row._sourceOutlineRootExportId ?? null,
+      sourceStartChapterId: row._sourceStartChapterExportId ?? null,
+      sourceEndChapterId: row._sourceEndChapterExportId ?? null,
+    } as AdaptationProject
+    const targetWork = { ...target, id: row._workExportId, projectId: 1, worldId: row._worldExportId } as Work
+    const sourceWork = source ? { ...source, id: row._sourceWorkExportId, projectId: 1, worldId: row._worldExportId } as Work : null
+    try {
+      assertAdaptationProjectInvariant(root, targetWork, sourceWork)
+    } catch (error) {
+      throw new Error(`[deriveImport] v6 改编根非法：${error instanceof Error ? error.message : String(error)}`)
+    }
+    roots.set(row._exportId, row)
+  }
+  const unique = new Set<string>()
+  for (const row of value.adaptationSourceUnits as Record<string, any>[]) {
+    if (!roots.has(row._adaptationProjectExportId)) throw new Error('[deriveImport] v6 来源单元 adaptation 引用越界')
+    if (!Number.isInteger(row.manifestVersion) || row.manifestVersion <= 0 || !Number.isInteger(row.order) || row.order < 0) throw new Error('[deriveImport] v6 来源单元版本或顺序非法')
+    if (!/^[a-f0-9]{64}$/i.test(row.contentHash) || typeof row.sourceUnitKey !== 'string' || !row.sourceUnitKey) throw new Error('[deriveImport] v6 来源单元 key/hash 非法')
+    const identity = `${row._adaptationProjectExportId}:${row.manifestVersion}:${row.sourceUnitKey}`
+    if (unique.has(identity)) throw new Error('[deriveImport] v6 来源单元 stable key 重复')
+    unique.add(identity)
+    if (row.sourceKind === 'work') {
+      if (row._sourceOutlineExportId != null || row._sourceChapterExportId != null) throw new Error('[deriveImport] v6 work 来源单元引用组合非法')
+    } else if (row.sourceKind === 'outline-node') {
+      if (row._sourceChapterExportId != null) throw new Error('[deriveImport] v6 outline 来源单元引用组合非法')
+    } else if (row.sourceKind === 'chapter') {
+      if (row._sourceOutlineExportId != null) throw new Error('[deriveImport] v6 chapter 来源单元引用组合非法')
+    } else {
+      throw new Error('[deriveImport] v6 来源单元 kind 非法')
+    }
+  }
+  for (const [rootId, root] of roots) {
+    const activeUnits = (value.adaptationSourceUnits as Record<string, any>[]).filter(row => row._adaptationProjectExportId === rootId && row.manifestVersion === root.activeSourceManifestVersion)
+    if (activeUnits.filter(row => row.sourceKind === 'work').length !== 1) throw new Error('[deriveImport] v6 活动 manifest 必须恰有一个 work 单元')
+  }
+}
+
+function validateScreenplayBackup(value: Record<string, any>): void {
+  if (!Array.isArray(value.screenplayScenes)) throw new Error('[deriveImport] v7 备份缺少 screenplayScenes')
+  const roots = new Map<number, Record<string, any>>((value.adaptationProjects ?? []).map((row: Record<string, any>) => [row._exportId, row]))
+  const units = new Map<number, Record<string, any>>((value.adaptationSourceUnits ?? []).map((row: Record<string, any>) => [row._exportId, row]))
+  const characterCount = Array.isArray(value.characters) ? value.characters.length : 0
+  const ids = new Set<number>()
+  const stable = new Set<string>()
+  const episodeNumbers = new Set<string>()
+  const orders = new Set<string>()
+  for (const row of value.screenplayScenes as Record<string, any>[]) {
+    const root = roots.get(row._adaptationProjectExportId)
+    if (!root || root.medium !== 'screenplay' || row._workExportId !== root._workExportId) throw new Error('[deriveImport] v7 剧本场景 owner 或媒介越界')
+    if (!Number.isInteger(row._exportId) || ids.has(row._exportId)) throw new Error('[deriveImport] v7 剧本场景便携 ID 重复或无效')
+    ids.add(row._exportId)
+    const stableIdentity = `${row._adaptationProjectExportId}:${row.stableKey}`
+    if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$/.test(row.stableKey) || stable.has(stableIdentity)) throw new Error('[deriveImport] v7 剧本场景 stableKey 非法或重复')
+    stable.add(stableIdentity)
+    if (!Number.isInteger(row.episodeNumber) || row.episodeNumber < 1 || !Number.isInteger(row.sceneNumber) || row.sceneNumber < 1 || !Number.isInteger(row.order) || row.order < 0) throw new Error('[deriveImport] v7 剧本场景编号非法')
+    const numberIdentity = `${row._adaptationProjectExportId}:${row.episodeNumber}:${row.sceneNumber}`
+    const orderIdentity = `${row._adaptationProjectExportId}:${row.order}`
+    if (episodeNumbers.has(numberIdentity) || orders.has(orderIdentity)) throw new Error('[deriveImport] v7 剧本场景编号或顺序重复')
+    episodeNumbers.add(numberIdentity); orders.add(orderIdentity)
+    const spec = root.targetSpec as AdaptationProject['targetSpec']
+    if (spec.format === 'film' && row.episodeNumber !== 1) throw new Error('[deriveImport] v7 电影场景集号必须为 1')
+    if ('episodeCount' in spec && spec.episodeCount != null && row.episodeNumber > spec.episodeCount) throw new Error('[deriveImport] v7 剧本场景集号越界')
+    if (!['INT', 'EXT', 'INT_EXT'].includes(row.intExt) || typeof row.location !== 'string' || !row.location.trim() || typeof row.timeOfDay !== 'string' || !row.timeOfDay.trim()) throw new Error('[deriveImport] v7 剧本场景标题非法')
+    if (!Number.isFinite(row.estimatedSeconds) || row.estimatedSeconds <= 0 || !Number.isInteger(row.sourceReviewManifestVersion) || row.sourceReviewManifestVersion < 1) throw new Error('[deriveImport] v7 剧本时长或来源版本非法')
+    if (!Array.isArray(row._sourceUnitExportIds) || !row._sourceUnitExportIds.length || new Set(row._sourceUnitExportIds).size !== row._sourceUnitExportIds.length) throw new Error('[deriveImport] v7 剧本来源证据非法')
+    for (const unitId of row._sourceUnitExportIds) {
+      const unit = units.get(unitId)
+      if (!unit || unit._adaptationProjectExportId !== row._adaptationProjectExportId || unit.manifestVersion !== row.sourceReviewManifestVersion) throw new Error('[deriveImport] v7 剧本来源单元越界')
+    }
+    if (!Array.isArray(row.blocks) || !validateScreenplayBlocksV1(row.blocks as ScreenplayBlock[]).valid) throw new Error('[deriveImport] v7 剧本块非法')
+    if (!Array.isArray(row._blockCharacterExportIds) || row._blockCharacterExportIds.length !== row.blocks.length) throw new Error('[deriveImport] v7 剧本角色影子映射非法')
+    row._blockCharacterExportIds.forEach((id: unknown, index: number) => {
+      if (id != null && (!Number.isInteger(id) || (id as number) < 0 || (id as number) >= characterCount)) throw new Error('[deriveImport] v7 剧本角色引用越界')
+      const block = row.blocks[index]
+      if (block?.characterId != null) throw new Error('[deriveImport] v7 剧本块泄露本地角色 ID')
+    })
+    const section = root.plan?.sections?.find((item: Record<string, unknown>) => item.stableKey === row.planSectionKey)
+    if (!section || root.planSourceManifestVersion !== root.activeSourceManifestVersion) throw new Error('[deriveImport] v7 剧本场景计划引用无效')
+  }
+}
+
+function validateComicStoryboardBackup(value: Record<string, any>): void {
+  if (!Array.isArray(value.comicPages) || !Array.isArray(value.comicPanels) || !Array.isArray(value.comicVisualSubjects)) throw new Error('[deriveImport] v8 备份缺少漫画页格或视觉条目表')
+  const roots = new Map<number, Record<string, any>>((value.adaptationProjects ?? []).map((row: Record<string, any>) => [row._exportId, row]))
+  const units = new Map<number, Record<string, any>>((value.adaptationSourceUnits ?? []).map((row: Record<string, any>) => [row._exportId, row]))
+  const pages = new Map<number, Record<string, any>>()
+  const stablePages = new Set<string>(); const pageOrders = new Set<string>()
+  for (const page of value.comicPages as Record<string, any>[]) {
+    const root = roots.get(page._adaptationProjectExportId)
+    if (!root || root.medium !== 'comic' || page._workExportId !== root._workExportId || !Number.isInteger(page._exportId) || pages.has(page._exportId)) throw new Error('[deriveImport] v8 漫画页面 owner 或便携 ID 非法')
+    if (!/^[a-z0-9][a-z0-9._-]{0,95}$/i.test(page.stableKey) || stablePages.has(`${page._workExportId}:${page.stableKey}`) || !Number.isInteger(page.order) || page.order < 0 || pageOrders.has(`${page._adaptationProjectExportId}:${page.order}`)) throw new Error('[deriveImport] v8 漫画页面 stableKey 或顺序非法')
+    if (!Number.isInteger(page.chapterNumber) || page.chapterNumber < 1 || page.chapterNumber > root.targetSpec.chapterCount || typeof page.allowPanelOverlap !== 'boolean' || typeof page.summary !== 'string') throw new Error('[deriveImport] v8 漫画页面内容非法')
+    pages.set(page._exportId, page); stablePages.add(`${page._workExportId}:${page.stableKey}`); pageOrders.add(`${page._adaptationProjectExportId}:${page.order}`)
+  }
+  const stablePanels = new Set<string>(); const panelsByPage = new Map<number, Record<string, any>[]>()
+  for (const panel of value.comicPanels as Record<string, any>[]) {
+    const page = pages.get(panel._pageExportId); const root = page ? roots.get(page._adaptationProjectExportId) : null
+    if (!page || !root || panel._workExportId !== page._workExportId || !/^[a-z0-9][a-z0-9._-]{0,95}$/i.test(panel.stableKey) || stablePanels.has(`${panel._workExportId}:${panel.stableKey}`)) throw new Error('[deriveImport] v8 漫画格 owner 或 stableKey 非法')
+    assertNormalizedFrameV1(panel.frame, `导入格 ${panel.stableKey}`, 0.04)
+    if (!Number.isInteger(panel.order) || panel.order < 0 || !Number.isInteger(panel.sourceReviewManifestVersion) || panel.sourceReviewManifestVersion !== root.activeSourceManifestVersion || !Array.isArray(panel._sourceUnitExportIds) || !panel._sourceUnitExportIds.length || new Set(panel._sourceUnitExportIds).size !== panel._sourceUnitExportIds.length) throw new Error('[deriveImport] v8 漫画格顺序或来源版本非法')
+    for (const unitId of panel._sourceUnitExportIds) {
+      const unit = units.get(unitId)
+      if (!unit || unit._adaptationProjectExportId !== page._adaptationProjectExportId || unit.manifestVersion !== panel.sourceReviewManifestVersion) throw new Error('[deriveImport] v8 漫画格来源单元越界')
+    }
+    assertComicLetteringV1(panel.lettering as ComicLetteringItemV1[])
+    if (!Array.isArray(panel.continuityRefs) || typeof panel.action !== 'string' || !panel.action.trim() || typeof panel.visualPrompt !== 'string' || typeof panel.negativePrompt !== 'string') throw new Error('[deriveImport] v8 漫画格内容非法')
+    stablePanels.add(`${panel._workExportId}:${panel.stableKey}`)
+    const siblings = panelsByPage.get(panel._pageExportId) ?? []; siblings.push(panel); panelsByPage.set(panel._pageExportId, siblings)
+  }
+  for (const [pageId, panels] of panelsByPage) {
+    const page = pages.get(pageId)!
+    const sorted = [...panels].sort((left, right) => left.order - right.order)
+    if (sorted.some((panel, index) => panel.order !== index)) throw new Error('[deriveImport] v8 漫画格顺序必须连续')
+    if (!page.allowPanelOverlap) for (let left = 0; left < sorted.length; left++) for (let right = left + 1; right < sorted.length; right++) if (framesOverlap(sorted[left].frame, sorted[right].frame)) throw new Error('[deriveImport] v8 漫画格非法重叠')
+  }
+  const characterCount = Array.isArray(value.characters) ? value.characters.length : 0
+  const subjectKeys = new Set<string>()
+  for (const subject of value.comicVisualSubjects as Record<string, any>[]) {
+    const root = roots.get(subject._adaptationProjectExportId)
+    if (!root || root.medium !== 'comic' || subject._workExportId !== root._workExportId || !/^[a-z0-9][a-z0-9._-]{0,95}$/i.test(subject.stableKey) || subjectKeys.has(`${subject._workExportId}:${subject.stableKey}`)) throw new Error('[deriveImport] v8 视觉条目 owner 或 stableKey 非法')
+    if (subject._characterExportId != null && (!Number.isInteger(subject._characterExportId) || subject._characterExportId < 0 || subject._characterExportId >= characterCount)) throw new Error('[deriveImport] v8 视觉条目角色引用越界')
+    if (subject.characterId != null || !Array.isArray(subject._sourceUnitExportIds) || !subject._sourceUnitExportIds.length) throw new Error('[deriveImport] v8 视觉条目泄露本地 ID 或缺来源')
+    if (subject.kind === 'character' ? subject.locationRefKey != null : subject.kind === 'location' ? subject._characterExportId != null : (subject._characterExportId != null || subject.locationRefKey != null)) throw new Error('[deriveImport] v8 视觉条目 kind/ref 组合非法')
+    subjectKeys.add(`${subject._workExportId}:${subject.stableKey}`)
+  }
+  for (const panel of value.comicPanels as Record<string, any>[]) for (const ref of panel.continuityRefs) if (!subjectKeys.has(`${panel._workExportId}:${ref.subjectKey}`)) throw new Error('[deriveImport] v8 漫画格连续性引用不存在')
+}
+
+function validateComicMediaBackup(value: Record<string, any>): void {
+  if (!Array.isArray(value.comicMediaAssets) || !Array.isArray(value.mediaBlobObjects)) throw new Error('[deriveImport] v9 备份缺少漫画媒体或共享 Blob 表')
+  const blobs = new Map<number, Record<string, any>>()
+  for (const blob of value.mediaBlobObjects as Record<string, any>[]) {
+    if (!Number.isInteger(blob._exportId) || blobs.has(blob._exportId) || !/^[a-f0-9]{64}$/.test(blob.contentHash) || !['image/png', 'image/jpeg', 'image/webp'].includes(blob.mimeType) || !Number.isInteger(blob.byteSize) || blob.byteSize < 16 || typeof blob.data !== 'string') throw new Error('[deriveImport] v9 Blob 元数据或便携内容非法')
+    blobs.set(blob._exportId, blob)
+  }
+  const panels = new Map<number, Record<string, any>>((value.comicPanels ?? []).map((row: Record<string, any>) => [row._exportId, row]))
+  const subjects = new Map<string, Record<string, any>>((value.comicVisualSubjects ?? []).map((row: Record<string, any>) => [`${row._workExportId}:${row.stableKey}`, row]))
+  const assets = new Map<string, Record<string, any>>()
+  for (const row of value.comicMediaAssets as Record<string, any>[]) {
+    const key = `${row._workExportId}:${row.stableKey}`
+    if (assets.has(key) || !blobs.has(row._blobObjectExportId)) throw new Error('[deriveImport] v9 asset stableKey 重复或 Blob 引用越界')
+    assertComicMediaAssetV1({ ...row, projectId: 1, workId: row._workExportId, adaptationProjectId: row._adaptationProjectExportId, panelId: row._panelExportId ?? null, blobObjectId: row._blobObjectExportId } as ComicMediaAsset)
+    if (row.role === 'panel-render' && (!panels.has(row._panelExportId) || panels.get(row._panelExportId)!._workExportId !== row._workExportId)) throw new Error('[deriveImport] v9 panel-render owner 越界')
+    if (row.role !== 'panel-render' && !subjects.has(`${row._workExportId}:${row.subjectKey}`)) throw new Error('[deriveImport] v9 subject asset owner 越界')
+    assets.set(key, row)
+  }
+  for (const panel of value.comicPanels as Record<string, any>[]) if (panel.selectedMediaAssetKey) {
+    const asset = assets.get(`${panel._workExportId}:${panel.selectedMediaAssetKey}`)
+    if (!asset || asset.role !== 'panel-render' || asset._panelExportId !== panel._exportId) throw new Error('[deriveImport] v9 格所选 asset 不匹配')
+  }
+  for (const subject of value.comicVisualSubjects as Record<string, any>[]) if (subject.selectedMediaAssetKey) {
+    const asset = assets.get(`${subject._workExportId}:${subject.selectedMediaAssetKey}`)
+    if (!asset || asset.subjectKey !== subject.stableKey) throw new Error('[deriveImport] v9 视觉条目所选 asset 不匹配')
+  }
+  for (const [key, asset] of assets) for (const reference of asset.referenceAssetKeys ?? []) if (reference === asset.stableKey || !assets.has(`${asset._workExportId}:${reference}`)) throw new Error(`[deriveImport] v9 asset 参考引用非法：${key}`)
+  const visiting = new Set<string>(); const visited = new Set<string>()
+  const visit = (key: string) => {
+    if (visiting.has(key)) throw new Error(`[deriveImport] v9 asset 参考引用形成环：${key}`)
+    if (visited.has(key)) return
+    const asset = assets.get(key)
+    if (!asset) throw new Error(`[deriveImport] v9 asset 参考引用缺失：${key}`)
+    visiting.add(key)
+    for (const reference of asset.referenceAssetKeys ?? []) visit(`${asset._workExportId}:${reference}`)
+    visiting.delete(key); visited.add(key)
+  }
+  assets.forEach((_asset, key) => visit(key))
+}
+
 function restoreStrictOwner(
   dataVersion: number,
   spec: TableSpec,
   obj: Record<string, any>,
   newIdMaps: Map<string, Map<number, number>>,
 ): void {
-  if (dataVersion !== STRICT_EXPORT_VERSION) return
+  if (dataVersion < PORTABLE_OWNER_VERSION) return
   const shadow = strictOwnerShadow(spec, obj)
   delete obj._worldOwnerExportId
   delete obj._workOwnerExportId
@@ -236,6 +441,13 @@ async function assertPortableBinaryIntegrity(
   data: ArrayBuffer,
 ): Promise<void> {
   const integrity = spec.portableData?.kind === 'binary-blob' ? spec.portableData.integrity : null
+  const selfIntegrity = spec.portableData?.kind === 'binary-blob' ? spec.portableData.selfIntegrity : null
+  if (selfIntegrity) {
+    if (row[selfIntegrity.sizeField] !== data.byteLength) throw new Error(`[deriveImport] ${spec.name} 二进制大小与本行元数据不一致`)
+    const digest = await Dexie.waitFor(crypto.subtle.digest('SHA-256', data))
+    const hash = Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, '0')).join('')
+    if (row[selfIntegrity.hashField] !== hash) throw new Error(`[deriveImport] ${spec.name} 二进制哈希与本行元数据不一致`)
+  }
   if (!integrity) return
   const referenceId = row[integrity.referenceField]
   const metadataTable = (db as any)[integrity.metadataTable]
@@ -442,12 +654,14 @@ export async function deriveImportProjectJSON(data: ProjectExportData): Promise<
               ? remapPortableIdArray(portableRefs, refMap, rr.storage === 'json-string')
               : rr.kind === 'scene-character-ids'
                 ? await remapSceneCharacterIndexes((db as any)[spec.name], pending.newId, rr.field, portableRefs, refMap)
-                : await remapCharacterPlanArcIndexes(
+                : await remapObjectArrayIdIndexes(
                   (db as any)[spec.name],
                   pending.newId,
                   rr.field,
                   portableRefs,
                   refMap,
+                  rr.itemField,
+                  rr.storage === 'json-string',
                 )
             if (patch !== undefined) {
               await (db as any)[spec.name].update(pending.newId, { [rr.field]: patch })
@@ -498,7 +712,7 @@ export async function deriveImportProjectJSON(data: ProjectExportData): Promise<
   // v1-v3 had no portable owner shadows. Upgrade only after the import
   // transaction commits; the ownership service performs its own preflight and
   // atomic stamping without guessing external IDs.
-  if (data.version < STRICT_EXPORT_VERSION) await ensureWorkspaceOwnership(importedProjectId)
+  if (data.version < PORTABLE_OWNER_VERSION) await ensureWorkspaceOwnership(importedProjectId)
   return importedProjectId
 }
 
@@ -530,21 +744,30 @@ async function remapSceneCharacterIndexes(
   })
 }
 
-async function remapCharacterPlanArcIndexes(
+async function remapObjectArrayIdIndexes(
   table: any,
   rowId: number,
   field: string,
   portableRefs: unknown,
   idMap: Map<number, number>,
-): Promise<string | undefined> {
+  itemField: string,
+  stringify: boolean,
+): Promise<Array<Record<string, unknown>> | string | undefined> {
   if (!Array.isArray(portableRefs)) return undefined
   const row = await table.get(rowId)
-  const arcs = parseCharacterDrivenPlanArcs(row?.[field])
-  return stringifyCharacterDrivenPlanArcs(arcs.map((arc, index) => {
+  let parsed: unknown = row?.[field]
+  if (typeof parsed === 'string') {
+    try { parsed = JSON.parse(parsed) } catch { return undefined }
+  }
+  if (!Array.isArray(parsed)) return undefined
+  const items = parsed.map((item, index) => {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) return item
     const exportIndex = portableRefs[index]
+    if (!(itemField in item) && exportIndex == null) return item
     return {
-      ...arc,
-      characterId: typeof exportIndex === 'number' ? (idMap.get(exportIndex) ?? null) : null,
+      ...(item as Record<string, unknown>),
+      [itemField]: typeof exportIndex === 'number' ? (idMap.get(exportIndex) ?? null) : null,
     }
-  }))
+  })
+  return stringify ? JSON.stringify(items) : items as Array<Record<string, unknown>>
 }

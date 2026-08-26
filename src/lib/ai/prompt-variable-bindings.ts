@@ -1,13 +1,26 @@
-import type { Project } from '../types'
+import type { Project, Work } from '../types'
 import type { ChatMessage, PromptTemplate, PromptVariableContext } from '../types'
 import { assembleContext } from '../registry/assemble-context'
 import { CONTEXT_SOURCE_BY_KEY } from '../registry/context-sources'
 import { renderPrompt } from './prompt-engine'
+import { effectiveWorkKind } from '../world-engine/work-kind'
 
 export function derivePromptLengthMode(targetWordCount: number): 'short' | 'medium' | 'long' {
   if (targetWordCount <= 50_000) return 'short'
   if (targetWordCount <= 200_000) return 'medium'
   return 'long'
+}
+
+/** New Work-aware resolver. Legacy rows keep the historical word-count heuristic. */
+export function resolveNovelPromptMode(
+  work: Pick<Work, 'kind' | 'novelProfile'> | null | undefined,
+  projectMirror: Pick<Project, 'targetWordCount'>,
+): 'short' | 'medium' | 'long' {
+  if (!work || (work.kind == null && work.novelProfile == null)) {
+    return derivePromptLengthMode(projectMirror.targetWordCount)
+  }
+  if (effectiveWorkKind(work) !== 'novel') throw new Error('非小说 Work 不能匹配小说 Prompt')
+  return work.novelProfile === 'short' ? 'short' : 'long'
 }
 
 export function derivePromptSerializationMode(project: Project): 'standalone' | 'serial' {
@@ -18,11 +31,12 @@ export function getPromptBindingSourceKeys(template: PromptTemplate): string[] {
   return [...new Set(template.variableBindings?.flatMap(binding => binding.sourceKeys ?? []) ?? [])]
 }
 
-export function promptTemplateMatchesProject(template: PromptTemplate, project: Project): boolean {
+export function promptTemplateMatchesProject(template: PromptTemplate, project: Project, work?: Work | null): boolean {
+  if (work && effectiveWorkKind(work) !== 'novel') return false
   const applicability = template.applicability
   if (!applicability) return true
   if (applicability.lengthModes?.length
-    && !applicability.lengthModes.includes(derivePromptLengthMode(project.targetWordCount))) return false
+    && !applicability.lengthModes.includes(resolveNovelPromptMode(work, project))) return false
   if (applicability.serializationModes?.length
     && !applicability.serializationModes.includes(derivePromptSerializationMode(project))) return false
   if (applicability.genres?.length
@@ -33,6 +47,7 @@ export function promptTemplateMatchesProject(template: PromptTemplate, project: 
 export interface AssembleBoundPromptInput {
   template: PromptTemplate
   project?: Project
+  work?: Work | null
   worldGroupId?: number | null
   outlineNodeId?: number | null
   chapterId?: number | null
@@ -88,14 +103,14 @@ export async function assembleBoundPrompt(input: AssembleBoundPromptInput): Prom
     projectName: input.project?.name ?? '',
     genres: input.project?.genres.join(' / ') ?? '',
     description: input.project?.description ?? '',
-    targetWordCount: input.project?.targetWordCount,
+    targetWordCount: input.work?.targetWordCount ?? input.project?.targetWordCount,
     worldContext: input.previousOutput?.trim() || '',
     userHint: input.userHint?.trim() || '',
   }
   for (const binding of bindings) {
     const parts: string[] = []
     const projectValue = input.project && binding.projectField
-      ? readPromptProjectField(input.project, binding.projectField)
+      ? readPromptProjectField(input.project, binding.projectField, input.work)
       : ''
     if (projectValue) parts.push(projectValue)
     if (binding.sourceKeys?.length) {
@@ -128,7 +143,7 @@ export async function assembleBoundPrompt(input: AssembleBoundPromptInput): Prom
       if (!binding.required) return false
       if (input.manualValues?.[binding.variable]?.trim()) return false
       if (input.workflowValues?.[binding.variable]?.trim()) return false
-      if (input.project && binding.projectField && readPromptProjectField(input.project, binding.projectField)) return false
+      if (input.project && binding.projectField && readPromptProjectField(input.project, binding.projectField, input.work)) return false
       if (binding.sourceKeys?.some(key => includedSources.has(key))) return false
       return true
     })
@@ -148,12 +163,16 @@ export async function assembleBoundPrompt(input: AssembleBoundPromptInput): Prom
   }
 }
 
-function readPromptProjectField(project: Project, field: NonNullable<PromptTemplate['variableBindings']>[number]['projectField']): string {
+function readPromptProjectField(
+  project: Project,
+  field: NonNullable<PromptTemplate['variableBindings']>[number]['projectField'],
+  work?: Work | null,
+): string {
   if (field === 'name') return project.name
   if (field === 'genres') return project.genres.join(' / ')
   if (field === 'description') return project.description
-  if (field === 'targetWordCount') return String(project.targetWordCount)
-  if (field === 'lengthMode') return derivePromptLengthMode(project.targetWordCount)
+  if (field === 'targetWordCount') return String(work?.targetWordCount ?? project.targetWordCount)
+  if (field === 'lengthMode') return resolveNovelPromptMode(work, project)
   if (field === 'serializationMode') return derivePromptSerializationMode(project)
   return ''
 }

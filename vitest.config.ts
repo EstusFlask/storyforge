@@ -15,10 +15,11 @@ export default defineConfig({
     environment: 'happy-dom',
     setupFiles: ['./tests/setup.ts'],
     // The suite contains several CPU-heavy 100/1000-step deterministic
-    // simulations. Capping file workers prevents timer starvation and
-    // non-reproducible 40s timeouts on high-core developer machines.
-    maxWorkers: 4,
+    // simulations, IndexedDB lifecycles, long replays and UI cases. Capping
+    // file workers prevents timer starvation and non-reproducible timeouts on
+    // high-core developer machines without weakening individual test limits.
     minWorkers: 1,
+    maxWorkers: 4,
     include: [
       'tests/**/*.test.ts',
       'tests/**/*.test.tsx',

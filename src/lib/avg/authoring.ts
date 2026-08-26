@@ -13,6 +13,7 @@ import { AVG_MEDIA_KINDS } from '../types'
 import { createWorldRevision, listWorldRevisions, publishWorldRevision } from '../world-engine/releases'
 import { assertRecordInScope, resolveScope, scopeTransactionTables, stampNewRecord } from '../world-engine/scope'
 import { freezeAvgMediaAsset, parseAvgPresentationContent, validateAvgPresentation } from './runtime'
+import { sha256BinaryV1 } from '../media/blob-store'
 
 const STABLE_KEY = /^[a-zA-Z0-9._:-]+$/
 
@@ -41,8 +42,7 @@ function key(value: string, label: string): string {
 }
 
 async function hashBlob(blob: Blob): Promise<string> {
-  const digest = await crypto.subtle.digest('SHA-256', await blob.arrayBuffer())
-  return Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, '0')).join('')
+  return sha256BinaryV1(await blob.arrayBuffer())
 }
 
 async function definitionInScope(scope: WorkspaceScope, id: number): Promise<GameDefinition> {

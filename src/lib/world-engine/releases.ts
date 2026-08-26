@@ -14,6 +14,10 @@ import type { ProjectExportData } from '../export/json-export'
 import { deriveStrictExportProjectSnapshot } from '../export/registry-export'
 import { validateNarrativeModule } from '../narrative/blueprint'
 
+// Release snapshots are deliberately sparse world-share packages, not v6+
+// full-project backups. v5 predates mandatory adaptation-private tables.
+const WORLD_RELEASE_PORTABLE_BACKUP_VERSION = 5
+
 export const WORLD_RELEASE_SECTIONS: ReadonlyArray<{
   key: WorldReleaseSection
   label: string
@@ -33,7 +37,7 @@ export function worldReleaseSectionTables(section: WorldReleaseSection): string[
     .map(spec => spec.name)
 }
 
-function stableJson(value: unknown): string {
+export function stableJson(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(stableJson).join(',')}]`
   if (value && typeof value === 'object') {
     const entries = Object.entries(value as Record<string, unknown>)
@@ -70,8 +74,8 @@ async function buildPortableReleaseProject(input: {
 }> {
   const snapshot = await deriveStrictExportProjectSnapshot(input.scope.projectId)
   const backup = snapshot.data
-  if (backup.version !== 4 || !backup.ownership || !backup.worlds || !backup.works) {
-    throw new Error('[release] 世界发布必须基于严格 v4 便携快照')
+  if (backup.version < 4 || !backup.ownership || !backup.worlds || !backup.works) {
+    throw new Error('[release] 世界发布必须基于 v4+ 严格便携快照')
   }
   const worldExportId = snapshot.exportIds.get('worlds')?.get(input.scope.worldId)
   const workExportId = snapshot.exportIds.get('works')?.get(input.scope.workId)
@@ -110,7 +114,7 @@ async function buildPortableReleaseProject(input: {
     project[field] = workRoot[field]
   }
   const portable: Record<string, unknown> = {
-    version: backup.version,
+    version: Math.min(backup.version, WORLD_RELEASE_PORTABLE_BACKUP_VERSION),
     // Release content hashes must depend on content, not the wall clock used
     // while deriving an otherwise identical portable snapshot.
     exportedAt: 0,

@@ -84,6 +84,14 @@ import type {
   AvgPresentationModule,
   NarrativeSimulationModule,
   OpenWorldModule,
+  AdaptationProject,
+  AdaptationSourceUnit,
+  ScreenplayScene,
+  ComicPage,
+  ComicPanel,
+  ComicVisualSubject,
+  ComicMediaAsset,
+  MediaBlobObject,
 } from '../types'
 import type { AIUsageEntry } from '../ai/usage-log'
 import type { TemporalFact } from '../types/temporal-fact'
@@ -237,6 +245,14 @@ class StoryForgeDB extends Dexie {
   avgPresentationModules!: Table<AvgPresentationModule, number>
   narrativeSimulationModules!: Table<NarrativeSimulationModule, number>
   openWorldModules!: Table<OpenWorldModule, number>
+  adaptationProjects!: Table<AdaptationProject, number>
+  adaptationSourceUnits!: Table<AdaptationSourceUnit, number>
+  screenplayScenes!: Table<ScreenplayScene, number>
+  comicPages!: Table<ComicPage, number>
+  comicPanels!: Table<ComicPanel, number>
+  comicVisualSubjects!: Table<ComicVisualSubject, number>
+  comicMediaAssets!: Table<ComicMediaAsset, number>
+  mediaBlobObjects!: Table<MediaBlobObject, number>
 
   constructor() {
     super('storyforge')
@@ -673,6 +689,34 @@ class StoryForgeDB extends Dexie {
         if (!Object.prototype.hasOwnProperty.call(entry, 'producerRunId')) entry.producerRunId = null
         if (!Object.prototype.hasOwnProperty.call(entry, 'producerCandidateHash')) entry.producerCandidateHash = null
       })
+    })
+
+    // v66 / ADAPT-CORE-1A: target Work root plus immutable, versioned source
+    // manifests. The upgrade only creates empty stores and never scans novels.
+    this.version(66).stores({
+      adaptationProjects: '++id, projectId, worldId, &workId, sourceWorkId, sourceOutlineRootId, sourceStartChapterId, sourceEndChapterId, medium, status, updatedAt',
+      adaptationSourceUnits: '++id, projectId, workId, adaptationProjectId, &[adaptationProjectId+manifestVersion+sourceUnitKey], [adaptationProjectId+manifestVersion], sourceOutlineNodeId, sourceChapterId, order',
+    })
+
+    // v67 / SCREEN-1A: structured screenplay scenes and ordered blocks.
+    this.version(67).stores({
+      screenplayScenes: '++id, projectId, workId, adaptationProjectId, &[adaptationProjectId+stableKey], &[adaptationProjectId+episodeNumber+sceneNumber], [adaptationProjectId+episodeNumber], order, status, updatedAt',
+    })
+
+    // v68 / COMIC-1A: structured pages, panels and visual-subject bible.
+    this.version(68).stores({
+      comicPages: '++id, projectId, workId, adaptationProjectId, &[adaptationProjectId+stableKey], &[adaptationProjectId+order], chapterNumber, status, updatedAt',
+      comicPanels: '++id, projectId, workId, pageId, &[workId+stableKey], &[pageId+order], status, updatedAt',
+      comicVisualSubjects: '++id, projectId, workId, adaptationProjectId, &[workId+stableKey], kind, characterId, locationRefKey, status, updatedAt',
+    })
+
+    // v69 / MEDIA-CORE-1 + COMIC-2: product-neutral verified blobs and comic assets.
+    this.version(69).stores({
+      // Phase 5 registered chapter deletion -> character evidence setNull;
+      // the reverse lifecycle lookup requires this explicit Dexie index.
+      characters: '++id, projectId, name, role, roleWeight, moralAxis, orderAxis, statusEvidenceChapterId',
+      comicMediaAssets: '++id, projectId, workId, adaptationProjectId, &[workId+stableKey], role, origin, panelId, subjectKey, blobObjectId, disposition, requestHash, &[workId+requestHash+candidateIndex], updatedAt',
+      mediaBlobObjects: '++id, projectId, workId, &[workId+contentHash], mimeType, disposition, updatedAt',
     })
   }
 }

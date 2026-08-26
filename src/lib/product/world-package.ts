@@ -5,7 +5,7 @@ import { db } from '../db/schema'
 import { cascadeDeleteProject } from '../registry/lifecycle'
 import type { CommunityWorldLicense, Project, WorldReleaseManifestV2 } from '../types'
 import { generateWorldCode } from './world-identity'
-import { assertReleaseUnchanged } from '../world-engine/releases'
+import { assertReleaseUnchanged, stableJson } from '../world-engine/releases'
 import { resolveWorkspaceScope } from '../world-engine/ownership'
 
 export const WORLD_PACKAGE_FORMAT = 'storyforge.world-package'
@@ -70,6 +70,9 @@ const LICENSES = new Set<CommunityWorldLicense>([
 ])
 
 const ROOT_TABLES = ['worlds', 'works'] as const
+// 世界包只承载世界共享表，不是 v6+ 的完整项目备份。固定声明为最后一个不要求
+// 改编私有表的备份版本，避免为了满足完整备份契约而在分享包中泄露/伪造私有表键。
+const WORLD_PACKAGE_PORTABLE_BACKUP_VERSION = 5
 
 // Frozen at PLATFORM-1 v1 (commit 60df0b4). Later world-engine tables are
 // optional when importing an existing v1 package, even if current v1 exports include them.
@@ -146,7 +149,7 @@ function buildPortableProject(backup: ProjectExportData): ProjectExportData {
   root.updatedAt = Date.now()
 
   const portable: Record<string, unknown> = {
-    version: backup.version,
+    version: Math.min(backup.version, WORLD_PACKAGE_PORTABLE_BACKUP_VERSION),
     exportedAt: Date.now(),
     project: root,
   }
@@ -368,7 +371,10 @@ export async function inspectWorldPackage(input: unknown): Promise<WorldPackageT
       if (!v2Release || !v2Manifest || v2Manifest.schema !== WORLD_PACKAGE_FORMAT || v2Manifest.version !== 2) {
         errors.push('世界包 v2 缺少有效的冻结发布清单。')
       } else {
-        const releaseHash = await sha256(canonicalStringify(v2Manifest))
+        // Release hashes use the exact canonical serializer that froze the
+        // release. Package integrity has its own serializer, but the two must
+        // never be mixed as table-key growth can expose ordering differences.
+        const releaseHash = await sha256(stableJson(v2Manifest))
         if (releaseHash !== v2Release.contentHash || releaseHash !== (manifest as WorldPackageV2Manifest).releaseHash) {
           errors.push('世界包 v2 的发布哈希不一致。')
         }

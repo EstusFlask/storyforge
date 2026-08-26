@@ -252,6 +252,38 @@ export const FIELD_REGISTRY: FieldSpec[] = [
   text('works', 'writingStyleId'),
   text('works', 'methodologyId'),
 
+  // ADAPT-CORE: only editable structured intent/plan fields are model-facing.
+  // IDs, hashes, versions, status, revision and timestamps stay system-owned.
+  object('adaptationProjects', 'brief'),
+  object('adaptationProjects', 'plan'),
+  object('adaptationProjects', 'visualBible'),
+
+  // SCREEN-1: model-facing scene content only. Stable identity, owner,
+  // revision, status and source review version remain system-owned.
+  text('screenplayScenes', 'planSectionKey'),
+  enumeration('screenplayScenes', 'intExt', ['INT', 'EXT', 'INT_EXT']),
+  text('screenplayScenes', 'location'),
+  text('screenplayScenes', 'timeOfDay'),
+  longtext('screenplayScenes', 'summary'),
+  num('screenplayScenes', 'estimatedSeconds'),
+  arr('screenplayScenes', 'sourceUnitIds'),
+  arr('screenplayScenes', 'blocks'),
+
+  // COMIC-1: only storyboard/visual content may be model-authored. Page overlap,
+  // media selection, rights, hashes, revisions and owners stay system-owned.
+  longtext('comicPages', 'summary'),
+  object('comicPanels', 'frame'),
+  object('comicPanels', 'shot'),
+  longtext('comicPanels', 'action'),
+  longtext('comicPanels', 'visualPrompt'),
+  longtext('comicPanels', 'negativePrompt'),
+  arr('comicPanels', 'continuityRefs'),
+  arr('comicPanels', 'lettering'),
+  arr('comicPanels', 'sourceUnitIds'),
+  text('comicVisualSubjects', 'label'),
+  object('comicVisualSubjects', 'design'),
+  arr('comicVisualSubjects', 'sourceUnitIds'),
+
   // HARNESS-68: AI may propose new World-owned worldGroups only through the
   // registered collection adoption boundary. Owner IDs and timestamps are stamped.
   text('worldGroups', 'name', ['世界名称']),

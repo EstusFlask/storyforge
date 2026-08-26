@@ -6,7 +6,7 @@
  */
 import { PROJECT_TABLES } from '../registry/project-tables'
 
-export const CURRENT_BACKUP_VERSION = 4
+export const CURRENT_BACKUP_VERSION = 9
 
 export interface BackupTrustReport {
   valid: boolean
@@ -74,6 +74,25 @@ export function inspectProjectBackup(input: unknown): BackupTrustReport {
     }
     presentTables += 1
     recordCount += rows.length
+  }
+
+  if (version != null && version >= 6) {
+    for (const tableName of ['adaptationProjects', 'adaptationSourceUnits']) {
+      if (!Array.isArray(input[tableName])) errors.push(`v${version} 备份缺少必需表「${tableName}」。`)
+    }
+  }
+  if (version != null && version >= 7 && !Array.isArray(input.screenplayScenes)) {
+    errors.push(`v${version} 备份缺少必需表「screenplayScenes」。`)
+  }
+  if (version != null && version >= 8) {
+    for (const tableName of ['comicPages', 'comicPanels', 'comicVisualSubjects']) {
+      if (!Array.isArray(input[tableName])) errors.push(`v${version} 备份缺少必需表「${tableName}」。`)
+    }
+  }
+  if (version != null && version >= 9) {
+    for (const tableName of ['comicMediaAssets', 'mediaBlobObjects']) {
+      if (!Array.isArray(input[tableName])) errors.push(`v${version} 备份缺少必需表「${tableName}」。`)
+    }
   }
 
   if (missingTables.length > 0) {

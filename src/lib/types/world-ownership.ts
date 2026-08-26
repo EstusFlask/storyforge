@@ -22,6 +22,9 @@ export interface PostAdoptionBudgetV1 {
   allowUnknownCost: boolean
 }
 
+export type WorkKind = 'novel' | 'screenplay' | 'comic'
+export type NovelWorkflowProfile = 'short' | 'long'
+
 /** WORLD-2C: a stable world root inside one local workspace. */
 export interface World {
   id?: number
@@ -42,6 +45,10 @@ export interface Work {
   worldId: number
   /** MEMORY-1: immutable portable identity; titles and local numeric ids may change. */
   code?: string
+  /** Missing on legacy rows, which always resolve to novel. */
+  kind?: WorkKind
+  /** Only meaningful for novel works. Missing legacy novel rows resolve to long. */
+  novelProfile?: NovelWorkflowProfile | null
   title: string
   description: string
   genres: string[]
@@ -107,8 +114,10 @@ export interface OwnershipScopeChange {
 }
 
 /**
- * Compact recovery evidence for the lazy ownership migration. It stores
- * only root/owner fields, never manuscript text or other content payloads.
+ * Compact ownership provenance and scope-change audit. Migrated workspaces
+ * retain their recovery before-image; natively created workspaces use an
+ * empty before-image and are deliberately not rollbackable. Manuscript text
+ * and other content payloads are never stored here.
  */
 export interface OwnershipMigrationReceipt {
   id?: number

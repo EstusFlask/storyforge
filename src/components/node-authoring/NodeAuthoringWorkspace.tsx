@@ -492,7 +492,11 @@ export default function NodeAuthoringWorkspace(props: { project: Project; worldG
       const id = await useNodeFlowStore.getState().createFlow(projectId, props.worldGroupId, {
         name: template.name,
         description: template.description,
-        graph: buildOfficialAuthoringTemplate(templateId),
+        graph: buildOfficialAuthoringTemplate(templateId, {
+          targetWordCount: props.project.targetWordCount >= 5_000 && props.project.targetWordCount <= 25_000
+            ? props.project.targetWordCount
+            : undefined,
+        }),
       })
       setSelectedFlowId(id)
       toast.success(`${template.name}已创建。`)
@@ -563,7 +567,11 @@ export default function NodeAuthoringWorkspace(props: { project: Project; worldG
   const removeNode = (id: string) => { changeGraph({ ...graph, nodes: graph.nodes.filter(node => node.id !== id), edges: graph.edges.filter(edge => edge.sourceNodeId !== id && edge.targetNodeId !== id) }); if (selectedNodeId === id) setSelectedNodeId(null); setSelectedNodeIds(current => current.filter(item => item !== id)) }
   const toggleFavorite = (id: string) => changeGraph({ ...graph, nodes: graph.nodes.map(node => node.id === id ? { ...node, favorite: !node.favorite } : node) })
   const applyOfficialTemplate = (templateId: Parameters<typeof buildOfficialAuthoringTemplate>[0]) => {
-    const nextGraph = buildOfficialAuthoringTemplate(templateId)
+    const nextGraph = buildOfficialAuthoringTemplate(templateId, {
+      targetWordCount: props.project.targetWordCount >= 5_000 && props.project.targetWordCount <= 25_000
+        ? props.project.targetWordCount
+        : undefined,
+    })
     const template = AUTHORING_OFFICIAL_TEMPLATES.find(item => item.id === templateId)!
     changeGraph(nextGraph)
     setSelectedNodeId(nextGraph.nodes[0]?.id ?? null)

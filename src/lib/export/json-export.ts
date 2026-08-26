@@ -12,7 +12,6 @@
  *   R-export-legacy-fixture(派生导入真实旧格式 fixture)
  */
 import { deriveExportProjectJSON } from './registry-export'
-import { deriveImportProjectJSON } from './registry-import'
 import { assertTrustedProjectBackup } from './backup-trust'
 import type {
   Project, Worldview, StoryCore, PowerSystem,
@@ -63,6 +62,14 @@ import type {
   AvgPresentationModule,
   NarrativeSimulationModule,
   OpenWorldModule,
+  AdaptationProject,
+  AdaptationSourceUnit,
+  ScreenplayScene,
+  ComicPage,
+  ComicPanel,
+  ComicVisualSubject,
+  ComicMediaAsset,
+  MediaBlobObject,
 } from '../types'
 import type { TemporalFact } from '../types/temporal-fact'
 
@@ -86,6 +93,11 @@ type HomeWorldGroupExportRef = {
  *   2 — 补全全部项目数据（2026-05-27）
  *   3 — 多世界系统（2026-06-02，Phase 25.4）
  *   4 — World/Work owner 便携影子 ID（WORLD-2C C4）
+ *   5 — Work kind / novelProfile（NOVEL-PROFILE-1）
+ *   6 — 改编根与不可变来源清单（ADAPT-CORE-1A）
+ *   7 — 结构化正规剧本场景（SCREEN-1A）
+ *   8 — 漫画页、格与视觉条目（COMIC-1A）
+ *   9 — 漫画媒资与共享 Blob（MEDIA-CORE-1 / COMIC-2）
  */
 export interface ProjectExportData {
   version: number
@@ -111,6 +123,58 @@ export interface ProjectExportData {
       _activeCharacterDrivenPlanExportId?: number | null
       _activeNarrativeModuleExportId?: number | null
     }
+  )[]
+  adaptationProjects?: (
+    Omit<AdaptationProject, 'id' | 'projectId' | 'worldId' | 'workId' | 'sourceWorkId' | 'sourceOutlineRootId' | 'sourceStartChapterId' | 'sourceEndChapterId'>
+    & {
+      _exportId: number
+      _worldExportId: number
+      _workExportId: number
+      _sourceWorkExportId?: number | null
+      _sourceOutlineRootExportId?: number | null
+      _sourceStartChapterExportId?: number | null
+      _sourceEndChapterExportId?: number | null
+    }
+  )[]
+  adaptationSourceUnits?: (
+    Omit<AdaptationSourceUnit, 'id' | 'projectId' | 'workId' | 'adaptationProjectId' | 'sourceOutlineNodeId' | 'sourceChapterId'>
+    & {
+      _exportId: number
+      _workExportId: number
+      _adaptationProjectExportId: number
+      _sourceOutlineExportId?: number | null
+      _sourceChapterExportId?: number | null
+    }
+  )[]
+  screenplayScenes?: (
+    Omit<ScreenplayScene, 'id' | 'projectId' | 'workId' | 'adaptationProjectId' | 'sourceUnitIds'>
+    & {
+      _exportId: number
+      _workExportId: number
+      _adaptationProjectExportId: number
+      _sourceUnitExportIds?: number[]
+      _blockCharacterExportIds?: Array<number | null>
+    }
+  )[]
+  comicPages?: (
+    Omit<ComicPage, 'id' | 'projectId' | 'workId' | 'adaptationProjectId'>
+    & { _exportId: number; _workExportId: number; _adaptationProjectExportId: number }
+  )[]
+  comicPanels?: (
+    Omit<ComicPanel, 'id' | 'projectId' | 'workId' | 'pageId' | 'sourceUnitIds'>
+    & { _exportId: number; _workExportId: number; _pageExportId: number; _sourceUnitExportIds?: number[] }
+  )[]
+  comicVisualSubjects?: (
+    Omit<ComicVisualSubject, 'id' | 'projectId' | 'workId' | 'adaptationProjectId' | 'characterId' | 'sourceUnitIds'>
+    & { _exportId: number; _workExportId: number; _adaptationProjectExportId: number; _characterExportId?: number | null; _sourceUnitExportIds?: number[] }
+  )[]
+  comicMediaAssets?: (
+    Omit<ComicMediaAsset, 'id' | 'projectId' | 'workId' | 'adaptationProjectId' | 'panelId' | 'blobObjectId'>
+    & { _exportId: number; _workExportId: number; _adaptationProjectExportId: number; _panelExportId?: number | null; _blobObjectExportId: number }
+  )[]
+  mediaBlobObjects?: (
+    Omit<MediaBlobObject, 'id' | 'projectId' | 'workId' | 'data'>
+    & { _exportId: number; _workExportId: number; data: string }
   )[]
   workCharacterBindings?: (
     Omit<WorkCharacterBinding, 'id' | 'projectId' | 'workId' | 'characterId'>
@@ -347,5 +411,8 @@ export function downloadJSON(data: ProjectExportData, filename: string) {
 export async function importProjectJSON(data: ProjectExportData): Promise<number> {
   // 预检必须发生在事务外、写库前；失败时保证项目表也不会出现半导入根记录。
   assertTrustedProjectBackup(data)
+  // 严格导入、全表拓扑重映射与二进制校验只在作者实际选择导入时需要；按需加载可
+  // 避免首页与日常写作静态携带完整恢复引擎，同时仍保留同一个公开 API/事务边界。
+  const { deriveImportProjectJSON } = await import('./registry-import')
   return deriveImportProjectJSON(data)
 }

@@ -329,6 +329,39 @@ async function assertContextAnchors(input: AssembleContextInput, selected: Conte
       throw new Error('[assembleContext] outlineNodeId 不属于当前 Work')
     }
   }
+  if (input.adaptationProjectId != null) {
+    const root = await db.adaptationProjects.get(input.adaptationProjectId)
+    if (!root
+      || root.projectId !== input.scope.projectId
+      || root.worldId !== input.scope.worldId
+      || root.workId !== input.scope.workId) {
+      throw new Error('[assembleContext] adaptationProjectId 不属于当前目标 Work')
+    }
+  }
+  if (input.screenplaySceneIds?.length) {
+    if (new Set(input.screenplaySceneIds).size !== input.screenplaySceneIds.length) throw new Error('[assembleContext] screenplaySceneIds 不得重复')
+    for (const sceneId of input.screenplaySceneIds) {
+      const scene = await db.screenplayScenes.get(sceneId)
+      if (!scene || !await assertRecordInScope(input.scope, 'screenplayScenes', scene, { owner: 'work' })) {
+        throw new Error('[assembleContext] screenplaySceneIds 越过当前目标 Work')
+      }
+      if (input.adaptationProjectId != null && scene.adaptationProjectId !== input.adaptationProjectId) {
+        throw new Error('[assembleContext] screenplaySceneIds 不属于指定改编')
+      }
+    }
+  }
+  if (input.comicPageIds?.length) {
+    if (new Set(input.comicPageIds).size !== input.comicPageIds.length) throw new Error('[assembleContext] comicPageIds 不得重复')
+    for (const pageId of input.comicPageIds) {
+      const page = await db.comicPages.get(pageId)
+      if (!page || !await assertRecordInScope(input.scope, 'comicPages', page, { owner: 'work' })) {
+        throw new Error('[assembleContext] comicPageIds 越过当前目标 Work')
+      }
+      if (input.adaptationProjectId != null && page.adaptationProjectId !== input.adaptationProjectId) {
+        throw new Error('[assembleContext] comicPageIds 不属于指定改编')
+      }
+    }
+  }
   // Runtime readers omit foreign sessions themselves and surface only same-scope
   // snapshot-integrity failures, preserving a fail-closed read contract.
 }
@@ -349,6 +382,14 @@ function requirementsMet(source: ContextSource, input: AssembleContextInput): bo
     && input.chapterId == null
     && !(source.acceptsOutlineNodeAsChapterBoundary && input.outlineNodeId != null)
   ) return false
+  if (source.requiresAdaptationProjectId && input.adaptationProjectId == null) return false
+  if (source.requiresAdaptationSourceUnits && (
+    input.adaptationProjectId == null
+    || input.adaptationSourceManifestVersion == null
+    || !input.adaptationSourceUnitKeys?.length
+  )) return false
+  if (source.requiresScreenplayScenes && (!input.adaptationProjectId || !input.screenplaySceneIds?.length)) return false
+  if (source.requiresComicPages && (!input.adaptationProjectId || !input.comicPageIds?.length)) return false
   return true
 }
 

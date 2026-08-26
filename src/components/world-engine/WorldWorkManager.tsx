@@ -4,6 +4,7 @@ import type { Work } from '../../lib/types/world-ownership'
 import { createWorldWork, listWorldWorks, switchActiveWork } from '../../lib/world-engine/works'
 import { deleteWork } from '../../lib/world-engine/lifecycle'
 import { useDialog } from '../shared/Dialog'
+import WorkKindBadge from '../work/WorkKindBadge'
 
 interface Props {
   projectId: number
@@ -80,7 +81,7 @@ export default function WorldWorkManager({ projectId, activeWorkId, onChanged }:
       </div>
       {creating && <div className="sf-world-work-create"><input value={title} onChange={event => setTitle(event.target.value)} placeholder="作品名称" autoFocus onKeyDown={event => { if (event.key === 'Enter') void create() }} /><button className="sf-icon-button" onClick={() => void create()} disabled={!title.trim() || busy} title="创建并切换" aria-label="创建并切换"><Check className="h-4 w-4" /></button></div>}
       <div className="sf-world-work-list">
-        {works.map(work => <div key={work.id} className={`sf-world-work-row ${work.id === activeWorkId ? 'active' : ''}`}><button onClick={() => void choose(work.id!)} disabled={busy}><span><strong>{work.title}</strong><small>{work.status === 'drafting' ? '创作中' : work.status}</small></span>{work.id === activeWorkId && <Check className="h-4 w-4" />}</button><button className="sf-icon-button" onClick={() => void remove(work)} disabled={busy || works.length <= 1} title="删除作品" aria-label={`删除作品 ${work.title}`}><Trash2 className="h-3.5 w-3.5" /></button></div>)}
+        {works.map(work => <div key={work.id} className={`sf-world-work-row ${work.id === activeWorkId ? 'active' : ''}`}><button onClick={() => void choose(work.id!)} disabled={busy}><span><strong>{work.title}</strong><small><WorkKindBadge work={work} /> · {work.status === 'drafting' ? '创作中' : work.status}</small></span>{work.id === activeWorkId && <Check className="h-4 w-4" />}</button><button className="sf-icon-button" onClick={() => void remove(work)} disabled={busy || works.length <= 1} title="删除作品" aria-label={`删除作品 ${work.title}`}><Trash2 className="h-3.5 w-3.5" /></button></div>)}
       </div>
       {error && <p className="sf-world-work-error">{error}</p>}
     </section>

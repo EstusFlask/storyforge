@@ -28,8 +28,8 @@ describe('Phase 1.1a · PROJECT_TABLES 注册表', () => {
       expect(result.ok, result.errors.join('; ')).toBe(true)
     })
 
-    it('登记了全部 83 张表', () => {
-      expect(PROJECT_TABLES.length).toBe(83)   // v63 CTXG-2 exact artifact store
+    it('登记了全部 91 张表', () => {
+      expect(PROJECT_TABLES.length).toBe(91)   // v69 + exact artifacts + adaptation/screenplay/comic/media
     })
 
     it('每张表名唯一', () => {
