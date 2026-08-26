@@ -60,6 +60,8 @@ export async function isPlanReconciliationCurrent(
 ): Promise<boolean> {
   const reconciliation = chapter.planReconciliation
   if (!chapter.id || !reconciliation) return false
+
+  // 如果正文内容变了，对账就不是当前的
   if (reconciliation.sourceTextHash !== await hashChapterText(chapter.content)) return false
   if (reconciliation.reviewStatus === 'confirmed-constraint') return true
   if (reconciliation.reviewStatus === 'applied-outline' || reconciliation.reviewStatus === 'dismissed') return false

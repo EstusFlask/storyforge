@@ -3,7 +3,7 @@
  * 展示/编辑全局故事线（主线+支线），支持 AI 生成
  */
 import { useState, useEffect } from 'react'
-import { Check, Plus, Sparkles, Loader2, Trash2, GripVertical, X, ChevronDown, ChevronRight } from 'lucide-react'
+import { ArrowUpDown, Check, Plus, Sparkles, Loader2, Trash2, GripVertical, X, ChevronDown, ChevronRight, ChevronUp } from 'lucide-react'
 import { useStoryArcStore } from '../../stores/story-arc'
 import { useMasterCopilot } from '../agent/useMasterCopilot'
 import { CInput } from '../shared/CompositionInput'
@@ -109,6 +109,52 @@ export default function StoryArcPanel({ project, worldGroupId, initialRecordTarg
       skillId: 'outline.story-arcs',
       instruction,
       storyArcMutationRequest: { operation, targetArcId: activeArc.id },
+    })
+  }
+
+  // PR #60 的阶段事件按钮保留，但执行统一进入已治理的故事线 Skill：
+  // 返回候选并由作者采纳，不在组件中直连模型或直接覆盖故事线。
+  const generateKeyEvents = async (
+    stage: StoryStage,
+    allStages: StoryStage[],
+    currentKeyEvents: string[]
+  ): Promise<void> => {
+    if (activeArc?.id == null) return
+    const neighborSummary = allStages
+      .filter(item => item.id !== stage.id)
+      .map(item => item.title)
+      .join('、')
+    const instruction = [
+      `只扩写故事线“${activeArc.name}”中的阶段“${stage.title}”关键事件。`,
+      `阶段描述：${stage.description || '未填写'}。`,
+      currentKeyEvents.length > 0 ? `必须保留现有事件：${currentKeyEvents.join('、')}。` : '当前还没有关键事件。',
+      neighborSummary ? `相邻阶段：${neighborSummary}；不得改写其他阶段。` : '',
+      '新增 3—5 个具有因果递进的关键事件，并返回完整故事线候选供作者审查。',
+    ].filter(Boolean).join('\n')
+    await copilot.submitTargetedRequest(instruction, {
+      agentId: 'outline',
+      skillId: 'outline.story-arcs',
+      instruction,
+      storyArcMutationRequest: { operation: 'expand', targetArcId: activeArc.id },
+    })
+  }
+
+  const sortKeyEvents = async (
+    stage: StoryStage,
+    _allStages: StoryStage[],
+    currentKeyEvents: string[]
+  ): Promise<void> => {
+    if (activeArc?.id == null || currentKeyEvents.length < 2) return
+    const instruction = [
+      `只重排故事线“${activeArc.name}”阶段“${stage.title}”的关键事件。`,
+      `现有事件：${currentKeyEvents.map((event, index) => `${index + 1}. ${event}`).join('；')}`,
+      '按时间和因果顺序排列，不得新增、删除、改写事件，也不得改变其他阶段；返回完整故事线候选供作者审查。',
+    ].join('\n')
+    await copilot.submitTargetedRequest(instruction, {
+      agentId: 'outline',
+      skillId: 'outline.story-arcs',
+      instruction,
+      storyArcMutationRequest: { operation: 'replan', targetArcId: activeArc.id },
     })
   }
 
@@ -348,6 +394,10 @@ export default function StoryArcPanel({ project, worldGroupId, initialRecordTarg
             onUpdateArc={(data) => updateArc(activeArc.id!, data)}
             onUpdateStages={(stages) => updateStages(activeArc.id!, stages)}
             onDelete={() => handleDeleteArc(activeArc.id!)}
+            onGenerateKeyEvents={generateKeyEvents}
+            onSortEvents={sortKeyEvents}
+            isGeneratingEvents={copilot.busy}
+            isSortingEvents={copilot.busy}
           />
           <StorylineProgressPanel
             projectId={project.id!}
@@ -372,13 +422,17 @@ export default function StoryArcPanel({ project, worldGroupId, initialRecordTarg
 
 // ── 故事线编辑器 ──
 
-function StoryArcEditor({ arc, stages, targeted, onUpdateArc, onUpdateStages, onDelete }: {
+function StoryArcEditor({ arc, stages, targeted, onUpdateArc, onUpdateStages, onDelete, onGenerateKeyEvents, onSortEvents, isGeneratingEvents, isSortingEvents }: {
   arc: NonNullable<ReturnType<typeof useStoryArcStore.getState>['arcs'][0]>
   stages: StoryStage[]
   targeted: boolean
   onUpdateArc: (data: Partial<Pick<StoryArc, 'name' | 'description' | 'type'>>) => void
   onUpdateStages: (stages: StoryStage[]) => void
   onDelete: () => void
+  onGenerateKeyEvents: (stage: StoryStage, allStages: StoryStage[], currentKeyEvents: string[]) => Promise<void>
+  onSortEvents: (stage: StoryStage, allStages: StoryStage[], currentKeyEvents: string[]) => Promise<void>
+  isGeneratingEvents: boolean
+  isSortingEvents: boolean
 }) {
   const [editName, setEditName] = useState(arc.name)
   const [editDesc, setEditDesc] = useState(arc.description || '')
@@ -476,6 +530,11 @@ function StoryArcEditor({ arc, stages, targeted, onUpdateArc, onUpdateStages, on
             total={stages.length}
             onUpdate={(data) => handleUpdateStage(idx, data)}
             onDelete={() => handleDeleteStage(idx)}
+            onGenerateKeyEvents={onGenerateKeyEvents}
+            onSortEvents={onSortEvents}
+            isGeneratingEvents={isGeneratingEvents}
+            isSortingEvents={isSortingEvents}
+            allStages={stages}
           />
         ))}
 
@@ -491,15 +550,22 @@ function StoryArcEditor({ arc, stages, targeted, onUpdateArc, onUpdateStages, on
 
 // ── 单个阶段卡片 ──
 
-function StageCard({ stage, index, total, onUpdate, onDelete }: {
+function StageCard({ stage, index, total, onUpdate, onDelete, onGenerateKeyEvents, onSortEvents, isGeneratingEvents, isSortingEvents, allStages }: {
   stage: StoryStage
   index: number
   total: number
   onUpdate: (data: Partial<StoryStage>) => void
   onDelete: () => void
+  onGenerateKeyEvents: (stage: StoryStage, allStages: StoryStage[], currentKeyEvents: string[]) => Promise<void>
+  onSortEvents: (stage: StoryStage, allStages: StoryStage[], currentKeyEvents: string[]) => Promise<void>
+  isGeneratingEvents: boolean
+  isSortingEvents: boolean
+  allStages: StoryStage[]
 }) {
   const [expanded, setExpanded] = useState(false)
   const [newEvent, setNewEvent] = useState('')
+  const [isGenerating, setIsGenerating] = useState(false)
+  const [isSorting, setIsSorting] = useState(false)
 
   const addEvent = () => {
     if (!newEvent.trim()) return
@@ -509,6 +575,43 @@ function StageCard({ stage, index, total, onUpdate, onDelete }: {
 
   const removeEvent = (i: number) => {
     onUpdate({ keyEvents: stage.keyEvents.filter((_, idx) => idx !== i) })
+  }
+
+  const handleGenerateEvents = async () => {
+    setIsGenerating(true)
+    try {
+      await onGenerateKeyEvents(stage, allStages, stage.keyEvents)
+    } catch (error) {
+      console.error('[StageCard] 生成关键事件失败:', error)
+    } finally {
+      setIsGenerating(false)
+    }
+  }
+
+  const moveEventUp = (i: number) => {
+    if (i === 0) return
+    const newEvents = [...stage.keyEvents]
+    ;[newEvents[i - 1], newEvents[i]] = [newEvents[i], newEvents[i - 1]]
+    onUpdate({ keyEvents: newEvents })
+  }
+
+  const moveEventDown = (i: number) => {
+    if (i === stage.keyEvents.length - 1) return
+    const newEvents = [...stage.keyEvents]
+    ;[newEvents[i], newEvents[i + 1]] = [newEvents[i + 1], newEvents[i]]
+    onUpdate({ keyEvents: newEvents })
+  }
+
+  const handleSortEvents = async () => {
+    if (stage.keyEvents.length < 2) return
+    setIsSorting(true)
+    try {
+      await onSortEvents(stage, allStages, stage.keyEvents)
+    } catch (error) {
+      console.error('[StageCard] 排序关键事件失败:', error)
+    } finally {
+      setIsSorting(false)
+    }
   }
 
   const stageColor = `hsl(${30 + index * (300 / total)}, 60%, 50%)`
@@ -576,14 +679,70 @@ function StageCard({ stage, index, total, onUpdate, onDelete }: {
 
           {/* 关键事件 */}
           <div>
-            <label className="text-xs text-text-muted mb-1 block">关键事件（{stage.keyEvents.length}）</label>
+            <div className="flex items-center justify-between mb-1">
+              <label className="text-xs text-text-muted block">关键事件（{stage.keyEvents.length}）</label>
+              <div className="flex items-center gap-1">
+                <button
+                  onClick={handleSortEvents}
+                  disabled={isSorting || isSortingEvents || stage.keyEvents.length < 2}
+                  className="flex items-center gap-1 px-2 py-0.5 text-xs text-accent bg-accent/10 hover:bg-accent/20 rounded disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                  title={stage.keyEvents.length < 2 ? '至少需要2个事件才能排序' : 'AI智能排序'}
+                >
+                  {isSorting || isSortingEvents ? (
+                    <Loader2 className="w-3 h-3 animate-spin" />
+                  ) : (
+                    <ArrowUpDown className="w-3 h-3" />
+                  )}
+                  {isSorting || isSortingEvents ? '排序中...' : 'AI排序'}
+                </button>
+                <button
+                  onClick={handleGenerateEvents}
+                  disabled={isGenerating || isGeneratingEvents || !stage.description?.trim()}
+                  className="flex items-center gap-1 px-2 py-0.5 text-xs text-accent bg-accent/10 hover:bg-accent/20 rounded disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                  title={!stage.description?.trim() ? '请先填写阶段描述' : 'AI生成关键事件'}
+                >
+                  {isGenerating || isGeneratingEvents ? (
+                    <Loader2 className="w-3 h-3 animate-spin" />
+                  ) : (
+                    <Sparkles className="w-3 h-3" />
+                  )}
+                  {isGenerating || isGeneratingEvents ? '生成中...' : 'AI生成'}
+                </button>
+              </div>
+            </div>
+            {!stage.description?.trim() && (
+              <p className="text-[10px] text-warning mb-1">提示：AI生成需要先填写阶段描述</p>
+            )}
             <div className="space-y-1">
               {stage.keyEvents.map((ev, i) => (
-                <div key={i} className="flex items-center gap-1.5">
+                <div key={i} className="flex items-center gap-1.5 group">
+                  <span className="text-[10px] text-text-muted w-4 text-center">{i + 1}</span>
                   <span className="text-xs text-text-secondary flex-1">{ev}</span>
-                  <button onClick={() => removeEvent(i)} className="p-0.5 text-text-muted hover:text-error">
-                    <X className="w-3 h-3" />
-                  </button>
+                  <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <button
+                      onClick={() => moveEventUp(i)}
+                      disabled={i === 0}
+                      className="p-0.5 text-text-muted hover:text-accent disabled:opacity-30 disabled:hover:text-text-muted"
+                      title="上移"
+                    >
+                      <ChevronUp className="w-3 h-3" />
+                    </button>
+                    <button
+                      onClick={() => moveEventDown(i)}
+                      disabled={i === stage.keyEvents.length - 1}
+                      className="p-0.5 text-text-muted hover:text-accent disabled:opacity-30 disabled:hover:text-text-muted"
+                      title="下移"
+                    >
+                      <ChevronDown className="w-3 h-3" />
+                    </button>
+                    <button
+                      onClick={() => removeEvent(i)}
+                      className="p-0.5 text-text-muted hover:text-error"
+                      title="删除"
+                    >
+                      <X className="w-3 h-3" />
+                    </button>
+                  </div>
                 </div>
               ))}
               <div className="flex gap-1.5">
@@ -591,7 +750,7 @@ function StageCard({ stage, index, total, onUpdate, onDelete }: {
                   value={newEvent}
                   onChange={e => setNewEvent(e.target.value)}
                   onKeyDown={e => e.key === 'Enter' && addEvent()}
-                  placeholder="添加关键事件..."
+                  placeholder="手动添加关键事件..."
                   className="flex-1 px-2 py-1 bg-bg-base border border-border rounded text-xs text-text-primary focus:outline-none focus:border-accent"
                 />
                 <button onClick={addEvent} disabled={!newEvent.trim()}

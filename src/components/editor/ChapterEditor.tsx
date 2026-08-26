@@ -67,15 +67,19 @@ import {
 } from '../../lib/generation/chapter-generation-node'
 import RichEditor, { type RichEditorHandle } from './RichEditor'
 import EmotionBeatCard from './EmotionBeatCard'
+import CoordinationView from './CoordinationView'
 import FloatingToolbar from './FloatingToolbar'
 import ChapterEditorHeader from './ChapterEditorHeader'
 import ChapterMemoryPanel from './ChapterMemoryPanel'
 import ChapterContextPreview from './ChapterContextPreview'
 import ChapterEditorToolbar from './ChapterEditorToolbar'
+import { type ReconciliationActionMap } from './ReconciliationTable'
 import PromptPreviewGate from '../shared/PromptPreviewGate'
 import { useItemLedgerStore } from '../../stores/item-ledger'
 import { useLocationStore } from '../../stores/location'
 import { useCodexStore } from '../../stores/codex'
+import { useDetailedOutlineStore } from '../../stores/detailed-outline'
+import { useEmotionBeatStore } from '../../stores/emotion-beat'
 import { buildEditorEntityReferences } from '../../lib/editor/entity-reference'
 import type {
   AgentSkillExecutionBindingV2,
@@ -248,6 +252,7 @@ const OutlinePreview = lazy(() => import('../outline/OutlinePreview'))
 const ReviewPanel = lazy(() => import('./ReviewPanel'))
 const NotePanel = lazy(() => import('./NotePanel'))
 const ComparePolishPanel = lazy(() => import('./ComparePolishPanel'))
+const SettingLookupPanel = lazy(() => import('./SettingLookupPanel'))
 const ChapterOrganizationModal = lazy(() => import('./ChapterOrganizationModal'))
 
 function LazyPanelFallback() {
@@ -293,6 +298,8 @@ export default function ChapterEditor({ project, outlineNodeId }: Props) {
   const { entries: itemEntries, loadAll: loadItemLedger } = useItemLedgerStore()
   const { locations, loadAll: loadLocations } = useLocationStore()
   const { categories: codexCategories, entries: codexEntries, loadExisting: loadCodex } = useCodexStore()
+  const { detailedOutlines, loadAll: loadDetailedOutlines } = useDetailedOutlineStore()
+  const { cards: emotionBeatCards, loadAll: loadEmotionBeats } = useEmotionBeatStore()
 
   // content 为 HTML 字符串；旧数据是纯文本，RichEditor 内部会自动包装
   const [content, setContent] = useState('')
@@ -363,6 +370,7 @@ export default function ChapterEditor({ project, outlineNodeId }: Props) {
   const [showOutlinePreview, setShowOutlinePreview] = useState(false)
   const [showReviewPanel, setShowReviewPanel] = useState(false)
   const [showNotePanel, setShowNotePanel] = useState(false)
+  const [showSettingsLookup, setShowSettingsLookup] = useState(false)
   const [compareSourceHtml, setCompareSourceHtml] = useState<string | null>(null)
   const [contextBudget, setContextBudget] = useState<ContextBudget | null>(null)
   const [transparentMode, setTransparentMode] = useState(false)
@@ -370,8 +378,6 @@ export default function ChapterEditor({ project, outlineNodeId }: Props) {
   const [proseCandidate, setProseCandidate] = useState<ProseGenerationCandidateV1 | null>(null)
   const [proseGenerationError, setProseGenerationError] = useState('')
   const [planReconciliationCurrent, setPlanReconciliationCurrent] = useState(false)
-  const [reconciliationAction, setReconciliationAction] = useState<'actual-progress' | 'outline' | null>(null)
-  const [reconciliationActionError, setReconciliationActionError] = useState('')
   const [organizationRun, setOrganizationRun] = useState<ChapterOrganizationRun | null>(null)
   const [organizationCurrent, setOrganizationCurrent] = useState(false)
   const [organizingChapter, setOrganizingChapter] = useState(false)
@@ -642,6 +648,8 @@ export default function ChapterEditor({ project, outlineNodeId }: Props) {
   useEffect(() => { loadItemLedger(project.id!) }, [project.id, loadItemLedger])
   useEffect(() => { loadLocations(project.id!) }, [project.id, loadLocations])
   useEffect(() => { loadCodex(project.id!) }, [project.id, loadCodex])
+  useEffect(() => { loadDetailedOutlines(project.id!) }, [project.id, loadDetailedOutlines])
+  useEffect(() => { loadEmotionBeats(project.id!) }, [project.id, loadEmotionBeats])
   useEffect(() => {
     let active = true
     setOrganizationRun(null)
@@ -2516,51 +2524,84 @@ export default function ChapterEditor({ project, outlineNodeId }: Props) {
     await handleChapterMemory({ chapterId, chapterTitle, chapterContent: persisted.html })
   }
 
-  const handleConfirmActualProgress = async () => {
-    if (!currentChapter?.id || !currentChapter.planReconciliation || reconciliationAction) return
+  const handleSaveReconciliation = async (actions: ReconciliationActionMap) => {
+    if (!currentChapter?.id || !currentChapter.planReconciliation) return
+
     const reconciliation = currentChapter.planReconciliation
-    const confirmedActualProgress = [
-      ...reconciliation.completedGoals.map(item => `已完成：${item.text}`),
-      ...reconciliation.deviations.map(item => `实际偏移：${item.text}`),
-      ...reconciliation.newConstraints.map(item => `新增约束：${item.text}`),
-      ...reconciliation.unfinishedGoals.map(item => `仍未完成：${item.text}`),
-    ].join('；')
-    setReconciliationAction('actual-progress')
-    setReconciliationActionError('')
-    try {
-      await updateChapter(currentChapter.id, {
-        planReconciliation: {
-          ...reconciliation,
-          reviewStatus: 'confirmed-constraint',
-          confirmedActualProgress,
-          reviewedAt: Date.now(),
-        },
-      })
-    } catch (error) {
-      setReconciliationActionError(error instanceof Error ? error.message : '实际进展约束写入失败，请重试。')
-    } finally {
-      setReconciliationAction(null)
+    const actionValues = Object.values(actions)
+    const hasApplyActions = actionValues.some(action => action.action === 'apply')
+    const hasAcceptedActions = actionValues.some(action => action.action === 'confirm' || action.action === 'foreshadow')
+    const reviewStatus = hasApplyActions
+      ? 'applied-outline' as const
+      : hasAcceptedActions
+        ? 'confirmed-constraint' as const
+        : 'dismissed' as const
+
+    const updatedReconciliation = {
+      ...reconciliation,
+      actions,
+      reviewStatus,
+      reviewedAt: Date.now(),
     }
+
+    await updateChapter(currentChapter.id, {
+      planReconciliation: updatedReconciliation,
+    })
+
+    // “同步”是作者明确动作，因此在保存时更新章纲；AI 候选本身仍未绕过采纳。
+    if (outlineNode?.id) {
+      const itemsToAdd: string[] = []
+
+      Object.entries(actions).forEach(([actionKey, action]) => {
+        if (action.action === 'apply') {
+          const sectionKey = actionKey.split(':')[0]
+          const items = reconciliation[sectionKey as keyof typeof reconciliation] as Array<{ text: string }> | undefined
+          if (Array.isArray(items)) {
+            action.indices.forEach(index => {
+              if (items[index]) {
+                const prefix = sectionKey === 'unfinishedGoals' ? '[待完成]' :
+                              sectionKey === 'deviations' ? '[补充]' :
+                              sectionKey === 'newConstraints' ? '[新约束]' : '[更新]'
+                itemsToAdd.push(`${prefix} ${items[index].text}`)
+              }
+            })
+          }
+        }
+      })
+
+      if (itemsToAdd.length > 0) {
+        const currentSummary = outlineNode.summary || ''
+        const additions = itemsToAdd.join('\n')
+        const newSummary = currentSummary
+          ? `${currentSummary}\n\n[基于对账更新]\n${additions}`
+          : additions
+        await updateNode(outlineNode.id, { summary: newSummary })
+      }
+    }
+
+    console.log('[Reconciliation] Saved actions:', actions)
   }
 
-  const handleApplyOutlineCandidate = async () => {
-    const reconciliation = currentChapter?.planReconciliation
-    if (!currentChapter?.id || !outlineNode?.id || !reconciliation?.proposedOutlineSummary || reconciliationAction) return
-    setReconciliationAction('outline')
-    setReconciliationActionError('')
+  const handleForeshadowReconciliation = async (item: { section: string; index: number; text: string }) => {
     try {
-      await updateNode(outlineNode.id, { summary: reconciliation.proposedOutlineSummary })
-      await updateChapter(currentChapter.id, {
-        planReconciliation: {
-          ...reconciliation,
-          reviewStatus: 'applied-outline',
-          reviewedAt: Date.now(),
-        },
+      const foreshadowStore = useForeshadowStore.getState()
+      await foreshadowStore.addForeshadow({
+        projectId: project.id!,
+        name: item.text.slice(0, 80) || '对账伏笔',
+        type: 'callback',
+        status: 'planned',
+        description: item.text,
+        plantChapterId: currentChapter?.id ?? null,
+        echoChapterIds: '[]',
+        resolveChapterId: null,
+        notes: `来源：计划—正文对账 ${item.section}#${item.index + 1}`,
+        importance: 5,
       })
-    } catch (error) {
-      setReconciliationActionError(error instanceof Error ? error.message : '本章章纲更新失败，请重试。')
-    } finally {
-      setReconciliationAction(null)
+
+      console.log('[Reconciliation] Added foreshadow:', item.text)
+    } catch (err) {
+      console.error('[Reconciliation] Failed to add foreshadow:', err)
+      throw err
     }
   }
 
@@ -2668,7 +2709,6 @@ export default function ChapterEditor({ project, outlineNodeId }: Props) {
         stepId,
       )
     }
-
     // 1. 一次综合抽取七域候选；作者确认前业务表零写入。
     if (!shouldRunStep(CHAPTER_POST_ADOPTION_STEP_IDS_V1.organization)) {
       if (snapshot.projection.steps[CHAPTER_POST_ADOPTION_STEP_IDS_V1.organization]?.status === 'awaiting_confirmation') {
@@ -3373,6 +3413,7 @@ export default function ChapterEditor({ project, outlineNodeId }: Props) {
           showReviewPanel={showReviewPanel}
           consistencyAlertCount={consistencyCurrent ? consistencyRun?.candidate.findings.length ?? 0 : 0}
           showNotePanel={showNotePanel}
+          showSettingsLookup={showSettingsLookup}
           customInstruction={customInstruction}
           perspectiveCharacterId={perspectiveCharacterId}
           perspectiveCharacters={perspectiveCharacters}
@@ -3408,6 +3449,7 @@ export default function ChapterEditor({ project, outlineNodeId }: Props) {
           onToggleOutlinePreview={() => setShowOutlinePreview(!showOutlinePreview)}
           onToggleReviewPanel={() => setShowReviewPanel(!showReviewPanel)}
           onToggleNotePanel={() => setShowNotePanel(!showNotePanel)}
+          onToggleSettingsLookup={() => setShowSettingsLookup(!showSettingsLookup)}
           onCustomInstructionChange={setCustomInstruction}
           onPerspectiveCharacterChange={characterId => {
             if (currentChapter.id) void updateChapter(currentChapter.id, {
@@ -3490,6 +3532,19 @@ export default function ChapterEditor({ project, outlineNodeId }: Props) {
         </div>
       )}
 
+      {/* H4: 设定查询面板 */}
+      {showSettingsLookup && (
+        <div className="mb-3">
+          <Suspense fallback={<LazyPanelFallback />}>
+            <SettingLookupPanel
+              aiConfig={aiConfig}
+              projectId={project.id!}
+              onClose={() => setShowSettingsLookup(false)}
+            />
+          </Suspense>
+        </div>
+      )}
+
       {/* AI 输出 */}
       {/* A3: 情感节拍卡 */}
       {outlineNode && currentChapter?.id && (
@@ -3500,6 +3555,51 @@ export default function ChapterEditor({ project, outlineNodeId }: Props) {
           worldGroupId={chapterWorldGroupId ?? null}
         />
       )}
+
+      {/* A4: 三层协调视图 */}
+      {outlineNode && currentChapter?.id && (() => {
+        // 计算当前章节索引（用于 5 轨叙事引擎）
+        const sortedChapters = [...chapters].sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
+        const chapterIndex = sortedChapters.findIndex(c => c.id === currentChapter.id) + 1
+
+        // 获取当前章节的场景细纲
+        const currentDetailedOutline = detailedOutlines.find(
+          d => d.outlineNodeId === outlineNode.id
+        )
+
+        // 获取当前章节的情感节拍
+        const currentEmotionCard = emotionBeatCards.find(
+          c => c.chapterId === currentChapter.id
+        )
+
+        return (
+          <CoordinationView
+            chapterTitle={outlineNode.title || currentChapter.title}
+            chapterIndex={chapterIndex}
+            totalChapters={sortedChapters.length}
+            detailedOutline={currentDetailedOutline}
+            emotionBeatCard={currentEmotionCard}
+            onApplyOutline={async (newOutline) => {
+              if (currentDetailedOutline?.id != null) {
+                await import('../../stores/detailed-outline').then(({ useDetailedOutlineStore }) => {
+                  useDetailedOutlineStore.getState().save(currentDetailedOutline.id!, {
+                    scenes: newOutline.scenes,
+                  })
+                })
+              }
+            }}
+            onApplyBeats={async (newBeats) => {
+              if (currentEmotionCard?.id != null) {
+                await import('../../stores/emotion-beat').then(({ useEmotionBeatStore }) => {
+                  useEmotionBeatStore.getState().updateCard(currentEmotionCard.id!, {
+                    beats: newBeats,
+                  })
+                })
+              }
+            }}
+          />
+        )
+      })()}
 
       {/* Phase 21.3: 上下文预算条 */}
       <details className="mb-2 rounded-lg border border-border bg-bg-surface/60 px-3 py-2 text-xs">
@@ -3775,13 +3875,16 @@ export default function ChapterEditor({ project, outlineNodeId }: Props) {
         summary={currentChapter.summary}
         hasText={!!plainText}
         memoryBusy={autoProcessing === 'memory' || memoryAI.isStreaming}
-        reconciliationBusy={reconciliationAction}
-        reconciliationError={reconciliationActionError}
+        chapterTitle={chapterDisplay?.title ?? currentChapter.title}
+        nextChapterTitle={(() => {
+          const next = findNextCanonicalChapter(nodes, chapters, currentChapter)
+          return next?.title
+        })()}
         reconciliation={currentChapter.planReconciliation}
         reconciliationCurrent={planReconciliationCurrent}
         onGenerateMemory={() => { void handleManualMemory() }}
-        onConfirmActualProgress={() => { void handleConfirmActualProgress() }}
-        onApplyOutlineCandidate={() => { void handleApplyOutlineCandidate() }}
+        onSaveReconciliation={handleSaveReconciliation}
+        onForeshadowReconciliation={handleForeshadowReconciliation}
       />
 
       {/* TipTap 富文本编辑器 / 对照润色模式 */}

@@ -1,9 +1,10 @@
 import type { AssembleContextResult } from '../registry/types'
 import type { WorkspaceContentRevisionVectorV1 } from '../authoring/content-revision'
+import type { GenerationMode, ChunkedGenerationConfig } from './generation-modes'
 
 export type OutlineGenerationRequest =
   | { kind: 'volumes' }
-  | { kind: 'chapters'; volumeId: number }
+  | { kind: 'chapters'; volumeId: number; mode?: GenerationMode; chunkedConfig?: ChunkedGenerationConfig }
   | { kind: 'single-volume'; volumeId: number }
   | { kind: 'single-chapter'; chapterId: number }
 

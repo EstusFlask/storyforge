@@ -1,4 +1,4 @@
-import { BookOpenCheck, Check, ClipboardList, Eye, GitBranch, Loader2, RefreshCw, ShieldCheck, StickyNote, X } from 'lucide-react'
+import { BookOpenCheck, Check, ClipboardList, Eye, GitBranch, Loader2, RefreshCw, Search, ShieldCheck, StickyNote, X } from 'lucide-react'
 import { CInput } from '../shared/CompositionInput'
 import type { ImpactPatchCandidateV1 } from '../../lib/agent/run/impact-patch-durable'
 import type { ImpactOutlineRegenerationCandidateV1 } from '../../lib/agent/run/impact-outline-regeneration-durable'
@@ -80,6 +80,7 @@ interface Props {
   showReviewPanel: boolean
   consistencyAlertCount: number
   showNotePanel: boolean
+  showSettingsLookup: boolean
   customInstruction: string
   perspectiveCharacterId: number | null
   perspectiveCharacters: Array<{ id: number; name: string }>
@@ -115,6 +116,7 @@ interface Props {
   onToggleOutlinePreview: () => void
   onToggleReviewPanel: () => void
   onToggleNotePanel: () => void
+  onToggleSettingsLookup: () => void
   onCustomInstructionChange: (value: string) => void
   onPerspectiveCharacterChange: (characterId: number | null) => void
 }
@@ -163,6 +165,7 @@ export default function ChapterEditorToolbar({
   showReviewPanel,
   consistencyAlertCount,
   showNotePanel,
+  showSettingsLookup,
   customInstruction,
   perspectiveCharacterId,
   perspectiveCharacters,
@@ -198,6 +201,7 @@ export default function ChapterEditorToolbar({
   onToggleOutlinePreview,
   onToggleReviewPanel,
   onToggleNotePanel,
+  onToggleSettingsLookup,
   onCustomInstructionChange,
   onPerspectiveCharacterChange,
 }: Props) {
@@ -705,6 +709,17 @@ export default function ChapterEditorToolbar({
           ))}
         </select>
       </label>
+      <button onClick={onToggleSettingsLookup}
+        title="设定查询"
+        aria-pressed={showSettingsLookup}
+        className={`flex items-center gap-1 px-3 py-1.5 text-xs rounded-md transition-colors ${
+          showSettingsLookup
+            ? 'bg-purple-500/10 text-purple-400'
+            : 'bg-bg-elevated text-text-secondary hover:text-text-primary'
+        }`}>
+        <Search className="w-3 h-3" />
+        设定查询
+      </button>
       <CInput value={customInstruction} onChange={event => onCustomInstructionChange(event.target.value)}
         placeholder="自定义指令..."
         className="min-w-[220px] flex-1 rounded-md border border-border bg-bg-elevated px-3 py-1.5 text-xs text-text-primary focus:outline-none focus:border-accent" />
