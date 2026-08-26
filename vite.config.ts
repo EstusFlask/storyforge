@@ -30,6 +30,12 @@ function manualChunkFor(moduleId: string): string | undefined {
 
   if (id.endsWith('/src/lib/ai/context-builder.ts')) return 'ai-context'
   if (id.endsWith('/src/lib/context-gateway/selector.ts')) return 'context-selector'
+  // System prompt catalogs are large, immutable data. Keep them in one
+  // cacheable chunk instead of making every application release reparse them
+  // as part of the route entry bundle.
+  if (/\/src\/lib\/ai\/prompt-seeds-(?:core|tools|genre-packs|genre-packs-extended)\.ts$/.test(id)) {
+    return 'prompt-seeds-system'
+  }
   return undefined
 }
 
