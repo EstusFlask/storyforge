@@ -69,11 +69,10 @@ export async function readAgentEvents(conversationId: number, scope?: WorkspaceS
     .where('conversationId')
     .equals(conversationId)
     .sortBy('sequence')
-  const owned: AgentEvent[] = []
-  for (const event of events) {
-    if (await assertRecordInScope(resolved, 'agentEvents', event, { owner: 'work' })) owned.push(event)
-  }
-  return owned
+  const ownership = await Promise.all(events.map(event => (
+    assertRecordInScope(resolved, 'agentEvents', event, { owner: 'work' })
+  )))
+  return events.filter((_, index) => ownership[index])
 }
 
 export async function appendAgentEvent(input: {
@@ -96,10 +95,13 @@ export async function appendAgentEvent(input: {
       .where('conversationId')
       .equals(input.conversationId)
       .toArray()
-    const existing: AgentEvent[] = []
-    for (const event of candidates) {
-      if (await assertRecordInScope(scope, 'agentEvents', event, { owner: 'work' })) existing.push(event)
-    }
+    // A long conversation can contain hundreds of direct-owner rows. Validate
+    // them under one global Promise.all so the surrounding IndexedDB
+    // transaction cannot auto-commit between synchronous ownership checks.
+    const ownership = await Promise.all(candidates.map(event => (
+      assertRecordInScope(scope, 'agentEvents', event, { owner: 'work' })
+    )))
+    const existing = candidates.filter((_, index) => ownership[index])
     const sequence = existing.reduce((max, event) => Math.max(max, event.sequence), 0) + 1
     const createdAt = Date.now()
     const event = stampNewRecord(scope, 'agentEvents', {
