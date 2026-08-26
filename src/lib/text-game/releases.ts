@@ -5,6 +5,7 @@ import { freezeAvgMediaAsset, parseAvgPresentationContent, validateAvgPresentati
 import { parseNarrativeSimulationContent, validateNarrativeSimulationContent } from '../narrative-simulation/runtime'
 import { parseOpenWorldContent, validateOpenWorldContent } from '../open-world/runtime'
 import type {
+  AnyGameReleaseManifest,
   AnyGameReleaseManifestV1,
   AvgGameReleaseManifestV1,
   AvgMediaAsset,
@@ -16,11 +17,17 @@ import type {
   GameDefinition,
   GameRelease,
   GameReleaseManifestV1,
+  GameReleaseManifestV2,
   NarrativeSimulationGameReleaseManifestV1,
   TextOpenWorldGameReleaseManifestV1,
   WorkspaceScope,
   WorldReleaseManifestV2,
 } from '../types'
+import {
+  parseGameReleaseManifestV2,
+  verifyGameReleaseManifestV2,
+} from '../game-production/runtime-package'
+import { hashGameProductionValueV2 } from '../game-production/hash'
 import { assertReleaseUnchanged } from '../world-engine/releases'
 import { assertRecordInScope, resolveScope, scopeTransactionTables } from '../world-engine/scope'
 import {
@@ -707,15 +714,31 @@ export async function publishGameDefinition(input: {
 export async function assertGameReleaseUnchanged(gameReleaseId: number): Promise<GameRelease> {
   const release = await db.gameReleases.get(gameReleaseId)
   if (!release) throw new Error('[storygame] GameRelease 不存在')
-  const manifest = parseAnyGameReleaseManifest(release.manifestJson)
-  if (await sha256(manifest) !== release.contentHash) throw new Error('[storygame] GameRelease 已被篡改')
+  const manifest = parseAnyGameReleaseManifestVersion(release.manifestJson)
+  const expectedReleaseHash = manifest.version === 2
+    ? await hashGameProductionValueV2(await verifyGameReleaseManifestV2(manifest))
+    : await sha256(manifest)
+  if (expectedReleaseHash !== release.contentHash) throw new Error('[storygame] GameRelease 已被篡改')
   const worldRelease = await db.worldReleases.get(release.worldReleaseId)
+  const expectedWorldHash = manifest.version === 2
+    ? manifest.sourceWorldRelease.contentHash
+    : manifest.worldRelease.contentHash
   if (!worldRelease || worldRelease.projectId !== release.projectId || worldRelease.worldId !== release.worldId
-    || worldRelease.contentHash !== manifest.worldRelease.contentHash) {
+    || worldRelease.contentHash !== expectedWorldHash) {
     throw new Error('[storygame] GameRelease 的 WorldRelease 绑定损坏')
   }
   await assertReleaseUnchanged(worldRelease.id!)
   return release
+}
+
+/** Parse either immutable release generation without weakening legacy player-specific parsers. */
+export function parseAnyGameReleaseManifestVersion(value: string): AnyGameReleaseManifest {
+  let raw: unknown
+  try { raw = JSON.parse(value) } catch { throw new Error('[game-release] GameRelease 不是合法 JSON') }
+  if (raw && typeof raw === 'object' && (raw as { version?: unknown }).version === 2) {
+    return parseGameReleaseManifestV2(raw)
+  }
+  return parseAnyGameReleaseManifest(value)
 }
 
 export function parseGameReleaseManifest(value: string): GameReleaseManifestV1 {
@@ -727,7 +750,10 @@ export function parseGameReleaseManifest(value: string): GameReleaseManifestV1 {
 }
 
 export function parseAnyGameReleaseManifest(value: string): AnyGameReleaseManifestV1 {
-  const parsed = JSON.parse(value) as AnyGameReleaseManifestV1
+  const raw = JSON.parse(value) as AnyGameReleaseManifestV1 | GameReleaseManifestV2
+  const parsed = raw.version === 2
+    ? projectGameReleaseV2ForLegacyPlayers(parseGameReleaseManifestV2(raw))
+    : raw
   if (parsed.schema !== 'storyforge.game-release' || parsed.version !== 1
     || (parsed.productType !== 'storygame' && parsed.productType !== 'character-interaction'
       && parsed.productType !== 'text-adventure' && parsed.productType !== 'avg'
@@ -843,6 +869,56 @@ export function parseAnyGameReleaseManifest(value: string): AnyGameReleaseManife
     if (!report.valid) throw new Error(`[textworld] GameRelease 开放世界内容无效:${report.errors.join('；')}`)
   }
   return structuredClone(parsed)
+}
+
+/**
+ * Player workbenches historically render the v1 view shape. v2 remains the
+ * immutable source of truth and is verified independently; this projection is
+ * display/runtime compatibility only and never participates in release hashes.
+ */
+function projectGameReleaseV2ForLegacyPlayers(manifest: GameReleaseManifestV2): AnyGameReleaseManifestV1 {
+  const pkg = manifest.runtimePackage
+  const base = {
+    schema: 'storyforge.game-release' as const,
+    version: 1 as const,
+    productType: pkg.productType,
+    definition: structuredClone(pkg.definition),
+    worldRelease: {
+      contentHash: pkg.sourceWorld.contentHash,
+      narrativeModuleExportId: pkg.sourceWorld.selection.narrativeModuleExportIds[0] ?? 0,
+    },
+    narrative: structuredClone(pkg.narrative),
+  }
+  if (pkg.productType === 'storygame') return { ...base, productType: 'storygame' }
+  if (pkg.productType === 'character-interaction') {
+    return { ...base, productType: 'character-interaction', interaction: structuredClone(pkg.interaction!) }
+  }
+  if (pkg.productType === 'text-adventure') {
+    return {
+      ...base, productType: 'text-adventure', interaction: structuredClone(pkg.interaction!),
+      adventure: structuredClone(pkg.adventure!),
+    }
+  }
+  if (pkg.productType === 'avg') {
+    return {
+      ...base, productType: 'avg',
+      presentation: {
+        version: 1, cues: structuredClone(pkg.presentation!.cues),
+        assets: pkg.presentation!.assets.map(asset => {
+          const { blobContentHash: _blobContentHash, ...frozen } = asset
+          return frozen
+        }),
+      },
+    }
+  }
+  if (pkg.productType === 'narrative-simulation') {
+    return { ...base, productType: 'narrative-simulation', simulation: structuredClone(pkg.simulation!) }
+  }
+  return {
+    ...base, productType: 'text-open-world', interaction: structuredClone(pkg.interaction!),
+    adventure: structuredClone(pkg.adventure!), simulation: structuredClone(pkg.simulation!),
+    openWorld: structuredClone(pkg.openWorld!),
+  }
 }
 
 export function parseInteractionGameReleaseManifest(value: string) {

@@ -49,6 +49,8 @@ export interface CreateAgentRunV1Input {
   scope: WorkspaceScope
   /** Runtime runs are Instance-owned; omitted runs remain Work-owned. */
   simulationSessionId?: number | null
+  /** Production runs stay Work-owned but are additionally bound to one immutable Build. */
+  gameBuildId?: number | null
   worldGroupId?: number | null
   conversationId?: number | null
   contract: unknown
@@ -112,11 +114,38 @@ async function waitForHash(value: unknown): Promise<string> {
   return Dexie.waitFor(hashCanonicalValue(value))
 }
 
+function contractParent(contract: AgentRunContract): {
+  runId: number
+  relation: string
+  receiptHash: string | null
+  artifactHash: string | null
+  kind: 'ownership' | 'lineage'
+} | null {
+  if (contract.ownership) {
+    return {
+      runId: contract.ownership.parentRunId,
+      relation: contract.ownership.relation,
+      receiptHash: null,
+      artifactHash: null,
+      kind: 'ownership',
+    }
+  }
+  const parent = contract.lineage?.parent
+  return parent ? {
+    runId: parent.runId,
+    relation: parent.relation,
+    receiptHash: parent.receiptHash,
+    artifactHash: parent.artifactHash ?? null,
+    kind: 'lineage',
+  } : null
+}
+
 async function assertContractScope(
   scope: WorkspaceScope,
   contract: AgentRunContract,
   expectedWorldGroupId: number | null,
   expectedSimulationSessionId: number | null,
+  expectedGameBuildId: number | null,
 ): Promise<void> {
   if (contract.scope.projectId !== scope.projectId) {
     fail('contract_scope', 'RunContract.projectId 与 WorkspaceScope 不一致')
@@ -127,12 +156,29 @@ async function assertContractScope(
   if (!sameNullableId(contract.scope.runtime?.simulationSessionId, expectedSimulationSessionId)) {
     fail('contract_scope', 'RunContract.runtime 与运行 owner 不一致')
   }
+  if (!sameNullableId(contract.scope.gameProduction?.gameBuildId, expectedGameBuildId)) {
+    fail('contract_scope', 'RunContract.gameProduction 与运行 Build owner 不一致')
+  }
+  if (expectedSimulationSessionId != null && expectedGameBuildId != null) {
+    fail('contract_scope', 'Instance-owned 运行不得同时绑定 GameBuild')
+  }
 
   if (expectedSimulationSessionId != null) {
     if ((contract.scope.chapterIds?.length ?? 0) > 0 || (contract.scope.outlineNodeIds?.length ?? 0) > 0) {
       fail('runtime_authoring_scope', 'Instance-owned 运行不得混入作者章节或大纲作用域')
     }
     await assertSimulationSessionScope(scope, expectedSimulationSessionId, expectedWorldGroupId)
+  }
+  if (expectedGameBuildId != null) {
+    const build = await db.gameBuilds.get(expectedGameBuildId)
+    const binding = contract.scope.gameProduction
+    if (!build || !binding || !await assertRecordInScope(scope, 'gameBuilds', build, { owner: 'work' })) {
+      fail('game_build_scope', 'RunContract 引用了越界或不存在的 GameBuild')
+    }
+    if (build.buildNumber !== binding.buildNumber || build.controlEpoch !== binding.controlEpoch
+      || build.planHash !== binding.planHash) {
+      fail('game_build_stale', 'RunContract 的 Build number/epoch/planHash 已过期')
+    }
   }
 
   if (expectedWorldGroupId != null) {
@@ -275,10 +321,11 @@ async function verifyContractRecord(run: AgentRunRecord & { id: number }): Promi
     contract.scope.projectId !== run.projectId
     || !sameNullableId(contract.scope.worldGroupId, run.worldGroupId)
     || !sameNullableId(contract.scope.runtime?.simulationSessionId, run.simulationSessionId)
+    || !sameNullableId(contract.scope.gameProduction?.gameBuildId, run.gameBuildId)
   ) {
     fail('contract_scope', '运行契约内嵌作用域与运行行不一致')
   }
-  const parent = contract.lineage?.parent
+  const parent = contractParent(contract)
   if (
     !sameNullableId(parent?.runId, run.parentRunId)
     || !sameNullableText(parent?.relation, run.parentRelation)
@@ -290,31 +337,44 @@ async function verifyContractRecord(run: AgentRunRecord & { id: number }): Promi
   return contract
 }
 
-async function assertParentLineageForCreationV1(
+async function assertParentRelationForCreationV1(
   scope: WorkspaceScope,
   contract: AgentRunContract,
   simulationSessionId: number | null,
+  gameBuildId: number | null,
 ): Promise<void> {
-  const lineage = contract.lineage?.parent
-  if (!lineage) return
-  const parent = await readVerifiedAgentRunInTransactionV1(scope, lineage.runId)
-  if (
-    parent.projection.state !== 'completed'
-    || !parent.projection.terminalReceiptHash
-    || parent.projection.terminalReceiptHash !== lineage.receiptHash
-  ) {
-    fail('parent_receipt', '父运行没有匹配的 fresh terminal receipt')
+  const relation = contractParent(contract)
+  if (!relation) return
+  const parent = await readVerifiedAgentRunInTransactionV1(scope, relation.runId)
+  if (relation.kind === 'lineage') {
+    if (
+      parent.projection.state !== 'completed'
+      || !parent.projection.terminalReceiptHash
+      || parent.projection.terminalReceiptHash !== relation.receiptHash
+    ) {
+      fail('parent_receipt', '父运行没有匹配的 fresh terminal receipt')
+    }
+  } else {
+    const parentProduction = parent.contract.scope.gameProduction
+    const childProduction = contract.scope.gameProduction
+    if (!parentProduction || !childProduction
+      || parentProduction.taskKey !== '$root'
+      || relation.relation !== `task:${childProduction.taskKey}`
+      || ['completed', 'failed', 'cancelled', 'recovery_required'].includes(parent.projection.state)) {
+      fail('ownership_relation', '生产任务 ownership 必须绑定同一活动 Build 的 root Run 和 task relation')
+    }
   }
   if (
     parent.contract.scope.projectId !== contract.scope.projectId
     || !sameNullableId(parent.contract.scope.worldGroupId, contract.scope.worldGroupId)
     || !sameNullableId(parent.run.simulationSessionId, simulationSessionId)
+    || !sameNullableId(parent.run.gameBuildId, gameBuildId)
   ) {
     fail('parent_scope', '父运行与子运行不属于同一项目/世界/owner 作用域')
   }
   const existing = await db.agentRuns
     .where('[parentRunId+parentRelation]')
-    .equals([lineage.runId, lineage.relation])
+    .equals([relation.runId, relation.relation])
     .first()
   if (existing) fail('duplicate_child', '同一父运行和关系已经存在子运行')
 }
@@ -459,8 +519,15 @@ export async function createAgentRunV1(input: CreateAgentRunV1Input): Promise<Ag
   }
   const conversationId = input.conversationId ?? null
   const simulationSessionId = input.simulationSessionId ?? null
+  const gameBuildId = input.gameBuildId ?? null
   if (simulationSessionId != null && conversationId != null) {
     fail('runtime_conversation', 'Instance-owned 运行不得绑定作者对话')
+  }
+  if (simulationSessionId != null && gameBuildId != null) {
+    fail('runtime_game_build', 'Instance-owned 运行不得绑定生产 Build')
+  }
+  if (gameBuildId != null && conversationId != null) {
+    fail('production_conversation', '生产 Build 运行不得绑定作者对话')
   }
   const now = input.now ?? Date.now()
 
@@ -472,20 +539,22 @@ export async function createAgentRunV1(input: CreateAgentRunV1Input): Promise<Ag
       db.chapters,
       db.agentConversations,
       ...(simulationSessionId == null ? [] : [db.simulationSessions]),
+      ...(gameBuildId == null ? [] : [db.gameBuilds]),
       db.agentRuns,
       db.agentRunEvents,
     ),
     async () => {
-      await assertContractScope(input.scope, accepted.contract, worldGroupId, simulationSessionId)
+      await assertContractScope(input.scope, accepted.contract, worldGroupId, simulationSessionId, gameBuildId)
       await assertOptionalConversationScope(input.scope, conversationId, worldGroupId)
-      await assertParentLineageForCreationV1(input.scope, accepted.contract, simulationSessionId)
+      await assertParentRelationForCreationV1(input.scope, accepted.contract, simulationSessionId, gameBuildId)
 
-      const parent = accepted.contract.lineage?.parent
+      const parent = contractParent(accepted.contract)
 
       const rootInput: AgentRunRecord = {
         projectId: input.scope.projectId,
         workId: simulationSessionId == null ? input.scope.workId : null,
         simulationSessionId,
+        gameBuildId,
         worldGroupId,
         conversationId,
         parentRunId: parent?.runId ?? null,
@@ -546,7 +615,7 @@ export async function createAgentRunV1(input: CreateAgentRunV1Input): Promise<Ag
       }
     },
   )
-  const parentRunId = accepted.contract.lineage?.parent.runId
+  const parentRunId = contractParent(accepted.contract)?.runId
   return parentRunId == null ? create() : withAgentRunMutationLockV1(parentRunId, create)
 }
 
@@ -589,11 +658,21 @@ export async function readAgentRunChildV1(input: {
   return readAgentRunV1(input.scope, row.id)
 }
 
-/** Verify that a child still points at the parent's current terminal receipt. */
+/** Verify the child's immutable ownership parent or fresh lineage parent. */
 export async function readCurrentAgentRunParentV1(
   scope: WorkspaceScope,
   child: AgentRunSnapshotV1,
 ): Promise<AgentRunSnapshotV1 | null> {
+  const ownership = child.contract.ownership
+  if (ownership) {
+    const parent = await readAgentRunV1(scope, ownership.parentRunId)
+    if (parent.run.gameBuildId !== child.run.gameBuildId
+      || parent.contract.scope.gameProduction?.taskKey !== '$root'
+      || ownership.relation !== `task:${child.contract.scope.gameProduction?.taskKey ?? ''}`) {
+      fail('ownership_relation', '生产任务 ownership 已损坏或跨 Build')
+    }
+    return parent
+  }
   const lineage = child.contract.lineage?.parent
   if (!lineage) return null
   const parent = await readAgentRunV1(scope, lineage.runId)
@@ -788,6 +867,7 @@ export async function reviseAgentRunContractV1(input: {
       db.worldGroups,
       db.outlineNodes,
       db.chapters,
+      db.gameBuilds,
       db.agentRuns,
       db.agentRunEvents,
     ),
@@ -800,14 +880,22 @@ export async function reviseAgentRunContractV1(input: {
       if (canonicalStringify(snapshot.contract.lineage ?? null) !== canonicalStringify(accepted.contract.lineage ?? null)) {
         fail('lineage_immutable', '运行创建后不得修改父子来源关系')
       }
+      if (canonicalStringify(snapshot.contract.ownership ?? null) !== canonicalStringify(accepted.contract.ownership ?? null)) {
+        fail('ownership_immutable', '运行创建后不得修改所有权父子关系')
+      }
       if (canonicalStringify(snapshot.contract.scope.runtime ?? null) !== canonicalStringify(accepted.contract.scope.runtime ?? null)) {
         fail('runtime_scope_immutable', '运行创建后不得修改 runtime 输入边界')
+      }
+      if (canonicalStringify(snapshot.contract.scope.gameProduction ?? null)
+        !== canonicalStringify(accepted.contract.scope.gameProduction ?? null)) {
+        fail('game_production_scope_immutable', '运行创建后不得修改 gameProduction 输入边界')
       }
       await assertContractScope(
         input.scope,
         accepted.contract,
         snapshot.run.worldGroupId ?? null,
         snapshot.run.simulationSessionId ?? null,
+        snapshot.run.gameBuildId ?? null,
       )
       const event = parseAgentRunEventV1({
         version: 1,

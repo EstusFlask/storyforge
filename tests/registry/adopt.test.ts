@@ -44,6 +44,8 @@ describe('Phase 1.2a · 统一写回层', () => {
       expect(ADOPTION_BY_TARGET.get(schema.target)).toBe(schema)
     }
     expect(ADOPTION_EXTENSIONS.map(extension => extension.id)).toEqual([
+      'ttrpg-product-authoring',
+      'ttrpg-campaign-authoring',
       'reference-analysis-run-lifecycle',
       'reference-analysis-source-lifecycle',
       'reference-analysis-chunk-lifecycle',
@@ -83,6 +85,19 @@ describe('Phase 1.2a · 统一写回层', () => {
       'world-game-avg-presentations',
       'world-game-avg-media-assets',
       'world-game-avg-media-blobs',
+      'character-interaction-production-roots',
+      'character-interaction-production-steps',
+      'character-interaction-production-artifacts',
+      'character-interaction-production-media',
+      'character-interaction-product-releases',
+      'game-production-roots',
+      'game-production-briefs',
+      'game-production-commands',
+      'game-production-builds',
+      'game-production-artifacts',
+      'game-production-release-adoption',
+      'game-production-textsim-adoption',
+      'game-production-openworld-adoption',
     ])
     for (const extension of ADOPTION_EXTENSIONS) {
       expect(REGISTRY_BY_NAME.has(extension.target), `ADOPTION_EXTENSION target 缺表:${extension.target}`).toBe(true)

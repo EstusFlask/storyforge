@@ -136,6 +136,31 @@ function normalize(data: any) {
   delete data.comicVisualSubjects
   delete data.comicMediaAssets
   delete data.mediaBlobObjects
+  // 上层游戏生产、跑团与角色互动产品晚于历史 v3 fixture。
+  delete data.gameProductions
+  delete data.gameProductionBriefs
+  delete data.gameProductionCommands
+  delete data.gameBuilds
+  delete data.gameBuildArtifacts
+  delete data.gameQualityGateReceipts
+  delete data.gameRulePacks
+  delete data.ttrpgCampaignModules
+  delete data.ttrpgSessionParticipants
+  delete data.ttrpgRuntimeAssetRequests
+  delete data.ttrpgSourceSelections
+  delete data.ttrpgProductions
+  delete data.ttrpgProductionBriefs
+  delete data.ttrpgProductionBuilds
+  delete data.ttrpgProductionSteps
+  delete data.ttrpgProductionMediaAssets
+  delete data.ttrpgProductReleases
+  delete data.characterInteractionSourceSelections
+  delete data.characterInteractionBriefs
+  delete data.characterInteractionProductions
+  delete data.characterInteractionProductionSteps
+  delete data.characterInteractionArtifacts
+  delete data.characterInteractionMediaAssets
+  delete data.characterInteractionProductReleases
   delete data.project?._activeWorldExportId
   delete data.project?._activeWorkExportId
   for (const row of data.characters ?? []) {

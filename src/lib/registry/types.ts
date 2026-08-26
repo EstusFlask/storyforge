@@ -190,6 +190,13 @@ export interface ExportRemapField {
    * - 'null' / 省略  置空(可空外键 / worldGroupId / 树 parentId)
    */
   onUnmapped?: 'drop' | 'require' | 'null'
+  /**
+   * Optional backward pointer patched after every table is imported. Use only
+   * to break an intentional parent/current-child cycle; ordinary refs still
+   * participate in topological ordering so source-missing policies remain
+   * accurate during the first pass.
+   */
+  deferImport?: true
 }
 
 /**
@@ -219,6 +226,14 @@ export type ExportRefRemap = {
   exportAs: string
   itemField: string
   storage?: 'array' | 'json-string'
+} | {
+  /** JSON object paths containing one local foreign key each. */
+  field: string
+  remapVia: string
+  kind: 'json-id-paths'
+  paths: readonly string[]
+  exportAs: string
+  onUnmapped?: 'require' | 'null'
 }
 
 /**
@@ -239,6 +254,8 @@ export type PortableDataSpec = {
   /** Binary field encoded as a data URL after the IndexedDB snapshot transaction. */
   kind: 'binary-blob'
   field: string
+  /** Optional shared-object link that replaces legacy inline bytes. */
+  allowMissingWhen?: { exportField: string; importField: string }
   /** Optional metadata contract checked before an imported binary row is committed. */
   integrity?: {
     metadataTable: string
@@ -254,6 +271,19 @@ export type PortableDataSpec = {
 } | {
   /** CTXG-2 immutable UTF-8 body or a verified evidence-pruned tombstone. */
   kind: 'exact-run-artifact'
+} | {
+  /** Content-addressed media object exported as verified inline binary. */
+  kind: 'shared-media-object'
+  dataField: string
+  hashField: string
+  sizeField: string
+  mimeField: string
+  backendField: string
+  stateField: string
+  pathField: string
+  leaseOwnerField: string
+  leaseExpiresAtField: string
+  lastVerifiedAtField: string
 }
 
 /**
@@ -351,6 +381,8 @@ export interface FieldSpec {
   target: string
   /** canonical 字段名 */
   field: string
+  /** Optional stable CreativeArtifact output id resolved through this same registry. */
+  candidateId?: string
   type: 'string' | 'longtext' | 'json' | 'object' | 'number' | 'boolean' | 'enum' | 'array'
   enums?: string[]
   worldScoped?: boolean
@@ -551,8 +583,22 @@ export interface AssembleContextInput {
   characterId?: number | null
   /** SIM-1C: 冻结运行时会话，供 NPC 演进候选只读上下文使用。 */
   simulationSessionId?: number
+  /** TTRPG R7: exact player character POV for the isolated AI-player reader. */
+  ttrpgPlayerActorKey?: string
+  /** GAMEPROD-1 registered production context anchors. */
+  gameProductionId?: number
+  gameBuildId?: number
+  gameWorldReleaseId?: number
+  gameArtifactKeys?: string[]
+  /** TTRPG-2A registered immutable/editable product authoring inputs. */
+  ttrpgRulePackId?: number
+  ttrpgCampaignModuleId?: number
+  /** R3 AI character-card candidate target inside the registered CampaignPack. */
+  ttrpgCharacterKey?: string
   /** CHATGAME-2: exactly one character viewpoint for the registered interaction reader. */
   interactionParticipantKey?: string
+  /** CHATGAME-CI-2: frozen product source + confirmed product Brief. */
+  characterInteractionProductionId?: number
   /** CM-1: 本次明确参与增量融合的碎片；由 inspirationWorkspace source 读取。 */
   inspirationFragmentIds?: string[]
   /** CM-1: 单世界与多世界各自维护最近确认版本。 */

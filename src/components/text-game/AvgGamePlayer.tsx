@@ -1,10 +1,11 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { ArrowLeft, BookOpen, ChevronRight, Eye, EyeOff, FastForward, Gauge, GitBranch, History, ImageOff, Maximize2, Play, Plus, RotateCcw, Save, Settings2, SkipForward, Trash2, Volume2, VolumeX, X } from 'lucide-react'
 import type { FrozenNarrativeChoice, Project, WorkspaceScope } from '../../lib/types'
 import { useAvgGamePlayerStore } from '../../stores/avg-game-player'
-import { preloadAvgReleaseMedia } from '../../lib/avg/media'
 import { applyAvgCue } from '../../lib/avg/runtime'
 import { currentPlayerReleases } from '../../lib/text-game/player-library'
+import { verifyGameMediaRuntimeUrlsV1 } from '../../lib/game-production/media-runtime-verifier'
+import { recordGameMediaRuntimeMeasurementV1 } from '../../lib/game-production/quality-receipts'
 import { useDialog } from '../shared/Dialog'
 import './player-roadshow.css'
 
@@ -13,12 +14,47 @@ type PlayerPanel = 'history' | 'saves' | null
 const DEFAULTS: Preferences = { muted: false, reducedMotion: false, images: true, auto: false, fast: false, textSpeed: 35, volume: .8 }
 const CUE_PHASES = ['before', 'during', 'after']
 
+export async function loadAvgPlayerInitialSelectionV1(input: {
+  scope: WorkspaceScope
+  worldGroupId: number | null
+  initialSessionId?: number | null
+  load: (scope: WorkspaceScope, worldGroupId: number | null, openLibrary?: boolean) => Promise<void>
+  select: (sessionId: number | null) => Promise<void>
+  cancelled?: () => boolean
+}): Promise<void> {
+  // Always load the library without auto-selecting an arbitrary existing
+  // session. Direct Build Preview then performs exactly one explicit select.
+  // This prevents the first resolver from being disposed halfway through a
+  // multi-asset preload by a second, same-session select.
+  await input.load(input.scope, input.worldGroupId, true)
+  if (input.initialSessionId != null && !input.cancelled?.()) {
+    await input.select(input.initialSessionId)
+  }
+}
+
 function splitAttributedText(text: string): { speaker: string; text: string } | null {
   const match = text.match(/^【([^】]+)】\s*([\s\S]*)$/)
   return match ? { speaker: match[1].trim(), text: match[2].trimStart() } : null
 }
 
-export default function AvgGamePlayer(props: { project: Project; scope: WorkspaceScope; worldGroupId: number | null }) {
+function currentBrowserEnvironment() {
+  const userAgent = navigator.userAgent || 'unknown-browser'
+  const browserName = /Edg\//.test(userAgent) ? 'edge'
+    : /Chrome\//.test(userAgent) ? 'chromium'
+      : /Firefox\//.test(userAgent) ? 'firefox'
+        : /Safari\//.test(userAgent) ? 'safari' : 'browser'
+  return {
+    browserName,
+    browserVersion: userAgent,
+    platform: navigator.platform || 'desktop',
+    viewport: {
+      width: Math.max(1, window.innerWidth),
+      height: Math.max(1, window.innerHeight),
+    },
+  }
+}
+
+export default function AvgGamePlayer(props: { project: Project; scope: WorkspaceScope; worldGroupId: number | null; initialSessionId?: number | null }) {
   const store = useAvgGamePlayerStore()
   const dialog = useDialog()
   const [prefs, setPrefs] = useState<Preferences>(() => ({ ...DEFAULTS, reducedMotion: typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches }))
@@ -30,20 +66,52 @@ export default function AvgGamePlayer(props: { project: Project; scope: Workspac
   const [sceneTitleVisible, setSceneTitleVisible] = useState(false)
   const [notice, setNotice] = useState('')
   const [catalogReleaseId, setCatalogReleaseId] = useState<number | null>(null)
+  const mediaVerificationKeys = useRef(new Set<string>())
 
-  useEffect(() => { setCatalogReleaseId(null); void store.load(props.scope, props.worldGroupId, true) }, [props.scope.projectId, props.scope.worldId, props.scope.workId, props.worldGroupId]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    let cancelled = false
+    setCatalogReleaseId(null)
+    void loadAvgPlayerInitialSelectionV1({
+      scope: props.scope, worldGroupId: props.worldGroupId, initialSessionId: props.initialSessionId,
+      load: store.load, select: store.select, cancelled: () => cancelled,
+    }).catch(() => undefined)
+    return () => { cancelled = true }
+  }, [props.scope.projectId, props.scope.worldId, props.scope.workId, props.worldGroupId, props.initialSessionId]) // eslint-disable-line react-hooks/exhaustive-deps
   const catalog = useMemo(() => currentPlayerReleases(store.releases), [store.releases])
   const catalogRelease = catalog.find(item => item.release.id === catalogReleaseId) ?? null
   const mediaCacheKey = `${store.selectedSessionId ?? 'title'}:${store.selectedManifest?.presentation.assets.map(asset => `${asset.assetKey}@${asset.version}:${asset.contentHash}`).join('|') ?? ''}`
   useEffect(() => {
     let cancelled = false
-    if (!store.selectedManifest) { setMediaUrls({}); setMediaFailures([]); return }
-    void preloadAvgReleaseMedia({ scope: props.scope, assets: store.selectedManifest.presentation.assets }).then(result => {
+    const manifest = store.selectedManifest
+    const session = store.sessions.find(row => row.id === store.selectedSessionId) ?? null
+    if (!manifest) { setMediaUrls({}); setMediaFailures([]); return }
+    void store.preloadMedia().then(result => {
       if (!cancelled) {
         setMediaUrls(result.urls)
         setMediaFailures(result.failures)
         void store.recordMediaFailures(result.failures).catch(() => undefined)
       }
+      if (session?.gameBuildId == null || manifest.presentation.assets.length === 0) return
+      const verificationKey = `${session.gameBuildId}:${manifest.presentation.assets
+        .map(asset => `${asset.assetKey}:${asset.contentHash}`).sort().join('|')}`
+      if (mediaVerificationKeys.current.has(verificationKey)) return
+      mediaVerificationKeys.current.add(verificationKey)
+      void verifyGameMediaRuntimeUrlsV1({
+        assets: manifest.presentation.assets.map(asset => ({
+          assetKey: asset.assetKey, contentHash: asset.contentHash, mimeType: asset.mimeType,
+          width: asset.width, height: asset.height, durationMs: asset.durationMs,
+        })),
+        urls: result.urls,
+        environment: currentBrowserEnvironment(),
+      }).then(measurement => recordGameMediaRuntimeMeasurementV1({
+        scope: props.scope, gameBuildId: session.gameBuildId!, measurement,
+      })).then(verified => {
+        if (!verified.evidence.passed) mediaVerificationKeys.current.delete(verificationKey)
+      }).catch(() => {
+        // The existing media failure UI remains the user-facing surface. A failed
+        // or interrupted measurement may be retried when this Preview is reopened.
+        mediaVerificationKeys.current.delete(verificationKey)
+      })
     })
     return () => { cancelled = true }
   }, [mediaCacheKey, props.scope.projectId, props.scope.worldId, props.scope.workId]) // eslint-disable-line react-hooks/exhaustive-deps

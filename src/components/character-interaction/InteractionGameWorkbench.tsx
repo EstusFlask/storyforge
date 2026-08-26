@@ -17,7 +17,9 @@ import type {
   WorkspaceScope,
 } from '../../lib/types'
 import {
+  addWorldGroundedInteractionCharacter,
   createInteractionAcceptanceSample,
+  createGuestInteractionCharacterProfile,
   createStarterInteractionGame,
   deleteInteractionCharacterProfile,
   deleteInteractionGameDraft,
@@ -44,6 +46,17 @@ function ProfileEditor(props: {
   characters: InteractionAuthoringSnapshot['characters']
   onChanged: () => Promise<void>
 }) {
+  const isPortable = props.profile.characterId == null
+  const portableSource = useMemo(() => {
+    if (!isPortable) return { name: '', label: '' }
+    try {
+      const parsed = JSON.parse(props.profile.sourceSnapshotJson ?? '{}')
+      return {
+        name: String(parsed.name ?? '未命名便携角色'),
+        label: parsed.schema === 'storyforge.interaction-guest-character' ? '互动自建角色' : '冻结来源角色',
+      }
+    } catch { return { name: '无效便携角色来源', label: '便携角色' } }
+  }, [isPortable, props.profile.sourceSnapshotJson])
   const [participantKey, setParticipantKey] = useState(props.profile.participantKey)
   const [characterId, setCharacterId] = useState(props.profile.characterId ?? props.characters[0]?.id ?? 0)
   const [roleLabel, setRoleLabel] = useState(props.profile.roleLabel)
@@ -59,7 +72,8 @@ function ProfileEditor(props: {
         scope: props.scope,
         gameDefinitionId: props.profile.gameDefinitionId,
         profileId: props.profile.id,
-        characterId,
+        characterId: isPortable ? null : characterId,
+        sourceSnapshotJson: isPortable ? props.profile.sourceSnapshotJson : undefined,
         participantKey,
         roleLabel,
         voiceRules,
@@ -70,7 +84,7 @@ function ProfileEditor(props: {
       await props.onChanged()
     } finally { setBusy(false) }
   }
-  return <article className="storygame-author-card"><div className="storygame-author-card-head"><code>{props.profile.participantKey}</code><label>记忆上限<input type="number" value={capacity} onChange={event => setCapacity(Number(event.target.value))} /></label></div><div className="storygame-author-inline"><label>世界角色<select value={characterId} onChange={event => setCharacterId(Number(event.target.value))}>{props.characters.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label><label>稳定参与者 key<input value={participantKey} onChange={event => setParticipantKey(event.target.value)} /></label></div><label>角色定位<input value={roleLabel} onChange={event => setRoleLabel(event.target.value)} /></label><label>口吻与边界规则<textarea rows={3} value={voiceRules} onChange={event => setVoiceRules(event.target.value)} /></label><div className="storygame-author-json-grid"><label>初始知识（public/private）<textarea rows={7} value={knowledge} onChange={event => setKnowledge(event.target.value)} /></label><label>关系维度<textarea rows={7} value={dimensions} onChange={event => setDimensions(event.target.value)} /></label></div><div className="storygame-author-actions"><button disabled={busy} onClick={() => void save()}><Save className="h-3.5 w-3.5" />保存角色</button><button className="danger" disabled={busy} onClick={() => void (async () => { setBusy(true); try { await deleteInteractionCharacterProfile({ scope: props.scope, profileId: props.profile.id! }); await props.onChanged() } finally { setBusy(false) } })()}><Trash2 className="h-3.5 w-3.5" />删除</button></div></article>
+  return <article className="storygame-author-card"><div className="storygame-author-card-head"><code>{props.profile.participantKey}</code><label>记忆上限<input type="number" value={capacity} onChange={event => setCapacity(Number(event.target.value))} /></label></div><div className="storygame-author-inline">{isPortable ? <label>角色来源<input value={`${portableSource.label} · ${portableSource.name}`} disabled /></label> : <label>世界角色<select value={characterId} onChange={event => setCharacterId(Number(event.target.value))}>{props.characters.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>}<label>稳定参与者 key<input value={participantKey} onChange={event => setParticipantKey(event.target.value)} /></label></div><label>角色定位<input value={roleLabel} onChange={event => setRoleLabel(event.target.value)} /></label><label>口吻与边界规则<textarea rows={3} value={voiceRules} onChange={event => setVoiceRules(event.target.value)} /></label><div className="storygame-author-json-grid"><label>初始知识（public/private）<textarea rows={7} value={knowledge} onChange={event => setKnowledge(event.target.value)} /></label><label>关系维度<textarea rows={7} value={dimensions} onChange={event => setDimensions(event.target.value)} /></label></div><div className="storygame-author-actions"><button disabled={busy} onClick={() => void save()}><Save className="h-3.5 w-3.5" />保存角色</button><button className="danger" disabled={busy} onClick={() => void (async () => { setBusy(true); try { await deleteInteractionCharacterProfile({ scope: props.scope, profileId: props.profile.id! }); await props.onChanged() } finally { setBusy(false) } })()}><Trash2 className="h-3.5 w-3.5" />删除</button></div></article>
 }
 
 function SceneEditor(props: {
@@ -114,6 +128,14 @@ export default function InteractionGameWorkbench({ scope }: { scope: WorkspaceSc
   const [selectedCharacterIds, setSelectedCharacterIds] = useState<number[]>([])
   const [newProfileCharacterId, setNewProfileCharacterId] = useState<number | null>(null)
   const [title, setTitle] = useState('未命名角色互动')
+  const [sceneLocation, setSceneLocation] = useState('')
+  const [sceneTimeLabel, setSceneTimeLabel] = useState('')
+  const [scenePurpose, setScenePurpose] = useState('')
+  const [chatDirection, setChatDirection] = useState('')
+  const [guestName, setGuestName] = useState('')
+  const [guestRole, setGuestRole] = useState('')
+  const [guestBackground, setGuestBackground] = useState('')
+  const [guestRelation, setGuestRelation] = useState('')
   const [view, setView] = useState<'profiles' | 'scenes' | 'context' | 'release'>('profiles')
   const [report, setReport] = useState<InteractionDraftReport | null>(null)
   const [inspection, setInspection] = useState<InteractionContextInspection | null>(null)
@@ -141,8 +163,11 @@ export default function InteractionGameWorkbench({ scope }: { scope: WorkspaceSc
   const run = async (action: () => Promise<void>) => { if (busy) return; setBusy(true); setError(''); setMessage(''); try { await action() } catch (reason) { setError(reason instanceof Error ? reason.message : String(reason)) } finally { setBusy(false) } }
   const refresh = async () => { await load(); setReport(null); setInspection(null) }
   const createGame = () => run(async () => {
-    const created = await createStarterInteractionGame({ scope, title, characterIds: selectedCharacterIds })
-    await load(); setSelectedId(created.id!); setMessage('已创建最小可发布角色互动。')
+    const created = await createStarterInteractionGame({
+      scope, title, characterIds: selectedCharacterIds,
+      sceneLocation, sceneTimeLabel, scenePurpose, chatDirection,
+    })
+    await load(); setSelectedId(created.id!); setMessage('已从世界人物、作品终局、关系与确认认知生成可发布角色互动。')
   })
   const createSample = () => run(async () => {
     const created = await createInteractionAcceptanceSample({ scope, characterIds: selectedCharacterIds.slice(0, 3) })
@@ -152,19 +177,21 @@ export default function InteractionGameWorkbench({ scope }: { scope: WorkspaceSc
     if (!definition) return
     const character = snapshot.characters.find(item => item.id === (newProfileCharacterId ?? availableCharacters[0]?.id))
     if (!character?.id) throw new Error('没有可添加的世界角色。')
-    const participantKey = `character-${character.id}`
-    await saveInteractionCharacterProfile({
-      scope, gameDefinitionId: definition.id!, characterId: character.id, participantKey,
-      roleLabel: character.shortDescription.trim() || character.storyRole?.trim() || '互动角色',
-      voiceRules: character.speechStyle?.trim() || '保持角色设定与自己的知识边界。',
-      initialKnowledgeJson: JSON.stringify([{ key: `profile.${participantKey}`, content: character.shortDescription.trim() || `${character.name}参与当前场景。`, visibility: 'public', importance: 50 }]),
-      relationshipDimensionsJson: JSON.stringify([
-        { key: 'trust', label: '信任', minimum: -10, maximum: 10, initial: 0, largeChangeThreshold: 3 },
-        { key: 'closeness', label: '亲近', minimum: -10, maximum: 10, initial: 0, largeChangeThreshold: 3 },
-      ]),
-      maxMemoryEntries: 24,
+    await addWorldGroundedInteractionCharacter({ scope, gameDefinitionId: definition.id!, characterId: character.id })
+    setNewProfileCharacterId(null); await refresh(); setMessage(`已从当前世界资料生成并添加角色 ${character.name}。`)
+  })
+  const addGuest = () => run(async () => {
+    if (!definition) return
+    const guest = await createGuestInteractionCharacterProfile({
+      scope,
+      gameDefinitionId: definition.id!,
+      name: guestName,
+      roleLabel: guestRole,
+      background: guestBackground,
+      relationToWorld: guestRelation,
     })
-    setNewProfileCharacterId(null); await refresh(); setMessage(`已添加角色 ${character.name}。`)
+    setGuestName(''); setGuestRole(''); setGuestBackground(''); setGuestRelation('')
+    await refresh(); setMessage(`已创建互动专属角色 ${JSON.parse(guest.sourceSnapshotJson ?? '{}').name}；它尚未写入世界 Canon，可在场景页加入所需场景。`)
   })
   const addScene = () => run(async () => {
     if (!definition || !profiles.length) throw new Error('至少添加一个互动角色后才能建立场景。')
@@ -195,19 +222,23 @@ export default function InteractionGameWorkbench({ scope }: { scope: WorkspaceSc
       <div className="storygame-author-game-list">{snapshot.definitions.map(item => <button key={item.id} className={item.id === definition?.id ? 'active' : ''} onClick={() => { setSelectedId(item.id!); setReport(null); setInspection(null) }}><strong>{item.title}</strong><small>{item.gameKey}</small></button>)}</div>
       <div className="mt-4 space-y-2 border-t border-border pt-4">
         <input value={title} onChange={event => setTitle(event.target.value)} placeholder="新游戏标题" />
+        <input value={sceneLocation} onChange={event => setSceneLocation(event.target.value)} placeholder="聊天起点地点（可选）" />
+        <input value={sceneTimeLabel} onChange={event => setSceneTimeLabel(event.target.value)} placeholder="聊天起点时间（可选）" />
+        <textarea rows={2} value={scenePurpose} onChange={event => setScenePurpose(event.target.value)} placeholder="聊天背景/为什么会在这里（可选）" />
+        <textarea rows={2} value={chatDirection} onChange={event => setChatDirection(event.target.value)} placeholder="希望这次聊天向哪里发展（可选）" />
         <div className="max-h-36 space-y-1 overflow-y-auto">{snapshot.characters.map(item => <label key={item.id} className="flex items-start gap-2 text-[9px] text-text-secondary"><input type="checkbox" checked={selectedCharacterIds.includes(item.id!)} onChange={() => setSelectedCharacterIds(current => current.includes(item.id!) ? current.filter(id => id !== item.id) : [...current, item.id!])} />{item.name}</label>)}</div>
         <button className="storygame-author-create" disabled={!selectedCharacterIds.length || busy} onClick={createGame}><FilePlus2 className="h-3.5 w-3.5" />用所选角色创建</button>
         <button className="storygame-author-create" disabled={selectedCharacterIds.length < 3 || busy} onClick={createSample}><ShieldCheck className="h-3.5 w-3.5" />创建五场景验收样例</button>
       </div>
-      <p>角色主档只作为发布来源；互动知识、口吻和关系规则由当前 Work 的专属档案冻结。</p>
+      <p>创建时会提取人物设定、当前 Work 的角色作用与终局、结构化关系及已确认认知；私密内容只进入本人视角，发布后不随上游漂移。</p>
     </aside>
     <main className="storygame-author-main">
       {message && <div className="storygame-author-notice success"><CheckCircle2 className="h-4 w-4" /><span>{message}</span></div>}
       {error && <div className="storygame-author-notice error"><AlertTriangle className="h-4 w-4" /><span>{error}</span></div>}
-      {!definition ? <div className="storygame-author-empty"><UserRound className="h-8 w-8" /><h2>选择角色创建第一个互动游戏</h2><p>创建后会同时建立共享 Narrative 入口/结局、角色档案和场景模板。</p></div> : <>
+      {!definition ? <div className="storygame-author-empty"><UserRound className="h-8 w-8" /><h2>选择角色创建第一个互动游戏</h2><p>创建后会建立共享 Narrative 入口/结局、世界落地角色档案和场景模板；所有结果仍可在发布前编辑。</p></div> : <>
         <div className="storygame-author-toolbar"><div><strong>{definition.title}</strong><span>{profiles.length} 角色 · {scenes.length} 场景 · {releases.length} 发布</span></div><nav><button className={view === 'profiles' ? 'active' : ''} onClick={() => setView('profiles')}>角色与知识</button><button className={view === 'scenes' ? 'active' : ''} onClick={() => setView('scenes')}>场景与规则</button><button className={view === 'context' ? 'active' : ''} onClick={() => setView('context')}>上下文检查</button><button className={view === 'release' ? 'active' : ''} onClick={() => setView('release')}>校验与发布</button></nav></div>
         <section className="storygame-author-pane">
-          {view === 'profiles' && <><div className="storygame-author-heading"><div><small>AUTHOR / PROFILES</small><h2>角色知识、秘密与关系维度</h2></div><div className="storygame-author-actions">{!!availableCharacters.length && <><select value={newProfileCharacterId ?? availableCharacters[0]?.id ?? ''} onChange={event => setNewProfileCharacterId(Number(event.target.value))}>{availableCharacters.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}</select><button disabled={busy} onClick={addProfile}><FilePlus2 className="h-3.5 w-3.5" />添加世界角色</button></>}</div></div>{profiles.map(profile => <ProfileEditor key={profile.id} scope={scope} profile={profile} characters={snapshot.characters} onChanged={refresh} />)}</>}
+          {view === 'profiles' && <><div className="storygame-author-heading"><div><small>AUTHOR / PROFILES</small><h2>角色知识、秘密与关系维度</h2></div><div className="storygame-author-actions">{!!availableCharacters.length && <><select value={newProfileCharacterId ?? availableCharacters[0]?.id ?? ''} onChange={event => setNewProfileCharacterId(Number(event.target.value))}>{availableCharacters.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}</select><button disabled={busy} onClick={addProfile}><FilePlus2 className="h-3.5 w-3.5" />添加世界角色</button></>}</div></div><article className="storygame-author-contract"><UserRound className="h-5 w-5" /><div className="w-full"><strong>创建互动专属角色</strong><p>它可以与原世界人物有关，也可以是全新来客；默认只进入当前互动草稿和发布，不会写入世界 Canon。</p><div className="storygame-author-inline mt-3"><label>姓名<input value={guestName} onChange={event => setGuestName(event.target.value)} placeholder="新角色姓名" /></label><label>角色定位<input value={guestRole} onChange={event => setGuestRole(event.target.value)} placeholder="身份、作用或与玩家的关系" /></label></div><div className="storygame-author-json-grid"><label>背景<textarea rows={3} value={guestBackground} onChange={event => setGuestBackground(event.target.value)} /></label><label>与既有世界/人物的关联<textarea rows={3} value={guestRelation} onChange={event => setGuestRelation(event.target.value)} /></label></div><div className="storygame-author-actions"><button disabled={busy || !guestName.trim() || !guestRole.trim()} onClick={addGuest}><FilePlus2 className="h-3.5 w-3.5" />创建专属角色</button></div></div></article>{profiles.map(profile => <ProfileEditor key={profile.id} scope={scope} profile={profile} characters={snapshot.characters} onChanged={refresh} />)}</>}
           {view === 'scenes' && <><div className="storygame-author-heading"><div><small>AUTHOR / SCENES</small><h2>场景、固定行动与 Narrative 连接</h2></div><div className="storygame-author-actions"><button disabled={busy || !profiles.length} onClick={addScene}><FilePlus2 className="h-3.5 w-3.5" />添加场景</button></div></div>{scenes.map(scene => <SceneEditor key={scene.id} scope={scope} scene={scene} nodes={nodes} onChanged={refresh} />)}</>}
           {view === 'context' && <><div className="storygame-author-heading"><div><small>VISIBILITY / INSPECTOR</small><h2>角色实际可见来源</h2></div></div><div className="storygame-author-actions">{profiles.map(profile => <button key={profile.id} onClick={() => void run(async () => { setInspection(await inspectInteractionContext({ scope, gameDefinitionId: definition.id!, participantKey: profile.participantKey })) })}><Eye className="h-3.5 w-3.5" />检查 {snapshot.characters.find(item => item.id === profile.characterId)?.name ?? profile.participantKey}</button>)}</div>{inspection && <article className="storygame-author-contract"><Eye className="h-5 w-5" /><div><strong>{inspection.profile.characterName} · {inspection.participantKey}</strong><p>统一上下文源：{inspection.sourceKeys.join(', ')}；可见知识：{inspection.visibleKnowledgeKeys.join('、') || '无'}；明确隐藏：{inspection.hiddenKnowledgeKeys.join('、') || '无'}；记忆上限 {inspection.memoryCapacity}。</p></div></article>}</>}
           {view === 'release' && <><div className="storygame-author-heading"><div><small>VALIDATE / RELEASE</small><h2>诊断、WorldRelease 与 GameRelease</h2></div><div className="storygame-author-actions"><button onClick={() => void run(async () => { setReport(await validateInteractionGameDraft(scope, definition.id!)) })}><ShieldCheck className="h-3.5 w-3.5" />运行检查</button><button disabled={busy} onClick={() => void run(async () => { const result = await publishInteractionGameDraft({ scope, gameDefinitionId: definition.id! }); setReport(result.report); await load(); setMessage(`已发布 GameRelease v${result.gameRelease.version}`) })}><Rocket className="h-3.5 w-3.5" />发布新版本</button></div></div>{report && <><div className={`storygame-graph-summary ${report.valid ? 'valid' : 'invalid'}`}>{report.valid ? <CheckCircle2 className="h-5 w-5" /> : <AlertTriangle className="h-5 w-5" />}<div><strong>{report.valid ? '可发布' : '存在阻断问题'}</strong><span>{report.participantCount} 角色 · {report.sceneCount} 场景 · Narrative {report.narrative.valid ? '通过' : '失败'}</span></div></div><ul className="storygame-graph-issues">{report.diagnostics.map((item, index) => <li key={`${item.code}:${index}`}>{item.severity === 'error' ? '阻断' : '提示'} · {item.message}</li>)}</ul></>}<div className="storygame-version-list">{releases.map(item => <article key={item.id}><div><strong>{item.label}</strong><span>GameRelease v{item.version}</span></div><code>{item.contentHash.slice(0, 16)}…</code></article>)}</div><div className="storygame-author-actions mt-6"><button className="danger" onClick={() => void run(async () => { const ok = await dialog.confirm({ title: `删除草稿“${definition.title}”？`, message: '已发布版本与玩家存档保留；专属作者草稿和可变叙事将删除。', confirmText: '删除草稿', tone: 'danger' }); if (!ok) return; await deleteInteractionGameDraft({ scope, gameDefinitionId: definition.id! }); await refresh(); setMessage('已删除作者草稿，旧发布和存档保留。') })}><Trash2 className="h-3.5 w-3.5" />删除草稿</button></div></>}

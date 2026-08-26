@@ -1,7 +1,7 @@
 import { act, createElement } from 'react'
 import { createRoot } from 'react-dom/client'
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
-import AvgGamePlayer from '../../src/components/text-game/AvgGamePlayer'
+import AvgGamePlayer, { loadAvgPlayerInitialSelectionV1 } from '../../src/components/text-game/AvgGamePlayer'
 import AvgGameWorkbench from '../../src/components/text-game/AvgGameWorkbench'
 import { DialogProvider } from '../../src/components/shared/Dialog'
 import { db } from '../../src/lib/db/schema'
@@ -23,6 +23,26 @@ describe('AVG-1 · author and player UI', () => {
   beforeAll(async () => { await db.delete(); await db.open() }); afterAll(() => db.close())
   beforeEach(() => { useAvgGamePlayerStore.setState({ scope: null, worldGroupId: null, releases: [], sessions: [], selectedSessionId: null, events: [], checkpoints: [], runtimeState: structuredClone(EMPTY_SIMULATION_STATE), selectedManifest: null, loading: false, busy: false, error: '' }); host = document.createElement('div'); document.body.append(host); root = createRoot(host) })
   afterEach(async () => { await act(async () => root.unmount()); host.remove() })
+
+  it('Build Preview 先打开空游戏库再只选择一次指定存档，避免双 resolver 竞态', async () => {
+    const owned = await fixture('AVG Preview 单选加载')
+    const calls: string[] = []
+    await loadAvgPlayerInitialSelectionV1({
+      scope: owned.scope, worldGroupId: null, initialSessionId: 42,
+      load: async (_scope, _worldGroupId, openLibrary) => { calls.push(`load:${openLibrary}`) },
+      select: async sessionId => { calls.push(`select:${sessionId}`) },
+    })
+    expect(calls).toEqual(['load:true', 'select:42'])
+
+    const cancelledCalls: string[] = []
+    await loadAvgPlayerInitialSelectionV1({
+      scope: owned.scope, worldGroupId: null, initialSessionId: 42,
+      load: async () => { cancelledCalls.push('load') },
+      select: async () => { cancelledCalls.push('select') },
+      cancelled: () => true,
+    })
+    expect(cancelledCalls).toEqual(['load'])
+  })
 
   it('作者载入演出样例、检查并发布不可变版本', async () => {
     const owned = await fixture('AVG 作者 UI'); await act(async () => { root.render(createElement(DialogProvider, null, createElement(AvgGameWorkbench, { scope: owned.scope }))); await new Promise(resolve => setTimeout(resolve, 0)) })

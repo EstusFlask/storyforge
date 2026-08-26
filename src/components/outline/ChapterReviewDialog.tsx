@@ -112,7 +112,8 @@ export default function ChapterReviewDialog({
   const toggleExpand = (issueId: string) => {
     setExpandedIssues(prev => {
       const next = new Set(prev)
-      next.has(issueId) ? next.delete(issueId) : next.add(issueId)
+      if (next.has(issueId)) next.delete(issueId)
+      else next.add(issueId)
       return next
     })
   }
@@ -121,7 +122,8 @@ export default function ChapterReviewDialog({
     setAcceptedChanges(prev => {
       const issueChanges = prev[issueId] || new Set()
       const next = new Set(issueChanges)
-      next.has(changeId) ? next.delete(changeId) : next.add(changeId)
+      if (next.has(changeId)) next.delete(changeId)
+      else next.add(changeId)
       return { ...prev, [issueId]: next }
     })
   }
@@ -129,7 +131,8 @@ export default function ChapterReviewDialog({
   const toggleIssueIgnore = (issueId: string) => {
     setIgnoredIssues(prev => {
       const next = new Set(prev)
-      next.has(issueId) ? next.delete(issueId) : next.add(issueId)
+      if (next.has(issueId)) next.delete(issueId)
+      else next.add(issueId)
       return next
     })
   }

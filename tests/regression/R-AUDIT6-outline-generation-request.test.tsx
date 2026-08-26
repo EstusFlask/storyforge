@@ -87,7 +87,8 @@ describe('AUDIT-6 · 大纲生成请求边界', () => {
       const host = await mount(request)
       expect(host.textContent).toContain(label)
       if (request.kind === 'single-chapter') {
-        expect(host.textContent).toContain('本卷章节数”不参与本次调用')
+        expect(host.textContent).toContain('本卷章节数')
+        expect(host.textContent).toContain('不参与本次调用')
       }
     }
   })

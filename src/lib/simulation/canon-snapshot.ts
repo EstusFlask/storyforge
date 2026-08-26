@@ -2,8 +2,11 @@ import { db } from '../db/schema'
 import {
   aggregateInventory,
   EMPTY_SIMULATION_STATE,
+  PLAYABLE_WORLD_COMPILER_VERSION,
   SIMULATION_CANON_SOURCE_KINDS,
   type Character,
+  type PlayableWorldBundleV1,
+  type PlayableWorldDiagnosticV1,
   type RuntimeEntityState,
   type SimulationCanonCandidate,
   type SimulationCanonSnapshotV1,
@@ -70,6 +73,19 @@ function snapshotHashInput(snapshot: Omit<SimulationCanonSnapshotV1, 'snapshotHa
     worldGroupId: snapshot.worldGroupId,
     worldLabel: snapshot.worldLabel,
     sources: snapshot.sources,
+  }
+}
+
+function bundleHashInput(bundle: Omit<PlayableWorldBundleV1, 'bundleHash'>) {
+  return {
+    schema: bundle.schema,
+    version: bundle.version,
+    compilerVersion: bundle.compilerVersion,
+    source: bundle.source,
+    createdAt: bundle.createdAt,
+    canonSnapshot: bundle.canonSnapshot,
+    initialState: bundle.initialState,
+    diagnostics: bundle.diagnostics,
   }
 }
 
@@ -288,6 +304,99 @@ function runtimeEntity(
   }
 }
 
+function releaseRows(
+  manifest: WorldReleaseManifestV2,
+  table: string,
+): Array<Record<string, unknown>> {
+  const value = manifest.records[table] ?? []
+  if (!Array.isArray(value)) throw new Error(`[playable-world] ${table} 不是冻结记录数组。`)
+  return value.map((row, index) => {
+    if (!isObject(row)) throw new Error(`[playable-world] ${table}[${index}] 不是有效记录。`)
+    return row
+  })
+}
+
+function portableId(row: Record<string, unknown>, index: number, table: string): number {
+  const value = row._exportId ?? index
+  if (!Number.isInteger(value) || Number(value) < 0) {
+    throw new Error(`[playable-world] ${table}[${index}] 缺少有效便携标识。`)
+  }
+  return Number(value)
+}
+
+function releaseUpdatedAt(row: Record<string, unknown>, createdAt: number): number {
+  if (Number.isFinite(row.updatedAt)) return Number(row.updatedAt)
+  if (Number.isFinite(row.createdAt)) return Number(row.createdAt)
+  return createdAt
+}
+
+function releaseText(row: Record<string, unknown>, ...keys: string[]): string {
+  for (const key of keys) {
+    const value = row[key]
+    if (typeof value === 'string' && value.trim()) return value.trim()
+  }
+  return ''
+}
+
+function diagnosticOrder(diagnostic: PlayableWorldDiagnosticV1): string {
+  const severity = diagnostic.severity === 'error' ? '0' : diagnostic.severity === 'warning' ? '1' : '2'
+  return `${severity}:${diagnostic.code}:${diagnostic.sourceKeys.join(',')}:${diagnostic.message}`
+}
+
+function releaseRuntimeEntities(
+  sources: SimulationCanonSource[],
+  diagnostics: PlayableWorldDiagnosticV1[],
+): Record<string, RuntimeEntityState> {
+  const locations = new Map<string, SimulationCanonSource[]>()
+  for (const source of sources) {
+    if (source.kind !== 'location') continue
+    const key = source.name.trim().toLocaleLowerCase()
+    if (!key) continue
+    locations.set(key, [...(locations.get(key) ?? []), source])
+  }
+
+  const entities: Record<string, RuntimeEntityState> = {}
+  for (const source of sources) {
+    if (
+      source.kind !== 'character'
+      && source.kind !== 'location'
+      && source.kind !== 'item'
+      && source.kind !== 'faction'
+    ) continue
+    let locationKey: string | null = source.kind === 'location' ? source.sourceKey : null
+    if (source.kind === 'character' && source.fields.location?.trim()) {
+      const matches = locations.get(source.fields.location.trim().toLocaleLowerCase()) ?? []
+      if (matches.length === 1) {
+        locationKey = matches[0].sourceKey
+      } else if (matches.length === 0) {
+        diagnostics.push({
+          code: 'CHARACTER_LOCATION_UNRESOLVED',
+          severity: 'warning',
+          message: `角色「${source.name}」的地点「${source.fields.location}」未匹配到冻结地点。`,
+          sourceKeys: [source.sourceKey],
+        })
+      } else {
+        diagnostics.push({
+          code: 'CHARACTER_LOCATION_AMBIGUOUS',
+          severity: 'error',
+          message: `角色「${source.name}」的地点「${source.fields.location}」匹配到多个同名冻结地点。`,
+          sourceKeys: [source.sourceKey, ...matches.map(item => item.sourceKey)],
+        })
+      }
+    }
+    entities[source.sourceKey] = {
+      entityKey: source.sourceKey,
+      kind: source.kind,
+      sourceId: null,
+      name: source.name,
+      locationKey,
+      lifecycleStatus: 'active',
+      attributes: structuredClone(source.fields),
+    }
+  }
+  return entities
+}
+
 export async function buildSimulationCanonSnapshot(input: {
   projectId: number
   scope?: WorkspaceScope
@@ -334,14 +443,61 @@ export async function buildSimulationCanonSnapshot(input: {
   }
 }
 
-/** Build a verifiable SIM Canon envelope from an immutable WORLD-2E release. */
-export async function buildReleaseSimulationCanonSnapshot(
-  manifest: WorldReleaseManifestV2,
-  createdAt: number,
-): Promise<SimulationCanonSnapshotV1> {
-  const sources: SimulationCanonSource[] = []
+/**
+ * Deterministically compile immutable WORLD-2E portable records into runtime-ready Canon.
+ * This layer preserves world semantics only; ruleset-specific statistics belong to RulePack.
+ */
+export async function buildPlayableWorldBundleFromRelease(input: {
+  manifest: WorldReleaseManifestV2
+  worldContentHash: string
+  createdAt: number
+}): Promise<PlayableWorldBundleV1> {
+  const { manifest, createdAt, worldContentHash } = input
+  if (manifest.schema !== 'storyforge.world-package' || manifest.version !== 2 || !isObject(manifest.records)) {
+    throw new Error('[playable-world] 只能编译 WorldReleaseManifestV2。')
+  }
+  if (!manifest.worldCode?.trim() || !manifest.worldName?.trim()) {
+    throw new Error('[playable-world] 发布包缺少世界身份。')
+  }
+  if (!Number.isFinite(createdAt)) throw new Error('[playable-world] 发布包创建时间无效。')
+  if (!/^[0-9a-f]{64}$/.test(worldContentHash)) {
+    throw new Error('[playable-world] WorldRelease content hash 无效。')
+  }
+
+  const diagnostics: PlayableWorldDiagnosticV1[] = []
+  const candidates: SimulationCanonCandidate[] = []
+  const sourceKeys = new Set<string>()
+  const addCandidate = (candidate: SimulationCanonCandidate) => {
+    if (sourceKeys.has(candidate.sourceKey)) {
+      diagnostics.push({
+        code: 'DUPLICATE_SOURCE_KEY',
+        severity: 'error',
+        message: `冻结记录生成了重复来源 ${candidate.sourceKey}。`,
+        sourceKeys: [candidate.sourceKey],
+      })
+      return
+    }
+    sourceKeys.add(candidate.sourceKey)
+    candidates.push(candidate)
+  }
+
+  addCandidate({
+    sourceKey: `release-world:${manifest.worldCode.trim()}`,
+    kind: 'world',
+    recordId: null,
+    name: manifest.worldName.trim(),
+    summary: compact(releaseText(manifest.portableProject, 'description') || '不可变世界发布包'),
+    fields: fields({
+      worldCode: manifest.worldCode.trim(),
+      workTitle: manifest.workTitle,
+      selectedTables: manifest.selectedTables,
+      worldContentHash,
+    }),
+    updatedAt: createdAt,
+  })
+
   for (const dependency of manifest.dependencies) {
-    const candidate: SimulationCanonCandidate = {
+    addCandidate({
       sourceKey: `release-table:${dependency.table}`,
       kind: 'world',
       recordId: null,
@@ -353,9 +509,264 @@ export async function buildReleaseSimulationCanonSnapshot(
         tableHash: dependency.contentHash,
       },
       updatedAt: createdAt,
+    })
+  }
+
+  const worldviews = releaseRows(manifest, 'worldviews')
+  for (const [index, row] of worldviews.entries()) {
+    const id = portableId(row, index, 'worldviews')
+    addCandidate({
+      sourceKey: `release-worldview:${id}`,
+      kind: 'world',
+      recordId: null,
+      name: worldviews.length === 1 ? `${manifest.worldName}世界观` : `${manifest.worldName}世界观 ${id + 1}`,
+      summary: compact(releaseText(row, 'summary', 'worldOrigin', 'worldStructure')),
+      fields: fields({
+        summary: row.summary,
+        worldOrigin: row.worldOrigin,
+        worldStructure: row.worldStructure,
+        worldDimensions: row.worldDimensions,
+        continentLayout: row.continentLayout,
+        geography: row.geography,
+        mountainsRivers: row.mountainsRivers,
+        climateByRegion: row.climateByRegion,
+        history: row.historyLine ?? row.history,
+        worldEvents: row.worldEvents,
+        society: row.society,
+        races: row.races,
+        culture: row.cultureOverview ?? row.culture,
+        politics: row.politicsOverview,
+        economy: row.economyOverview ?? row.economy,
+        rules: row.rules,
+        factionLayout: row.factionLayout,
+        internalConflicts: row.internalConflicts,
+        itemDesign: row.itemDesign,
+        powerHierarchy: row.powerHierarchy,
+        divineDesign: row.divineDesign,
+      }),
+      updatedAt: releaseUpdatedAt(row, createdAt),
+    })
+  }
+
+  for (const [index, row] of releaseRows(manifest, 'worldRulesProfiles').entries()) {
+    const id = portableId(row, index, 'worldRulesProfiles')
+    addCandidate({
+      sourceKey: `release-world-rules:${id}`,
+      kind: 'rule',
+      recordId: null,
+      name: `${manifest.worldName}世界规则`,
+      summary: compact(releaseText(row, 'globalNote') || '真实与幻想规则配置'),
+      fields: fields({ entries: row.entries, customNodes: row.customNodes, globalNote: row.globalNote }),
+      updatedAt: releaseUpdatedAt(row, createdAt),
+    })
+  }
+
+  for (const [index, row] of releaseRows(manifest, 'powerSystems').entries()) {
+    const id = portableId(row, index, 'powerSystems')
+    const name = releaseText(row, 'name') || `未命名力量体系 ${id + 1}`
+    addCandidate({
+      sourceKey: `release-power-system:${id}`,
+      kind: 'rule',
+      recordId: null,
+      name,
+      summary: compact(releaseText(row, 'description', 'rules')),
+      fields: fields({ description: row.description, levels: row.levels, rules: row.rules }),
+      updatedAt: releaseUpdatedAt(row, createdAt),
+    })
+  }
+
+  const characterRows = releaseRows(manifest, 'characters')
+  const characterKeysByIndex = new Map<number, string>()
+  const characterRelations = new Map<number, Array<Record<string, unknown>>>()
+  for (const [index, row] of characterRows.entries()) {
+    const id = portableId(row, index, 'characters')
+    characterKeysByIndex.set(index, `release-character:${id}`)
+    characterRelations.set(index, [])
+  }
+  for (const [index, row] of releaseRows(manifest, 'characterRelations').entries()) {
+    const sourceKey = `release-character-relation:${portableId(row, index, 'characterRelations')}`
+    const fromIndex = Number(row._fromCharacterIndex)
+    const toIndex = Number(row._toCharacterIndex)
+    const fromKey = Number.isInteger(fromIndex) ? characterKeysByIndex.get(fromIndex) : undefined
+    const toKey = Number.isInteger(toIndex) ? characterKeysByIndex.get(toIndex) : undefined
+    if (!fromKey || !toKey) {
+      diagnostics.push({
+        code: 'CHARACTER_RELATION_UNRESOLVED',
+        severity: 'error',
+        message: `角色关系 ${sourceKey} 包含悬空便携角色引用。`,
+        sourceKeys: [sourceKey, ...[fromKey, toKey].filter((key): key is string => !!key)],
+      })
+      continue
     }
+    characterRelations.get(fromIndex)!.push({
+      sourceKey,
+      otherCharacterKey: toKey,
+      direction: row.isBidirectional === true ? 'bidirectional' : 'outgoing',
+      relationType: releaseText(row, 'relationType', 'relation') || 'other',
+      label: releaseText(row, 'label'),
+      description: releaseText(row, 'description'),
+    })
+    if (row.isBidirectional === true) {
+      characterRelations.get(toIndex)!.push({
+        sourceKey,
+        otherCharacterKey: fromKey,
+        direction: 'bidirectional',
+        relationType: releaseText(row, 'relationType', 'relation') || 'other',
+        label: releaseText(row, 'label'),
+        description: releaseText(row, 'description'),
+      })
+    }
+  }
+
+  for (const [index, row] of characterRows.entries()) {
+    const sourceKey = characterKeysByIndex.get(index)!
+    const name = releaseText(row, 'name')
+    if (!name) {
+      diagnostics.push({
+        code: 'CHARACTER_NAME_MISSING',
+        severity: 'warning',
+        message: `${sourceKey} 缺少角色名称，已从可运行实体中排除。`,
+        sourceKeys: [sourceKey],
+      })
+      continue
+    }
+    addCandidate({
+      sourceKey,
+      kind: 'character',
+      recordId: null,
+      name,
+      summary: compact(releaseText(row, 'shortDescription', 'identity', 'personality')),
+      fields: fields({
+        role: row.role,
+        roleWeight: row.roleWeight,
+        moralAxis: row.moralAxis,
+        orderAxis: row.orderAxis,
+        identity: row.identity,
+        profile: row.profile,
+        appearance: row.appearance,
+        personality: row.personality,
+        background: row.background,
+        motivation: row.goals ?? row.motivation,
+        abilities: row.abilities,
+        powerLevel: row.powerLevel,
+        relationships: row.relationships,
+        relationRefs: characterRelations.get(index),
+        arc: row.arc,
+        location: row.location,
+        speechStyle: row.speechStyle,
+        signatureItem: row.signatureItem,
+      }),
+      updatedAt: releaseUpdatedAt(row, createdAt),
+    })
+  }
+
+  for (const [index, row] of releaseRows(manifest, 'importantLocations').entries()) {
+    const id = portableId(row, index, 'importantLocations')
+    const sourceKey = `release-location:${id}`
+    const name = releaseText(row, 'name')
+    if (!name) {
+      diagnostics.push({
+        code: 'LOCATION_NAME_MISSING',
+        severity: 'warning',
+        message: `${sourceKey} 缺少地点名称，已从可运行实体中排除。`,
+        sourceKeys: [sourceKey],
+      })
+      continue
+    }
+    addCandidate({
+      sourceKey,
+      kind: 'location',
+      recordId: null,
+      name,
+      summary: compact(releaseText(row, 'description', 'significance')),
+      fields: fields({
+        tags: row.tags,
+        description: row.description,
+        significance: row.significance,
+        parentExportId: row._parentExportId,
+        sortOrder: row.sortOrder,
+      }),
+      updatedAt: releaseUpdatedAt(row, createdAt),
+    })
+  }
+
+  const categoryKinds = new Map<number, 'item' | 'faction'>()
+  for (const [index, row] of releaseRows(manifest, 'codexCategories').entries()) {
+    const id = portableId(row, index, 'codexCategories')
+    if (row.builtInKey === 'artifact') categoryKinds.set(id, 'item')
+    if (row.builtInKey === 'faction') categoryKinds.set(id, 'faction')
+  }
+  for (const [index, row] of releaseRows(manifest, 'codexEntries').entries()) {
+    const kind = Number.isInteger(row._categoryExportId)
+      ? categoryKinds.get(Number(row._categoryExportId))
+      : undefined
+    if (!kind) continue
+    const id = portableId(row, index, 'codexEntries')
+    const sourceKey = kind === 'item' ? `release-item:${id}` : `release-faction:${id}`
+    const name = releaseText(row, 'name')
+    if (!name) {
+      diagnostics.push({
+        code: kind === 'item' ? 'ITEM_NAME_MISSING' : 'FACTION_NAME_MISSING',
+        severity: 'warning',
+        message: `${sourceKey} 缺少名称，已从可运行实体中排除。`,
+        sourceKeys: [sourceKey],
+      })
+      continue
+    }
+    addCandidate({
+      sourceKey,
+      kind,
+      recordId: null,
+      name,
+      summary: compact(releaseText(row, 'summary', 'description')),
+      fields: fields({
+        summary: row.summary,
+        description: row.description,
+        fields: row.fields,
+        refs: row.refs,
+        tags: row.tags,
+        importance: row.importance,
+      }),
+      updatedAt: releaseUpdatedAt(row, createdAt),
+    })
+  }
+
+  const narrativeRowsById = new Map(releaseRows(manifest, 'narrativeModules').map((row, index) => (
+    [portableId(row, index, 'narrativeModules'), row]
+  )))
+  for (const selected of manifest.selectedNarrativeModules) {
+    const row = narrativeRowsById.get(selected.exportId)
+    if (!row) {
+      diagnostics.push({
+        code: 'NARRATIVE_MODULE_UNRESOLVED',
+        severity: 'error',
+        message: `发布选择的叙事模块 ${selected.exportId} 缺少冻结记录。`,
+        sourceKeys: [`release-narrative:${selected.exportId}`],
+      })
+      continue
+    }
+    const nodes = releaseRows(manifest, 'narrativeNodes').filter(node => node._moduleExportId === selected.exportId)
+    addCandidate({
+      sourceKey: `release-narrative:${selected.exportId}`,
+      kind: 'world',
+      recordId: null,
+      name: selected.title,
+      summary: compact(releaseText(row, 'description', 'summary') || `${nodes.length} 个冻结叙事节点`),
+      fields: fields({
+        moduleKind: selected.kind,
+        entryNodeKey: row.entryNodeKey,
+        nodeKeys: nodes.map(node => node.key),
+      }),
+      updatedAt: releaseUpdatedAt(row, createdAt),
+    })
+  }
+
+  const sortedCandidates = sortCandidates(candidates)
+  const sources: SimulationCanonSource[] = []
+  for (const candidate of sortedCandidates) {
     sources.push({
       ...candidate,
+      fields: structuredClone(candidate.fields),
       contentHash: await sha256(sourceHashInput(candidate)),
     })
   }
@@ -364,13 +775,75 @@ export async function buildReleaseSimulationCanonSnapshot(
     version: 1,
     createdAt,
     worldGroupId: null,
-    worldLabel: manifest.worldName,
+    worldLabel: manifest.worldName.trim(),
     sources,
   }
-  return {
+  const canonSnapshot: SimulationCanonSnapshotV1 = {
     ...snapshotBase,
     snapshotHash: await sha256(snapshotHashInput(snapshotBase)),
   }
+  const initialState: SimulationRuntimeState = {
+    ...structuredClone(EMPTY_SIMULATION_STATE),
+    entities: releaseRuntimeEntities(sources, diagnostics),
+  }
+  if (Object.keys(initialState.entities).length === 0) {
+    diagnostics.push({
+      code: 'NO_RUNTIME_ENTITIES',
+      severity: 'info',
+      message: '发布包未包含角色、地点、人工器物或势力实体。',
+      sourceKeys: [`release-world:${manifest.worldCode.trim()}`],
+    })
+  }
+  diagnostics.sort((left, right) => diagnosticOrder(left).localeCompare(diagnosticOrder(right), 'zh-Hans-CN'))
+  const bundleBase: Omit<PlayableWorldBundleV1, 'bundleHash'> = {
+    schema: 'storyforge.playable-world-bundle',
+    version: 1,
+    compilerVersion: PLAYABLE_WORLD_COMPILER_VERSION,
+    source: {
+      worldCode: manifest.worldCode.trim(),
+      worldName: manifest.worldName.trim(),
+      worldContentHash,
+    },
+    createdAt,
+    canonSnapshot,
+    initialState,
+    diagnostics,
+  }
+  return { ...bundleBase, bundleHash: await sha256(bundleHashInput(bundleBase)) }
+}
+
+/** Backwards-compatible Canon-only adapter for callers not yet consuming the full bundle. */
+export async function buildReleaseSimulationCanonSnapshot(
+  manifest: WorldReleaseManifestV2,
+  createdAt: number,
+  worldContentHash?: string,
+): Promise<SimulationCanonSnapshotV1> {
+  return (await buildPlayableWorldBundleFromRelease({
+    manifest,
+    createdAt,
+    worldContentHash: worldContentHash ?? await sha256(manifest),
+  })).canonSnapshot
+}
+
+export async function verifyPlayableWorldBundle(bundle: PlayableWorldBundleV1): Promise<boolean> {
+  if (
+    bundle.schema !== 'storyforge.playable-world-bundle'
+    || bundle.version !== 1
+    || bundle.compilerVersion !== PLAYABLE_WORLD_COMPILER_VERSION
+    || !/^[0-9a-f]{64}$/.test(bundle.source.worldContentHash)
+    || !/^[0-9a-f]{64}$/.test(bundle.bundleHash)
+    || !await verifySimulationCanonSnapshot(bundle.canonSnapshot)
+  ) return false
+  const { bundleHash: _bundleHash, ...base } = bundle
+  return await sha256(bundleHashInput(base)) === bundle.bundleHash
+}
+
+export function assertPlayableWorldBundleRunnable(bundle: PlayableWorldBundleV1): void {
+  const errors = bundle.diagnostics.filter(diagnostic => diagnostic.severity === 'error')
+  if (errors.length === 0) return
+  throw new Error(`[playable-world] 发布世界不能安全进入运行时: ${errors
+    .map(diagnostic => `${diagnostic.code}:${diagnostic.message}`)
+    .join('；')}`)
 }
 
 export function parseSimulationCanonSnapshot(value: string): SimulationCanonSnapshotV1 | null {

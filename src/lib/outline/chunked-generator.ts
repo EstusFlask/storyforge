@@ -6,7 +6,7 @@
  * 5轨引擎仅在生成章节细纲时使用，不在走向规划阶段使用。
  */
 import type { ChatMessage } from '../types'
-import { chat } from '../ai/client'
+import { executeRegisteredAIEntryV1 } from '../agent/formal-ai-entry'
 import { parseChapterOutlineSmart, type ParsedChapter } from '../ai/parse-outline-output'
 import { useAIConfigStore } from '../../stores/ai-config'
 import { divideChaptersIntoBlocks, getBlockLabels, type ChunkedGenerationConfig } from './generation-modes'
@@ -141,8 +141,8 @@ ${options.storyArcContext ? '重要：你可以返回一个可选的 JSON 对象
 
   const config = useAIConfigStore.getState().config
   try {
-    const rawOutput = await chat(messages, config, {
-      category: 'outline.chapter',
+    const rawOutput = await executeRegisteredAIEntryV1('outline.chunked.generate', messages, config, {
+      category: 'outline.chunked-direction',
       projectId: options.volumeId,
     })
 
@@ -391,8 +391,8 @@ async function generateBlockChapters(
 
   const config = useAIConfigStore.getState().config
   try {
-    const rawOutput = await chat(messages, config, {
-      category: 'outline.chapter',
+    const rawOutput = await executeRegisteredAIEntryV1('outline.chunked.generate', messages, config, {
+      category: 'outline.chunked-chapters',
       projectId: options.volumeId,
     })
 

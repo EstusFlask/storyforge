@@ -6,7 +6,10 @@ import type { WorldRuleNodeDef } from '../../lib/types/world-rules'
 import { WORLD_RULE_TREE } from '../../lib/types/world-rules'
 import { parseFieldSchema, parseEntryFields } from '../../lib/types/codex'
 import { scoreCodexEntry } from '../../lib/codex/search'
-import { chat, streamChat } from '../../lib/ai/client'
+import {
+  executeRegisteredAIEntryV1,
+  streamRegisteredAIEntryV1,
+} from '../../lib/agent/formal-ai-entry'
 import type { AIConfig } from '../../lib/types'
 import { useCodexStore } from '../../stores/codex'
 import { useCharacterStore } from '../../stores/character'
@@ -266,7 +269,11 @@ ${knowledgeContext}
 
       setQaMessages(prev => [...prev, { role: 'assistant', content: '' }])
 
-      for await (const chunk of streamChat(messages, aiConfig, undefined, undefined, { category: 'setting-qa', projectId })) {
+      for await (const chunk of streamRegisteredAIEntryV1(messages, aiConfig, {
+        formalEntryId: 'world.setting.lookup.qa',
+        category: 'setting-qa',
+        projectId,
+      })) {
         setQaMessages(prev => {
           const last = [...prev]
           last[last.length - 1] = { role: 'assistant', content: last[last.length - 1].content + chunk }
@@ -317,7 +324,8 @@ ${conversationText}
 3. categoryKey 必须是以下之一：city, artifact, race, faction, mineral, herb, beast, natStructure, natDimension, natTerrain, natWater, natClimate, humEra, humEvent, humSociety, humConflict, originPower, originDeity`
 
     try {
-      const response = await chat(
+      const response = await executeRegisteredAIEntryV1(
+        'world.setting.lookup.extract',
         [
           { role: 'system', content: extractPrompt },
         ],

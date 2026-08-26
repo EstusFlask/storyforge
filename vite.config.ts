@@ -34,6 +34,11 @@ function manualChunkFor(moduleId: string): string | undefined {
 }
 
 export default defineConfig({
+  // 冻结 E2E 工作区通过符号链接复用 node_modules，但必须使用自己的
+  // Vite optimizer 缓存，避免与作者正在运行的预览互相改写预构建依赖。
+  cacheDir: process.env.STORYFORGE_E2E_SNAPSHOT === '1'
+    ? '.vite-e2e-cache'
+    : 'node_modules/.vite',
   define: {
     __STORYFORGE_BUILD_SHA__: JSON.stringify(resolveBuildSha()),
   },

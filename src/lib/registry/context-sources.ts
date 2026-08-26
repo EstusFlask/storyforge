@@ -104,6 +104,45 @@ async function loadAdaptationSourceReader() {
   return import('../adaptation/source-manifest')
 }
 
+// Upper-product readers are lazy for the same reason as adaptation readers:
+// their production Harnesses import the Skill registry, so eager imports here
+// would create CONTEXT_SOURCES -> product Harness -> Skill -> CONTEXT_SOURCES.
+async function readGameProductionConsultationSource(input: AssembleContextInput): Promise<string> {
+  return (await import('../game-production/context')).readGameProductionConsultationSource(input)
+}
+async function readGameProductionBriefContext(input: AssembleContextInput): Promise<string> {
+  return (await import('../game-production/context')).readGameProductionBriefContext(input)
+}
+async function readGameProductionArtifactInputs(input: AssembleContextInput): Promise<string> {
+  return (await import('../game-production/context')).readGameProductionArtifactInputs(input)
+}
+async function readGameProductionQualityFeedback(input: AssembleContextInput): Promise<string> {
+  return (await import('../game-production/context')).readGameProductionQualityFeedback(input)
+}
+async function readGameProductionEvolutionBase(input: AssembleContextInput): Promise<string> {
+  return (await import('../game-production/context')).readGameProductionEvolutionBase(input)
+}
+async function readTtrpgProductContext(input: AssembleContextInput): Promise<string> {
+  return (await import('../ttrpg/context')).readTtrpgProductContext(input)
+}
+async function readTtrpgCharacterAuthoringContextV2(input: AssembleContextInput): Promise<string> {
+  return (await import('../ttrpg/context')).readTtrpgCharacterAuthoringContextV2(input)
+}
+async function readTtrpgGmRuntimeContextV1(input: AssembleContextInput): Promise<string> {
+  return (await import('../ttrpg/gm-context')).readTtrpgGmRuntimeContextV1(input)
+}
+async function readTtrpgPlayerRuntimeContextV1(input: AssembleContextInput): Promise<string> {
+  return (await import('../ttrpg/player-context')).readTtrpgPlayerRuntimeContextV1(input)
+}
+async function readCharacterInteractionProductionContext(
+  input: AssembleContextInput,
+): Promise<string> {
+  return (await import('../character-interaction/production')).readCharacterInteractionProductionContextV1({
+    scope: input.scope!,
+    productionId: input.characterInteractionProductionId!,
+  })
+}
+
 async function requireTargetAdaptation(input: AssembleContextInput): Promise<AdaptationProject> {
   if (input.adaptationProjectId == null || !input.scope) throw new Error('[adaptation-context] 缺少目标改编 selector')
   const root = await db.adaptationProjects.get(input.adaptationProjectId)
@@ -1303,6 +1342,115 @@ async function readCharacterPassages(projectId: number, name?: string, worldGrou
 }
 
 export const CONTEXT_SOURCES: ContextSource[] = [
+  {
+    key: 'ttrpg.product-authoring',
+    label: 'TTRPG 规则与战役包',
+    scope: 'project',
+    layer: 'L0',
+    ownerFrom: 'work',
+    budgetTokens: 16_000,
+    protectedFromTrim: true,
+    enabled: input => Number.isInteger(input.ttrpgRulePackId) || Number.isInteger(input.ttrpgCampaignModuleId),
+    read: readTtrpgProductContext,
+  },
+  {
+    key: 'ttrpg.character-authoring',
+    label: 'TTRPG 单角色安全车卡制作上下文',
+    scope: 'project',
+    layer: 'L0',
+    ownerFrom: 'work',
+    budgetTokens: 12_000,
+    protectedFromTrim: true,
+    enabled: input => Number.isInteger(input.ttrpgCampaignModuleId) && !!input.ttrpgCharacterKey?.trim(),
+    read: readTtrpgCharacterAuthoringContextV2,
+  },
+  {
+    key: 'ttrpgRuntime',
+    label: '正式 TTRPG 主持人运行视角',
+    scope: 'runtime',
+    layer: 'L0',
+    ownerFrom: 'work',
+    budgetTokens: 10_000,
+    protectedFromTrim: true,
+    requiresSimulationSessionId: true,
+    read: readTtrpgGmRuntimeContextV1,
+  },
+  {
+    key: 'ttrpgPlayerRuntime',
+    label: '正式 TTRPG 单角色玩家运行视角',
+    scope: 'runtime',
+    layer: 'L0',
+    ownerFrom: 'work',
+    budgetTokens: 10_000,
+    protectedFromTrim: true,
+    requiresSimulationSessionId: true,
+    enabled: input => !!input.ttrpgPlayerActorKey?.trim(),
+    read: readTtrpgPlayerRuntimeContextV1,
+  },
+  {
+    key: 'game-production.consultation-source',
+    label: '游戏生产会谈来源',
+    scope: 'project',
+    layer: 'L0',
+    ownerFrom: 'world',
+    budgetTokens: 6000,
+    protectedFromTrim: true,
+    enabled: input => Number.isInteger(input.gameWorldReleaseId),
+    read: readGameProductionConsultationSource,
+  },
+  {
+    key: 'game-production.brief',
+    label: '已授权游戏生产 Brief',
+    scope: 'project',
+    layer: 'L0',
+    ownerFrom: 'work',
+    budgetTokens: 8000,
+    protectedFromTrim: true,
+    enabled: input => Number.isInteger(input.gameProductionId),
+    read: readGameProductionBriefContext,
+  },
+  {
+    key: 'game-production.artifact-inputs',
+    label: '游戏生产任务依赖',
+    scope: 'project',
+    layer: 'L1',
+    ownerFrom: 'work',
+    budgetTokens: 10_000,
+    enabled: input => Number.isInteger(input.gameBuildId) && !!input.gameArtifactKeys?.length,
+    read: readGameProductionArtifactInputs,
+  },
+  {
+    key: 'game-production.quality-feedback',
+    label: '游戏生产质量反馈',
+    scope: 'project',
+    layer: 'L1',
+    ownerFrom: 'work',
+    budgetTokens: 6000,
+    enabled: input => Number.isInteger(input.gameBuildId),
+    read: readGameProductionQualityFeedback,
+  },
+  {
+    key: 'game-production.evolution-base',
+    label: '游戏持续演化基线',
+    scope: 'project',
+    layer: 'L0',
+    ownerFrom: 'work',
+    budgetTokens: 12_000,
+    protectedFromTrim: true,
+    enabled: input => Number.isInteger(input.gameBuildId),
+    read: readGameProductionEvolutionBase,
+  },
+  {
+    key: 'characterInteractionProduction',
+    label: '角色互动冻结生产上下文',
+    scope: 'project',
+    layer: 'L0',
+    ownerFrom: 'work',
+    budgetTokens: 16_000,
+    protectedFromTrim: true,
+    enabled: input => Number.isInteger(input.characterInteractionProductionId),
+    read: readCharacterInteractionProductionContext,
+  },
   {
     key: 'adaptation.sourceManifest',
     label: '改编来源清单',

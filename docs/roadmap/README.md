@@ -91,6 +91,20 @@ held-out。前两轮分别暴露布尔 `turningPoint`/事件上限/verifier 截�
 
 默认同一时间只推进一个主体系；最多附带一个无数据红线、不会被主体系重写的小功能。紧急 Bug 可以插队，但修完回到原体系。
 
+### GAME-PROD-1 开工卡：Agent 自主游戏生产与持续演化
+
+| 项目 | 冻结边界 |
+|---|---|
+| 类型 / 用户故事 | `GAME-PROD-1` 新体系。用户从一个已发布世界表达做游戏的意愿后，主 Agent 先给主线、支线、角色、地点或事件等有来源的起点建议，通过对话冻结主角、起点、规模、玩法、风格、内容边界、媒资和预算；用户确认开始后，系统自主拆分内容、视觉、音频和集成任务，有界并行制作、自动质检和装配，交付可玩预览。用户只控制方向、开始、暂停、停止、发布和下一轮演化，不逐项审批中间素材。 |
+| 主归属 / 复用 | 归新增游戏生产编排层；复用 `WorldReleaseManifestV2`、已有六类游戏合同、Narrative/SIM、`GameDefinition / GameRelease`、AVG 媒资和 Cue、统一 Agent Skill / Run Contract / durable Harness / `CreativeArtifactV1` / Adoption。现有 `outline.world-game` 是内容叶子 Skill，不是顶层制片系统；不得新增平行 Runner、播放器、存档或正式 Release。 |
+| 范围 | Production/Brief/Build/Artifact 合同；起点建议与会谈；开始授权和预算；父子 Run DAG、暂停/恢复/取消；内容/美术/音频并行；构建期二进制；确定性装配；统一 QA；可玩预览；一次整包采用与发布；父 Build/Release 增量演化和存档兼容。 |
+| 非范围 | 不做第七种文字游戏、3D/实时动作引擎、任意脚本、无界多 Agent、逐素材用户审批、自动修改世界 Canon/手稿/旧 Release，也不在纯前端阶段宣称关闭浏览器仍后台运行；账号、云 worker、对象存储、社区和商业分发继续归 PLATFORM。 |
+| 读 | 世界和游戏来源继续只经登记 `CONTEXT_SOURCES + assembleContext()`；每个 Build 冻结 WorldRelease hash、便携选择、Brief hash、Skill/Plan 版本和父 receipt。新增 consultation/brief/build Context Source 必须先登记。 |
+| 写 | 中间内容和媒资只进入 `CreativeArtifactV1` 与隔离 GameBuild；开始授权不等于 Canon 采用。用户试玩后一次确认，才由登记 Adoption extension 在可回滚事务中物化现有 Narrative、GameDefinition、产品模块、AVG 媒资/Cue 并创建 GameRelease。 |
+| 表生命周期 | V3 新增 `gameProductions / gameProductionBriefs / gameProductionCommands / gameBuilds / gameBuildArtifacts / mediaBlobObjects` 六表；命令表证明跨刷新/多标签幂等，共享 Blob 同时服务 Build 和正式媒资。先登记 `PROJECT_TABLES` 并补迁移、导入导出、删除/归档、重映射、损坏零写入和 GC 反例；任务执行仍复用 Agent ledger，不新增 scheduler 表。 |
+| 阶段 | `A0` RuntimePackage/Release v2 → `A1` 六表/治理 → `A2` 共享 Blob → `A3` Build Preview/SIM → `B` 会谈/授权/控制 → `C` 可玩纵切 → `D` durable DAG → `E` 真实视觉 → `F` 真实音频 → `G` 六产品/统一 QA/原子发布 → `H` 增量演化 → `I` 商业验收和旧入口收口。C 只是 MVP，不是完成。 |
+| 验收 | 真实浏览器完整走通“意愿 → 建议/会谈 → 开始 → 内容/视觉/音频有界并行 → 自动装配/QA → 直接试玩 → 一次发布 → 多轮增量演化”；刷新、取消、预算耗尽、来源过期、媒资失败、存储不足、损坏导入和采用中断均有反例；旧 GameRelease/存档/未变素材保持不变。施工权威及逐项完成证据见 `docs/text-game/GAME-PRODUCTION-PIPELINE-BLUEPRINT-V3.md`。 |
+
 ### HARNESS-86 完成卡：真实故事线 Generator 主路径 A/B
 
 | 项目 | 冻结边界 |
@@ -467,11 +481,12 @@ held-out。前两轮分别暴露布尔 `turningPoint`/事件上限/verifier 截�
 | 8 | **AGENT-1 对话副驾与 Agent 团队** | 用一个主 Agent 对话组合调用现有能力，不让用户选择分 Agent | 单一主对话、五领域闭环、六角色路由、领域上下文与团队预算已完成；27.2b“整理本章”形成六域可恢复证据候选；27.2c 一致性 Agent 以零 token 后台守卫和显式单次 fast/deep 检测提供只读报告；下一单位先落 SIM-1 共享运行时，再接 NPC 演进 | Tool Registry 薄封装；前台写入必确认；后台默认只读；Canon 负责校验 | **27.2c CONSISTENCY AGENT COMPLETE（2026-07-27）** |
 | 9 | **FLOW-2 技术底座 / FLOW-3 领域节点创作** | 把分步骤模式的世界、故事、角色、大纲、正文和连续性能力转化为可自由拆分、连接与控制的完整节点创作系统 | FLOW-2 独立图、运行证据、动态端口、预算、精确资料和确认写回保留；FLOW-3 新增领域节点库、智能前后置创建、语义端口、稳定 Canon 绑定、节点级 AI/API 档案、批量结构生成、脏下游和分步骤同源同步 | 节点模式与分步骤模式能力同源、交互并列；读写与生命周期只走三注册表；不复制第二份世界观/角色/大纲/正文；旧图兼容 | **FLOW-2 ENGINE COMPLETE；FLOW-3A/3B/3C/3D/3E/3F COMPLETE（2026-08-05）** |
 | 10 | **SIM-1 世界模拟与互动运行时** | 为跑团、角色聊天、文字游戏和 NPC 演进提供共同状态与事件地基 | SIM-1A 共同运行时核心；SIM-1B 作者选择式 Canon 冻结、来源 hash 审计、角色/地点/物品投影、实体查看和检查点恢复分支；SIM-1C NPC 演进候选、作者确认/拒绝、过期保护和事件回放已交付 | 创作 Canon 与运行时状态分层；模拟不得污染作者原稿；状态变化可回放、可分支；AI 只能产候选 | **SIM-1C COMPLETE（2026-08-03）；TTRPG-1C 与 CHATGAME-1 已消费该基座；NEXT CHATGAME-1 扩展** |
-| 11 | **TTRPG-1 跑团与战役主持** | 在 StoryForge 世界中进行单机跑团、规则判定和长期战役 | `TTRPG-1A` 单机战役主持、`1B` 规则与战斗遭遇、`1C` 长期战役已完成；后续 `1D` 多人协作 | AI 叙事与确定性判定分离；第一阶段不做联网多人；战役日志不冒充创作 Canon | **1C COMPLETE（2026-08-05）；NEXT 1D；依赖 SIM-1** |
+| 11 | **TTRPG 完整跑团产品** | 从冻结世界生产规则、角色、战役并由真人/AI KP 完整主持 | `TTRPG-1A/1B/1C` 仅保留早期事件与规则内核；固定模板退出正式生产；按 R0～R10 补齐 d100、车卡、行动反馈、AI/真人混合桌、媒资和多人权威 | 以 `docs/ttrpg/TTRPG-COMPLETE-PRODUCT-CONSTRUCTION-PLAN-V2.md` 与开发看板为权威；Golden A/B/C 未通过前不得称完成 | **R0 IN PROGRESS（2026-08-22）；Golden 0/3；依赖 SIM-1 / OUTLET-1 / GAME-PROD-1** |
 | 12 | **CHATGAME-1 角色聊天与冒险** | 提供类似酒馆的角色聊天、长期记忆、多角色房间和文字冒险 | ✅ 单角色聊天 MVP：用户身份/场景、冻结角色快照、流式回复、重生成、检查点与分支；后续长期记忆、多角色调度、地点/物品/能力与冒险选择 | 角色知识边界真实；运行时人格/状态不自动反写角色主档；游戏事件只能候选式回流创作层 | **MVP COMPLETE（2026-08-05）；后续扩展依赖 SIM-1，联机依赖 PLATFORM-1** |
 | 13 | **PRODUCT-1 新手转化、数据主权与开源信任** | 让新用户快速得到成果，成熟用户敢托付手稿，贡献者能参与 | 当前功能单位：备份恢复可信；后续 `AUDIT-5/8/9/10/11`、加密备份、帮助系统、i18n、安全/贡献/发布政策另行登记 | 当前阶段完成备份导入边界；其余产品能力仍需独立设计和验收 | **CURRENT SCOPE COMPLETE：备份恢复可信（2026-08-05）；后续扩展未完成** |
 | 14 | **PLATFORM-1 协作与社区广场** | 支撑世界版本发布、发现、游玩、派生、讨论、协作和社区治理 | 本地世界包 v1/v2 已完成；后续 `PLATFORM-1B/1C` 实施账号、云发布、发现、派生图、协作和治理 | 当前阶段完成不可变本地发布/导入闭环；线上服务服从 `WORLD-2` 世界/作品/实例边界，不直接同步或覆盖本地草稿 | **LOCAL PACKAGE V2 COMPLETE（2026-08-06）；NEXT PLATFORM-1B BACKEND** |
 | 15 | **WORLD-2 世界引擎领域重构** | 把散落在分步骤模式中的世界基础、角色资产、主线/支线、大纲/细纲与 SIM 状态机重组为完整世界引擎 | `WORLD-2A` 基线冻结与语义纠偏 → `2B` 完整世界工作台 → `2C` 世界/作品所有权 → `2D` 可执行叙事 → `2E` 版本/发布包 v2 → `2F` 多产品实例统一 | 分步骤模式原样保护；多世界只是可选子系统；世界基础、叙事蓝图和状态机分层；作品与游玩绑定冻结世界版本 | **WORLD-2A 至 WORLD-2F LOCAL FOUNDATION COMPLETE（2026-08-07）** |
+| 16 | **GAME-PROD-1 Agent 自主游戏生产与持续演化** | 把用户意愿、世界来源、游戏内容、美术、音频、装配、QA、发布和后续演化收口为一条可恢复生产流程 | `A0` RuntimePackage/Release v2 → `A1` 六表/治理 → `A2/A3` Blob/Preview → `B/C` 会谈与纵切 → `D` 编排 → `E/F` 真实视觉/音频 → `G` 六产品/商业 QA/发布 → `H` 演化 → `I` 验收收口 | 用户控制方向/启停/发布；中间生产在授权 Build 内自主完成；不复制 Harness、运行时、正式媒资或 Release；MVP 不冒充最终商业流程 | **A0–I 主体已实现：六产品生产、三轮演化、商业性能/主路线/媒资解码硬门均落地；PARTIAL 仅保留真实 Agnes 图片、真实音频供应商与演化浏览器 Golden 证据** |
 
 ## 三、严格施工顺序
 
@@ -559,6 +574,12 @@ held-out。前两轮分别暴露布尔 `turningPoint`/事件上限/verifier 截�
     选择、过期序列拒绝、事件回放、检查点和分支均确定。跑团、角色聊天、文字游戏、NPC 演进四类实例相互隔离，
     文字游戏已有实际运行入口。WORLD-2 本地世界引擎基座完成；最终 CI 为 265 文件 / 1001 项，独立 Chromium
     E2E 为 37/37。社区后端、各上层产品扩展和 HARNESS-2 仍是独立阶段。
+34. 🚧 GAME-PROD-1（2026-08-21 主体实施检查点）：A0–I 已形成统一会谈/Brief/授权控制、durable DAG、共享 Blob、
+    六产品与 TTRPG compiler、Build Preview、三轮演化和同包原子发布。文本与 Agnes 图片复用现有全局配置和同一 Key；
+    开始命令跨切页/刷新自动续跑。商业候选必须同时具备 30 分钟真实浏览器性能、作者主路线和精确媒资 hash 的浏览器
+    解码 receipt；完整覆盖率为 501 文件 / 2,306 项，当前冻结工作区 Chromium E2E 为 58/58。真实演化 Build 已在浏览器展示
+    stable-key 兼容报告，并证明旧 Release/Session 继续绑定原 packageHash；真实 Agnes 图片、真实 music/SFX 供应商费用/权利/取消 Golden
+    仍待外部账号完成，§24 未全部 PROVED 前不标商业完成。
 
 ### FLOW-1 历史实验 / FLOW-2 技术底座 / FLOW-3 当前设计卡
 
@@ -935,6 +956,7 @@ held-out。前两轮分别暴露布尔 `turningPoint`/事件上限/verifier 截�
 | Agent | [`AI-COPILOT-DESIGN.md`](../AI-COPILOT-DESIGN.md) |
 | 节点模式 | [`NODE-AUTHORING-MODE-DESIGN.md`](../NODE-AUTHORING-MODE-DESIGN.md)（FLOW-3 当前方案）、[`VISUAL-WORKFLOW-DESIGN.md`](../VISUAL-WORKFLOW-DESIGN.md)（FLOW-1/2 历史与技术证据） |
 | 跑团 / 角色聊天 / 互动运行时 | [`INTERACTIVE-RUNTIME-ROADMAP.md`](../INTERACTIVE-RUNTIME-ROADMAP.md) |
+| 游戏产品类型与自主生产 | [`text-game/README.md`](../text-game/README.md)、[`text-game/GAME-PRODUCTION-PIPELINE-DESIGN.md`](../text-game/GAME-PRODUCTION-PIPELINE-DESIGN.md) |
 
 设计文档提供方案细节，`README.md` 提供当前归属和施工顺序；两者冲突时，先停止开发并回到 `CLAUDE.md`、`MASTER-BLUEPRINT.md` 和本路线图裁决。
 

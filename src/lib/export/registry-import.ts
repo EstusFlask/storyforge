@@ -273,7 +273,16 @@ function validateComicMediaBackup(value: Record<string, any>): void {
   if (!Array.isArray(value.comicMediaAssets) || !Array.isArray(value.mediaBlobObjects)) throw new Error('[deriveImport] v9 备份缺少漫画媒体或共享 Blob 表')
   const blobs = new Map<number, Record<string, any>>()
   for (const blob of value.mediaBlobObjects as Record<string, any>[]) {
-    if (!Number.isInteger(blob._exportId) || blobs.has(blob._exportId) || !/^[a-f0-9]{64}$/.test(blob.contentHash) || !['image/png', 'image/jpeg', 'image/webp'].includes(blob.mimeType) || !Number.isInteger(blob.byteSize) || blob.byteSize < 16 || typeof blob.data !== 'string') throw new Error('[deriveImport] v9 Blob 元数据或便携内容非法')
+    // mediaBlobObjects is product-neutral. Comic validation may constrain the
+    // subset it references to image media, but must not reject valid audio,
+    // fonts or other upper-product objects stored in the same shared table.
+    if (!Number.isInteger(blob._exportId) || blobs.has(blob._exportId)
+      || !/^[a-f0-9]{64}$/.test(blob.contentHash)
+      || typeof blob.mimeType !== 'string' || !blob.mimeType.trim()
+      || !Number.isInteger(blob.byteSize) || blob.byteSize < 1
+      || typeof blob.data !== 'string') {
+      throw new Error('[deriveImport] v9 Blob 元数据或便携内容非法')
+    }
     blobs.set(blob._exportId, blob)
   }
   const panels = new Map<number, Record<string, any>>((value.comicPanels ?? []).map((row: Record<string, any>) => [row._exportId, row]))
@@ -281,7 +290,13 @@ function validateComicMediaBackup(value: Record<string, any>): void {
   const assets = new Map<string, Record<string, any>>()
   for (const row of value.comicMediaAssets as Record<string, any>[]) {
     const key = `${row._workExportId}:${row.stableKey}`
-    if (assets.has(key) || !blobs.has(row._blobObjectExportId)) throw new Error('[deriveImport] v9 asset stableKey 重复或 Blob 引用越界')
+    const blob = blobs.get(row._blobObjectExportId)
+    if (assets.has(key) || !blob) throw new Error('[deriveImport] v9 asset stableKey 重复或 Blob 引用越界')
+    if (!['image/png', 'image/jpeg', 'image/webp'].includes(blob.mimeType)
+      || !Number.isInteger(blob.width) || blob.width < 1
+      || !Number.isInteger(blob.height) || blob.height < 1) {
+      throw new Error('[deriveImport] v9 漫画 asset 必须引用带尺寸的图片 Blob')
+    }
     assertComicMediaAssetV1({ ...row, projectId: 1, workId: row._workExportId, adaptationProjectId: row._adaptationProjectExportId, panelId: row._panelExportId ?? null, blobObjectId: row._blobObjectExportId } as ComicMediaAsset)
     if (row.role === 'panel-render' && (!panels.has(row._panelExportId) || panels.get(row._panelExportId)!._workExportId !== row._workExportId)) throw new Error('[deriveImport] v9 panel-render owner 越界')
     if (row.role !== 'panel-render' && !subjects.has(`${row._workExportId}:${row.subjectKey}`)) throw new Error('[deriveImport] v9 subject asset owner 越界')
@@ -362,7 +377,8 @@ function deriveImportOrder(specs: TableSpec[]): TableSpec[] {
       const fieldDeps = (spec.exportRemap ?? [])
         .filter(rm => !rm.selfTree
           && rm.remapVia !== spec.name
-          && rm.deferred !== true)
+          && rm.deferred !== true
+          && rm.deferImport !== true)
         .map(rm => rm.remapVia)
       const refDeps = (spec.exportRefRemap ?? [])
         .filter(ref => ref.remapVia !== spec.name)
@@ -457,6 +473,37 @@ async function assertPortableBinaryIntegrity(
   const digest = await Dexie.waitFor(crypto.subtle.digest('SHA-256', data))
   const hash = Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, '0')).join('')
   if (metadata[integrity.hashField] !== hash) throw new Error(`[deriveImport] ${spec.name} 二进制哈希与元数据不一致`)
+}
+
+async function restorePortableSharedMediaObject(
+  spec: TableSpec,
+  row: Record<string, any>,
+): Promise<void> {
+  const portable = spec.portableData
+  if (portable?.kind !== 'shared-media-object') return
+  if (row[portable.stateField] !== 'ready') {
+    throw new Error(`[deriveImport] ${spec.name} 只接受 ready 共享媒资`)
+  }
+  const data = restorePortableBinaryBlob(row[portable.dataField], `${spec.name}.${portable.dataField}`)
+  if (row[portable.sizeField] !== data.byteLength) {
+    throw new Error(`[deriveImport] ${spec.name} 二进制大小与记录不一致`)
+  }
+  const mimeType = row[portable.mimeField]
+  if (typeof mimeType !== 'string' || !mimeType.trim()) {
+    throw new Error(`[deriveImport] ${spec.name} 缺少 MIME 类型`)
+  }
+  const digest = await Dexie.waitFor(crypto.subtle.digest('SHA-256', data))
+  const hash = Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, '0')).join('')
+  if (row[portable.hashField] !== hash) {
+    throw new Error(`[deriveImport] ${spec.name} 二进制哈希与记录不一致`)
+  }
+  row[portable.dataField] = data
+  row[portable.backendField] = 'indexeddb'
+  row[portable.stateField] = 'ready'
+  row[portable.pathField] = null
+  row[portable.leaseOwnerField] = null
+  row[portable.leaseExpiresAtField] = null
+  row[portable.lastVerifiedAtField] = Date.now()
 }
 
 /**
@@ -578,12 +625,20 @@ export async function deriveImportProjectJSON(data: ProjectExportData): Promise<
           await Dexie.waitFor(assertAgentRunArtifactRecordIntegrityV1(obj))
         }
         if (spec.portableData?.kind === 'binary-blob') {
-          const binary = restorePortableBinaryBlob(
-            obj[spec.portableData.field],
-            `${spec.name}.${spec.portableData.field}`,
-          )
-          await assertPortableBinaryIntegrity(spec, obj, binary)
-          obj[spec.portableData.field] = binary
+          if (obj[spec.portableData.field] == null && spec.portableData.allowMissingWhen
+            && obj[spec.portableData.allowMissingWhen.importField] != null) {
+            obj[spec.portableData.field] = null
+          } else {
+            const binary = restorePortableBinaryBlob(
+              obj[spec.portableData.field],
+              `${spec.name}.${spec.portableData.field}`,
+            )
+            await assertPortableBinaryIntegrity(spec, obj, binary)
+            obj[spec.portableData.field] = binary
+          }
+        }
+        if (spec.portableData?.kind === 'shared-media-object') {
+          await restorePortableSharedMediaObject(spec, obj)
         }
         if (spec.portableData?.kind === 'agent-run-root') {
           const contractIdMaps = new Map(newIdMaps)
@@ -654,15 +709,23 @@ export async function deriveImportProjectJSON(data: ProjectExportData): Promise<
               ? remapPortableIdArray(portableRefs, refMap, rr.storage === 'json-string')
               : rr.kind === 'scene-character-ids'
                 ? await remapSceneCharacterIndexes((db as any)[spec.name], pending.newId, rr.field, portableRefs, refMap)
-                : await remapObjectArrayIdIndexes(
-                  (db as any)[spec.name],
-                  pending.newId,
-                  rr.field,
-                  portableRefs,
-                  refMap,
-                  rr.itemField,
-                  rr.storage === 'json-string',
-                )
+                : rr.kind === 'object-array-id'
+                  ? await remapObjectArrayIdIndexes(
+                    (db as any)[spec.name],
+                    pending.newId,
+                    rr.field,
+                    portableRefs,
+                    refMap,
+                    rr.itemField,
+                    rr.storage === 'json-string',
+                  )
+                  : remapPortableJsonIdPaths(
+                    portableRefs,
+                    rr.paths,
+                    refMap,
+                    rr.onUnmapped === 'require',
+                    `${spec.name}.${rr.field}`,
+                  )
             if (patch !== undefined) {
               await (db as any)[spec.name].update(pending.newId, { [rr.field]: patch })
             }
@@ -714,6 +777,44 @@ export async function deriveImportProjectJSON(data: ProjectExportData): Promise<
   // atomic stamping without guessing external IDs.
   if (data.version < PORTABLE_OWNER_VERSION) await ensureWorkspaceOwnership(importedProjectId)
   return importedProjectId
+}
+
+function remapPortableJsonIdPaths(
+  value: unknown,
+  paths: readonly string[],
+  idMap: Map<number, number>,
+  required: boolean,
+  label: string,
+): string | null | undefined {
+  if (value == null) return value === null ? null : undefined
+  let parsed: unknown
+  try { parsed = typeof value === 'string' ? JSON.parse(value) : structuredClone(value) } catch {
+    throw new Error(`[deriveImport] ${label} 不是合法便携 JSON`)
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error(`[deriveImport] ${label} 必须是 JSON 对象`)
+  }
+  for (const path of paths) {
+    const parts = path.split('.').filter(Boolean)
+    let owner = parsed as Record<string, unknown>
+    for (const part of parts.slice(0, -1)) {
+      const child = owner[part]
+      if (!child || typeof child !== 'object' || Array.isArray(child)) {
+        if (required) throw new Error(`[deriveImport] ${label}.${path} 缺失`)
+        owner = {}
+        break
+      }
+      owner = child as Record<string, unknown>
+    }
+    const field = parts[parts.length - 1]
+    if (!field) continue
+    const portableId = owner[field]
+    if (portableId == null) { owner[field] = null; continue }
+    const localId = typeof portableId === 'number' ? idMap.get(portableId) : undefined
+    if (localId == null && required) throw new Error(`[deriveImport] ${label}.${path} 缺少本地映射`)
+    owner[field] = localId ?? null
+  }
+  return JSON.stringify(parsed)
 }
 
 function remapPortableIdArray(value: unknown, idMap: Map<number, number>, stringify: boolean): number[] | string {

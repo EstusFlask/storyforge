@@ -11,7 +11,11 @@ import type {
 import type { WorldReleaseSection } from '../registry/types'
 import { assertRecordInScope, resolveScope, scopeTransactionTables } from './scope'
 import type { ProjectExportData } from '../export/json-export'
-import { deriveStrictExportProjectSnapshot } from '../export/registry-export'
+import {
+  deriveStrictExportProjectSnapshot,
+  deriveStrictExportProjectSnapshotInCurrentTransaction,
+  type StrictProjectExportSnapshot,
+} from '../export/registry-export'
 import { validateNarrativeModule } from '../narrative/blueprint'
 
 // Release snapshots are deliberately sparse world-share packages, not v6+
@@ -68,11 +72,13 @@ async function buildPortableReleaseProject(input: {
   scope: WorkspaceScope
   requestedTables: string[]
   selectedNarrativeModules: NarrativeModule[]
+  strictSnapshot?: StrictProjectExportSnapshot
 }): Promise<{
   portableProject: ProjectExportData
   selectedNarrativeModules: WorldReleaseManifestV2['selectedNarrativeModules']
 }> {
-  const snapshot = await deriveStrictExportProjectSnapshot(input.scope.projectId)
+  const snapshot = input.strictSnapshot
+    ?? await deriveStrictExportProjectSnapshot(input.scope.projectId)
   const backup = snapshot.data
   if (backup.version < 4 || !backup.ownership || !backup.worlds || !backup.works) {
     throw new Error('[release] 世界发布必须基于 v4+ 严格便携快照')
@@ -124,6 +130,9 @@ async function buildPortableReleaseProject(input: {
     works: [{ ...clone(workRoot), _activeCharacterDrivenPlanExportId: null }],
   }
   const source = backup as unknown as Record<string, unknown>
+  const sharedMediaRows = Array.isArray(source.mediaBlobObjects)
+    ? source.mediaBlobObjects as Record<string, unknown>[]
+    : []
   for (const tableName of input.requestedTables) {
     if (tableName === 'worlds' || tableName === 'works' || tableName === 'worldReleases') continue
     const rows = Array.isArray(source[tableName]) ? clone(source[tableName] as Record<string, unknown>[]) : []
@@ -134,7 +143,15 @@ async function buildPortableReleaseProject(input: {
       || tableName === 'narrativeChoices') {
       portable[tableName] = rows.filter(row => selectedModuleExportIds.has(row._moduleExportId as number))
     } else {
-      portable[tableName] = rows.filter(row => rowMatchesScope(row, portableWorldId, portableWorkId))
+      const scopedRows = rows.filter(row => rowMatchesScope(row, portableWorldId, portableWorkId))
+      portable[tableName] = tableName === 'avgMediaBlobs'
+        ? scopedRows.map(row => {
+            if (typeof row.data === 'string' || !Number.isInteger(row._blobObjectExportId)) return row
+            const shared = sharedMediaRows.find(candidate => candidate._exportId === row._blobObjectExportId)
+            if (typeof shared?.data !== 'string') throw new Error('[release] AVG 共享媒资无法冻结到 WorldRelease')
+            return { ...row, data: shared.data }
+          })
+        : scopedRows
     }
   }
   const portableWorks = portable.works as Array<Record<string, unknown>>
@@ -146,7 +163,7 @@ export async function buildWorldReleaseManifest(input: {
   scope: WorkspaceScope
   selectedTables?: string[]
   selectedNarrativeModuleIds?: number[]
-}): Promise<WorldReleaseManifestV2> {
+}, strictSnapshot?: StrictProjectExportSnapshot): Promise<WorldReleaseManifestV2> {
   const scope = await resolveScope({ scope: input.scope })
   const world = await db.worlds.get(scope.worldId)
   if (!world || world.projectId !== scope.projectId) throw new Error('[release] World 不属于当前工作区')
@@ -182,6 +199,7 @@ export async function buildWorldReleaseManifest(input: {
     scope,
     requestedTables: selectedTables,
     selectedNarrativeModules: modules,
+    strictSnapshot,
   })
   const portableRecord = portableProject as unknown as Record<string, unknown>
   const records = Object.fromEntries(selectedTables.map(name => [
@@ -234,7 +252,14 @@ export async function createWorldRevision(input: {
         throw new Error('[release] 父修订不属于当前 World')
       }
     }
-    const currentManifest = await buildWorldReleaseManifest({ ...input, scope: currentScope })
+    const strictSnapshot = await deriveStrictExportProjectSnapshotInCurrentTransaction(
+      currentScope.projectId,
+      currentScope,
+    )
+    const currentManifest = await buildWorldReleaseManifest(
+      { ...input, scope: currentScope },
+      strictSnapshot,
+    )
     if (stableJson(currentManifest) !== manifestJson) {
       throw new Error('[release] 世界内容在修订冻结过程中发生变化，请重试')
     }

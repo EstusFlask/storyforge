@@ -78,6 +78,13 @@ import type {
   NarrativeChoice,
   InteractionCharacterProfile,
   InteractionSceneTemplate,
+  CharacterInteractionProductionRecordV1,
+  CharacterInteractionSourceSelectionRecordV1,
+  CharacterInteractionBriefRecordV1,
+  CharacterInteractionProductionStepRecordV1,
+  CharacterInteractionArtifactRecordV1,
+  CharacterInteractionMediaAssetRecordV1,
+  CharacterInteractionProductReleaseRecordV1,
   AdventureModule,
   AvgMediaAsset,
   AvgMediaBlob,
@@ -91,7 +98,24 @@ import type {
   ComicPanel,
   ComicVisualSubject,
   ComicMediaAsset,
-  MediaBlobObject,
+  GameProductionRecordV1,
+  GameProductionBriefRecordV1,
+  GameProductionCommandRecordV1,
+  GameBuildRecordV1,
+  GameBuildArtifactRecordV1,
+  GameQualityGateReceiptRecordV1,
+  MediaBlobObjectRecordV1,
+  GameRulePackRecordV1,
+  TtrpgCampaignModuleRecordV1,
+  TtrpgSessionParticipantRecordV2,
+  TtrpgRuntimeAssetRequestRecordV1,
+  TtrpgProductionRecordV1,
+  TtrpgSourceSelectionRecordV1,
+  TtrpgProductionBriefRecordV1,
+  TtrpgProductionStepRecordV1,
+  TtrpgProductionBuildRecordV1,
+  TtrpgProductionMediaAssetRecordV1,
+  TtrpgProductReleaseRecordV1,
 } from '../types'
 import type { AIUsageEntry } from '../ai/usage-log'
 import type { TemporalFact } from '../types/temporal-fact'
@@ -224,6 +248,8 @@ class StoryForgeDB extends Dexie {
   simulationSessions!: Table<SimulationSession, number>
   simulationEvents!: Table<SimulationEvent, number>
   simulationCheckpoints!: Table<SimulationCheckpoint, number>
+  ttrpgSessionParticipants!: Table<TtrpgSessionParticipantRecordV2, number>
+  ttrpgRuntimeAssetRequests!: Table<TtrpgRuntimeAssetRequestRecordV1, number>
   narrativeModules!: Table<NarrativeModule, number>
   narrativeNodes!: Table<NarrativeNode, number>
   worldRevisions!: Table<WorldRevision, number>
@@ -239,6 +265,13 @@ class StoryForgeDB extends Dexie {
   narrativeChoices!: Table<NarrativeChoice, number>
   interactionCharacterProfiles!: Table<InteractionCharacterProfile, number>
   interactionSceneTemplates!: Table<InteractionSceneTemplate, number>
+  characterInteractionProductions!: Table<CharacterInteractionProductionRecordV1, number>
+  characterInteractionSourceSelections!: Table<CharacterInteractionSourceSelectionRecordV1, number>
+  characterInteractionBriefs!: Table<CharacterInteractionBriefRecordV1, number>
+  characterInteractionProductionSteps!: Table<CharacterInteractionProductionStepRecordV1, number>
+  characterInteractionArtifacts!: Table<CharacterInteractionArtifactRecordV1, number>
+  characterInteractionMediaAssets!: Table<CharacterInteractionMediaAssetRecordV1, number>
+  characterInteractionProductReleases!: Table<CharacterInteractionProductReleaseRecordV1, number>
   adventureModules!: Table<AdventureModule, number>
   avgMediaAssets!: Table<AvgMediaAsset, number>
   avgMediaBlobs!: Table<AvgMediaBlob, number>
@@ -252,7 +285,24 @@ class StoryForgeDB extends Dexie {
   comicPanels!: Table<ComicPanel, number>
   comicVisualSubjects!: Table<ComicVisualSubject, number>
   comicMediaAssets!: Table<ComicMediaAsset, number>
-  mediaBlobObjects!: Table<MediaBlobObject, number>
+
+  // GAMEPROD / TTRPG / CHATGAME —— 上层产品生产与媒资生命周期。
+  gameProductions!: Table<GameProductionRecordV1, number>
+  gameProductionBriefs!: Table<GameProductionBriefRecordV1, number>
+  gameProductionCommands!: Table<GameProductionCommandRecordV1, number>
+  gameBuilds!: Table<GameBuildRecordV1, number>
+  gameBuildArtifacts!: Table<GameBuildArtifactRecordV1, number>
+  gameQualityGateReceipts!: Table<GameQualityGateReceiptRecordV1, number>
+  mediaBlobObjects!: Table<MediaBlobObjectRecordV1, number>
+  gameRulePacks!: Table<GameRulePackRecordV1, number>
+  ttrpgCampaignModules!: Table<TtrpgCampaignModuleRecordV1, number>
+  ttrpgProductions!: Table<TtrpgProductionRecordV1, number>
+  ttrpgSourceSelections!: Table<TtrpgSourceSelectionRecordV1, number>
+  ttrpgProductionBriefs!: Table<TtrpgProductionBriefRecordV1, number>
+  ttrpgProductionSteps!: Table<TtrpgProductionStepRecordV1, number>
+  ttrpgProductionBuilds!: Table<TtrpgProductionBuildRecordV1, number>
+  ttrpgProductionMediaAssets!: Table<TtrpgProductionMediaAssetRecordV1, number>
+  ttrpgProductReleases!: Table<TtrpgProductReleaseRecordV1, number>
 
   constructor() {
     super('storyforge')
@@ -717,6 +767,133 @@ class StoryForgeDB extends Dexie {
       characters: '++id, projectId, name, role, roleWeight, moralAxis, orderAxis, statusEvidenceChapterId',
       comicMediaAssets: '++id, projectId, workId, adaptationProjectId, &[workId+stableKey], role, origin, panelId, subjectKey, blobObjectId, disposition, requestHash, &[workId+requestHash+candidateIndex], updatedAt',
       mediaBlobObjects: '++id, projectId, workId, &[workId+contentHash], mimeType, disposition, updatedAt',
+    })
+
+    // v70-v78: merge the independently developed upper-product production
+    // history after the authoring/adaptation v63-v69 line. Historical branch
+    // databases may already contain equivalent stores under lower versions;
+    // Dexie treats these declarations as additive schema convergence.
+    this.version(70).stores({
+      gameProductions: '++id, projectId, worldId, workId, &[workId+productionKey], status, currentGameDefinitionId, currentGameReleaseId, updatedAt',
+      gameProductionBriefs: '++id, projectId, worldId, workId, productionId, &[productionId+revision], &[productionId+briefHash], [productionId+status], sourceWorldReleaseId, createdAt',
+      gameProductionCommands: '++id, projectId, worldId, workId, productionId, &[productionId+commandId], [productionId+status], type, createdAt',
+      gameBuilds: '++id, projectId, worldId, workId, productionId, &[productionId+buildNumber], [productionId+status], sourceGameReleaseId, packageHash, previewHash, releasedGameReleaseId, updatedAt',
+      gameBuildArtifacts: '++id, projectId, worldId, workId, buildId, &[buildId+artifactKey+version], [buildId+status], [buildId+requirementKey], producerRunId, blobObjectId, contentHash, createdAt',
+      mediaBlobObjects: '++id, projectId, worldId, workId, &[workId+contentHash], mimeType, disposition, storageState, leaseExpiresAt, byteSize, updatedAt',
+      avgMediaBlobs: '++id, projectId, worldId, workId, &mediaAssetId, blobObjectId',
+      agentRuns: '++id, projectId, workId, simulationSessionId, gameBuildId, worldGroupId, conversationId, parentRunId, &[parentRunId+parentRelation], status, updatedAt',
+      simulationSessions: '++id, projectId, worldGroupId, worldId, workId, worldReleaseId, gameReleaseId, gameBuildId, runtimeSourceHash, narrativeModuleId, kind, status, parentSessionId, updatedAt',
+    }).upgrade(async tx => {
+      await tx.table('avgMediaBlobs').toCollection().modify(row => {
+        if (!Object.prototype.hasOwnProperty.call(row, 'blobObjectId')) row.blobObjectId = null
+      })
+      await tx.table('agentRuns').toCollection().modify(run => {
+        if (!Object.prototype.hasOwnProperty.call(run, 'gameBuildId')) run.gameBuildId = null
+      })
+      await tx.table('simulationSessions').toCollection().modify(session => {
+        if (!Object.prototype.hasOwnProperty.call(session, 'gameBuildId')) session.gameBuildId = null
+        if (!Object.prototype.hasOwnProperty.call(session, 'runtimeSourceHash')) session.runtimeSourceHash = null
+      })
+    })
+
+    this.version(71).stores({
+      gameRulePacks: '++id, projectId, worldId, workId, &[workId+ruleSystemId+ruleSystemVersion], [workId+status], contentHash, updatedAt',
+      ttrpgCampaignModules: '++id, projectId, worldId, workId, &[workId+campaignKey], [workId+status], sourceWorldReleaseId, rulePackId, contentHash, updatedAt',
+    })
+
+    this.version(72).stores({
+      gameQualityGateReceipts: '++id, projectId, worldId, workId, buildId, &[buildId+gateId+receiptHash], [buildId+gateId], [buildId+status], gateId, status, createdAt',
+    })
+
+    this.version(73).stores({
+      ttrpgSessionParticipants: '++id, projectId, worldGroupId, worldId, workId, sessionId, &[sessionId+seatKey], &[sessionId+viewerKey], [sessionId+actorKey], role, controller, assignmentState, updatedAt',
+    })
+
+    this.version(74).stores({
+      ttrpgRuntimeAssetRequests: '++id, projectId, worldGroupId, worldId, workId, sessionId, &[sessionId+requestKey], [sessionId+slotKey], [sessionId+status], priority, mediaAssetId, processorLeaseExpiresAt, updatedAt',
+    })
+
+    this.version(75).stores({
+      ttrpgProductions: '++id, projectId, worldId, workId, &[workId+productionKey], [workId+status], activeSourceSelectionId, activeBriefId, currentBuildId, currentProductReleaseId, updatedAt',
+      ttrpgSourceSelections: '++id, projectId, worldId, workId, productionId, &[productionId+revision], &[productionId+selectionHash], [productionId+status], sourceKind, sourceWorldReleaseId, createdAt',
+      ttrpgProductionBriefs: '++id, projectId, worldId, workId, productionId, sourceSelectionId, &[productionId+revision], &[productionId+briefHash], [productionId+status], createdAt',
+      ttrpgProductionSteps: '++id, projectId, worldId, workId, productionId, buildId, &[productionId+stepKey+attempt], [productionId+status], [productionId+stepKey], updatedAt',
+      ttrpgProductionBuilds: '++id, projectId, worldId, workId, productionId, sourceSelectionId, briefId, &[productionId+buildNumber], [productionId+status], buildHash, updatedAt',
+      ttrpgProductReleases: '++id, projectId, worldId, workId, productionId, sourceSelectionId, sourceWorldReleaseId, briefId, buildId, &[productionId+version], &[productionId+contentHash], createdAt',
+      simulationSessions: '++id, projectId, worldGroupId, worldId, workId, worldReleaseId, gameReleaseId, gameBuildId, ttrpgBuildId, runtimeSourceHash, narrativeModuleId, kind, status, parentSessionId, updatedAt',
+    }).upgrade(async tx => {
+      await tx.table('simulationSessions').toCollection().modify(session => {
+        if (!Object.prototype.hasOwnProperty.call(session, 'ttrpgBuildId')) session.ttrpgBuildId = null
+      })
+    })
+
+    this.version(76).stores({
+      ttrpgProductionMediaAssets: '++id, projectId, worldId, workId, buildId, &[buildId+slotKey+version], [buildId+slotKey], [buildId+status], blobObjectId, contentHash, updatedAt',
+    })
+
+    this.version(77).stores({
+      characterInteractionProductions: '++id, projectId, worldId, workId, &[workId+productionKey], [workId+status], activeSourceSelectionId, activeBriefId, updatedAt',
+      characterInteractionSourceSelections: '++id, projectId, worldId, workId, productionId, &[productionId+revision], &[productionId+selectionHash], [productionId+status], sourceWorldReleaseId, worldContentHash, createdAt',
+      characterInteractionBriefs: '++id, projectId, worldId, workId, productionId, sourceSelectionId, &[productionId+revision], [productionId+briefHash], [productionId+status], createdAt',
+    })
+
+    this.version(78).stores({
+      characterInteractionProductions: '++id, projectId, worldId, workId, &[workId+productionKey], [workId+status], activeSourceSelectionId, activeBriefId, currentProductReleaseId, updatedAt',
+      characterInteractionProductionSteps: '++id, projectId, worldId, workId, productionId, &[productionId+stepKey+attempt], [productionId+status], [productionId+stepKey], candidateArtifactId, confirmedArtifactId, producerRunId, updatedAt',
+      characterInteractionArtifacts: '++id, projectId, worldId, workId, productionId, &[productionId+artifactKey+revision], [productionId+status], [productionId+stepKey], kind, producerRunId, sourceSessionId, payloadHash, createdAt',
+      characterInteractionMediaAssets: '++id, projectId, worldId, workId, productionId, &[productionId+slotKey+version], [productionId+slotKey], [productionId+status], blobObjectId, contentHash, updatedAt',
+      characterInteractionProductReleases: '++id, projectId, worldId, workId, productionId, sourceSelectionId, sourceWorldReleaseId, briefId, gameReleaseId, &[productionId+version], &[productionId+contentHash], createdAt',
+    }).upgrade(async tx => {
+      await tx.table('characterInteractionProductions').toCollection().modify(row => {
+        if (!Object.prototype.hasOwnProperty.call(row, 'currentProductReleaseId')) row.currentProductReleaseId = null
+      })
+    })
+
+    // v79 is the convergence point for databases created by either historical
+    // v63-v71 line. It declares the complete union and only backfills fields
+    // whose values can be derived from authoritative Work ownership.
+    this.version(79).stores({
+      agentRunArtifacts: '++id, projectId, &[projectId+artifactKind+contentHash], contentHash, retentionState, createdAt',
+      storyArcs: '++id, projectId, type, sourceStoryCoreId, producerRunId',
+      codexEntries: '++id, projectId, categoryId, worldGroupId, order, producerRunId',
+      characters: '++id, projectId, name, role, roleWeight, moralAxis, orderAxis, statusEvidenceChapterId',
+      adaptationProjects: '++id, projectId, worldId, &workId, sourceWorkId, sourceOutlineRootId, sourceStartChapterId, sourceEndChapterId, medium, status, updatedAt',
+      adaptationSourceUnits: '++id, projectId, workId, adaptationProjectId, &[adaptationProjectId+manifestVersion+sourceUnitKey], [adaptationProjectId+manifestVersion], sourceOutlineNodeId, sourceChapterId, order',
+      screenplayScenes: '++id, projectId, workId, adaptationProjectId, &[adaptationProjectId+stableKey], &[adaptationProjectId+episodeNumber+sceneNumber], [adaptationProjectId+episodeNumber], order, status, updatedAt',
+      comicPages: '++id, projectId, workId, adaptationProjectId, &[adaptationProjectId+stableKey], &[adaptationProjectId+order], chapterNumber, status, updatedAt',
+      comicPanels: '++id, projectId, workId, pageId, &[workId+stableKey], &[pageId+order], status, updatedAt',
+      comicVisualSubjects: '++id, projectId, workId, adaptationProjectId, &[workId+stableKey], kind, characterId, locationRefKey, status, updatedAt',
+      comicMediaAssets: '++id, projectId, workId, adaptationProjectId, &[workId+stableKey], role, origin, panelId, subjectKey, blobObjectId, disposition, requestHash, &[workId+requestHash+candidateIndex], updatedAt',
+      mediaBlobObjects: '++id, projectId, worldId, workId, &[workId+contentHash], mimeType, disposition, storageState, leaseExpiresAt, byteSize, updatedAt',
+    }).upgrade(async tx => {
+      await tx.table('storyArcs').toCollection().modify(arc => {
+        if (!Object.prototype.hasOwnProperty.call(arc, 'origin')) arc.origin = 'manual'
+        if (!Object.prototype.hasOwnProperty.call(arc, 'status')) arc.status = 'active'
+      })
+      await tx.table('codexEntries').toCollection().modify(entry => {
+        if (!Object.prototype.hasOwnProperty.call(entry, 'origin')) entry.origin = 'manual'
+        if (!Object.prototype.hasOwnProperty.call(entry, 'sourceEvidenceQuotes')) entry.sourceEvidenceQuotes = '[]'
+        if (!Object.prototype.hasOwnProperty.call(entry, 'sourceContentHash')) entry.sourceContentHash = ''
+        if (!Object.prototype.hasOwnProperty.call(entry, 'producerRunId')) entry.producerRunId = null
+        if (!Object.prototype.hasOwnProperty.call(entry, 'producerCandidateHash')) entry.producerCandidateHash = null
+      })
+      const blobs = await tx.table('mediaBlobObjects').toArray()
+      for (const blob of blobs) {
+        const patch: Record<string, unknown> = {}
+        if (!Object.prototype.hasOwnProperty.call(blob, 'worldId') || blob.worldId == null) {
+          const work = await tx.table('works').get(blob.workId)
+          if (work?.worldId != null) patch.worldId = work.worldId
+        }
+        if (!Object.prototype.hasOwnProperty.call(blob, 'backend')) patch.backend = 'indexeddb'
+        if (!Object.prototype.hasOwnProperty.call(blob, 'storageState')) {
+          patch.storageState = blob.disposition === 'pending-delete' ? 'pending-delete' : 'ready'
+        }
+        if (!Object.prototype.hasOwnProperty.call(blob, 'opfsPath')) patch.opfsPath = null
+        if (!Object.prototype.hasOwnProperty.call(blob, 'leaseOwner')) patch.leaseOwner = null
+        if (!Object.prototype.hasOwnProperty.call(blob, 'leaseExpiresAt')) patch.leaseExpiresAt = null
+        if (!Object.prototype.hasOwnProperty.call(blob, 'lastVerifiedAt')) patch.lastVerifiedAt = null
+        if (Object.keys(patch).length > 0) await tx.table('mediaBlobObjects').update(blob.id, patch)
+      }
     })
   }
 }

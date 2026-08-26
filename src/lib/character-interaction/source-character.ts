@@ -1,4 +1,8 @@
-import type { InteractionSourceCharacterSnapshotV1 } from '../types'
+import type {
+  InteractionGuestCharacterSnapshotV1,
+  InteractionPortableCharacterSnapshotV1,
+  InteractionSourceCharacterSnapshotV1,
+} from '../types'
 
 const HASH = /^[a-f0-9]{64}$/
 const KEY = /^[a-zA-Z0-9._:-]+$/
@@ -25,9 +29,28 @@ export function createInteractionSourceCharacterSnapshot(input: {
   }
 }
 
+export function createInteractionGuestCharacterSnapshot(input: {
+  guestKey: string
+  name: string
+}): InteractionGuestCharacterSnapshotV1 {
+  const guestKey = input.guestKey.trim()
+  const name = input.name.trim()
+  if (!guestKey || guestKey.length > 120 || !KEY.test(guestKey)) {
+    throw new Error('[chatgame] 自建角色稳定 key 无效')
+  }
+  if (!name || name.length > 240) throw new Error('[chatgame] 自建角色名称无效')
+  return {
+    schema: 'storyforge.interaction-guest-character',
+    version: 1,
+    guestKey,
+    characterKey: `interaction-guest:${guestKey}`,
+    name,
+  }
+}
+
 export function parseInteractionSourceCharacterSnapshot(
   value: unknown,
-): InteractionSourceCharacterSnapshotV1 | null {
+): InteractionPortableCharacterSnapshotV1 | null {
   if (value == null || value === '') return null
   let parsed = value
   if (typeof parsed === 'string') {
@@ -38,6 +61,17 @@ export function parseInteractionSourceCharacterSnapshot(
     throw new Error('[chatgame] 来源角色快照无效')
   }
   const row = parsed as Record<string, unknown>
+  if (row.schema === 'storyforge.interaction-guest-character') {
+    const guest = createInteractionGuestCharacterSnapshot({
+      guestKey: typeof row.guestKey === 'string' ? row.guestKey : '',
+      name: typeof row.name === 'string' ? row.name : '',
+    })
+    if (row.version !== guest.version || row.characterKey !== guest.characterKey
+      || !KEY.test(guest.characterKey) || guest.characterKey.length > 160) {
+      throw new Error('[chatgame] 自建角色快照身份不一致')
+    }
+    return guest
+  }
   const result = createInteractionSourceCharacterSnapshot({
     worldContentHash: typeof row.worldContentHash === 'string' ? row.worldContentHash : '',
     characterExportId: typeof row.characterExportId === 'number' ? row.characterExportId : Number.NaN,

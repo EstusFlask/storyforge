@@ -1,4 +1,5 @@
 import { db } from '../db/schema'
+import { resolveCanonicalChapterSequence } from '../ai/chapter-memory/canonical-chapter-sequence'
 import {
   addNarrativeNode,
   createNarrativeModule,
@@ -14,6 +15,8 @@ import {
 import { publishGameDefinition } from '../text-game/releases'
 import type {
   Character,
+  CharacterRelation,
+  Chapter,
   GameDefinition,
   GameRelease,
   InteractionCharacterProfile,
@@ -21,15 +24,19 @@ import type {
   InteractionRelationshipDimension,
   InteractionRelationshipRule,
   InteractionSceneTemplate,
+  KnowledgeLedgerEntry,
   NarrativeContentGraphReport,
   NarrativeModule,
   NarrativeNode,
+  OutlineNode,
   WorkspaceScope,
   WorldRelease,
   WorldRevision,
+  WorkCharacterBinding,
 } from '../types'
 import {
   assertRecordInScope,
+  readOwnedRows,
   resolveScope,
   scopeTransactionTables,
   stampNewRecord,
@@ -39,7 +46,11 @@ import {
   listWorldRevisions,
   publishWorldRevision,
 } from '../world-engine/releases'
-import { parseInteractionSourceCharacterSnapshot } from './source-character'
+import {
+  createInteractionGuestCharacterSnapshot,
+  parseInteractionSourceCharacterSnapshot,
+} from './source-character'
+import { buildWorldGroundedInteractionProfile } from './world-grounding'
 
 const STABLE_KEY = /^[a-zA-Z0-9._:-]+$/
 const DIMENSIONS = new Set(['trust', 'closeness', 'wariness', 'respect'])
@@ -84,6 +95,14 @@ export interface InteractionGamePublication {
   revision: WorldRevision
   worldRelease: WorldRelease
   gameRelease: GameRelease
+}
+
+interface InteractionWorldGroundingSources {
+  allCharacters: Character[]
+  relations: CharacterRelation[]
+  knowledgeEvents: KnowledgeLedgerEntry[]
+  workCharacterBindings: WorkCharacterBinding[]
+  chapterOrder: Map<number, number>
 }
 
 function stableKey(value: string, label: string): string {
@@ -188,6 +207,35 @@ async function characterInScope(scope: WorkspaceScope, id: number): Promise<Char
   return row
 }
 
+async function readInteractionWorldGroundingSources(scope: WorkspaceScope): Promise<InteractionWorldGroundingSources> {
+  const [allCharacters, relations, knowledgeEvents, workCharacterBindings, outlineNodes, chapters] = await Promise.all([
+    readOwnedRows<Character>(scope, 'characters', { owner: 'world' }),
+    readOwnedRows<CharacterRelation>(scope, 'characterRelations', { owner: 'world' }),
+    readOwnedRows<KnowledgeLedgerEntry>(scope, 'knowledgeLedger', { owner: 'work' }),
+    readOwnedRows<WorkCharacterBinding>(scope, 'workCharacterBindings', { owner: 'work' }),
+    readOwnedRows<OutlineNode>(scope, 'outlineNodes', { owner: 'work' }),
+    readOwnedRows<Chapter>(scope, 'chapters', { owner: 'work' }),
+  ])
+  const chapterOrder = new Map<number, number>()
+  resolveCanonicalChapterSequence(outlineNodes, chapters).sequence.forEach((item, index) => {
+    if (item.chapter.id != null) chapterOrder.set(item.chapter.id, index)
+  })
+  return { allCharacters, relations, knowledgeEvents, workCharacterBindings, chapterOrder }
+}
+
+function compileInteractionWorldGrounding(character: Character, sources: InteractionWorldGroundingSources) {
+  return buildWorldGroundedInteractionProfile({
+    character,
+    allCharacters: sources.allCharacters,
+    relations: sources.relations,
+    workBinding: sources.workCharacterBindings.find(binding => binding.characterId === character.id) ?? null,
+    chapterOrder: sources.chapterOrder,
+    knowledgeEvents: sources.knowledgeEvents.filter(entry => (
+      entry.worldGroupId == null || entry.worldGroupId === (character.homeWorldGroupId ?? null)
+    )),
+  })
+}
+
 export async function loadInteractionAuthoringSnapshot(scopeValue: WorkspaceScope): Promise<InteractionAuthoringSnapshot> {
   const scope = await resolveScope({ scope: scopeValue })
   const definitions = (await db.gameDefinitions.where('workId').equals(scope.workId).toArray())
@@ -224,13 +272,24 @@ export async function createStarterInteractionGame(input: {
   title?: string
   gameKey?: string
   characterIds: number[]
+  sceneTitle?: string
+  scenePurpose?: string
+  sceneLocation?: string
+  sceneTimeLabel?: string
+  chatDirection?: string
 }): Promise<GameDefinition> {
   const scope = await resolveScope({ scope: input.scope })
   const characterIds = [...new Set(input.characterIds)]
   if (!characterIds.length || characterIds.length > 8) throw new Error('[chatgame] 请选择 1..8 个互动角色')
   const characters = await Promise.all(characterIds.map(id => characterInScope(scope, id)))
+  const groundingSources = await readInteractionWorldGroundingSources(scope)
   const title = input.title?.trim() || '未命名角色互动'
   const gameKey = stableKey(input.gameKey ?? `chatgame-${Date.now().toString(36)}`, 'gameKey')
+  const sceneTitle = input.sceneTitle?.trim() || '初次见面'
+  const scenePurpose = input.scenePurpose?.trim() || '让玩家与角色建立第一次可回放的互动。'
+  const sceneLocation = input.sceneLocation?.trim() || '作者待补充的地点'
+  const sceneTimeLabel = input.sceneTimeLabel?.trim() || '故事开始时'
+  const chatDirection = input.chatDirection?.trim() || '完成一次有目标的见面'
   return db.transaction('rw', scopeTransactionTables(
     db.narrativeModules, db.narrativeNodes, db.narrativeBeats, db.narrativeChoices,
     db.gameDefinitions, db.interactionCharacterProfiles, db.interactionSceneTemplates,
@@ -253,6 +312,7 @@ export async function createStarterInteractionGame(input: {
     for (const [index, character] of characters.entries()) {
       const participantKey = stableKey(`character-${character.id}`, '参与者 key')
       participantKeys.push(participantKey)
+      const grounding = compileInteractionWorldGrounding(character, groundingSources)
       const profile = stampNewRecord(scope, 'interactionCharacterProfiles', {
         projectId: scope.projectId,
         worldId: scope.worldId,
@@ -260,14 +320,9 @@ export async function createStarterInteractionGame(input: {
         gameDefinitionId: definition.id!,
         characterId: character.id!,
         participantKey,
-        roleLabel: character.shortDescription.trim() || character.storyRole?.trim() || '互动角色',
-        voiceRules: character.speechStyle?.trim() || '保持角色设定与自己的知识边界。',
-        initialKnowledgeJson: JSON.stringify([{
-          key: `profile.${participantKey}`,
-          content: character.shortDescription.trim() || `${character.name}参与当前场景。`,
-          visibility: 'public',
-          importance: 50,
-        }]),
+        roleLabel: grounding.roleLabel,
+        voiceRules: grounding.voiceRules,
+        initialKnowledgeJson: JSON.stringify(grounding.initialKnowledge),
         relationshipDimensionsJson: JSON.stringify([
           { key: 'trust', label: '信任', minimum: -10, maximum: 10, initial: 0, largeChangeThreshold: 3 },
           { key: 'closeness', label: '亲近', minimum: -10, maximum: 10, initial: 0, largeChangeThreshold: 3 },
@@ -284,13 +339,13 @@ export async function createStarterInteractionGame(input: {
       workId: scope.workId,
       gameDefinitionId: definition.id!,
       sceneKey: 'first-meeting',
-      title: '初次见面',
-      purpose: '让玩家与角色建立第一次可回放的互动。',
-      location: '作者待补充的地点',
-      timeLabel: '故事开始时',
+      title: text(sceneTitle, '场景标题', 240),
+      purpose: text(scenePurpose, '场景目的', 4_000),
+      location: text(sceneLocation, '场景地点', 1_000),
+      timeLabel: text(sceneTimeLabel, '场景时间', 1_000),
       participantKeysJson: JSON.stringify(participantKeys),
       publicKnowledgeKeysJson: JSON.stringify(participantKeys.map(key => `profile.${key}`)),
-      goalsJson: JSON.stringify(['完成一次有目标的见面']),
+      goalsJson: JSON.stringify([text(chatDirection, '聊天方向', 2_000)]),
       endingConditionsJson: JSON.stringify(['玩家选择结束，或场景达到最大回合']),
       safetyBoundariesJson: JSON.stringify(['不替玩家决定感受或行动']),
       relationshipRulesJson: '[]',
@@ -304,6 +359,88 @@ export async function createStarterInteractionGame(input: {
     } satisfies InteractionSceneTemplate, { owner: 'work' })
     await db.interactionSceneTemplates.add(scene)
     return definition
+  })
+}
+
+/** Add one existing World character through the same terminal-capsule compiler as a new game. */
+export async function addWorldGroundedInteractionCharacter(input: {
+  scope: WorkspaceScope
+  gameDefinitionId: number
+  characterId: number
+}): Promise<InteractionCharacterProfile> {
+  const scope = await resolveScope({ scope: input.scope })
+  await definitionInScope(scope, input.gameDefinitionId)
+  const character = await characterInScope(scope, input.characterId)
+  const grounding = compileInteractionWorldGrounding(character, await readInteractionWorldGroundingSources(scope))
+  return saveInteractionCharacterProfile({
+    scope,
+    gameDefinitionId: input.gameDefinitionId,
+    characterId: input.characterId,
+    participantKey: `character-${input.characterId}`,
+    roleLabel: grounding.roleLabel,
+    voiceRules: grounding.voiceRules,
+    initialKnowledgeJson: JSON.stringify(grounding.initialKnowledge),
+    relationshipDimensionsJson: JSON.stringify([
+      { key: 'trust', label: '信任', minimum: -10, maximum: 10, initial: 0, largeChangeThreshold: 3 },
+      { key: 'closeness', label: '亲近', minimum: -10, maximum: 10, initial: 0, largeChangeThreshold: 3 },
+    ]),
+    maxMemoryEntries: 24,
+  })
+}
+
+/**
+ * Create a portable interaction-only participant. The profile belongs to the
+ * current Work draft and release; it does not create or mutate World Character.
+ */
+export async function createGuestInteractionCharacterProfile(input: {
+  scope: WorkspaceScope
+  gameDefinitionId: number
+  guestKey?: string
+  name: string
+  roleLabel: string
+  background?: string
+  relationToWorld?: string
+  voiceRules?: string
+}): Promise<InteractionCharacterProfile> {
+  const guestKey = stableKey(input.guestKey ?? `guest-${Date.now().toString(36)}`, '自建角色 key')
+  const snapshot = createInteractionGuestCharacterSnapshot({ guestKey, name: input.name })
+  const participantKey = stableKey(`guest-${guestKey}`, '参与者 key')
+  const roleLabel = text(input.roleLabel, '角色定位', 500)
+  const initialKnowledge: InteractionKnowledgeSeed[] = [{
+    key: `profile.${participantKey}`,
+    content: `${snapshot.name}：${roleLabel}`,
+    visibility: 'public',
+    importance: 50,
+  }]
+  const background = input.background?.trim()
+  if (background) initialKnowledge.push({
+    key: `guest.${guestKey}.background`,
+    content: `自建角色背景：${background}`,
+    visibility: 'private',
+    importance: 85,
+  })
+  const relationToWorld = input.relationToWorld?.trim()
+  if (relationToWorld) initialKnowledge.push({
+    key: `guest.${guestKey}.world-relation`,
+    content: `与既有世界和人物的起点关联：${relationToWorld}`,
+    visibility: 'private',
+    importance: 90,
+  })
+  return saveInteractionCharacterProfile({
+    scope: input.scope,
+    gameDefinitionId: input.gameDefinitionId,
+    characterId: null,
+    sourceSnapshotJson: JSON.stringify(snapshot),
+    participantKey,
+    roleLabel,
+    voiceRules: input.voiceRules?.trim()
+      || '保持自建角色的身份、经历和关系边界；只依据自己的私有认知、公开场景信息与亲历互动回应。',
+    initialKnowledgeJson: JSON.stringify(initialKnowledge),
+    relationshipDimensionsJson: JSON.stringify([
+      { key: 'trust', label: '信任', minimum: -10, maximum: 10, initial: 0, largeChangeThreshold: 3 },
+      { key: 'closeness', label: '亲近', minimum: -10, maximum: 10, initial: 0, largeChangeThreshold: 3 },
+    ]),
+    maxMemoryEntries: 24,
   })
 }
 
@@ -391,7 +528,8 @@ export async function saveInteractionCharacterProfile(input: {
   scope: WorkspaceScope
   gameDefinitionId: number
   profileId?: number
-  characterId: number
+  characterId: number | null
+  sourceSnapshotJson?: string
   participantKey: string
   roleLabel: string
   voiceRules: string
@@ -401,7 +539,13 @@ export async function saveInteractionCharacterProfile(input: {
 }): Promise<InteractionCharacterProfile> {
   const scope = await resolveScope({ scope: input.scope })
   await definitionInScope(scope, input.gameDefinitionId)
-  await characterInScope(scope, input.characterId)
+  const sourceCharacter = parseInteractionSourceCharacterSnapshot(input.sourceSnapshotJson)
+  if (input.characterId != null) {
+    await characterInScope(scope, input.characterId)
+    if (sourceCharacter) throw new Error('[chatgame] 互动角色不能同时绑定世界角色与便携来源')
+  } else if (!sourceCharacter) {
+    throw new Error('[chatgame] 自建互动角色缺少便携身份')
+  }
   const participantKey = stableKey(input.participantKey, '参与者 key')
   const initialKnowledgeJson = normalizeKnowledge(input.initialKnowledgeJson)
   const relationshipDimensionsJson = normalizeDimensions(input.relationshipDimensionsJson)
@@ -425,7 +569,7 @@ export async function saveInteractionCharacterProfile(input: {
       gameDefinitionId: input.gameDefinitionId,
       characterId: input.characterId,
       participantKey,
-      sourceSnapshotJson: '{}',
+      sourceSnapshotJson: sourceCharacter ? JSON.stringify(sourceCharacter) : '{}',
       roleLabel: text(input.roleLabel, '角色定位', 500),
       voiceRules: text(input.voiceRules, '口吻规则', 8_000),
       initialKnowledgeJson,

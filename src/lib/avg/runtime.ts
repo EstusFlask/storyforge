@@ -97,7 +97,7 @@ export function parseAvgPresentationContent(value: string | unknown): AvgPresent
   return { version: 1, cues: parsed.cues.map(parseCue) }
 }
 
-export function freezeAvgMediaAsset(asset: AvgMediaAsset): FrozenAvgMediaAsset {
+export function freezeAvgMediaAsset(asset: AvgMediaAsset | FrozenAvgMediaAsset): FrozenAvgMediaAsset {
   if (!AVG_MEDIA_KINDS.includes(asset.kind) || !asset.name.trim() || !asset.contentHash.match(/^[a-f0-9]{64}$/)
     || !Number.isInteger(asset.version) || asset.version < 1 || !Number.isInteger(asset.byteSize) || asset.byteSize < 0) {
     throw new Error(`[avg] 媒资元数据无效:${asset.assetKey}`)
@@ -216,7 +216,10 @@ export function createInitialAvgPresentationState(input: {
 }): SimulationAvgPresentationState {
   return {
     schema: 'storyforge.avg-presentation', version: 1, contentHash: input.contentHash,
-    assets: structuredClone(input.assets), cues: structuredClone(input.content.cues), currentNodeKey: input.entryNodeKey,
+    // RuntimePackage v2 media additionally carries blobContentHash for the
+    // resolver. Session state intentionally stores only the canonical frozen
+    // AVG metadata so serialization/parsing cannot change its shape.
+    assets: input.assets.map(freezeAvgMediaAsset), cues: structuredClone(input.content.cues), currentNodeKey: input.entryNodeKey,
     currentBeatKey: null, reachedBeatKeys: [], readBeatKeys: [], stage: structuredClone(EMPTY_AVG_STAGE),
     snapshots: {}, mediaFailures: [],
   }

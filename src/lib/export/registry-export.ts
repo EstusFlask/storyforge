@@ -18,6 +18,7 @@ import { redactAuthoringSecrets } from '../node-authoring/contracts'
 import { ensureWorkspaceOwnership } from '../world-engine/ownership'
 import { portableizeAgentRunLedgerExportV1 } from '../agent/run/ledger-portability'
 import { assertAgentRunArtifactRecordIntegrityV1 } from '../memory/artifact-record'
+import { readVerifiedMediaBlobObjectData } from '../game-production/media-blob-store'
 
 /** 旧 fixture 等价导出版本；仅供兼容测试和无 ownership 的空项目使用。 */
 const EXPORT_VERSION = 3
@@ -100,6 +101,17 @@ function toExportRow(
         const sanitized = items.map(item => rr.itemField in item ? { ...item, [rr.itemField]: null } : item)
         obj[rr.field] = rr.storage === 'json-string' ? JSON.stringify(sanitized) : sanitized
       }
+    } else if (rr.kind === 'json-id-paths') {
+      obj[rr.exportAs] = remapJsonIdPathsForExport(
+        obj[rr.field],
+        rr.paths,
+        idMaps.get(rr.remapVia),
+        rr.onUnmapped === 'require',
+        `${spec.name}.${rr.field}`,
+      )
+      // The portable shadow is authoritative. Never leak embedded local IDs
+      // into either ordinary or strict backups.
+      delete obj[rr.field]
     }
   }
 
@@ -144,6 +156,44 @@ function toExportRow(
   return spec.name === 'nodeFlows' || spec.name === 'nodeRuns'
     ? redactAuthoringSecrets(obj)
     : obj
+}
+
+function remapJsonIdPathsForExport(
+  value: unknown,
+  paths: readonly string[],
+  idMap: Map<number, number> | undefined,
+  required: boolean,
+  label: string,
+): string | null {
+  if (value == null) return null
+  let parsed: unknown
+  try { parsed = typeof value === 'string' ? JSON.parse(value) : structuredClone(value) } catch {
+    throw new Error(`[deriveExport] ${label} 不是合法 JSON`)
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error(`[deriveExport] ${label} 必须是 JSON 对象`)
+  }
+  for (const path of paths) {
+    const parts = path.split('.').filter(Boolean)
+    let owner = parsed as Record<string, unknown>
+    for (const part of parts.slice(0, -1)) {
+      const child = owner[part]
+      if (!child || typeof child !== 'object' || Array.isArray(child)) {
+        if (required) throw new Error(`[deriveExport] ${label}.${path} 缺失`)
+        owner = {}
+        break
+      }
+      owner = child as Record<string, unknown>
+    }
+    const field = parts[parts.length - 1]
+    if (!field) continue
+    const localId = owner[field]
+    if (localId == null) { owner[field] = null; continue }
+    const portableId = typeof localId === 'number' ? idMap?.get(localId) : undefined
+    if (portableId == null && required) throw new Error(`[deriveExport] ${label}.${path} 缺少便携映射`)
+    owner[field] = portableId ?? null
+  }
+  return JSON.stringify(parsed)
 }
 
 function parseObjectArray(value: unknown): Array<Record<string, unknown>> {
@@ -192,8 +242,14 @@ async function captureProjectExportInTransaction(
   // 第一遍:查询每张表 + 建 dbId → 导出序号 映射
   const rowsByTable = new Map<string, any[]>()
   const idMaps = new Map<string, Map<number, number>>()
-  for (const spec of specs) {
-    const rows = await queryRows(spec, projectId)
+  // Schedule every registered read before awaiting. With 100+ tables, a
+  // sequential chain can leave IndexedDB without a pending request between
+  // empty-table resolutions and let the browser auto-commit the snapshot.
+  const capturedRows = await Promise.all(specs.map(async spec => ({
+    spec,
+    rows: await queryRows(spec, projectId),
+  })))
+  for (const { spec, rows } of capturedRows) {
     rowsByTable.set(spec.name, rows)
     const idMap = new Map<number, number>()
     rows.forEach((r, i) => { if (r.id != null) idMap.set(r.id, i) })
@@ -228,12 +284,20 @@ async function captureProjectExport(projectId: number, version: number, strictOw
 }
 
 async function deriveProjectExport(projectId: number, version: number, strictOwners: boolean): Promise<ProjectExportData> {
-  return (await portableizeSnapshot(await captureProjectExport(projectId, version, strictOwners))).data
+  const captured = await captureProjectExport(projectId, version, strictOwners)
+  // Binary materialization (Blob/OPFS/crypto) is intentionally outside the
+  // read snapshot transaction. Dexie's promise zone can otherwise preserve a
+  // just-finished transaction into this continuation and report a premature
+  // commit when an external storage promise is awaited.
+  const result = await Dexie.ignoreTransaction(() => portableizeSnapshot(captured))
+  return result.data
 }
 
 async function portableizeSnapshot(snapshot: StrictProjectExportSnapshot): Promise<StrictProjectExportSnapshot> {
   if (PROJECT_TABLES.some(spec => spec.portableData?.kind === 'agent-run-root')) {
-    await portableizeAgentRunLedgerExportV1(snapshot.data, snapshot.exportIds)
+    const portableLedger = portableizeAgentRunLedgerExportV1(snapshot.data, snapshot.exportIds)
+    if (Dexie.currentTransaction) await Dexie.waitFor(portableLedger)
+    else await portableLedger
   }
   const portable = snapshot.data as unknown as Record<string, unknown>
   for (const spec of PROJECT_TABLES) {
@@ -245,26 +309,64 @@ async function portableizeSnapshot(snapshot: StrictProjectExportSnapshot): Promi
       }
       continue
     }
-    if (spec.portableData?.kind !== 'binary-blob') continue
+    if (spec.portableData?.kind !== 'binary-blob' && spec.portableData?.kind !== 'shared-media-object') continue
     const rows = portable[spec.name]
     if (!Array.isArray(rows)) continue
     for (const row of rows as Array<Record<string, unknown>>) {
-      const value = row[spec.portableData.field]
+      const portableData: NonNullable<TableSpec['portableData']> = spec.portableData
+      const dataField = portableData.kind === 'binary-blob' ? portableData.field : portableData.dataField
+      const value = row[dataField]
       const blobLike = value as { arrayBuffer?: () => Promise<ArrayBuffer>; type?: string } | null
-      const buffer = value instanceof ArrayBuffer
+      let buffer = value instanceof ArrayBuffer
         ? value
         : ArrayBuffer.isView(value)
-          ? value.buffer.slice(value.byteOffset, value.byteOffset + value.byteLength)
+          ? new Uint8Array(value.buffer, value.byteOffset, value.byteLength).slice().buffer
           : blobLike && typeof blobLike.arrayBuffer === 'function'
             ? (Dexie.currentTransaction ? await Dexie.waitFor(blobLike.arrayBuffer()) : await blobLike.arrayBuffer())
             : null
-      if (!buffer) throw new Error(`[deriveExport] ${spec.name}.${spec.portableData.field} 不是便携二进制`)
+      if (!buffer && portableData.kind === 'shared-media-object') {
+        const read = readVerifiedMediaBlobObjectData(
+          row as unknown as import('../types').MediaBlobObjectRecordV1,
+        )
+        buffer = Dexie.currentTransaction ? await Dexie.waitFor(read) : await read
+      }
+      if (!buffer && portableData.kind === 'binary-blob'
+        && portableData.allowMissingWhen && row[portableData.allowMissingWhen.exportField] != null) {
+        row[dataField] = null
+        continue
+      }
+      if (!buffer) throw new Error(`[deriveExport] ${spec.name}.${dataField} 不是便携二进制`)
+
+      let mimeType = blobLike?.type || 'application/octet-stream'
+      if (portableData.kind === 'shared-media-object') {
+        if (row[portableData.stateField] !== 'ready') {
+          throw new Error(`[deriveExport] ${spec.name} 只允许导出 ready 共享媒资`)
+        }
+        if (row[portableData.sizeField] !== buffer.byteLength) {
+          throw new Error(`[deriveExport] ${spec.name} 二进制大小与记录不一致`)
+        }
+        const digestPromise = crypto.subtle.digest('SHA-256', buffer)
+        const digest = Dexie.currentTransaction ? await Dexie.waitFor(digestPromise) : await digestPromise
+        const hash = Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, '0')).join('')
+        if (row[portableData.hashField] !== hash) {
+          throw new Error(`[deriveExport] ${spec.name} 二进制哈希与记录不一致`)
+        }
+        const declaredMime = row[portableData.mimeField]
+        if (typeof declaredMime !== 'string' || !declaredMime.trim()) {
+          throw new Error(`[deriveExport] ${spec.name} 缺少 MIME 类型`)
+        }
+        mimeType = declaredMime
+        row[portableData.backendField] = 'indexeddb'
+        row[portableData.pathField] = null
+        row[portableData.leaseOwnerField] = null
+        row[portableData.leaseExpiresAtField] = null
+      }
       const bytes = new Uint8Array(buffer)
       let binary = ''
       for (let offset = 0; offset < bytes.length; offset += 0x8000) {
         binary += String.fromCharCode(...bytes.subarray(offset, offset + 0x8000))
       }
-      row[spec.portableData.field] = `data:${blobLike?.type || 'application/octet-stream'};base64,${btoa(binary)}`
+      row[dataField] = `data:${mimeType};base64,${btoa(binary)}`
     }
   }
   return snapshot
@@ -289,9 +391,8 @@ export async function deriveStrictExportProjectSnapshot(projectId: number): Prom
     return captureProjectExport(projectId, EXPORT_VERSION, false)
   }
   const ownership = await ensureWorkspaceOwnership(projectId)
-  const snapshot = await portableizeSnapshot(
-    await captureProjectExport(projectId, STRICT_EXPORT_VERSION, true),
-  )
+  const captured = await captureProjectExport(projectId, STRICT_EXPORT_VERSION, true)
+  const snapshot = await Dexie.ignoreTransaction(() => portableizeSnapshot(captured))
   const worldExportId = snapshot.exportIds.get('worlds')?.get(ownership.scope.worldId)
   const workExportId = snapshot.exportIds.get('works')?.get(ownership.scope.workId)
   if (worldExportId == null || workExportId == null) throw new Error('[strictExport] ownership 根不在导出快照中')
@@ -303,5 +404,29 @@ export async function deriveStrictExportProjectSnapshot(projectId: number): Prom
   // Keep the ownership resolver observable to callers and make an accidental
   // unused migration result impossible to hide in diagnostics.
   if (!ownership.scope.worldId || !ownership.scope.workId) throw new Error('[strictExport] ownership 根不完整')
+  return snapshot
+}
+
+/**
+ * Capture a strict portable snapshot inside a caller-owned Dexie transaction.
+ * World-release freezing uses this boundary so the source rows and release
+ * manifest are observed atomically instead of nesting another transaction.
+ */
+export async function deriveStrictExportProjectSnapshotInCurrentTransaction(
+  projectId: number,
+  ownership: { worldId: number; workId: number },
+): Promise<StrictProjectExportSnapshot> {
+  if (!Dexie.currentTransaction) {
+    throw new Error('[strictExport] 当前事务快照只能在已打开的 Dexie 事务中派生')
+  }
+  const snapshot = await portableizeSnapshot(
+    await captureProjectExportInTransaction(projectId, STRICT_EXPORT_VERSION, true),
+  )
+  const worldExportId = snapshot.exportIds.get('worlds')?.get(ownership.worldId)
+  const workExportId = snapshot.exportIds.get('works')?.get(ownership.workId)
+  if (worldExportId == null || workExportId == null) {
+    throw new Error('[strictExport] 当前事务的 ownership 根不在导出快照中')
+  }
+  snapshot.data.ownership = { contractVersion: 1, worldExportId, workExportId }
   return snapshot
 }

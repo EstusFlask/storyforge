@@ -133,6 +133,7 @@ export default function AdventureGamePlayer(props: {
   project: Project
   scope: WorkspaceScope
   worldGroupId: number | null
+  initialSessionId?: number | null
 }) {
   const store = useAdventureGamePlayerStore()
   const { config } = useAIConfigStore()
@@ -154,9 +155,11 @@ export default function AdventureGamePlayer(props: {
 
   useEffect(() => {
     setCatalogReleaseId(null)
-    void store.load(props.scope, props.worldGroupId, true)
+    void store.load(props.scope, props.worldGroupId, props.initialSessionId == null).then(async () => {
+      if (props.initialSessionId != null) await store.select(props.initialSessionId)
+    })
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [props.scope.projectId, props.scope.worldId, props.scope.workId, props.worldGroupId])
+  }, [props.scope.projectId, props.scope.worldId, props.scope.workId, props.worldGroupId, props.initialSessionId])
 
   const selected = store.sessions.find(item => item.id === store.selectedSessionId) ?? null
   const catalog = useMemo(() => currentPlayerReleases(store.releases), [store.releases])

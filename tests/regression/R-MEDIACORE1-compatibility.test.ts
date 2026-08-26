@@ -22,7 +22,12 @@ describe('MEDIA-CORE-1 · AVG compatibility on shared integrity primitives', () 
     const url = await readAvgReleaseMediaDataUrl({ scope: workspace.scope, asset: freezeAvgMediaAsset(asset) })
     expect(url).toMatch(/^data:image\/png;base64,/)
     const blob = await db.avgMediaBlobs.where('mediaAssetId').equals(asset.id!).first()
-    await db.avgMediaBlobs.update(blob!.id!, { data: new Uint8Array([1, 2, 3, 4]).buffer })
-    await expect(readAvgReleaseMediaDataUrl({ scope: workspace.scope, asset: freezeAvgMediaAsset(asset) })).rejects.toThrow('哈希不匹配')
+    // 模拟真正的 pre-MEDIA-CORE 记录：旧行没有共享对象链接，内联字节本身
+    // 就是唯一事实源；篡改这个事实源必须 fail closed。
+    await db.avgMediaBlobs.update(blob!.id!, {
+      blobObjectId: null,
+      data: new Uint8Array([1, 2, 3, 4]).buffer,
+    })
+    await expect(readAvgReleaseMediaDataUrl({ scope: workspace.scope, asset: freezeAvgMediaAsset(asset) })).rejects.toThrow(/完整性|哈希/)
   })
 })

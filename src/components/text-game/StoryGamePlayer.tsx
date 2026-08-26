@@ -121,6 +121,7 @@ export default function StoryGamePlayer(props: {
   project: Project
   scope: WorkspaceScope
   worldGroupId: number | null
+  initialSessionId?: number | null
 }) {
   const store = useStoryGamePlayerStore()
   const dialog = useDialog()
@@ -133,10 +134,12 @@ export default function StoryGamePlayer(props: {
 
   useEffect(() => {
     setCatalogReleaseId(null)
-    void store.load(props.scope, props.worldGroupId, true)
+    void store.load(props.scope, props.worldGroupId, props.initialSessionId == null).then(async () => {
+      if (props.initialSessionId != null) await store.select(props.initialSessionId)
+    })
   // Zustand actions are stable; the explicit scope is the reload boundary.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [props.scope.projectId, props.scope.worldId, props.scope.workId, props.worldGroupId])
+  }, [props.scope.projectId, props.scope.worldId, props.scope.workId, props.worldGroupId, props.initialSessionId])
 
   useEffect(() => {
     localStorage.setItem(preferenceKey(props.project.id!), JSON.stringify(preferences))

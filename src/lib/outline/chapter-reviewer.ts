@@ -1,4 +1,4 @@
-import { chat } from '../ai/client'
+import { executeRegisteredAIEntryV1 } from '../agent/formal-ai-entry'
 import { useAIConfigStore } from '../../stores/ai-config'
 import type { OutlineNode } from '../types'
 
@@ -117,7 +117,7 @@ export async function reviewChapterOutlines(
   ]
 
   try {
-    const rawOutput = await chat(messages, config, {
+    const rawOutput = await executeRegisteredAIEntryV1('outline.chapter.review', messages, config, {
       category: 'outline.review',
     })
 
@@ -231,7 +231,7 @@ export async function rewriteChapterOutline(
   ]
 
   try {
-    const rawOutput = await chat(messages, config, {
+    const rawOutput = await executeRegisteredAIEntryV1('outline.chapter.rewrite', messages, config, {
       category: 'outline.rewrite',
     })
 

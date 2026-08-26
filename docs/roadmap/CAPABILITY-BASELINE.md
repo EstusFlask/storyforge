@@ -640,11 +640,11 @@
   来源删除、导入和分支不回读或反写创作 Canon，检查点恢复建立可验证子分支。
 - SIM-1C 已提供 NPC 演进候选、作者确认/拒绝、过期保护和确定性状态更新；AI 只读冻结
   `simulationRuntime`，不修改 Canon 或角色主档。
-- TTRPG-1A 已提供单机战役主持：场景、回合顺序、玩家动作、手动/AI 候选技能检定、成功/失败
+- TTRPG-1A 已提供单机战役主持内核：场景、回合顺序、玩家动作、手动/AI 候选技能检定、成功/失败
   分支叙事和原子回合记录。骰点与下一行动者由代码决定，刷新、检查点、分支和导出导入复用 SIM-1。
-- TTRPG-1B 已提供规则与战斗遭遇：AI 遭遇候选确认、确定性先攻、攻击/伤害、资源上下限、状态效果、
+- TTRPG-1B 已提供规则与战斗遭遇内核：AI 遭遇候选确认、确定性先攻、攻击/伤害、资源上下限、状态效果、
   战斗回合推进和运行时回放；继续复用三张 SIM 表，不写回 Canon。
-- TTRPG-1C 已提供长期战役闭环：战役摘要、任务状态/优先级/期限、NPC 时间段日程与重复方式，
+- TTRPG-1C 已提供长期战役事件内核：战役摘要、任务状态/优先级/期限、NPC 时间段日程与重复方式，
   均以专用事件进入同一运行时事件流；世界时间复用 `time.advanced`，摘要更新有事件基线保护，
   分支和导出导入继承并重映射现有会话，不新增表或 Canon 写字段。
 
@@ -656,10 +656,12 @@
 - 后台领域任务目前按依赖顺序执行，不是并行自治团队；当前有三档领域输入预算、一次
   受控确定性打回、正文采纳后的自动六域整理（也可从原手动入口查看/重跑）和只读一致性 Agent。任意单源权重、更多 Canon 闭集和
   模型投票仍未形成正式产品闭环。
-- SIM-1B 已完成结构化冻结、实体投影和检查点恢复；SIM-1C 已完成 NPC 演进功能闭环：AI 只读
-  `simulationRuntime` 冻结运行时上下文并生成严格结构化候选，候选作为提案事件持久化，作者确认/拒绝
-  后由确定性 reducer 更新运行时位置、生命周期、标量属性、叙事和可选记忆；过期候选不可确认，Canon
-  主档保持不变。TTRPG-1A/1B/1C 已完成单机战役主持、战斗遭遇和长期战役；CHATGAME-1 单角色聊天 MVP 已完成，长期记忆、多角色和冒险仍待开发。
+- SIM-1B 已完成结构化冻结、实体投影和检查点恢复；SIM-1C 已完成 NPC 演进功能闭环。其上的正式 TTRPG
+  已接通精确 WorldRelease 承接、九步生产 Brief、提案/锁定式 CampaignPack、完整车卡、d20/d100/2d6/Rank Lite、
+  村规、真人/AI 混合席位、可信 AI KP/玩家、逐行动回执、物品/次数/奖惩、信息隔离、长战役、运行时媒资和
+  权威在线房间。它仍只处于 `integrated`：非 fixture Golden A/B/C、真实供应商/外部身份/多设备与无协助新用户
+  证据尚未密封，因此 production 能力继续 fail-closed；施工与证据权威仍为
+  `docs/ttrpg/TTRPG-COMPLETE-PRODUCT-CONSTRUCTION-PLAN-V2.md` 和对应开发看板。
 - 协同编辑、账号、云同步、发布发现和社区治理不属于当前纯前端架构的增量功能，必须另立 PLATFORM 架构阶段。
 - PRODUCT-1 已交付第一段“备份恢复可信”闭环：`inspectProjectBackup()` 只读复用 `PROJECT_TABLES` 检查版本、项目根记录和
   所有登记表的数组结构；统一 `importProjectJSON()` 在写库前拒绝损坏/未来版本输入，旧格式缺表只给兼容警告。JSON、
@@ -669,6 +671,130 @@
   `createWorldPackage()` 生成带来源编号、许可、署名、用途、内容警告和 SHA-256 的包；`inspectWorldPackage()`
   在导入前拒绝私有表泄漏或篡改，`importWorldPackage()` 为副本分配新 `worldCode` 并保留 `communityOrigin`。
   章节、笔记、Agent/运行时存档、API 配置和个人文风不会进入包。线上账号、云同步、评论和协同仍属于后续后端阶段。
+
+## TTRPG-2 / GAME-PLATFORM 正式跑团与平台边界
+
+> **2026-08-22 总纲对齐更正：**下列条目证明运行内核和历史统一生产实现存在，不再证明世界到 TTRPG
+> 的正式生产链合规。最新审计确认 TTRPG 缺少产品专属 frozen SourceSelection，且当前 WorldRelease 中
+> `characters / characterRelations` 等关键表缺少逐记录便携身份；新建正式生产和历史草稿写入已 fail-closed，
+> 既有 Release / 存档继续可运行。权威差距与迁移顺序见
+> [`TTRPG-WORLD-DATA-ALIGNMENT-AUDIT-20260822.md`](../ttrpg/TTRPG-WORLD-DATA-ALIGNMENT-AUDIT-20260822.md)。
+
+### 已有能力
+
+- `WorldReleaseManifestV2 → PlayableWorldBundleV1` 已成为带 compiler/hash/diagnostic 的确定性游戏出口；
+  角色、地点、物品、势力和叙事会进入运行时实体，正式规则数值不再从世界散文字段静默推断。
+- TTRPG 已加入统一 `GameProductType / GameRuntimePackageV2 / GameRelease v2`。第一方无脚本
+  `RulePack`、`CampaignPack`、角色映射、Session Zero、线索冗余、失败推进、成长、结局、讲义和
+  data-only tabletop 均有严格 parser、fixture、hash 与发布预检。
+- 跑团页历史上提供“自动制作 / 手工精修 / 主持与游玩”三种用户入口；自动制作进入 GAME-PROD Brief、Build、
+  Preview、QA 和原子发布，RulePack/CampaignPack 同时作为独立 Build Artifact 与 RuntimePackage 交叉校验。
+  手工精修支持逐角色属性修订、资源重算、作者覆盖理由和 contentHash CAS；既有 Release/Session 不改写。
+- 正式玩家/GM 流程覆盖角色选择与创建、GM 准备、场景、规则行动、线索权限、Session Zero、安全暂停、
+  结局、成长、会后回顾、地图/token/迷雾/距离和文本 fallback。玩家投影不会下发 GM 秘密。
+- 可信 AI GM 可在当前行动者为 NPC 时，通过本地 durable Harness 或在线 `ai.gm.act` 服务提出闭集行动意图；
+  actor、action、target 均由权威状态约束，采用后仍只由 RulePack/runtime 掷骰和提交机械结果。已提交规则行动之后，
+  AI GM 再基于 GmSynthesisFrame 生成叙事候选；两条路径都有真人确认/接管、stale 防护、秘密/结果矛盾检查、
+  确定性降级和 usage/cost/latency 证据。
+- 在线、社区和商业已经有服务端 headless 边界：权威房间、幂等命令、事务存储接口、逐观看者投影、重连、
+  可验证骰子、Release 交付、LFG、评价/举报/申诉、订单/权益/退款、税务/发票/创作者结算、客服和删除请求。
+  单一平台 router 与 readiness 会在 production 缺少身份、事务库、对象存储、支付、密钥、实时扇出或限流时 503。
+
+### 当前边界 / 不可提前宣称
+
+- 新建 TTRPG 正式生产不得继续使用通用 `WorldGameSourceSelectionV2 / GameProductionBriefV3 / GameProductionPlanV3`；
+  这些代码只作为待迁移历史实现和回归证据，不是最新总纲认可的生产入口。
+
+- 本地正式跑团与七产品生产闭环已有代码和回归证据；AI GM 真实模型 30 样本/5 场景族/10 对抗样本门尚未通过，
+  UI 必须继续标为实验性，不能称 Beta。
+- 在线、目录和商业模块目前是可部署协议/领域核心，不是已上线服务。没有真实身份、数据库、对象存储、实时网关、
+  支付商、税务地区配置、监控和灾备演练前，production 必须 fail-closed，浏览器字段不得冒充身份、权益或付款。
+- 世界引擎普通 UI 已停止新建 WorldRelease 直开 TTRPG 的第二权威入口；旧 session API/数据仍保留回放、导出和兼容测试。
+- Creator SDK v1 已完成 RulePack/CampaignPack strict parser、fixture、ECDSA P-256 签名、固定可信根短期清单、
+  密钥/包级撤销、sequence 防回滚、完整安装集合 lock、data-only 隔离收据和连续加载失败熔断；v1 权限严格为空，
+  不执行第三方脚本，因此不存在以页面内“沙箱”放行脚本的旁路。第三方规则仍须逐许可证和内容审核；第三方媒资不进入
+  Creator SDK v1，继续走 GAME-PROD 媒资 byte/权利/发布治理。开发者合同见
+  `docs/ttrpg/CREATOR-SDK-V1.md`。
+
+### 新功能必须复用
+
+- 世界出口：`src/lib/simulation/canon-snapshot.ts`；正式 TTRPG：`src/lib/ttrpg/`；统一运行：SIM 事件/检查点。
+- 自动生产：`src/lib/game-production/`；在线/社区/商业部署入口：`src/lib/game-platform/headless-platform.ts`。
+- 任何新 AI GM 能力继续只读 `ttrpgRuntime` 并走 durable Harness；任何新规则结果只由确定性 RulePack/runtime 提交。
+
+## GAME-PROD-1 Agent 自主游戏生产与持续演化
+
+### 已有能力
+
+- 六类文字游戏已经拥有统一 `GameDefinition / GameRelease`、Narrative/产品能力模块、SIM 事件/存档/fork、
+  玩家端和作者工作台；`STORYGAME-1`、`AVG-1` 与世界到游戏桥可作为首个生产切片的直接底座。
+- 世界工作台可从不可变 `WorldReleaseManifestV2` 读取便携角色、关系、地点、artifact、词条、故事线和 AVG
+  媒资选择；GameDefinition 和 GameRelease 都冻结来源 world hash、映射版本和 portable selection。
+- `worldGameAuthoring → assembleContext()` 与 `outline.world-game` 已能生成严格 5–18 节点、真实分支和至少两个
+  结局的剧情候选；坏引用、不可达、死路、重复 key 和循环风险会阻断，作者确认后才经统一采纳物化。
+- `avgMediaAssets / avgMediaBlobs / avgPresentationModules` 已提供正式图片/音频元数据、二进制完整性、版本、
+  来源/许可/alt、声明式 Cue、发布冻结、缺失降级和完整备份往返。
+- Agent + durable Harness 已提供 Skill/Run Contract、父子 Run、fan-out workflow kind、预算、checkpoint、
+  terminal receipt、`CreativeArtifactV1`、Adoption、刷新恢复和 Work/Instance owner 生命周期。
+- 世界工作台原有 raw JSON AI 候选直接采纳发布和无 AI 快速映射产品入口已经下线；存在可发布
+  `WorldRelease` 时只跳转统一制作中心。历史 `GameRelease`、存档和显式“手工作者”维护入口保留兼容，
+  但不再把旧世界桥当作新游戏生产主路径；`core-workflow` Chromium 回归同时证明全局 Agnes 配置会被自动识别，
+  制作页没有第二个 API Key 输入。
+- `GAME-PROD-1` 已新增登记上下文会谈、Brief v3、一次作者授权、pause/resume/stop、durable DAG、共享 Blob、
+  Build Preview、整包原子发布和三轮增量演化；六类文字游戏与 TTRPG 均由同一 registry 和各自 compiler
+  从 Brief 编译并完成 Preview/Release。
+- 正式文本生产直接复用全局/任务路由 AI 配置，不另建 Key 输入；Production/Build/Artifact/receipt 只冻结去敏 binding。
+- 全局 provider 为 Agnes 时，图片生产复用同一配置和同一个 Key，自动绑定 `agnes-image-2.1-flash`；Key 只在既有
+  browser transport 请求头使用，不进入 Brief、binding、receipt、Artifact、日志或导出。OpenAI 图片 relay 保留为 fallback，
+  music/SFX 仍按独立音频能力处理。
+- 2026-08-21 隔离 Golden `gameprod.mt2377pl.51567039` 使用既有 `agnes / agnes-2.0-flash` 完成真实会谈、Brief、授权、
+  六任务生产、Build Preview、首个三选一与事件 #4 自动存档，并把同一包原子发布为 Release #3；全过程未出现第二个
+  API Key 输入。真实 provider 返回的 JSON 围栏/单对象包装、Unicode 引用键、原型孤岛/终点标记噪声已在严格边界
+  确定性归一并再次验图；原型结局目标不足进入 QA 警告，商业候选仍按 Brief 目标硬拒绝。
+- 商业授权前现在按冻结 Brief 分别检查文本、图片和音频：图片可由同 Key Agnes 或可信 relay 满足，music/SFX 才要求
+  独立音频 relay/imported 媒资；缺失时以 `capability-unbound` 阻断且不创建 Build，制作页只显示去敏 origin/原因，
+  不出现第二套 Key。浏览器性能 policy/receipt
+  已冻结 12 MiB 首次交互、250ms 场景 p95、100ms 输入 p95、350 MiB 桌面峰值和 30 分钟增长 10% 的硬阈值；样本不足
+  或仅 smoke 一律 fail closed。冻结工作区 Chromium 商业长跑已通过：场景 p95 171.6ms、输入 p95 12.5ms、首次交互
+  3,956 bytes、峰值堆 30,968,996 bytes、5–30 分钟增长 2.12%，receipt 为 `6e30a62f…637f97`。2026-08-22
+  再次以最终代码完成 30.3 分钟商业长跑：369 个场景/输入样本、场景 p95 174.2ms、输入 p95 9.8ms、
+  61 个堆样本、峰值 36,663,048 bytes、增长 1.92%，receipt 为 `5e02102e…7f042d3`，失败列表为空。
+- 含媒资商业 Build 的 Preview 播放器会自动解码每个冻结图片/音频 object URL，把实际图片尺寸、音频时长、浏览器环境
+  和精确 `blobContentHash` 冻结为 `media.runtime.decode` receipt；缺 URL、解码失败、尺寸/hash 不符或最新失败都会把
+  Build 保持/降回 `preview-ready`。性能、主路线和媒资解码三门共同进入 adoption intent，不能互相替代。
+- 产品页“手工作者”已收口为“手工维护”：不再暴露新建旧式手工游戏，旧 v1 发布和上线前存量草稿可继续维护；任何
+  已有 Production provenance 的流，以及所有新游戏，都只能进入制作中心。`R-GAMEPROD1I-legacy-entry-governance` 与
+  `core-workflow` Chromium 回归覆盖该分流。
+
+### 当前边界 / 尚未完成
+
+- Agnes Image 2.1 同 Key adapter、OpenAI 图片 relay fallback 和 ElevenLabs music/SFX adapter 已有录制响应、去敏 binding
+  与字节 verifier，但仍缺真实 Agnes 图片及真实音频供应商的隔离 Golden Project；录制 fixture 不能证明实际账号、费用、
+  取消和供应商权利条款。
+- QA 已覆盖结构、图、媒资字节、权利字段、可玩性、浏览器性能和逐资产浏览器解码 receipt 的 fail-closed 聚合；真实 Agnes Golden 已取得
+  一条用户主路线 Preview/选择/存档/发布 receipt，真实浏览器 p95、30 分钟长局、首次交互体积和内存增长均已通过商业阈值。
+  真实商业媒资仍未完成，因此不能把 `commercial-candidate` 当成最终商业发布证明。
+- 三轮 Build 演化、旧 Release/Session 不变和 Artifact 闭包复用已验证；stable-key compatibility 报告、制作页兼容
+  摘要以及 legacy Release v1→v2 后旧存档固定回归已经补齐。真实 Chromium 现已展示 Build #1→#2 报告，并在
+  新 Build 存在后继续推进绑定旧 Release/packageHash 的旧 Session。
+- 制作中心已经成为世界到新游戏的唯一产品主路径，旧 AI 候选直接发布/快速映射 UI 已下线；“手工维护”只允许旧 v1
+  与存量草稿维护，Production-owned 流不能回退为旧发布。完整 `npm run ci` 已通过全仓三注册表、源码可达性、
+  覆盖率、TypeScript、构建和包体预算，冻结工作区 Chromium E2E 58/58 通过；真实商业媒资和长时/多账号外部验收
+  仍须分别完成，不能用定向回归替代。
+- 纯前端可以在刷新后恢复 durable Run，但关闭浏览器不会继续生产；真正后台 worker、账号、云对象存储和社区
+  分发仍需独立 PLATFORM/桌面架构，不能在 GAME-PROD 本地 MVP 中伪造。
+
+### 新功能必须复用
+
+- `GAME-PROD-1` 是生产编排层，不是第七种游戏产品；必须消费现有 WorldRelease、游戏类型、AVG、SIM、Harness
+  和 GameRelease，禁止复制播放器、规则 reducer、存档、正式媒资库、Runner 或 Release。
+- 开始生产只授权隔离 Build 内自主执行，不授权 Canon/手稿/旧 Release 写入；用户试玩后一次确认，才经登记的
+  Adoption extension 物化现有正式表并发布。用户不需要逐节点或逐素材确认。
+- V3 新增 `gameProductions / gameProductionBriefs / gameProductionCommands / gameBuilds / gameBuildArtifacts /
+  mediaBlobObjects` 六表；命令表承载跨刷新/多标签幂等，共享 Blob 同时服务 Build 和正式媒资。任务继续复用 Agent
+  ledger。任何实现必须先登记 `PROJECT_TABLES`、新增 Context Source 和正式 Adoption 边界，再写 UI 或模型调用。
+- 施工权威见 [`../text-game/GAME-PRODUCTION-PIPELINE-BLUEPRINT-V3.md`](../text-game/GAME-PRODUCTION-PIPELINE-BLUEPRINT-V3.md)。
+  `GAME-PROD-1C` 是内容+最小视觉并行的可玩 MVP，不是最终完成；A0～I 与 §24 全部证据才构成最终交付。
 
 ## WORLD-2 世界引擎领域重构
 

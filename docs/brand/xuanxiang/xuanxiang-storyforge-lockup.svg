@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1040 320" role="img" aria-labelledby="title desc">
+  <title id="title">悬象与 StoryForge 联合标识</title>
+  <desc id="desc">悬象公司品牌与 StoryForge 故事熔炉产品的联合标识。</desc>
+  <g transform="translate(24 24)">
+    <g fill="none" stroke="#253A35" stroke-width="14" stroke-linecap="round">
+      <path d="M58 57A96 96 0 0 1 220 105"/>
+      <path d="M198 202A96 96 0 0 1 36 151"/>
+    </g>
+    <ellipse cx="128" cy="128" rx="94" ry="45" transform="rotate(-24 128 128)" fill="none" stroke="#A45137" stroke-width="10"/>
+    <path fill="#A45137" d="M128 72c6 29 27 50 56 56-29 6-50 27-56 56-6-29-27-50-56-56 29-6 50-27 56-56Z"/>
+    <circle cx="128" cy="128" r="8" fill="#F5F0E7"/>
+  </g>
+  <text x="330" y="136" fill="#211F1B" font-family="Songti SC, STSong, Noto Serif CJK SC, serif" font-size="88" font-weight="600" letter-spacing="12">悬象</text>
+  <text x="338" y="184" fill="#A45137" font-family="Avenir Next, Helvetica Neue, Arial, sans-serif" font-size="21" font-weight="600" letter-spacing="9">XUANXIANG</text>
+  <line x1="338" y1="218" x2="910" y2="218" stroke="#D9D0C4" stroke-width="2"/>
+  <text x="338" y="263" fill="#253A35" font-family="Georgia, Times New Roman, serif" font-size="30" font-weight="600" letter-spacing="1">StoryForge</text>
+  <text x="542" y="263" fill="#716B61" font-family="Songti SC, STSong, Noto Serif CJK SC, serif" font-size="25" letter-spacing="3">故事熔炉 · 让世界持续生长</text>
+</svg>

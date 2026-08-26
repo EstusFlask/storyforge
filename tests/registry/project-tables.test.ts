@@ -28,8 +28,8 @@ describe('Phase 1.1a · PROJECT_TABLES 注册表', () => {
       expect(result.ok, result.errors.join('; ')).toBe(true)
     })
 
-    it('登记了全部 91 张表', () => {
-      expect(PROJECT_TABLES.length).toBe(91)   // v69 + exact artifacts + adaptation/screenplay/comic/media
+    it('登记了全部 115 张表', () => {
+      expect(PROJECT_TABLES.length).toBe(115)   // v79 两条历史迁移线汇合
     })
 
     it('每张表名唯一', () => {
@@ -41,7 +41,7 @@ describe('Phase 1.1a · PROJECT_TABLES 注册表', () => {
       const allowed = new Set(['editable', 'evidence', 'derived-none', 'not-applicable'])
       expect(PROJECT_TABLES.every(spec => allowed.has(spec.memoryClassification.classification))).toBe(true)
       expect(PROJECT_TABLES.filter(spec => spec.memoryClassification.classification === 'editable').map(spec => spec.name).sort())
-        .toEqual(['chapters', 'creativeRules', 'projects', 'storyCores', 'works', 'worlds'])
+        .toEqual(['chapters', 'characterInteractionBriefs', 'characterInteractionProductions', 'creativeRules', 'gameProductionBriefs', 'gameProductions', 'gameRulePacks', 'projects', 'storyCores', 'ttrpgCampaignModules', 'ttrpgProductionBriefs', 'ttrpgProductions', 'works', 'worlds'])
       expect(PROJECT_TABLES.find(spec => spec.name === 'agentRunEvents')?.memoryClassification.classification).toBe('evidence')
       expect(PROJECT_TABLES.find(spec => spec.name === 'retrievalChunks')?.memoryClassification.classification).toBe('derived-none')
       expect(PROJECT_TABLES.find(spec => spec.name === 'promptTemplates')?.memoryClassification.classification).toBe('not-applicable')

@@ -41,8 +41,10 @@ export interface AvgMediaBlob {
   worldId: number
   workId: number
   mediaAssetId: number
+  /** GAMEPROD-1 shared content-addressed storage link; legacy rows keep inline data only. */
+  blobObjectId?: number | null
   /** Structured-clone-safe binary; callers materialize a Blob with the asset mimeType. */
-  data: ArrayBuffer
+  data?: ArrayBuffer | null
   createdAt: number
 }
 

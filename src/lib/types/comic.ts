@@ -1,3 +1,5 @@
+import type { MediaBlobObjectRecordV1 } from './game-production'
+
 export interface ComicNormalizedFrameV1 {
   x: number
   y: number
@@ -172,19 +174,12 @@ export interface ComicMediaAsset {
   updatedAt: number
 }
 
-export interface MediaBlobObject {
-  id?: number
-  projectId: number
-  workId: number
-  contentHash: string
+export interface MediaBlobObject extends MediaBlobObjectRecordV1 {
   mimeType: 'image/png' | 'image/jpeg' | 'image/webp'
-  byteSize: number
   width: number
   height: number
   data: ArrayBuffer
   disposition: 'available' | 'pending-delete'
   deleteRequestedAt: number | null
   deleteReceiptHash: string | null
-  createdAt: number
-  updatedAt: number
 }

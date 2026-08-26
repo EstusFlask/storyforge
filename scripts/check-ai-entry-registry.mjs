@@ -116,6 +116,9 @@ export function analyzeAIEntrySource(source, file = 'entry.tsx') {
       const expression = node.expression
       if (ts.isIdentifier(expression) && expression.text === 'executeRegisteredAIEntryV1') {
         registerGovernedCall(node, node.arguments[0], node.arguments[3])
+      } else if (ts.isIdentifier(expression) && expression.text === 'streamRegisteredAIEntryV1'
+        && file !== 'src/hooks/useAIStream.ts') {
+        registerGovernedCall(node, objectProperty(node.arguments[2], 'formalEntryId'), node.arguments[2])
       } else if (ts.isIdentifier(expression) && startAliases.has(expression.text)) {
         registerGovernedCall(node, objectProperty(node.arguments[2], 'formalEntryId'), node.arguments[2])
       } else if (ts.isPropertyAccessExpression(expression) && propertyName(expression.name) === 'start') {

@@ -149,7 +149,7 @@ test('世界引擎可在同一 World 创建并切换两部隔离作品', async (
   await expect(page.getByRole('heading', { name: '叙事蓝图与发布' })).toBeVisible()
 })
 
-test('世界引擎从主线冻结发布并创建绑定跑团实例', async ({ page }) => {
+test('世界引擎从主线冻结发布并创建绑定互动诊断实例', async ({ page }) => {
   await page.addInitScript(() => {
     localStorage.setItem('storyforge_guide_completed', 'e2e')
   })
@@ -189,14 +189,15 @@ test('世界引擎从主线冻结发布并创建绑定跑团实例', async ({ pa
   await publishDialog.getByRole('button', { name: '发布版本', exact: true }).click()
   await expect(pipeline.getByRole('status')).toContainText('不可变世界版本已发布。')
 
-  await pipeline.getByLabel('互动实例类型').selectOption('ttrpg')
-  await pipeline.getByLabel('实例名称').fill('E2E 主线跑团')
+  await expect(pipeline.getByLabel('互动实例类型').locator('option[value="ttrpg"]')).toHaveCount(0)
+  await pipeline.getByLabel('互动实例类型').selectOption('chatgame')
+  await pipeline.getByLabel('实例名称').fill('E2E 主线角色互动')
   await pipeline.getByRole('button', { name: '创建实例', exact: true }).click()
-  await expect(pipeline.getByRole('status')).toContainText('已创建独立实例“E2E 主线跑团”。')
+  await expect(pipeline.getByRole('status')).toContainText('已创建独立实例“E2E 主线角色互动”。')
   await pipeline.getByRole('button', { name: '查看实例', exact: true }).click()
   await expect(page).toHaveURL(/\/storyforge\/workspace\/\d+\?module=simulation-runtime$/)
-  await expect(page.getByRole('heading', { name: 'E2E 主线跑团', exact: true })).toBeVisible()
-  await expect(page.getByText('体验中心 · 跑团', { exact: true })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'E2E 主线角色互动', exact: true })).toBeVisible()
+  await expect(page.getByText('体验中心 · 角色聊天', { exact: true })).toBeVisible()
   const frozenNarrative = page.getByRole('region', { name: '冻结叙事进度' })
   await expect(frozenNarrative).toContainText('主线')
   await frozenNarrative.getByRole('button').click()

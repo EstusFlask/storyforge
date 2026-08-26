@@ -141,3 +141,5 @@
 3. 涉及删除、批量写入、导入或引用重映射，必须有失败回滚、无孤儿和真实隔离项目往返证据。
 4. 涉及 AI 行为，必须证明候选/Canon 边界、最终 Prompt 与登记来源同源，并通过 `check:ai-manual`、架构检查、类型检查、相关测试和构建。
 5. 继续遵守施工顺序：`SIM-1B → SIM-1C → TTRPG-1A → TTRPG-1B/1C → CHATGAME-1 → PRODUCT-1 / PLATFORM-1`；只有 P1 生产 Bug 可插队，修完回到主线。
+> **TTRPG 状态复核（2026-08-22）**：本文的 `TTRPG-1A COMPLETE` 是 2026-08-03 对早期事件内核的历史分流结论，不能用于证明完整跑团产品完成。当前状态以 `docs/ttrpg/TTRPG-DEVELOPMENT-TRACKER-20260822.md` 为准。
+>

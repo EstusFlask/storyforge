@@ -26,6 +26,7 @@ export default function NarrativeSimulationPlayer(props: {
   project: Project
   scope: WorkspaceScope
   worldGroupId: number | null
+  initialSessionId?: number | null
 }) {
   const store = useNarrativeSimulationPlayerStore()
   const { config } = useAIConfigStore()
@@ -35,9 +36,11 @@ export default function NarrativeSimulationPlayer(props: {
   const [localError, setLocalError] = useState('')
 
   useEffect(() => {
-    void store.load(props.scope, props.worldGroupId)
+    void store.load(props.scope, props.worldGroupId).then(async () => {
+      if (props.initialSessionId != null) await store.select(props.initialSessionId)
+    })
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [props.scope.projectId, props.scope.worldId, props.scope.workId, props.worldGroupId])
+  }, [props.scope.projectId, props.scope.worldId, props.scope.workId, props.worldGroupId, props.initialSessionId])
 
   const selected = store.sessions.find(session => session.id === store.selectedSessionId) ?? null
   const simulation = store.runtimeState.narrativeSimulation

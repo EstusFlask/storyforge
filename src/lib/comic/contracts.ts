@@ -7,6 +7,7 @@ import type {
   ComicPanel,
   ComicVisualSubject,
   MediaBlobObject,
+  MediaBlobObjectRecordV1,
   WorkCharacterBinding,
 } from '../types'
 
@@ -123,8 +124,21 @@ export function assertComicVisualSubjectV1(input: {
   if (!['draft', 'reviewed', 'locked'].includes(subject.status) || !Number.isInteger(subject.revision) || subject.revision < 1) throw new Error('[comic] 视觉条目状态非法')
 }
 
-export function assertMediaBlobObjectV1(blob: MediaBlobObject): void {
-  if (!/^[a-f0-9]{64}$/.test(blob.contentHash) || !['image/png', 'image/jpeg', 'image/webp'].includes(blob.mimeType) || blob.byteSize !== blob.data.byteLength || blob.byteSize < 16 || blob.byteSize > 25 * 1024 * 1024 || !Number.isInteger(blob.width) || !Number.isInteger(blob.height) || blob.width < 1 || blob.height < 1 || blob.width > 16384 || blob.height > 16384) throw new Error('[media] Blob 元数据、尺寸或体积非法')
+export function assertMediaBlobObjectV1(blob: MediaBlobObjectRecordV1): asserts blob is MediaBlobObject {
+  if (!(blob.data instanceof ArrayBuffer)
+    || typeof blob.width !== 'number'
+    || typeof blob.height !== 'number'
+    || !/^[a-f0-9]{64}$/.test(blob.contentHash)
+    || !['image/png', 'image/jpeg', 'image/webp'].includes(blob.mimeType)
+    || blob.byteSize !== blob.data.byteLength
+    || blob.byteSize < 16
+    || blob.byteSize > 25 * 1024 * 1024
+    || !Number.isInteger(blob.width)
+    || !Number.isInteger(blob.height)
+    || blob.width < 1
+    || blob.height < 1
+    || blob.width > 16384
+    || blob.height > 16384) throw new Error('[media] Blob 元数据、尺寸或体积非法')
 }
 
 export function assertComicMediaAssetV1(asset: ComicMediaAsset): void {

@@ -30,6 +30,7 @@ import type {
   SimulationTtrpgTurnCandidate,
   WorkspaceScope,
 } from '../../lib/types'
+import type { OnlineRoomJoinHandoffV1 } from '../../lib/online/http-transport'
 import { useSimulationRuntimeStore } from '../../stores/simulation-runtime'
 import { useDialog } from '../shared/Dialog'
 import { useAIStream } from '../../hooks/useAIStream'
@@ -46,6 +47,7 @@ import {
   parseTtrpgTurnCandidate,
 } from '../../lib/simulation/ttrpg'
 import { isNpcRuntimeEntity } from '../../lib/simulation/runtime'
+import TtrpgCampaignGuide from '../ttrpg/TtrpgCampaignGuide'
 
 const KIND_LABELS: Record<SimulationSessionKind, string> = {
   sandbox: '沙盒',
@@ -64,6 +66,7 @@ const SOURCE_KIND_LABELS: Record<SimulationCanonSourceKind, string> = {
   character: '角色',
   location: '地点',
   item: '物品',
+  faction: '势力',
   rule: '规则',
 }
 
@@ -72,6 +75,7 @@ const SOURCE_KIND_ORDER: SimulationCanonSourceKind[] = [
   'character',
   'location',
   'item',
+  'faction',
   'rule',
 ]
 
@@ -106,6 +110,16 @@ function eventSummary(type: string, payloadJson: string): string {
     if (type === 'ttrpg.campaign.summary.updated') return '更新长期战役摘要'
     if (type === 'ttrpg.campaign.quest.upserted') return `任务：${(payload.quest as Record<string, unknown>)?.title ?? ''}`
     if (type === 'ttrpg.campaign.schedule.upserted') return `日程：${(payload.schedule as Record<string, unknown>)?.activity ?? ''}`
+    if (type === 'ttrpg.session-zero.completed') return 'Session Zero：安全与共识已确认'
+    if (type === 'ttrpg.safety.changed') return payload.status === 'paused'
+      ? `安全暂停：${payload.reason ?? '重新确认内容边界'}`
+      : '安全暂停已解除'
+    if (type === 'ttrpg.clue.discovered') return `线索：${payload.clueKey ?? ''} · ${payload.visibility ?? ''}`
+    if (type === 'ttrpg.rule.action.resolved') {
+      const result = payload.result as Record<string, unknown> | undefined
+      return `规则行动：${result?.actionName ?? result?.actionKey ?? ''} · ${result?.outcome ?? ''}`
+    }
+    if (type === 'ttrpg.campaign.ended') return `战役结局：${payload.title ?? payload.endingKey ?? ''}`
     if (type === 'chat.session.configured') return `聊天场景：${(payload.scene as Record<string, unknown>)?.title ?? ''}`
     if (type === 'chat.message.recorded') return `用户：${payload.text ?? ''}`
     if (type === 'chat.reply.recorded') return `角色：${payload.text ?? ''}`
@@ -122,6 +136,9 @@ export default function SimulationRuntimePanel(props: {
   /** 产品入口锁定为单一会话类型；旧工作区不传时仍管理全部互动存档。 */
   sessionKind?: SimulationSessionKind
   workspaceScope?: WorkspaceScope
+  initialSessionId?: number | null
+  initialOnlineHandoff?: OnlineRoomJoinHandoffV1 | null
+  onOnlineHandoffConsumed?: () => void
 }) {
   const store = useSimulationRuntimeStore()
   const dialog = useDialog()
@@ -186,10 +203,14 @@ export default function SimulationRuntimePanel(props: {
   const { config } = useAIConfigStore()
 
   useEffect(() => {
-    void store.load(props.project.id!, props.worldGroupId)
+    let cancelled = false
+    void store.load(props.project.id!, props.worldGroupId).then(async () => {
+      if (!cancelled && props.initialSessionId != null) await store.select(props.initialSessionId)
+    })
+    return () => { cancelled = true }
   // Zustand action identity is stable; project change is the actual reload boundary.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [props.project.id, props.worldGroupId])
+  }, [props.project.id, props.worldGroupId, props.initialSessionId])
 
   useEffect(() => {
     let cancelled = false
@@ -227,6 +248,7 @@ export default function SimulationRuntimePanel(props: {
     () => visibleSessions.find(session => session.id === store.selectedSessionId) ?? null,
     [store.selectedSessionId, visibleSessions],
   )
+  const hasFormalTtrpgProduct = selected?.kind === 'ttrpg' && store.runtimeState.ttrpg?.product != null
   useEffect(() => {
     if (selected?.id == null) return
     setCampaignSummary(store.runtimeState.ttrpg?.campaign?.summary ?? '')
@@ -641,7 +663,7 @@ export default function SimulationRuntimePanel(props: {
               </div>
             )}
 
-            <section className="grid gap-3 sm:grid-cols-3">
+            {!hasFormalTtrpgProduct && <section className="grid gap-3 sm:grid-cols-3">
               <div className="rounded-lg border border-border bg-bg-surface p-4">
                 <Clock3 className="mb-2 h-4 w-4 text-accent" />
                 <div className="text-2xl font-semibold text-text-primary">{store.runtimeState.clock}</div>
@@ -661,9 +683,9 @@ export default function SimulationRuntimePanel(props: {
                 </div>
                 <div className="text-xs text-text-muted">叙事记录</div>
               </div>
-            </section>
+            </section>}
 
-            {narrative && currentNarrativeNode && (
+            {!hasFormalTtrpgProduct && narrative && currentNarrativeNode && (
               <section className="rounded-lg border border-accent/30 bg-bg-surface" aria-label="冻结叙事进度">
                 <div className="flex items-start justify-between gap-3 border-b border-border px-4 py-3">
                   <div>
@@ -704,7 +726,7 @@ export default function SimulationRuntimePanel(props: {
               </section>
             )}
 
-            <section className="rounded-lg border border-border bg-bg-surface">
+            {!hasFormalTtrpgProduct && <section className="rounded-lg border border-border bg-bg-surface">
               <div className="flex items-center justify-between gap-3 border-b border-border px-4 py-3">
                 <div className="flex items-center gap-2 text-sm font-semibold text-text-primary">
                   <Snowflake className="h-4 w-4 text-accent" />
@@ -743,7 +765,7 @@ export default function SimulationRuntimePanel(props: {
               ) : (
                 <p className="px-4 py-5 text-sm text-text-muted">旧会话没有结构化冻结审计。</p>
               )}
-            </section>
+            </section>}
 
             {selected.kind === 'npc-evolution' && (
               <section className="rounded-lg border border-accent/30 bg-bg-surface">
@@ -844,7 +866,22 @@ export default function SimulationRuntimePanel(props: {
               </section>
             )}
 
-            {selected.kind === 'ttrpg' && (
+            {selected.kind === 'ttrpg' && store.runtimeState.ttrpg?.product && (
+              <TtrpgCampaignGuide
+                session={selected}
+                state={store.runtimeState}
+                workspaceScope={props.workspaceScope}
+                checkpoints={store.checkpoints}
+                onCheckpoint={name => store.checkpoint(name)}
+                onBranch={title => store.branch(title)}
+                onRestoreCheckpoint={checkpointId => store.restoreCheckpoint(checkpointId)}
+                onChanged={() => store.select(selected.id!)}
+                initialOnlineHandoff={props.initialOnlineHandoff}
+                onOnlineHandoffConsumed={props.onOnlineHandoffConsumed}
+              />
+            )}
+
+            {selected.kind === 'ttrpg' && !store.runtimeState.ttrpg?.product && (
               <section className="rounded-lg border border-accent/30 bg-bg-surface">
                 <div className="flex items-center justify-between gap-3 border-b border-border px-4 py-3">
                   <div>
@@ -1212,7 +1249,7 @@ export default function SimulationRuntimePanel(props: {
               </section>
             )}
 
-            {selected.kind === 'ttrpg' && (
+            {selected.kind === 'ttrpg' && !hasFormalTtrpgProduct && (
               <section className="rounded-lg border border-accent/30 bg-bg-surface" data-testid="ttrpg-campaign-panel">
                 <div className="flex items-center gap-2 border-b border-border px-4 py-3">
                   <CalendarClock className="h-4 w-4 text-accent" />
@@ -1350,7 +1387,7 @@ export default function SimulationRuntimePanel(props: {
               </section>
             )}
 
-            <section className="grid gap-3 lg:grid-cols-2">
+            {!hasFormalTtrpgProduct && <section className="grid gap-3 lg:grid-cols-2">
               <div className="space-y-3 rounded-lg border border-border bg-bg-surface p-4">
                 <h3 className="text-sm font-semibold text-text-primary">确定性动作</h3>
                 <div className="flex gap-2">
@@ -1464,9 +1501,9 @@ export default function SimulationRuntimePanel(props: {
                   )}
                 </div>
               </div>
-            </section>
+            </section>}
 
-            <section className="rounded-lg border border-border bg-bg-surface">
+            {!hasFormalTtrpgProduct && <section className="rounded-lg border border-border bg-bg-surface">
               <div className="border-b border-border px-4 py-3 text-sm font-semibold text-text-primary">
                 运行时实体
               </div>
@@ -1491,9 +1528,9 @@ export default function SimulationRuntimePanel(props: {
                   <p className="px-4 py-6 text-center text-sm text-text-muted">暂无运行时实体</p>
                 )}
               </div>
-            </section>
+            </section>}
 
-            <section className="rounded-lg border border-border bg-bg-surface">
+            {!hasFormalTtrpgProduct && <section className="rounded-lg border border-border bg-bg-surface">
               <div className="border-b border-border px-4 py-3">
                 <div className="text-sm font-semibold text-text-primary">当前叙事状态</div>
                 <p className="mt-0.5 text-xs text-text-muted">
@@ -1518,9 +1555,9 @@ export default function SimulationRuntimePanel(props: {
                   <p className="px-4 py-6 text-center text-sm text-text-muted">暂无叙事状态</p>
                 )}
               </div>
-            </section>
+            </section>}
 
-            <section className="rounded-lg border border-border bg-bg-surface">
+            {!hasFormalTtrpgProduct && <section className="rounded-lg border border-border bg-bg-surface">
               <div className="border-b border-border px-4 py-3 text-sm font-semibold text-text-primary">
                 追加事件日志
               </div>
@@ -1538,7 +1575,7 @@ export default function SimulationRuntimePanel(props: {
                   <p className="px-4 py-8 text-center text-sm text-text-muted">尚无事件</p>
                 )}
               </div>
-            </section>
+            </section>}
           </div>
         )}
       </main>

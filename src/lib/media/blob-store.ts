@@ -98,15 +98,18 @@ export async function putPreparedMediaBlobV1(
 ): Promise<MediaBlobObject & { id: number }> {
   const existing = await db.mediaBlobObjects.where('[workId+contentHash]').equals([scope.workId, image.contentHash]).first()
   if (existing?.id) {
-    if (!await assertRecordInScope(scope, 'mediaBlobObjects', existing, { owner: 'work' })
-      || existing.byteSize !== image.data.byteLength
+    if (!await assertRecordInScope(scope, 'mediaBlobObjects', existing, { owner: 'work' })) {
+      throw new Error('[media] 同 hash Blob 越界')
+    }
+    assertMediaBlobObjectV1(existing)
+    if (existing.byteSize !== image.data.byteLength
       || existing.mimeType !== image.mimeType
       || existing.width !== image.width
       || existing.height !== image.height) {
       throw new Error('[media] 同 hash Blob 元数据冲突')
     }
     if (existing.disposition === 'pending-delete') {
-      const restored = { ...existing, disposition: 'available' as const, deleteRequestedAt: null, deleteReceiptHash: null, updatedAt: Date.now() }
+      const restored = { ...existing, disposition: 'available' as const, storageState: 'ready' as const, deleteRequestedAt: null, deleteReceiptHash: null, updatedAt: Date.now() }
       await db.mediaBlobObjects.put(restored)
       return restored as MediaBlobObject & { id: number }
     }
@@ -114,8 +117,10 @@ export async function putPreparedMediaBlobV1(
   }
   const now = Date.now()
   const row: MediaBlobObject = stampNewRecord(scope, 'mediaBlobObjects', {
-    projectId: scope.projectId, workId: scope.workId, contentHash: image.contentHash, mimeType: image.mimeType,
+    projectId: scope.projectId, worldId: scope.worldId, workId: scope.workId, contentHash: image.contentHash, mimeType: image.mimeType,
     byteSize: image.data.byteLength, width: image.width, height: image.height, data: image.data.slice(0),
+    backend: 'indexeddb', storageState: 'ready', opfsPath: null, leaseOwner: null,
+    leaseExpiresAt: null, lastVerifiedAt: now,
     disposition: 'available', deleteRequestedAt: null, deleteReceiptHash: null, createdAt: now, updatedAt: now,
   }, { owner: 'work' })
   assertMediaBlobObjectV1(row)
@@ -128,6 +133,7 @@ export async function putVerifiedMediaBlobV1(input: { scope: WorkspaceScope; dat
   const image = await prepareMediaBlobV1(input.data)
   const existing = await db.mediaBlobObjects.where('[workId+contentHash]').equals([scope.workId, image.contentHash]).first()
   if (existing?.id) {
+    assertMediaBlobObjectV1(existing)
     if (await sha256BinaryV1(existing.data) !== image.contentHash) throw new Error('[media] 同 hash Blob 内容冲突')
   }
   return putPreparedMediaBlobV1(scope, image)
@@ -136,8 +142,9 @@ export async function putVerifiedMediaBlobV1(input: { scope: WorkspaceScope; dat
 export async function readVerifiedMediaBlobV1(input: { scope: WorkspaceScope; blobObjectId: number }): Promise<MediaBlobObject & { id: number }> {
   const scope = await resolveScope({ scope: input.scope })
   const row = await db.mediaBlobObjects.get(input.blobObjectId)
-  if (!row?.id || row.disposition !== 'available' || !await assertRecordInScope(scope, 'mediaBlobObjects', row, { owner: 'work' })) throw new Error('[media] Blob 不存在、已回收或越界')
+  if (!row?.id || !await assertRecordInScope(scope, 'mediaBlobObjects', row, { owner: 'work' })) throw new Error('[media] Blob 不存在、已回收或越界')
   assertMediaBlobObjectV1(row)
+  if (row.disposition !== 'available' || row.storageState !== 'ready') throw new Error('[media] Blob 不存在、已回收或越界')
   if (await sha256BinaryV1(row.data) !== row.contentHash) throw new Error('[media] Blob 内容 hash 不匹配')
   return row as MediaBlobObject & { id: number }
 }
@@ -153,9 +160,10 @@ export async function markUnreferencedMediaBlobForDeletionV1(input: { scope: Wor
   return db.transaction('rw', [db.mediaBlobObjects, ...refs.map(spec => spec.table)], async () => {
     const row = await db.mediaBlobObjects.get(input.blobObjectId)
     if (!row?.id || !await assertRecordInScope(scope, 'mediaBlobObjects', row, { owner: 'work' })) throw new Error('[media] Blob 不存在或越界')
+    assertMediaBlobObjectV1(row)
     if (await hasRegisteredMediaReferences(row.id)) return null
     const requestedAt = Date.now()
-    const next = { ...row, disposition: 'pending-delete' as const, deleteRequestedAt: requestedAt, deleteReceiptHash: await Dexie.waitFor(hashCanonicalValue({ version: 1, blobObjectId: row.id, workId: scope.workId, contentHash: row.contentHash, requestedAt })), updatedAt: requestedAt }
+    const next = { ...row, disposition: 'pending-delete' as const, storageState: 'pending-delete' as const, deleteRequestedAt: requestedAt, deleteReceiptHash: await Dexie.waitFor(hashCanonicalValue({ version: 1, blobObjectId: row.id, workId: scope.workId, contentHash: row.contentHash, requestedAt })), updatedAt: requestedAt }
     await db.mediaBlobObjects.put(next); return next as MediaBlobObject & { id: number }
   })
 }
@@ -166,9 +174,10 @@ export async function finalizePendingMediaBlobDeletionV1(input: { scope: Workspa
   return db.transaction('rw', [db.mediaBlobObjects, ...refs.map(spec => spec.table)], async () => {
     const row = await db.mediaBlobObjects.get(input.blobObjectId)
     if (!row?.id || !await assertRecordInScope(scope, 'mediaBlobObjects', row, { owner: 'work' })) throw new Error('[media] Blob 不存在或越界')
+    assertMediaBlobObjectV1(row)
     if (row.disposition !== 'pending-delete' || row.deleteReceiptHash !== input.receiptHash) throw new Error('[media] Blob 删除回执不匹配')
     if (await hasRegisteredMediaReferences(row.id)) {
-      await db.mediaBlobObjects.update(row.id, { disposition: 'available', deleteRequestedAt: null, deleteReceiptHash: null, updatedAt: Date.now() })
+      await db.mediaBlobObjects.update(row.id, { disposition: 'available', storageState: 'ready', deleteRequestedAt: null, deleteReceiptHash: null, updatedAt: Date.now() })
       return false
     }
     await db.mediaBlobObjects.delete(row.id); return true

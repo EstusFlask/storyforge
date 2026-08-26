@@ -123,7 +123,7 @@ export function divideChaptersIntoBlocks(
     assigned += floor
   }
 
-  let remaining = totalChapters - assigned
+  const remaining = totalChapters - assigned
   const sortedRemainders = remainders
     .map((r, i) => ({ r, i }))
     .sort((a, b) => b.r - a.r)

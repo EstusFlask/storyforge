@@ -340,11 +340,21 @@ export function parseAgentRunContractV1(value: unknown): AgentRunContractV1 {
   const record = readRecord(value, 'contract')
   assertExactKeys(
     record,
-    ['version', 'objective', 'workflowKind', 'lineage', 'scope', 'permissions', 'runtimeBindingHash', 'executionBindings', 'dependencyReceiptPolicy', 'candidateSemanticReviewPolicy', 'automationAuthorization', 'budget', 'acceptance', 'verificationPlan', 'failurePolicy'],
+    ['version', 'objective', 'workflowKind', 'ownership', 'lineage', 'scope', 'permissions', 'runtimeBindingHash', 'executionBindings', 'dependencyReceiptPolicy', 'candidateSemanticReviewPolicy', 'automationAuthorization', 'budget', 'acceptance', 'verificationPlan', 'failurePolicy'],
     ['version', 'objective', 'workflowKind', 'scope', 'permissions', 'budget', 'acceptance', 'verificationPlan', 'failurePolicy'],
     'contract',
   )
   if (record.version !== 1) failSchema('unsupported_version', 'contract.version', '仅支持版本 1')
+
+  let ownership: AgentRunContractV1['ownership']
+  if (record.ownership !== undefined) {
+    const ownershipRecord = readRecord(record.ownership, 'contract.ownership')
+    assertExactKeys(ownershipRecord, ['parentRunId', 'relation'], ['parentRunId', 'relation'], 'contract.ownership')
+    ownership = {
+      parentRunId: readInteger(ownershipRecord.parentRunId, 'contract.ownership.parentRunId', { min: 1 }),
+      relation: readString(ownershipRecord.relation, 'contract.ownership.relation', { max: 220 }),
+    }
+  }
 
   let lineage: AgentRunContractV1['lineage']
   if (record.lineage !== undefined) {
@@ -352,11 +362,14 @@ export function parseAgentRunContractV1(value: unknown): AgentRunContractV1 {
     assertExactKeys(lineageRecord, ['parent'], ['parent'], 'contract.lineage')
     lineage = { parent: readParentLineage(lineageRecord.parent, 'contract.lineage.parent') }
   }
+  if (ownership && lineage) {
+    failSchema('invalid_parent_relation', 'contract', 'ownership 与 lineage 互斥')
+  }
 
   const scopeRecord = readRecord(record.scope, 'contract.scope')
   assertExactKeys(
     scopeRecord,
-    ['projectId', 'worldGroupId', 'chapterIds', 'outlineNodeIds', 'runtime'],
+    ['projectId', 'worldGroupId', 'chapterIds', 'outlineNodeIds', 'runtime', 'gameProduction'],
     ['projectId', 'worldGroupId'],
     'contract.scope',
   )
@@ -379,6 +392,26 @@ export function parseAgentRunContractV1(value: unknown): AgentRunContractV1 {
       visibilityHash: readHash(runtimeRecord.visibilityHash, 'contract.scope.runtime.visibilityHash'),
       releaseHash: readHash(runtimeRecord.releaseHash, 'contract.scope.runtime.releaseHash'),
     }
+  }
+  let gameProduction: AgentRunContractV1['scope']['gameProduction']
+  if (scopeRecord.gameProduction !== undefined) {
+    const productionRecord = readRecord(scopeRecord.gameProduction, 'contract.scope.gameProduction')
+    assertExactKeys(
+      productionRecord,
+      ['gameBuildId', 'buildNumber', 'controlEpoch', 'planHash', 'taskKey'],
+      ['gameBuildId', 'buildNumber', 'controlEpoch', 'planHash', 'taskKey'],
+      'contract.scope.gameProduction',
+    )
+    gameProduction = {
+      gameBuildId: readInteger(productionRecord.gameBuildId, 'contract.scope.gameProduction.gameBuildId', { min: 1 }),
+      buildNumber: readInteger(productionRecord.buildNumber, 'contract.scope.gameProduction.buildNumber', { min: 1 }),
+      controlEpoch: readInteger(productionRecord.controlEpoch, 'contract.scope.gameProduction.controlEpoch', { min: 0 }),
+      planHash: readHash(productionRecord.planHash, 'contract.scope.gameProduction.planHash'),
+      taskKey: readString(productionRecord.taskKey, 'contract.scope.gameProduction.taskKey', { max: 200 }),
+    }
+  }
+  if (runtime && gameProduction) {
+    failSchema('invalid_scope', 'contract.scope', 'runtime 与 gameProduction 运行边界互斥')
   }
 
   const permissionsRecord = readRecord(record.permissions, 'contract.permissions')
@@ -610,6 +643,7 @@ export function parseAgentRunContractV1(value: unknown): AgentRunContractV1 {
     version: 1,
     objective: readString(record.objective, 'contract.objective', { max: 4000 }),
     workflowKind,
+    ...(ownership ? { ownership } : {}),
     ...(lineage ? { lineage } : {}),
     scope: {
       projectId: readInteger(scopeRecord.projectId, 'contract.scope.projectId', { min: 1 }),
@@ -617,6 +651,7 @@ export function parseAgentRunContractV1(value: unknown): AgentRunContractV1 {
       chapterIds: readIdArray(scopeRecord.chapterIds, 'contract.scope.chapterIds'),
       outlineNodeIds: readIdArray(scopeRecord.outlineNodeIds, 'contract.scope.outlineNodeIds'),
       ...(runtime ? { runtime } : {}),
+      ...(gameProduction ? { gameProduction } : {}),
     },
     permissions: { contextSourceKeys, writeTargets },
     ...(record.runtimeBindingHash === undefined ? {} : {

@@ -240,6 +240,7 @@ export default function OutlinePanel({ project, onOpenChapter, initialNodeId }: 
   })
 
   const chunkedGen = useChunkedGeneration()
+  const startChunkedGeneration = chunkedGen.start
   const [, setPendingChunkedMode] = useState<{ mode: GenerationMode; config: ChunkedGenerationConfig } | null>(null)
 
   const handleAIVolumes = () => { void generation.prepare({ kind: 'volumes' }) }
@@ -265,7 +266,7 @@ export default function OutlinePanel({ project, onOpenChapter, initialNodeId }: 
       )
       const targetChapters = Number(parameterValues.chaptersPerVolume) || 20
       const storyArcContext = storyArcStore()  // 获取故事线上下文
-      await chunkedGen.start({
+      await startChunkedGeneration({
         project,
         volumeId: selectedVol.id,
         volumeTitle: selectedVol.title,
