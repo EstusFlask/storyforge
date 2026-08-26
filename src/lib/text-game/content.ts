@@ -469,7 +469,7 @@ export async function addNarrativeBeat(input: {
       }
     }
     const now = Date.now()
-    const row: NarrativeBeat = {
+    const row = stampNewRecord(scope, 'narrativeBeats', {
       projectId: scope.projectId,
       moduleId: input.moduleId,
       nodeKey,
@@ -480,7 +480,7 @@ export async function addNarrativeBeat(input: {
       order: input.order ?? 0,
       createdAt: now,
       updatedAt: now,
-    }
+    } satisfies NarrativeBeat, { owner: module.worldId != null ? 'world' : 'work' })
     const id = await db.narrativeBeats.add(row) as number
     return { ...row, id }
   })
@@ -524,7 +524,7 @@ export async function addNarrativeChoice(input: {
     if (!nodes.some(node => node.key === sourceNodeKey)) throw new Error(`[storygame] Choice 来源节点不存在:${sourceNodeKey}`)
     if (!nodes.some(node => node.key === targetNodeKey)) throw new Error(`[storygame] Choice 目标节点不存在:${targetNodeKey}`)
     const now = Date.now()
-    const row: NarrativeChoice = {
+    const row = stampNewRecord(scope, 'narrativeChoices', {
       projectId: scope.projectId,
       moduleId: input.moduleId,
       sourceNodeKey,
@@ -540,7 +540,7 @@ export async function addNarrativeChoice(input: {
       order: input.order ?? 0,
       createdAt: now,
       updatedAt: now,
-    }
+    } satisfies NarrativeChoice, { owner: module.worldId != null ? 'world' : 'work' })
     const id = await db.narrativeChoices.add(row) as number
     return { ...row, id }
   })

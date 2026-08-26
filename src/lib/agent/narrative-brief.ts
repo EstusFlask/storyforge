@@ -100,6 +100,14 @@ function sourceText(assembled: AssembleContextResult, key: string): string {
   return index < 0 ? '' : assembled.segments[index]?.content ?? ''
 }
 
+function gatewayResourceText(assembled: AssembleContextResult, kinds: readonly string[]): string {
+  const packet = sourceText(assembled, 'ragSelection')
+  if (!packet) return ''
+  return packet.split(/(?=【)/g)
+    .filter(block => kinds.some(kind => block.startsWith(`【${kind}｜`)))
+    .join('\n\n')
+}
+
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
@@ -138,11 +146,17 @@ export function buildNarrativeBriefV1(input: {
   inheritedAssumptions?: readonly CreativeAssumptionV1[]
 }): NarrativeBriefV1 {
   const storyCore = sourceText(input.assembled, 'storyCore')
+    || gatewayResourceText(input.assembled, ['story-core-field'])
   const characters = sourceText(input.assembled, 'characters')
+    || gatewayResourceText(input.assembled, ['character'])
   const chapterOutline = sourceText(input.assembled, 'chapterOutline')
+    || gatewayResourceText(input.assembled, ['outline-node'])
   const detailedOutline = sourceText(input.assembled, 'detailedOutline')
+    || gatewayResourceText(input.assembled, ['detailed-outline'])
   const storyArcs = sourceText(input.assembled, 'storyArcs')
+    || gatewayResourceText(input.assembled, ['story-arc', 'storyline-progress'])
   const worldview = sourceText(input.assembled, 'worldview')
+    || gatewayResourceText(input.assembled, ['world', 'worldview-field', 'world-link'])
 
   const desire = labeledValue(characters, ['目标(短/长期)', '动机/欲望'])
   const centralConflict = labeledValue(storyCore, ['核心冲突'])

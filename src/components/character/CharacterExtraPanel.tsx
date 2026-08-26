@@ -5,6 +5,8 @@ import type { Project, Character } from '../../lib/types'
 import { filterCharactersByRoleWeight } from '../../lib/character/character-axes'
 import CharacterDimensionFields from './CharacterDimensionFields'
 import CharacterSupplementAction from './CharacterSupplementAction'
+import CharacterLifecycleAction from './CharacterLifecycleAction'
+import { useWorldGroupStore } from '../../stores/world-group'
 import { filledDimensions, type CharacterDimensionKey } from '../../lib/character/character-dimensions'
 import { CInput } from '../shared/CompositionInput'
 
@@ -18,6 +20,7 @@ const TABLE_DIMS: CharacterDimensionKey[] = ['shortDescription', 'location', 'st
 /** v3 §2.1 — 路人（表格视图：姓名 / 出场时间 / 章节 / 作用 / 结局；可展开看完整维度） */
 export default function CharacterExtraPanel({ project }: Props) {
   const { characters, loadAll, addCharacter, updateCharacter, deleteCharacter } = useCharacterStore()
+  const activeGroupId = useWorldGroupStore(state => state.activeGroupId)
   const [expanded, setExpanded] = useState<Set<number>>(new Set())
 
   useEffect(() => { loadAll(project.id!) }, [project.id, loadAll])
@@ -140,7 +143,14 @@ export default function CharacterExtraPanel({ project }: Props) {
                           <CharacterSupplementAction
                             character={c}
                             project={project}
-                            worldGroupId={c.homeWorldGroupId ?? null}
+                            worldGroupId={c.isCrossWorld ? activeGroupId : (c.homeWorldGroupId ?? null)}
+                            onDone={() => loadAll(project.id!)}
+                            compact
+                          />
+                          <CharacterLifecycleAction
+                            character={c}
+                            project={project}
+                            worldGroupId={c.isCrossWorld ? activeGroupId : (c.homeWorldGroupId ?? null)}
                             onDone={() => loadAll(project.id!)}
                             compact
                           />

@@ -5,6 +5,8 @@ import type { Project, Character } from '../../lib/types'
 import { filterCharactersByRoleWeight } from '../../lib/character/character-axes'
 import CharacterDimensionFields from './CharacterDimensionFields'
 import CharacterSupplementAction from './CharacterSupplementAction'
+import CharacterLifecycleAction from './CharacterLifecycleAction'
+import { useWorldGroupStore } from '../../stores/world-group'
 import { CInput, CTextarea } from '../shared/CompositionInput'
 
 interface Props {
@@ -14,6 +16,7 @@ interface Props {
 /** v3 §2.1 — 次要角色（小卡片网格视图） */
 export default function CharacterMinorPanel({ project }: Props) {
   const { characters, loadAll, addCharacter, updateCharacter, deleteCharacter } = useCharacterStore()
+  const activeGroupId = useWorldGroupStore(state => state.activeGroupId)
   const [editing, setEditing] = useState<number | null>(null)
 
   useEffect(() => { loadAll(project.id!) }, [project.id, loadAll])
@@ -74,7 +77,14 @@ export default function CharacterMinorPanel({ project }: Props) {
                 <CharacterSupplementAction
                   character={c}
                   project={project}
-                  worldGroupId={c.homeWorldGroupId ?? null}
+                  worldGroupId={c.isCrossWorld ? activeGroupId : (c.homeWorldGroupId ?? null)}
+                  onDone={() => loadAll(project.id!)}
+                  compact
+                />
+                <CharacterLifecycleAction
+                  character={c}
+                  project={project}
+                  worldGroupId={c.isCrossWorld ? activeGroupId : (c.homeWorldGroupId ?? null)}
                   onDone={() => loadAll(project.id!)}
                   compact
                 />

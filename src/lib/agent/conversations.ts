@@ -25,6 +25,7 @@ import {
   contextManifestHashForStepAttemptV1,
   createMasterCandidateStepReceiptV1,
 } from './run/master-step-verification'
+import { computeMasterCandidateHashV1 } from './run/master-candidate-hash'
 
 export async function getOrCreateAgentConversation(input: {
   projectId: number
@@ -128,7 +129,14 @@ export async function updateAgentEventCandidate(
   projectId: number,
   content: string,
   scope?: WorkspaceScope,
-  options?: { creativeArtifact?: CreativeArtifactV1; refreshOutputHash?: boolean },
+  options?: {
+    creativeArtifact?: CreativeArtifactV1
+    revalidateCreativeArtifact?: (input: {
+      creativeArtifact: CreativeArtifactV1
+      payload: Readonly<Record<string, unknown>>
+    }) => CreativeArtifactV1
+    refreshOutputHash?: boolean
+  },
 ): Promise<string | null> {
   const event = await db.agentEvents.get(eventId)
   const resolved = scope ?? await resolveScope({ projectId })
@@ -144,7 +152,15 @@ export async function updateAgentEventCandidate(
   } catch {
     payload = null
   }
-  if (payload && options?.creativeArtifact) {
+  if (payload && options?.revalidateCreativeArtifact && payload.creativeArtifact) {
+    payload = {
+      ...payload,
+      creativeArtifact: parseCreativeArtifactV1(options.revalidateCreativeArtifact({
+        creativeArtifact: parseCreativeArtifactV1(payload.creativeArtifact),
+        payload,
+      })),
+    }
+  } else if (payload && options?.creativeArtifact) {
     payload = {
       ...payload,
       creativeArtifact: parseCreativeArtifactV1(options.creativeArtifact),
@@ -172,10 +188,12 @@ export async function updateAgentEventCandidate(
       semanticReview: _staleSemanticReview,
       ...withoutHash
     } = payload
-    const candidateHash = await hashCanonicalValue({
-      draft: content,
-      payload: withoutHash,
-    })
+    const candidateHash = options?.refreshOutputHash
+      ? await hashCanonicalValue({ draft: content, payload: withoutHash })
+      : await computeMasterCandidateHashV1(
+          withoutHash as unknown as MasterCandidatePayload,
+          content,
+        )
     const revisedPayload = { ...withoutHash, candidateHash }
     const nextPayload = JSON.stringify(revisedPayload)
     await db.transaction(

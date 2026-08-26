@@ -20,6 +20,7 @@ import {
   type DetailedOutlineGenerationCandidateV1,
 } from '../../src/lib/agent/run/detailed-outline-generation-durable'
 import type { WorkspaceScope } from '../../src/lib/types'
+import { assertFormalAIEntrySnapshotIntegrityV1 } from '../../src/lib/agent/formal-ai-entry'
 
 async function createWorkspace(label: string): Promise<{
   scope: WorkspaceScope
@@ -200,6 +201,13 @@ describe.sequential('R-HARNESS8 · 细纲生成 durable run', { timeout: 15_000 
 
   it('候选先停在 durable ledger，作者确认后经 adopt 写回并签发 receipt', async () => {
     const pending = await pendingCandidate('细纲 durable')
+    const formalEntrySnapshot = pending.snapshot.contract.executionBindings?.[0]?.formalEntry
+    expect(formalEntrySnapshot?.entryId).toBe('outline.detail.enhance')
+    const formalEntry = await assertFormalAIEntrySnapshotIntegrityV1(formalEntrySnapshot!)
+    expect(formalEntry.skillId).toBe('outline.details')
+    expect(formalEntry.adoptionTargets).toEqual(['detailedOutlines'])
+    expect(pending.candidate.durable.runId).toBe(pending.snapshot.run.id)
+    expect(pending.candidate.contextManifestHash).toMatch(/^[a-f0-9]{64}$/)
     expect(pending.snapshot.projection.state).toBe('awaiting_confirmation')
     expect(await db.detailedOutlines.count()).toBe(0)
     const adopted = await commitDetailedOutlineGenerationAdoptionV1({

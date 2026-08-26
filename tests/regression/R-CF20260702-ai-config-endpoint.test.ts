@@ -27,6 +27,10 @@ describe('R-CF20260702-ai-config-endpoint', () => {
       proxy: '/deepseek-proxy/v1',
       direct: 'https://api.deepseek.com/v1',
     })
+    expect(AI_PROXY_ENDPOINTS.gemini).toEqual({
+      proxy: '/gemini-proxy/v1beta/openai',
+      direct: 'https://generativelanguage.googleapis.com/v1beta/openai',
+    })
     expect(AI_PROXY_ENDPOINTS.longcat).toEqual({
       proxy: '/longcat-proxy/openai/v1',
       direct: 'https://api.longcat.chat/openai/v1',

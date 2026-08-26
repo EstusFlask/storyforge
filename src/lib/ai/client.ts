@@ -92,6 +92,11 @@ export interface ChatRequestOptions {
   tools?: readonly ChatToolDefinition[]
   toolChoice?: 'auto'
   responseFormat?: 'json_object'
+  jsonSchema?: {
+    name: string
+    schema: Record<string, unknown>
+    strict?: boolean
+  }
 }
 
 export function estimateChatRequestOptionsTokens(options?: ChatRequestOptions): number {
@@ -99,6 +104,16 @@ export function estimateChatRequestOptionsTokens(options?: ChatRequestOptions): 
   return estimateTokens(JSON.stringify({
     ...(options.tools ? { tools: options.tools, tool_choice: options.toolChoice } : {}),
     ...(options.responseFormat ? { response_format: { type: options.responseFormat } } : {}),
+    ...(options.jsonSchema ? {
+      response_format: {
+        type: 'json_schema',
+        json_schema: {
+          name: options.jsonSchema.name,
+          strict: options.jsonSchema.strict ?? true,
+          schema: options.jsonSchema.schema,
+        },
+      },
+    } : {}),
   }))
 }
 
@@ -121,7 +136,20 @@ function buildRequest(
     body.tools = options.tools
     body.tool_choice = options.toolChoice
   }
+  if (options?.responseFormat && options.jsonSchema) {
+    throw new Error('ChatRequestOptions 不能同时声明 json_object 与 json_schema')
+  }
   if (options?.responseFormat) body.response_format = { type: options.responseFormat }
+  if (options?.jsonSchema) {
+    body.response_format = {
+      type: 'json_schema',
+      json_schema: {
+        name: options.jsonSchema.name,
+        strict: options.jsonSchema.strict ?? true,
+        schema: options.jsonSchema.schema,
+      },
+    }
+  }
 
   // 流式请求时要求返回 token 用量
   // stream_options 仅 OpenAI / DeepSeek / Qwen 等兼容 provider 支持

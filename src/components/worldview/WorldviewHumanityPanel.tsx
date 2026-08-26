@@ -33,6 +33,7 @@ const FIELDS: FieldMeta[] = [
   { key: 'conflicts', field: 'internalConflicts',      emoji: '🔥', label: '矛盾冲突',       description: '社会内在矛盾 / 阶级冲突 / 个体与集体冲突 / 与外部世界的张力' },
   { key: 'items',     field: 'itemDesign',             emoji: '🗡', label: '道具与器物',     description: '武器 / 法器 / 工具 / 科技装备……物品的来源、品级、规则', hint: '这里写物品体系概述；具体道具在下方「📚 道具与器物 · 具体词条」逐条管理，主角实际获得与消耗的物品由创作区「🎒 物品栏」追踪。' },
 ]
+export const WORLDVIEW_HUMANITY_AGENT_FIELDS = FIELDS.map(field => field.field)
 const HISTORY_NAV = { key: 'history', emoji: '📜', label: '历史年表' }
 
 // 每个方面(子页) → 其专属词条分类(builtInKey)。下方只显示该方面对应的词条。

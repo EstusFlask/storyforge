@@ -6,13 +6,18 @@ import { assembleContext } from '../../src/lib/registry/assemble-context'
 import {
   beginOutlineGenerationAdoptionV1,
   commitOutlineGenerationAdoptionV1,
-  OUTLINE_GENERATION_SOURCE_KEYS,
   rejectOutlineGenerationCandidateV1,
   restoreLatestOutlineGenerationBatchV1,
   restoreLatestOutlineGenerationCandidateV1,
 } from '../../src/lib/outline/harness'
 import { adoptGeneratedOutlineItems } from '../../src/lib/outline/adopt-generation'
 import type { OutlineNode, Project, WorkspaceScope } from '../../src/lib/types'
+import { backfillResourceUidsV1 } from '../../src/lib/context-gateway/resource-identity'
+import { prepareOutlineGatewayAssemblyV1 } from '../../src/lib/outline/gateway-context'
+import { useAIConfigStore } from '../../src/stores/ai-config'
+import { ensureWorkspaceOwnership } from '../../src/lib/world-engine/ownership'
+import { generateWorkspaceUid, generateWorkCode } from '../../src/lib/memory/identity'
+import { verifyContextGatewayCandidateEvidenceV1 } from '../../src/lib/context-gateway/attempt-evidence'
 
 async function createWorkspace(): Promise<{
   scope: WorkspaceScope
@@ -22,6 +27,7 @@ async function createWorkspace(): Promise<{
 }> {
   const now = Date.now()
   const projectId = await db.projects.add({
+    workspaceUid: generateWorkspaceUid(),
     name: '批量章纲 durable',
     genre: 'fantasy',
     genres: ['fantasy'],
@@ -45,6 +51,7 @@ async function createWorkspace(): Promise<{
   const workId = await db.works.add({
     projectId,
     worldId,
+    code: generateWorkCode(),
     title: '潮城纪事',
     description: '',
     genres: ['fantasy'],
@@ -60,6 +67,7 @@ async function createWorkspace(): Promise<{
   })
   const worldGroupId = await db.worldGroups.add({
     projectId,
+    worldId,
     name: '主世界',
     order: 0,
     createdAt: now,
@@ -91,6 +99,8 @@ async function createWorkspace(): Promise<{
       updatedAt: now,
     },
   ] as any, { allKeys: true }) as number[]
+  await ensureWorkspaceOwnership(projectId)
+  await backfillResourceUidsV1(projectId)
   const project = await db.projects.get(projectId) as Project
   const volumes = await db.outlineNodes.bulkGet(volumeIds) as OutlineNode[]
   return {
@@ -99,6 +109,23 @@ async function createWorkspace(): Promise<{
     worldGroupId,
     volumes,
   }
+}
+
+async function assembleBatchContext(input: {
+  fixture: Awaited<ReturnType<typeof createWorkspace>>
+  volume: OutlineNode
+  priorOutlineCandidateText?: string
+}) {
+  await backfillResourceUidsV1(input.fixture.scope.projectId)
+  return prepareOutlineGatewayAssemblyV1({
+    projectId: input.fixture.scope.projectId,
+    scope: input.fixture.scope,
+    worldGroupId: input.volume.worldGroupId ?? null,
+    request: { kind: 'chapters', volumeId: input.volume.id! },
+    authorRequest: `把《${input.volume.title}》拆分为章纲`,
+    config: useAIConfigStore.getState().config,
+    priorOutlineCandidateText: input.priorOutlineCandidateText,
+  })
 }
 
 describe.sequential('R-HARNESS11 · 批量章纲 durable 主路径', () => {
@@ -126,13 +153,10 @@ describe.sequential('R-HARNESS11 · 批量章纲 durable 主路径', () => {
       batchGroupId: 'outline-batch-h11-proof',
       runModel,
       assembleContext: async ({ volume, priorOutlineCandidateText }) => {
-        const assembled = await assembleContext({
-          projectId: fixture.scope.projectId,
-          scope: fixture.scope,
-          worldGroupId: fixture.worldGroupId,
-          outlineNodeId: volume.id,
+        const assembled = await assembleBatchContext({
+          fixture,
+          volume,
           priorOutlineCandidateText,
-          sourceKeys: [...OUTLINE_GENERATION_SOURCE_KEYS],
         })
         contextRequests.push({
           volumeId: volume.id!,
@@ -160,6 +184,16 @@ describe.sequential('R-HARNESS11 · 批量章纲 durable 主路径', () => {
       const snapshot = await readAgentRunV1(fixture.scope, candidate.runId)
       expect(snapshot.projection.state).toBe('awaiting_confirmation')
       expect(snapshot.projection.steps[candidate.stepId]?.candidateHash).toBe(candidate.candidateHash)
+      const verified = await verifyContextGatewayCandidateEvidenceV1({
+        scope: fixture.scope,
+        runId: candidate.runId,
+        stepId: candidate.stepId,
+        attempt: 1,
+        candidateHash: candidate.candidateHash,
+      })
+      expect(verified.manifest.version).toBe(3)
+      expect(verified.manifest.gateway.retrievalTrace.mandatory
+        .some(item => item.resourceKey.startsWith('outline-node:'))).toBe(true)
     }
 
     expect(await restoreLatestOutlineGenerationCandidateV1(fixture.scope.projectId)).toBeNull()
@@ -216,13 +250,7 @@ describe.sequential('R-HARNESS11 · 批量章纲 durable 主路径', () => {
       volumes: [fixture.volumes[0]],
       batchGroupId: 'outline-batch-h11-invalid',
       runModel,
-      assembleContext: ({ volume }) => assembleContext({
-        projectId: fixture.scope.projectId,
-        scope: fixture.scope,
-        worldGroupId: fixture.worldGroupId,
-        outlineNodeId: volume.id,
-        sourceKeys: [...OUTLINE_GENERATION_SOURCE_KEYS],
-      }),
+      assembleContext: ({ volume }) => assembleBatchContext({ fixture, volume }),
     })
 
     expect(runModel).toHaveBeenCalledOnce()
@@ -252,13 +280,7 @@ describe.sequential('R-HARNESS11 · 批量章纲 durable 主路径', () => {
       batchGroupId: 'outline-batch-h11-cancel',
       signal: controller.signal,
       runModel,
-      assembleContext: ({ volume }) => assembleContext({
-        projectId: fixture.scope.projectId,
-        scope: fixture.scope,
-        worldGroupId: fixture.worldGroupId,
-        outlineNodeId: volume.id,
-        sourceKeys: [...OUTLINE_GENERATION_SOURCE_KEYS],
-      }),
+      assembleContext: ({ volume }) => assembleBatchContext({ fixture, volume }),
     })
 
     expect(result.cancelled).toBe(true)
@@ -284,6 +306,7 @@ describe.sequential('R-HARNESS11 · 批量章纲 durable 主路径', () => {
     const now = Date.now()
     const otherWorldGroupId = await db.worldGroups.add({
       projectId: fixture.scope.projectId,
+      worldId: fixture.scope.worldId,
       name: '镜像世界',
       order: 1,
       createdAt: now,
@@ -291,6 +314,7 @@ describe.sequential('R-HARNESS11 · 批量章纲 durable 主路径', () => {
     }) as number
     await db.outlineNodes.update(fixture.volumes[1].id!, { worldGroupId: otherWorldGroupId })
     fixture.volumes[1] = { ...fixture.volumes[1], worldGroupId: otherWorldGroupId }
+    await backfillResourceUidsV1(fixture.scope.projectId)
     const priorInputs: Array<string | undefined> = []
     const result = await runBatchOutlineGeneration({
       project: fixture.project,
@@ -302,13 +326,10 @@ describe.sequential('R-HARNESS11 · 批量章纲 durable 主路径', () => {
       ]),
       assembleContext: async ({ volume, priorOutlineCandidateText }) => {
         priorInputs.push(priorOutlineCandidateText)
-        return assembleContext({
-          projectId: fixture.scope.projectId,
-          scope: fixture.scope,
-          worldGroupId: volume.worldGroupId ?? null,
-          outlineNodeId: volume.id,
+        return assembleBatchContext({
+          fixture,
+          volume,
           priorOutlineCandidateText,
-          sourceKeys: [...OUTLINE_GENERATION_SOURCE_KEYS],
         })
       },
     })

@@ -187,7 +187,8 @@ describe('R-AI-CONFIG · API Key 存储策略', () => {
     expect(PROVIDER_PRESETS.agnes?.model).toBe('agnes-2.5-flash')
     expect(PROVIDER_MODELS.agnes?.map(model => model.value)).toEqual([
       'agnes-2.5-flash',
-      'agnes-1.5-flash',
+      'agnes-2.5-pro',
+      'agnes-2.5-pro-alpha',
       'agnes-2.0-flash',
     ])
 
@@ -195,6 +196,9 @@ describe('R-AI-CONFIG · API Key 存储策略', () => {
       maxContext: 524_288,
       maxOutput: 65_536,
     })
+    expect(getModelPreset('agnes', 'agnes-2.5-pro').maxContext).toBe(524_288)
+    // Historical imports remain budget-safe even after the live provider
+    // removed 1.5 from its selectable model directory.
     expect(getModelPreset('agnes', 'agnes-1.5-flash').maxContext).toBe(262_144)
     expect(getModelPreset('agnes', 'agnes-2.0-flash').maxContext).toBe(262_144)
 
@@ -202,6 +206,68 @@ describe('R-AI-CONFIG · API Key 存储策略', () => {
     useAIConfigStore.getState().switchProvider('agnes')
     expect(useAIConfigStore.getState().config.baseUrl).toBe('https://apihub.agnes-ai.com/v1')
     expect(useAIConfigStore.getState().config.model).toBe('agnes-2.5-flash')
+  })
+
+  it('DeepSeek、Gemini 与 NVIDIA 使用 2026-08 官方端点、模型 ID 和窗口', async () => {
+    expect(PROVIDER_PRESETS.deepseek).toMatchObject({
+      baseUrl: 'https://api.deepseek.com/v1',
+      model: 'deepseek-v4-flash',
+    })
+    expect(PROVIDER_MODELS.deepseek?.map(model => model.value)).toEqual([
+      'deepseek-v4-flash',
+      'deepseek-v4-pro',
+    ])
+    expect(getModelPreset('deepseek', 'deepseek-v4-pro')).toMatchObject({
+      maxContext: 1_000_000,
+      maxOutput: 384_000,
+    })
+
+    expect(PROVIDER_PRESETS.gemini).toMatchObject({
+      baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai',
+      model: 'gemini-3.5-flash',
+    })
+    expect(PROVIDER_MODELS.gemini?.map(model => model.value)).toContain('gemini-3.5-flash')
+    expect(getModelPreset('gemini', 'gemini-3.5-flash')).toMatchObject({
+      maxContext: 1_048_576,
+      maxOutput: 65_536,
+    })
+
+    expect(PROVIDER_PRESETS.nvidia).toMatchObject({
+      baseUrl: 'https://integrate.api.nvidia.com/v1',
+      model: 'mistralai/mistral-nemotron',
+    })
+    expect(PROVIDER_MODELS.nvidia?.map(model => model.value)).toEqual(expect.arrayContaining([
+      'deepseek-ai/deepseek-v4-flash-0731',
+      'minimaxai/minimax-m3',
+    ]))
+    expect(getModelPreset('nvidia', 'deepseek-ai/deepseek-v4-flash-0731')).toMatchObject({
+      maxContext: 1_000_000,
+      maxOutput: 384_000,
+    })
+  })
+
+  it('加载时迁移已停用的 DeepSeek 与 Gemini 模型别名', async () => {
+    localStorage.setItem(CONFIG_KEY, JSON.stringify({
+      provider: 'deepseek',
+      apiKey: 'deepseek-key',
+      model: 'deepseek-reasoner',
+      baseUrl: 'https://api.deepseek.com/v1',
+      temperature: 0.7,
+      maxTokens: 0,
+    }))
+    let useAIConfigStore = await freshStore()
+    expect(useAIConfigStore.getState().config.model).toBe('deepseek-v4-flash')
+
+    localStorage.setItem(CONFIG_KEY, JSON.stringify({
+      provider: 'gemini',
+      apiKey: 'gemini-key',
+      model: 'gemini-3-flash-preview',
+      baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai',
+      temperature: 0.7,
+      maxTokens: 0,
+    }))
+    useAIConfigStore = await freshStore()
+    expect(useAIConfigStore.getState().config.model).toBe('gemini-3.5-flash')
   })
 
   it('加载时无损迁移 Agnes 历史大小写模型 ID', async () => {
@@ -264,6 +330,45 @@ describe('R-AI-CONFIG · API Key 存储策略', () => {
 })
 
 describe('R-AI-CONFIG · 连接测试错误分类', () => {
+  it('成功时明确说明只是最小连接，不把短请求冒充任务级可用', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      text: async () => JSON.stringify({ choices: [{ message: { content: '连接成功' } }] }),
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    const useAIConfigStore = await freshStore()
+    useAIConfigStore.getState().setConfig({ apiKey: 'provider-test' })
+
+    const result = await useAIConfigStore.getState().testConnection()
+
+    expect(result.ok).toBe(true)
+    expect(result.message).toContain('最小连接成功')
+    expect(result.message).toContain('不代表长输出或批量评测额度')
+    expect(JSON.parse(fetchMock.mock.calls[0]?.[1]?.body as string)).toMatchObject({ max_tokens: 32 })
+  })
+
+  it('解析 Gemini 数组错误并明确区分地区限制与模型或 Key 错误', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: false,
+      status: 400,
+      text: async () => JSON.stringify([{
+        error: {
+          code: 400,
+          message: 'User location is not supported for the API use.',
+          status: 'FAILED_PRECONDITION',
+        },
+      }]),
+    }))
+    const useAIConfigStore = await freshStore()
+    useAIConfigStore.getState().setConfig({ provider: 'gemini', apiKey: 'gemini-test' })
+
+    const result = await useAIConfigStore.getState().testConnection()
+
+    expect(result.ok).toBe(false)
+    expect(result.message).toContain('请求所在地不在该平台 API 支持范围内')
+    expect(result.message).not.toContain('API Key 无效')
+  })
   it('把方舟 403 AccountOverdueError 识别为账户欠费而不是 Key 权限不足', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
       ok: false,

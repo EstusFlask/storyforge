@@ -1,5 +1,6 @@
 import { useAIConfigStore } from '../../stores/ai-config'
-import { chat, resolveRequestConfig } from '../ai/client'
+import { getModelPreset } from '../ai/context-budget'
+import { chat, resolveRequestConfig, type ChatResult } from '../ai/client'
 import type { FieldGenerationMode } from '../ai/field-generation-context'
 import { db } from '../db/schema'
 import type {
@@ -10,8 +11,12 @@ import type {
 import { prepareGenerationNode } from '../generation/generation-node'
 import { adopt } from '../registry/adopt'
 import { assembleContext } from '../registry/assemble-context'
+import {
+  WORLDVIEW_GENERATABLE_FIELD_SPECS,
+  type WorldviewGeneratableField,
+} from '../registry/field-registry'
 import type { AdoptResult, AssembleContextResult } from '../registry/types'
-import type { AIConfig, ChatMessage, DivineDesign, Worldview } from '../types'
+import type { AIConfig, ChatMessage, DivineDesign, NaturalResources, Worldview } from '../types'
 import type { WorkspaceScope } from '../types/world-ownership'
 import {
   isLegacyReadScope,
@@ -38,39 +43,59 @@ import {
   resolveAgentSkillV1,
   type AgentSkillId,
 } from './skill-registry'
+import { parseStructuredOutputV1 } from './structured-output-pipeline'
+import {
+  renderFrozenPromptExecutionV1,
+  type PromptExecutionEvidenceV1,
+  type PromptExecutionOptionsV1,
+} from './prompt-execution'
+import {
+  executeContextGatewayV1,
+  type ContextGatewayExecutionV1,
+} from '../context-gateway/execution'
+import { isContextGatewayRequiredForWriteTargetV1 } from '../context-gateway/skill-policy'
+import {
+  assembleContextGatewayPacketV1,
+  contextGatewayInputStateSourceKeysV1,
+  projectContextGatewayInputStateV1,
+} from './context-gateway-input'
 
-export const WORLDVIEW_AGENT_FIELDS = [
-  'worldOrigin',
-  'powerHierarchy',
-  'divineDesign',
-  'worldStructure',
-  'worldDimensions',
-  'continentLayout',
-  'mountainsRivers',
-  'climateByRegion',
-  'naturalResourceOverview',
-  'races',
-  'factionLayout',
-  'regionDimensions',
-  'politicsOverview',
-  'economyOverview',
-  'cultureOverview',
-  'internalConflicts',
-  'itemDesign',
-] as const
+export const WORLDVIEW_AGENT_FIELDS = WORLDVIEW_GENERATABLE_FIELD_SPECS
+  .map(spec => spec.field) as readonly WorldviewGeneratableField[]
 
-export type WorldviewAgentField = typeof WORLDVIEW_AGENT_FIELDS[number]
-export type WorldviewTextAgentField = Exclude<WorldviewAgentField, 'divineDesign'>
+export type WorldviewAgentField = WorldviewGeneratableField
+export type WorldviewTextAgentField = Exclude<WorldviewAgentField, 'divineDesign' | 'naturalResources'>
 export type WorldviewFoundationState = 'empty' | 'partial' | 'complete'
+export type WorldviewFieldOperationV1 = 'create' | FieldGenerationMode
+
+export const WORLDVIEW_FIELD_DEFAULT_OUTPUT_TOKENS_V1 = 6_000
+const WORLDVIEW_FIELD_CANDIDATE_MAX_CHARS_V1 = Math.max(
+  ...WORLDVIEW_GENERATABLE_FIELD_SPECS.map(spec => spec.aiGeneration.maxChars),
+) + 10_000
+
+export interface WorldviewFieldOutputBudgetV1 {
+  version: 1
+  source: 'default' | 'author-custom'
+  requestedTokens: number
+  effectiveMaxTokens: number
+  effectiveCapTokens: number
+  modelCapTokens: number
+  authorConfigCapTokens: number
+  schemaCapTokens: number
+  skillCapTokens: number
+  longOutputMode: 'disabled'
+}
 
 export type WorldviewFieldCopilotCandidate =
-  | { field: WorldviewTextAgentField; value: string }
-  | { field: 'divineDesign'; value: DivineDesign }
+  | { field: WorldviewTextAgentField; value: string; temporaryAssumptions?: string[] }
+  | { field: 'divineDesign'; value: DivineDesign; temporaryAssumptions?: string[] }
+  | { field: 'naturalResources'; value: NaturalResources; temporaryAssumptions?: string[] }
 
-type WorldviewFieldValue = string | DivineDesign
+type WorldviewFieldValue = string | DivineDesign | NaturalResources
 
 export interface WorldviewFieldCopilotSnapshot {
   id: number | null
+  ragDocumentId: string | null
   updatedAt: number | null
   serialized: string
   values: Record<WorldviewAgentField, WorldviewFieldValue>
@@ -79,18 +104,22 @@ export interface WorldviewFieldCopilotSnapshot {
 
 export interface WorldviewFieldCopilotInput {
   projectId: number
+  projectName: string
   scope?: WorkspaceScope
   worldGroupId: number | null
   authorRequest: string
   supplementalContext: string
   inputGuidance: string
   targetField: WorldviewAgentField
-  mode: FieldGenerationMode
+  mode: WorldviewFieldOperationV1
   assembled: AssembleContextResult
   snapshot: WorldviewFieldCopilotSnapshot
   config: AIConfig
   routingCategory: string
   generationOverrides?: { temperature?: number; maxTokens?: number }
+  frozenPromptMessages?: ChatMessage[]
+  promptExecutionEvidence?: PromptExecutionEvidenceV1
+  outputBudget?: WorldviewFieldOutputBudgetV1
   signal?: AbortSignal
 }
 
@@ -104,6 +133,9 @@ export interface PreparedWorldviewFieldCopilot {
   targetField: WorldviewAgentField
   label: string
   modelIdentity: MasterCandidateModelIdentityV1
+  promptExecutionEvidence?: PromptExecutionEvidenceV1
+  /** Present only for write targets admitted through the required Gateway canary. */
+  contextGatewayExecution?: ContextGatewayExecutionV1
 }
 
 interface WorldviewFieldCopilotDependencies {
@@ -119,46 +151,16 @@ const EMPTY_DIVINE_DESIGN: DivineDesign = {
   divineRules: '',
 }
 
-export const WORLDVIEW_AGENT_FIELD_LABELS: Record<WorldviewAgentField, string> = {
-  worldOrigin: '世界来源',
-  powerHierarchy: '力量体系',
-  divineDesign: '神明与信仰',
-  worldStructure: '世界结构',
-  worldDimensions: '疆域尺寸',
-  continentLayout: '地貌分布',
-  mountainsRivers: '山川水系',
-  climateByRegion: '气候环境',
-  naturalResourceOverview: '自然资源',
-  races: '种族与民族',
-  factionLayout: '势力分布',
-  regionDimensions: '城池重镇',
-  politicsOverview: '政治制度',
-  economyOverview: '经济制度',
-  cultureOverview: '文化制度',
-  internalConflicts: '矛盾冲突',
-  itemDesign: '道具与器物',
-}
+export const WORLDVIEW_AGENT_FIELD_LABELS = Object.fromEntries(
+  WORLDVIEW_GENERATABLE_FIELD_SPECS.map(spec => [spec.field, spec.aiGeneration.label]),
+) as Record<WorldviewAgentField, string>
 
-const FIELD_MAX_CHARS: Record<WorldviewTextAgentField, number> = {
-  worldOrigin: 12_000,
-  powerHierarchy: 30_000,
-  worldStructure: 20_000,
-  worldDimensions: 12_000,
-  continentLayout: 30_000,
-  mountainsRivers: 30_000,
-  climateByRegion: 30_000,
-  naturalResourceOverview: 30_000,
-  races: 30_000,
-  factionLayout: 30_000,
-  regionDimensions: 30_000,
-  politicsOverview: 30_000,
-  economyOverview: 30_000,
-  cultureOverview: 30_000,
-  internalConflicts: 30_000,
-  itemDesign: 30_000,
-}
+export const WORLDVIEW_AGENT_FIELD_CAPABILITIES = new Map(
+  WORLDVIEW_GENERATABLE_FIELD_SPECS.map(spec => [spec.field, spec.aiGeneration]),
+) as ReadonlyMap<WorldviewAgentField, typeof WORLDVIEW_GENERATABLE_FIELD_SPECS[number]['aiGeneration']>
 
-const MODE_INSTRUCTIONS: Record<FieldGenerationMode, string> = {
+const MODE_INSTRUCTIONS: Record<WorldviewFieldOperationV1, string> = {
+  create: '目标字段为空：创建一份可直接审阅的新设定，不得用“暂无资料”或待办占位交付。',
   expand: '保留目标字段当前已有事实和方向，在其基础上补足因果、约束与具体性。',
   rewrite: '允许重写目标字段，但必须遵守其他已确认字段和正式上下文，不得顺手改写它们。',
   polish: '只优化目标字段的表达、逻辑顺序和可读性，除非作者明确要求，不新增重大设定。',
@@ -192,6 +194,24 @@ function normalizeDivineDesign(value: unknown): DivineDesign {
   }
 }
 
+const EMPTY_NATURAL_RESOURCES: NaturalResources = {
+  rareCreatures: '',
+  herbs: '',
+  minerals: '',
+  others: '',
+}
+
+function normalizeNaturalResources(value: unknown): NaturalResources {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return { ...EMPTY_NATURAL_RESOURCES }
+  const source = value as Partial<NaturalResources>
+  return {
+    rareCreatures: text(source.rareCreatures),
+    herbs: text(source.herbs),
+    minerals: text(source.minerals),
+    others: text(source.others),
+  }
+}
+
 function valuesOf(row: Worldview | null): Record<WorldviewAgentField, WorldviewFieldValue> {
   return {
     worldOrigin: text(row?.worldOrigin),
@@ -203,6 +223,7 @@ function valuesOf(row: Worldview | null): Record<WorldviewAgentField, WorldviewF
     mountainsRivers: text(row?.mountainsRivers),
     climateByRegion: text(row?.climateByRegion),
     naturalResourceOverview: text(row?.naturalResourceOverview),
+    naturalResources: normalizeNaturalResources(row?.naturalResources),
     races: text(row?.races),
     factionLayout: text(row?.factionLayout),
     regionDimensions: text(row?.regionDimensions),
@@ -216,8 +237,7 @@ function valuesOf(row: Worldview | null): Record<WorldviewAgentField, WorldviewF
 
 function hasMaterial(value: WorldviewFieldValue): boolean {
   if (typeof value === 'string') return value.trim().length > 0
-  return value.hasDivinity
-    || Boolean(value.divineRank.trim() || value.divineNames.trim() || value.divineRules.trim())
+  return Object.values(value).some(item => item === true || (typeof item === 'string' && item.trim().length > 0))
 }
 
 function foundationStateOf(values: Record<WorldviewAgentField, WorldviewFieldValue>): WorldviewFoundationState {
@@ -229,6 +249,7 @@ function snapshotOf(row: Worldview | null): WorldviewFieldCopilotSnapshot {
   const values = valuesOf(row)
   const body = {
     id: row?.id ?? null,
+    ragDocumentId: row?.ragDocumentId ?? null,
     updatedAt: row?.updatedAt ?? null,
     values,
   }
@@ -255,7 +276,7 @@ async function readSnapshot(
 function assertAuthorRequest(value: string): string {
   const request = value.trim()
   if (request.length < 2) throw new Error('请至少输入 2 个字符的世界基座要求。')
-  if (request.length > 1_000) throw new Error('单次世界基座要求不能超过 1000 个字符。')
+  if (request.length > 8_000) throw new Error('单次世界基座要求不能超过 8000 个字符。')
   return request
 }
 
@@ -272,6 +293,7 @@ export function resolveWorldviewAgentFieldV1(request: string): WorldviewAgentFie
     ['continentLayout', /地貌分布|大陆分布|地形格局/],
     ['mountainsRivers', /山川水系|山脉|河流|水系/],
     ['climateByRegion', /气候环境|季节|自然灾害/],
+    ['naturalResources', /自然资源明细|资源分类明细|物产分类明细/],
     ['naturalResourceOverview', /自然资源|物产分布/],
     ['races', /种族与民族|种族|民族/],
     ['factionLayout', /势力分布|势力格局|阵营格局/],
@@ -294,21 +316,91 @@ export function resolveWorldviewFieldModeV1(request: string): FieldGenerationMod
   return 'expand'
 }
 
-function parseJsonObject(draft: string): Record<string, unknown> {
-  const input = draft.trim()
-  if (!input) throw new Error('世界基座候选为空。')
-  if (input.length > 40_000) throw new Error('世界基座候选超过 40000 字符。')
-  const fenced = /^```(?:json)?\s*([\s\S]*?)```\s*$/i.exec(input)
-  let parsed: unknown
-  try {
-    parsed = JSON.parse(fenced?.[1]?.trim() ?? input)
-  } catch {
-    throw new Error('世界基座候选不是有效的严格 JSON 对象。')
+export function resolveWorldviewFieldOperationV1(input: {
+  requestedMode: FieldGenerationMode
+  currentValue: WorldviewFieldValue
+}): WorldviewFieldOperationV1 {
+  return hasMaterial(input.currentValue) ? input.requestedMode : 'create'
+}
+
+export function resolveWorldviewFieldOutputBudgetV1(input: {
+  config: AIConfig
+  targetField: WorldviewAgentField
+  skillMaxOutputTokens: number
+  requestedMaxTokens?: number
+}): WorldviewFieldOutputBudgetV1 {
+  const modelCapTokens = getModelPreset(input.config.provider, input.config.model).maxOutput
+  const authorConfigCapTokens = input.config.maxTokens > 0
+    ? input.config.maxTokens
+    : modelCapTokens
+  const capability = WORLDVIEW_AGENT_FIELD_CAPABILITIES.get(input.targetField)
+  if (!capability) throw new Error(`世界基座字段 ${input.targetField} 缺少可生成能力声明。`)
+  const fieldMaxChars = capability.maxChars
+  // Conservative CJK upper bound plus a small JSON envelope allowance.
+  const schemaCapTokens = Math.max(1, Math.floor(fieldMaxChars * 1.5) + 256)
+  const effectiveCapTokens = Math.min(
+    modelCapTokens,
+    authorConfigCapTokens,
+    schemaCapTokens,
+    input.skillMaxOutputTokens,
+  )
+  const source = input.requestedMaxTokens == null ? 'default' : 'author-custom'
+  const requestedTokens = input.requestedMaxTokens ?? WORLDVIEW_FIELD_DEFAULT_OUTPUT_TOKENS_V1
+  if (!Number.isSafeInteger(requestedTokens) || requestedTokens < 1) {
+    throw new Error('世界基座输出长度必须是正整数 token。')
   }
-  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-    throw new Error('世界基座候选必须是 JSON 对象。')
+  if (source === 'author-custom' && requestedTokens > effectiveCapTokens) {
+    throw new Error(
+      `作者请求 ${requestedTokens.toLocaleString()} output tokens，超过当前单次 effective cap ${effectiveCapTokens.toLocaleString()}；LONGOUT-1 尚未启用，已在模型调用前明确拒绝，没有截断、降长或额外调用。`,
+    )
   }
-  return parsed as Record<string, unknown>
+  return {
+    version: 1,
+    source,
+    requestedTokens,
+    effectiveMaxTokens: Math.min(requestedTokens, effectiveCapTokens),
+    effectiveCapTokens,
+    modelCapTokens,
+    authorConfigCapTokens,
+    schemaCapTokens,
+    skillCapTokens: input.skillMaxOutputTokens,
+    longOutputMode: 'disabled',
+  }
+}
+
+export function parseWorldviewFieldOutputBudgetV1(value: unknown): WorldviewFieldOutputBudgetV1 {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error('世界基座输出预算证据无效。')
+  }
+  const source = value as Record<string, unknown>
+  const keys = [
+    'version', 'source', 'requestedTokens', 'effectiveMaxTokens', 'effectiveCapTokens',
+    'modelCapTokens', 'authorConfigCapTokens', 'schemaCapTokens', 'skillCapTokens',
+    'longOutputMode',
+  ] as const
+  exactKeys(source, keys, '世界基座输出预算')
+  if (source.version !== 1
+    || !['default', 'author-custom'].includes(String(source.source))
+    || source.longOutputMode !== 'disabled') {
+    throw new Error('世界基座输出预算版本、来源或长输出模式无效。')
+  }
+  for (const key of keys.slice(2, 9)) {
+    if (!Number.isSafeInteger(source[key]) || (source[key] as number) < 1) {
+      throw new Error(`世界基座输出预算 ${key} 必须是正整数。`)
+    }
+  }
+  const cap = Math.min(
+    source.modelCapTokens as number,
+    source.authorConfigCapTokens as number,
+    source.schemaCapTokens as number,
+    source.skillCapTokens as number,
+  )
+  if (source.effectiveCapTokens !== cap
+    || source.effectiveMaxTokens !== Math.min(source.requestedTokens as number, cap)
+    || (source.source === 'author-custom' && (source.requestedTokens as number) > cap)) {
+    throw new Error('世界基座输出预算 effective cap 派生不一致。')
+  }
+  return source as unknown as WorldviewFieldOutputBudgetV1
 }
 
 function exactKeys(source: Record<string, unknown>, expected: readonly string[], label: string): void {
@@ -320,48 +412,115 @@ function exactKeys(source: Record<string, unknown>, expected: readonly string[],
 }
 
 export function parseWorldviewFieldCandidateDraft(draft: string): WorldviewFieldCopilotCandidate {
-  const source = parseJsonObject(draft)
-  exactKeys(source, ['field', 'value'], '世界基座候选')
-  if (!WORLDVIEW_AGENT_FIELDS.includes(source.field as WorldviewAgentField)) {
-    throw new Error('世界基座候选 field 不在允许范围。')
-  }
-  const field = source.field as WorldviewAgentField
-  if (field === 'divineDesign') {
-    if (!source.value || typeof source.value !== 'object' || Array.isArray(source.value)) {
-      throw new Error('神明与信仰候选 value 必须是对象。')
-    }
-    const value = source.value as Record<string, unknown>
-    exactKeys(value, ['hasDivinity', 'divineRank', 'divineNames', 'divineRules'], '神明与信仰候选 value')
-    if (typeof value.hasDivinity !== 'boolean') throw new Error('神明与信仰 hasDivinity 必须是布尔值。')
-    const divineRank = value.divineRank
-    const divineNames = value.divineNames
-    const divineRules = value.divineRules
-    for (const [key, candidate] of Object.entries({ divineRank, divineNames, divineRules })) {
-      if (typeof candidate !== 'string' || candidate.length > 20_000) {
-        throw new Error(`神明与信仰 ${key} 必须是 0-20000 字符的文本。`)
+  return parseStructuredOutputV1({
+    raw: draft,
+    contract: {
+      version: 1,
+      schemaId: 'worldview-field-candidate.v1',
+      target: 'worldviews.field',
+      root: 'object',
+      // Native object fields may legitimately exceed the old text-only ceiling.
+      // Per-field parsers below still enforce each capability's own limit.
+      maxChars: WORLDVIEW_FIELD_CANDIDATE_MAX_CHARS_V1,
+      allowedRootFields: ['field', 'value', 'temporaryAssumptions'],
+      requiredRootFields: ['field', 'value'],
+      unknownRootFieldMessage: '世界基座候选只能包含 field、value、temporaryAssumptions。',
+      missingRootFieldMessage: '世界基座候选必须包含 field、value。',
+    },
+    parse: value => {
+      const source = value as Record<string, unknown>
+      exactKeys(
+        source,
+        source.temporaryAssumptions === undefined
+          ? ['field', 'value']
+          : ['field', 'value', 'temporaryAssumptions'],
+        '世界基座候选',
+      )
+      if (!WORLDVIEW_AGENT_FIELDS.includes(source.field as WorldviewAgentField)) {
+        throw new Error('世界基座候选 field 不在允许范围。')
       }
-    }
-    if (typeof divineRank !== 'string' || typeof divineNames !== 'string' || typeof divineRules !== 'string') {
-      throw new Error('神明与信仰文本字段无效。')
-    }
-    return {
-      field,
-      value: {
-        hasDivinity: value.hasDivinity,
-        divineRank: divineRank.trim(),
-        divineNames: divineNames.trim(),
-        divineRules: divineRules.trim(),
-      },
-    }
-  }
-  if (typeof source.value !== 'string' || source.value.trim().length < 2) {
-    throw new Error(`世界基座候选 ${field}.value 至少需要 2 个字符。`)
-  }
-  const value = source.value.trim()
-  if (value.length > FIELD_MAX_CHARS[field]) {
-    throw new Error(`世界基座候选 ${field}.value 超过 ${FIELD_MAX_CHARS[field]} 字符。`)
-  }
-  return { field, value }
+      const field = source.field as WorldviewAgentField
+      const capability = WORLDVIEW_AGENT_FIELD_CAPABILITIES.get(field)
+      if (!capability) throw new Error(`世界基座候选 ${field} 缺少可生成能力声明。`)
+      let temporaryAssumptions: string[] | undefined
+      if (source.temporaryAssumptions !== undefined) {
+        if (capability.temporaryAssumptions !== 'allowed') {
+          throw new Error(`世界基座候选 ${field} 不允许 temporaryAssumptions。`)
+        }
+        if (
+          !Array.isArray(source.temporaryAssumptions)
+          || source.temporaryAssumptions.length > 8
+          || source.temporaryAssumptions.some(item => (
+            typeof item !== 'string' || !item.trim() || item.length > 500
+          ))
+        ) throw new Error('temporaryAssumptions 必须是最多 8 条、每条不超过 500 字符的非空文本。')
+        temporaryAssumptions = [...new Set(source.temporaryAssumptions.map(item => item.trim()))]
+      }
+      if (field === 'divineDesign') {
+        if (!source.value || typeof source.value !== 'object' || Array.isArray(source.value)) {
+          throw new Error('神明与信仰候选 value 必须是对象。')
+        }
+        const divine = source.value as Record<string, unknown>
+        exactKeys(divine, ['hasDivinity', 'divineRank', 'divineNames', 'divineRules'], '神明与信仰候选 value')
+        if (typeof divine.hasDivinity !== 'boolean') throw new Error('神明与信仰 hasDivinity 必须是布尔值。')
+        const divineRank = divine.divineRank
+        const divineNames = divine.divineNames
+        const divineRules = divine.divineRules
+        for (const [key, candidate] of Object.entries({ divineRank, divineNames, divineRules })) {
+          if (typeof candidate !== 'string' || candidate.length > 20_000) {
+            throw new Error(`神明与信仰 ${key} 必须是 0-20000 字符的文本。`)
+          }
+        }
+        if (typeof divineRank !== 'string' || typeof divineNames !== 'string' || typeof divineRules !== 'string') {
+          throw new Error('神明与信仰文本字段无效。')
+        }
+        return {
+          field,
+          value: {
+            hasDivinity: divine.hasDivinity,
+            divineRank: divineRank.trim(),
+            divineNames: divineNames.trim(),
+            divineRules: divineRules.trim(),
+          },
+          ...(temporaryAssumptions?.length ? { temporaryAssumptions } : {}),
+        }
+      }
+      if (field === 'naturalResources') {
+        if (!source.value || typeof source.value !== 'object' || Array.isArray(source.value)) {
+          throw new Error('自然资源明细候选 value 必须是对象。')
+        }
+        const resources = source.value as Record<string, unknown>
+        exactKeys(resources, ['rareCreatures', 'herbs', 'minerals', 'others'], '自然资源明细候选 value')
+        for (const [key, candidate] of Object.entries(resources)) {
+          if (typeof candidate !== 'string' || candidate.length > 20_000) {
+            throw new Error(`自然资源明细 ${key} 必须是 0-20000 字符的文本。`)
+          }
+        }
+        return {
+          field,
+          value: {
+            rareCreatures: (resources.rareCreatures as string).trim(),
+            herbs: (resources.herbs as string).trim(),
+            minerals: (resources.minerals as string).trim(),
+            others: (resources.others as string).trim(),
+          },
+          ...(temporaryAssumptions?.length ? { temporaryAssumptions } : {}),
+        }
+      }
+      if (typeof source.value !== 'string' || source.value.trim().length < 2) {
+        throw new Error(`世界基座候选 ${field}.value 至少需要 2 个字符。`)
+      }
+      const fieldValue = source.value.trim()
+      if (fieldValue.length > capability.maxChars) {
+        throw new Error(`世界基座候选 ${field}.value 超过 ${capability.maxChars} 字符。`)
+      }
+      return {
+        field,
+        value: fieldValue,
+        ...(temporaryAssumptions?.length ? { temporaryAssumptions } : {}),
+      }
+    },
+  })
 }
 
 function sameValue(left: WorldviewFieldValue, right: WorldviewFieldValue): boolean {
@@ -397,16 +556,27 @@ function candidateIssues(
 function outputContract(field: WorldviewAgentField): string {
   return field === 'divineDesign'
     ? '{"field":"divineDesign","value":{"hasDivinity":true,"divineRank":"信仰层级","divineNames":"名号与职司","divineRules":"规则、仪式与禁忌"}}'
-    : `{"field":"${field}","value":"候选正文"}`
+    : field === 'naturalResources'
+      ? '{"field":"naturalResources","value":{"rareCreatures":"珍禽异兽与牲畜","herbs":"灵药与作物","minerals":"矿物与金属","others":"其他特产"},"temporaryAssumptions":["尚未成为正式设定的假设"]}'
+    : field === 'races'
+      ? '{"field":"races","value":"候选正文","temporaryAssumptions":["本轮为补齐空白而采用、尚未成为正式设定的假设"]}'
+    : `{"field":"${field}","value":"候选正文","temporaryAssumptions":["尚未成为正式设定的假设"]}`
 }
 
-function buildWorldviewFieldMessages(input: WorldviewFieldCopilotInput): ChatMessage[] {
-  const supplemental = input.supplementalContext.trim()
-    ? `\n\n【本轮已验证上游候选（尚未采纳，不属于 Canon）】\n${input.supplementalContext.trim()}`
+function worldviewFieldHardSystem(input: WorldviewFieldCopilotInput): string {
+  const capability = WORLDVIEW_AGENT_FIELD_CAPABILITIES.get(input.targetField)
+  if (!capability) throw new Error(`世界基座字段 ${input.targetField} 缺少可生成能力声明。`)
+  const dependencies = capability.directDependencies
+    .map(field => `${field}（${WORLDVIEW_AGENT_FIELD_LABELS[field as WorldviewAgentField] ?? field}）`)
+    .join('、')
+  const raceRequirement = input.targetField === 'races'
+    ? `8. 种族与民族正文必须给出可用于故事的具体新设定，至少覆盖：身份/来源、群体差异、生活或组织方式、群体关系或张力。不得输出占位话术、状态说明或概念解释。${
+        input.snapshot.foundationState === 'empty'
+          ? '当前无正式世界内容，可自主创造；采用的临时假设放入 temporaryAssumptions，它们不属于 Canon。'
+          : '已有内容只决定兼容边界，不应让正文围绕同一已知信息打转；要补充真正的新结构。'
+      }`
     : ''
-  return [{
-    role: 'system',
-    content: `你是 StoryForge 世界基座 Agent，当前执行 worldview-field Skill。你只为作者生成一个世界基座字段的可确认候选。
+  return `你是 StoryForge 世界基座 Agent，当前执行 worldview-field Skill。你只为作者生成一个世界基座字段的可确认候选。
 
 硬性要求：
 1. 本轮目标字段是 ${input.targetField}（${WORLDVIEW_AGENT_FIELD_LABELS[input.targetField]}），只允许生成这个字段。
@@ -414,13 +584,27 @@ function buildWorldviewFieldMessages(input: WorldviewFieldCopilotInput): ChatMes
 3. ${FOUNDATION_STATE_INSTRUCTIONS[input.snapshot.foundationState]}
 4. 世界观、规则、事实、故事核心和其他已确认内容属于正式约束；角色、故事线和大纲属于下游证据，只能在上游缺失时用于反推，不能覆盖已确认的上游设定。
 5. 不得输出对其他字段的顺带修改，也不得把推断冒充已经写入的数据。
-6. 只输出严格 JSON 对象，不输出 Markdown、解释或额外字段：
-${outputContract(input.targetField)}`,
+6. 项目名“${input.projectName}”只是低权重灵感，不是世界事实、主题命令或中心概念；除非作者明确要求，不得围绕标题释义或反复复述标题。
+${dependencies ? `7. 当前字段的直接依赖是 ${dependencies}。已填写依赖是约束；缺失依赖只能形成 temporaryAssumptions，不得顺写其它字段。发现潜在冲突时保留目标候选并明确写入临时假设，交给作者重规划。` : '7. 当前字段没有字段级直接依赖；仍须遵守正式上下文。'}
+${raceRequirement}
+${input.targetField === 'races' ? '9' : '8'}. 只输出严格 JSON 对象，不输出 Markdown、解释或额外字段：
+${outputContract(input.targetField)}`
+}
+
+function buildWorldviewFieldMessages(input: WorldviewFieldCopilotInput): ChatMessage[] {
+  if (input.frozenPromptMessages) return input.frozenPromptMessages.map(message => ({ ...message }))
+  const supplemental = input.supplementalContext.trim()
+    ? `\n\n【本轮已验证上游候选（尚未采纳，不属于 Canon）】\n${input.supplementalContext.trim()}`
+    : ''
+  return [{
+    role: 'system',
+    content: worldviewFieldHardSystem(input),
   }, {
     role: 'user',
     content: [
       input.inputGuidance,
       `【作者要求】\n${input.authorRequest}${supplemental}`,
+      `【低权重灵感：作品名】\n${input.projectName}`,
       `【正式上下文】\n${input.assembled.text || '（当前没有已填写的正式设定）'}`,
     ].join('\n\n'),
   }]
@@ -500,6 +684,7 @@ export async function prepareWorldviewFieldCopilot(
     contextProfile?: AgentContextProfile
     configOverride?: AIConfig
     generationOverrides?: { temperature?: number; maxTokens?: number }
+    promptExecution?: PromptExecutionOptionsV1
     contextCompressionRuntime?: AgentContextCompressionRuntimeV1
     signal?: AbortSignal
   },
@@ -519,6 +704,13 @@ export async function prepareWorldviewFieldCopilot(
   const readScope = input.scope ?? await resolveReadScopeLike(input.projectId)
   const scope = isLegacyReadScope(readScope) ? undefined : readScope
   const before = await readSnapshot(input.projectId, worldGroupId, scope)
+  const targetField = resolveWorldviewAgentFieldV1(request)
+  const capability = WORLDVIEW_AGENT_FIELD_CAPABILITIES.get(targetField)
+  if (!capability) throw new Error(`世界基座字段 ${targetField} 缺少可生成能力声明。`)
+  const requestedMode = resolveWorldviewFieldModeV1(request)
+  if (!capability.modes.includes(requestedMode)) {
+    throw new Error(`世界基座字段 ${targetField} 不支持 ${requestedMode} 模式。`)
+  }
   const routingCategory = input.routingCategory ?? 'agent.world-foundation.worldview-field'
   const config = input.configOverride ?? resolveRequestConfig(
     useAIConfigStore.getState().config,
@@ -537,40 +729,130 @@ export async function prepareWorldviewFieldCopilot(
         runtime: input.contextCompressionRuntime,
       })
     : undefined
-  const assembled = await assembleContext({
-    projectId: input.projectId,
-    scope,
-    worldGroupId,
-    provider: config.provider,
-    model: config.model,
-    sourceKeys: [...skill.contextSourceKeys],
-    inputBudgetMaxTokens: contextPolicy.maxInputTokens,
-    sourceBudgetScale: contextPolicy.sourceBudgetScale,
-    sourceTransformer: compression?.sourceTransformer,
-  })
+  const gatewayRequired = isContextGatewayRequiredForWriteTargetV1(
+    skill,
+    `worldviews.${targetField}`,
+  )
+  if (gatewayRequired && !scope) {
+    throw new Error('世界基座 Gateway required 字段需要稳定 WorkspaceScope，旧项目必须先完成所有权迁移。')
+  }
+  const targetResourceKey = hasMaterial(before.values[targetField])
+    && before.ragDocumentId
+    ? `worldview-field:${before.ragDocumentId}:field:${targetField}`
+    : undefined
+  const contextGatewayExecution = gatewayRequired
+    ? await executeContextGatewayV1({
+        skill,
+        scope: scope!,
+        worldGroupId,
+        budgetTokens: Math.min(contextPolicy.maxInputTokens, skill.contextGateway!.maxRetrievedTokens),
+        query: [
+          `${WORLDVIEW_AGENT_FIELD_LABELS[targetField]} ${resolveWorldviewFieldModeV1(request)}`,
+          request,
+        ].join('\n'),
+        ...(targetResourceKey ? {
+          mandatoryResourceKeys: [targetResourceKey],
+          mandatoryOriginalResourceKeys: [targetResourceKey],
+          targetResourceKeys: [targetResourceKey],
+        } : {}),
+        additionalReadsEnabled: false,
+        signal: input.signal,
+      })
+    : undefined
+  const assembled = contextGatewayExecution
+    ? assembleContextGatewayPacketV1(contextGatewayExecution, contextPolicy.maxInputTokens)
+    : await assembleContext({
+        projectId: input.projectId,
+        scope,
+        worldGroupId,
+        provider: config.provider,
+        model: config.model,
+        sourceKeys: [...skill.contextSourceKeys],
+        inputBudgetMaxTokens: contextPolicy.maxInputTokens,
+        sourceBudgetScale: contextPolicy.sourceBudgetScale,
+        sourceTransformer: compression?.sourceTransformer,
+      })
   const snapshot = await readSnapshot(input.projectId, worldGroupId, scope)
   if (before.serialized !== snapshot.serialized) throw new WorldviewFieldCopilotStaleError()
-  const inputState = resolveAgentSkillInputStateV1(skill, [assembled])
+  const inputState = contextGatewayExecution
+    ? projectContextGatewayInputStateV1(skill, contextGatewayExecution, assembled)
+    : resolveAgentSkillInputStateV1(skill, [assembled])
   const contextEvidence = attachAgentContextInputStateV1(
     evidenceFromContextResult(contextProfile, assembled),
     inputState,
   )
-  const targetField = resolveWorldviewAgentFieldV1(request)
+  if (contextGatewayExecution) {
+    contextEvidence.inputStateSourceKeys = contextGatewayInputStateSourceKeysV1(
+      skill,
+      contextGatewayExecution,
+    )
+  }
   const nodeInput: WorldviewFieldCopilotInput = {
     projectId: input.projectId,
+    projectName: project.name,
     scope,
     worldGroupId,
     authorRequest: request,
     supplementalContext: input.supplementalContext ?? '',
     inputGuidance: buildAgentSkillInputGuidanceV1(skill, inputState),
     targetField,
-    mode: resolveWorldviewFieldModeV1(request),
+    mode: resolveWorldviewFieldOperationV1({
+      requestedMode,
+      currentValue: snapshot.values[targetField],
+    }),
     assembled,
     snapshot,
     config,
     routingCategory,
     generationOverrides: input.generationOverrides,
     signal: input.signal,
+  }
+  if (input.promptExecution) {
+    const rendered = await renderFrozenPromptExecutionV1({
+      options: input.promptExecution,
+      context: {
+        projectName: project.name,
+        genres: project.genres?.join('/') || project.genre || '',
+        dimension: WORLDVIEW_AGENT_FIELD_LABELS[targetField],
+        worldContext: assembled.text || '（当前没有已填写的正式设定）',
+        existingWorldview: assembled.text || '',
+        currentValue: JSON.stringify(snapshot.values[targetField]),
+        generationMode: nodeInput.mode,
+        userHint: '',
+      },
+      hardSystem: worldviewFieldHardSystem(nodeInput),
+      authorInstruction: request,
+      additionalUserMessages: [
+        nodeInput.inputGuidance,
+        ...(nodeInput.supplementalContext.trim()
+          ? [`【本轮已验证上游候选（尚未采纳，不属于 Canon）】\n${nodeInput.supplementalContext.trim()}`]
+          : []),
+        `【低权重灵感：作品名】\n${project.name}`,
+        `【Harness 登记的正式上下文】\n${assembled.text || '（当前没有已填写的正式设定）'}`,
+      ],
+    })
+    const generationOverrides = {
+      temperature: 0.5,
+      ...rendered.generationOverrides,
+      ...input.generationOverrides,
+    }
+    nodeInput.frozenPromptMessages = rendered.messages
+    nodeInput.promptExecutionEvidence = {
+      ...rendered.evidence,
+      effectiveTemperature: generationOverrides.temperature ?? null,
+      effectiveMaxTokens: generationOverrides.maxTokens ?? null,
+    }
+    nodeInput.generationOverrides = generationOverrides
+  }
+  nodeInput.outputBudget = resolveWorldviewFieldOutputBudgetV1({
+    config,
+    targetField,
+    skillMaxOutputTokens: skill.maxOutputTokens,
+    requestedMaxTokens: nodeInput.generationOverrides?.maxTokens,
+  })
+  nodeInput.generationOverrides = {
+    ...nodeInput.generationOverrides,
+    maxTokens: nodeInput.outputBudget.effectiveMaxTokens,
   }
   const node = createWorldviewFieldCopilotNode(nodeInput, dependencies)
   return {
@@ -583,6 +865,8 @@ export async function prepareWorldviewFieldCopilot(
     targetField,
     label: WORLDVIEW_AGENT_FIELD_LABELS[targetField],
     modelIdentity: { provider: config.provider, model: config.model },
+    promptExecutionEvidence: nodeInput.promptExecutionEvidence,
+    contextGatewayExecution,
   }
 }
 
@@ -600,15 +884,31 @@ export function createWorldviewFieldCopilotNode(
     targetField: input.targetField,
     candidate,
   }))
-  const runAI = dependencies.runAI ?? (messages => chat(messages, input.config, {
-    category: input.routingCategory,
-    projectId: input.projectId,
-    configOverrides: {
-      maxTokens: input.generationOverrides?.maxTokens ?? 6_000,
-      temperature: input.generationOverrides?.temperature ?? 0.5,
-    },
-    contextOverflowPolicy: 'reject',
-  }, input.signal))
+  const runAI = dependencies.runAI ?? (async messages => {
+    const result: ChatResult = {}
+    const content = await chat(messages, input.config, {
+      category: input.routingCategory,
+      projectId: input.projectId,
+      configOverrides: {
+        // prepareWorldviewFieldCopilot has already resolved or explicitly
+        // frozen the connection. Re-assert it at execution so a later task
+        // route change cannot switch provider/model between prepare and run.
+        provider: input.config.provider,
+        apiKey: input.config.apiKey,
+        baseUrl: input.config.baseUrl,
+        model: input.config.model,
+        contextWindow: input.config.contextWindow,
+        maxTokens: input.outputBudget?.effectiveMaxTokens
+          ?? WORLDVIEW_FIELD_DEFAULT_OUTPUT_TOKENS_V1,
+        temperature: input.generationOverrides?.temperature ?? 0.5,
+      },
+      contextOverflowPolicy: 'reject',
+    }, input.signal, result)
+    if (result.finishReason === 'length') {
+      throw new Error('模型因达到输出上限而停止；本次不是完整候选，已拒绝标记成功。请缩小目标或等待 LONGOUT-1 分段协议。')
+    }
+    return content
+  })
   return {
     id: `agent.world-foundation.worldview-field:${input.projectId}:${input.targetField}:${input.snapshot.updatedAt ?? 0}`,
     kind: 'world-foundation.worldview-field',
@@ -630,10 +930,6 @@ export function createWorldviewFieldCopilotNode(
   }
 }
 
-function compactText(value: string | null | undefined, max: number): string {
-  return (value ?? '').trim().replace(/\s+/g, ' ').slice(0, max)
-}
-
 export function formatWorldviewFieldGenerationRequestV1(input: {
   field: WorldviewAgentField
   mode: FieldGenerationMode
@@ -645,15 +941,11 @@ export function formatWorldviewFieldGenerationRequestV1(input: {
   const parts = [
     `生成世界基座字段。目标字段=${input.field}；生成模式=${input.mode}。`,
   ]
-  const hint = compactText(input.hint, 360)
+  const hint = (input.hint ?? '').trim()
   if (hint) parts.push(`作者要求：${hint}`)
-  if (input.parameterValues && Object.keys(input.parameterValues).length) {
-    const serialized = compactText(JSON.stringify(input.parameterValues), 240)
-    if (serialized) parts.push(`模板参数：${serialized}`)
+  const request = parts.join('\n')
+  if (request.length > 8_000) {
+    throw new Error('世界基座作者要求超过 8000 字符；没有截断，已在模型调用前阻止。')
   }
-  const systemOverride = compactText(input.systemOverride, 160)
-  if (systemOverride) parts.push(`自定义系统要求：${systemOverride}`)
-  const userOverride = compactText(input.userOverride, 160)
-  if (userOverride) parts.push(`自定义用户要求：${userOverride}`)
-  return parts.join('\n').slice(0, 1_000)
+  return request
 }

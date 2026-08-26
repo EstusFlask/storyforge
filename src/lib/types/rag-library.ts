@@ -10,6 +10,8 @@ export interface RagFieldPolicy {
   weight?: number
   /** 单字段最多进入一次上下文的 token 数。 */
   tokenCap?: number
+  /** 长期作者意图；selector 必须在普通权重之前处理。 */
+  priority?: 'normal' | 'pinned' | 'must-read'
 }
 
 export interface RagDocumentPolicy extends RagFieldPolicy {
@@ -19,6 +21,9 @@ export interface RagDocumentPolicy extends RagFieldPolicy {
 export interface RagDocumentMetadata {
   ragDocumentId?: string
   ragPolicy?: RagDocumentPolicy
+  /** Retrieval policy evolves independently from Canon content revisions. */
+  ragPolicyRevision?: number
+  ragPolicyHash?: string
 }
 
 export type RagVectorState = 'none' | 'keyword' | 'partial' | 'ready'
@@ -42,6 +47,7 @@ export interface RagLibraryEntry {
   enabled: boolean
   weight: number
   tokenCap: number
+  priority: 'normal' | 'pinned' | 'must-read'
   chunkCount: number
   vectorState: RagVectorState
 }

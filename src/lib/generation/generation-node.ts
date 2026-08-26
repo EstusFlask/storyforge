@@ -75,11 +75,13 @@ function assertMessages(messages: ChatMessage[]): void {
 async function notifyShadowTrace(
   trace: GenerationNodeShadowTrace | undefined,
   notify: (trace: GenerationNodeShadowTrace) => Promise<void>,
+  failureMode: 'ignore' | 'throw' = 'ignore',
 ): Promise<void> {
   if (!trace) return
   try {
     await notify(trace)
   } catch (error) {
+    if (failureMode === 'throw') throw error
     try {
       trace.onTraceError?.(error)
     } catch {
@@ -120,6 +122,8 @@ export async function runGenerationNode<TInput, TOutput, TAdoption>(
      */
     deferStepSucceeded?: boolean
     shadowTrace?: GenerationNodeShadowTrace
+    /** Formal durable entries must fail closed when evidence persistence fails. */
+    traceFailureMode?: 'ignore' | 'throw'
   } = {},
 ): Promise<GenerationNodeRunResult<TOutput, TAdoption>> {
   if (prepared.nodeId !== node.id || prepared.kind !== node.kind) {
@@ -127,47 +131,48 @@ export async function runGenerationNode<TInput, TOutput, TAdoption>(
   }
   const messages = cloneMessages(options.messages ?? prepared.messages)
   assertMessages(messages)
-  await notifyShadowTrace(options.shadowTrace, trace => trace.beforeModel({ prepared, messages }))
+  const traceFailureMode = options.traceFailureMode ?? 'ignore'
+  await notifyShadowTrace(options.shadowTrace, trace => trace.beforeModel({ prepared, messages }), traceFailureMode)
   let output: TOutput
   try {
     output = await node.run(messages)
   } catch (error) {
-    await notifyShadowTrace(options.shadowTrace, trace => trace.stepFailed({ phase: 'model', error }))
+    await notifyShadowTrace(options.shadowTrace, trace => trace.stepFailed({ phase: 'model', error }), traceFailureMode)
     throw error
   }
-  await notifyShadowTrace(options.shadowTrace, trace => trace.modelResponded(output))
+  await notifyShadowTrace(options.shadowTrace, trace => trace.modelResponded(output), traceFailureMode)
   let gate: GenerationGateResult | null
   try {
     gate = node.gate ? await node.gate(output) : null
   } catch (error) {
-    await notifyShadowTrace(options.shadowTrace, trace => trace.stepFailed({ phase: 'gate', error }))
+    await notifyShadowTrace(options.shadowTrace, trace => trace.stepFailed({ phase: 'gate', error }), traceFailureMode)
     throw error
   }
   if (gate?.status === 'blocked') {
     await notifyShadowTrace(options.shadowTrace, trace => trace.stepFailed({
       phase: 'gate',
       error: new Error(gate.issues.map(issue => issue.code).join(',') || 'generation_gate_blocked'),
-    }))
+    }), traceFailureMode)
     return { output, gate, adopted: false, adoption: null }
   }
   await notifyShadowTrace(options.shadowTrace, trace => (
     trace.candidateReady?.(output) ?? Promise.resolve()
-  ))
+  ), traceFailureMode)
   if (options.adopt === true && node.adopt) {
     let adoption: TAdoption
     try {
       adoption = await node.adopt(output)
     } catch (error) {
-      await notifyShadowTrace(options.shadowTrace, trace => trace.stepFailed({ phase: 'adoption', error }))
+      await notifyShadowTrace(options.shadowTrace, trace => trace.stepFailed({ phase: 'adoption', error }), traceFailureMode)
       throw error
     }
     if (!options.deferStepSucceeded) {
-      await notifyShadowTrace(options.shadowTrace, trace => trace.stepSucceeded(output))
+      await notifyShadowTrace(options.shadowTrace, trace => trace.stepSucceeded(output), traceFailureMode)
     }
     return { output, gate, adopted: true, adoption }
   }
   if (!options.deferStepSucceeded) {
-    await notifyShadowTrace(options.shadowTrace, trace => trace.stepSucceeded(output))
+    await notifyShadowTrace(options.shadowTrace, trace => trace.stepSucceeded(output), traceFailureMode)
   }
   return { output, gate, adopted: false, adoption: null }
 }

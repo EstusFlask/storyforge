@@ -19,6 +19,7 @@ import {
 } from '../../src/lib/memory/workspace-projection'
 import { adopt, hashAdoptRecordFieldsV1 } from '../../src/lib/registry/adopt'
 import { ensureWorkspaceOwnership } from '../../src/lib/world-engine/ownership'
+import { stampNewRecord } from '../../src/lib/world-engine/scope'
 
 function notFound(): DOMException {
   return new DOMException('not found', 'NotFoundError')
@@ -129,17 +130,17 @@ async function seedWorkspace() {
     description: '三方核对', targetWordCount: 100_000, createdAt: now, updatedAt: now,
   } as any) as number
   const ownership = await ensureWorkspaceOwnership(projectId)
-  const outlineNodeId = await db.outlineNodes.add({
+  const outlineNodeId = await db.outlineNodes.add(stampNewRecord(ownership.scope, 'outlineNodes', {
     projectId, workId: ownership.scope.workId,
     parentId: null, type: 'chapter', title: '第一章', summary: '', order: 0,
     createdAt: now, updatedAt: now,
-  } as any) as number
-  const chapterId = await db.chapters.add({
+  }, { owner: 'work' }) as any) as number
+  const chapterId = await db.chapters.add(stampNewRecord(ownership.scope, 'chapters', {
     projectId, workId: ownership.scope.workId, outlineNodeId, title: '第一章',
     content: '<p>潮声穿过旧港。</p><p><strong>灯没有灭。</strong></p>',
     wordCount: 12, status: 'draft', order: 0, notes: '作者笔记',
     createdAt: now, updatedAt: now,
-  } as any) as number
+  }, { owner: 'work' }) as any) as number
   return { projectId, chapterId }
 }
 

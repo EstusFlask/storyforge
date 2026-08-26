@@ -151,9 +151,13 @@ describe.sequential('R-HARNESS14 · 固定工作流分类与 Skill 冻结', () =
       budgetEvidence: new AgentTeamBudgetTracker('balanced').snapshot(),
     })
     expect(contract.workflowKind).toBe('direct-generation')
-    expect(contract.permissions.contextSourceKeys).toContain('existingVolumeOutlines')
+    expect(contract.permissions.contextSourceKeys).toEqual(['ragSelection'])
     expect(contract.permissions.writeTargets).toEqual([
-      { table: 'outlineNodes', fields: ['title', 'summary'], mode: 'author-confirmed' },
+      {
+        table: 'outlineNodes',
+        fields: ['parentId', 'type', 'title', 'summary', 'order'],
+        mode: 'author-confirmed',
+      },
     ])
   })
 

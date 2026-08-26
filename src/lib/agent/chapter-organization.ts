@@ -27,6 +27,7 @@ import type {
   Foreshadow,
   ForeshadowStatus,
   StateDiffItem,
+  StoryArc,
 } from '../types'
 import { parseAgentEventPayload } from '../types'
 import {
@@ -49,6 +50,13 @@ import {
   resolveScopeLike,
   stampNewRecord,
 } from '../world-engine/scope'
+import {
+  adoptStorylineAnalysisCandidates,
+  parseStorylineProgressResult,
+  type StorylineAnalysisCandidates,
+} from '../storyline/storyline-progress'
+import { htmlToPlainText } from '../utils/html'
+import { hashCanonicalValue } from './run/hash'
 
 export const CHAPTER_ORGANIZATION_VERSION = 1
 export const CHAPTER_ORGANIZATION_PAYLOAD_TYPE = 'chapter-organization'
@@ -60,6 +68,7 @@ export type ChapterOrganizationDomain =
   | 'timeline'
   | 'relations'
   | 'foreshadows'
+  | 'storyline'
 
 export type ChapterOrganizationDomainStatus =
   | 'pending'
@@ -107,6 +116,8 @@ export interface ChapterOrganizationCandidate {
   storyEvents: EvidencedStoryEvent[]
   relations: EvidencedRelation[]
   foreshadowUpdates: ForeshadowProgressCandidate[]
+  /** PROGRESS-1: same model response, author-confirmed dynamic story evolution. */
+  storyline?: StorylineAnalysisCandidates
   domainStatus: Record<ChapterOrganizationDomain, ChapterOrganizationDomainStatus>
   domainErrors: Partial<Record<ChapterOrganizationDomain, string>>
   budget: AgentTeamBudgetEvidence
@@ -129,6 +140,9 @@ export interface ChapterOrganizationSelection {
   storyEvents: number[]
   relations: number[]
   foreshadowUpdates: number[]
+  storylineProgress?: number[]
+  storylineCrossings?: number[]
+  newStoryArcs?: number[]
 }
 
 export interface ChapterOrganizationRun {
@@ -149,6 +163,7 @@ interface RawRoot {
   storyEvents?: unknown
   relations?: unknown
   foreshadowUpdates?: unknown
+  storyline?: unknown
 }
 
 const DOMAIN_STATUS: Record<ChapterOrganizationDomain, ChapterOrganizationDomainStatus> = {
@@ -158,6 +173,7 @@ const DOMAIN_STATUS: Record<ChapterOrganizationDomain, ChapterOrganizationDomain
   timeline: 'pending',
   relations: 'pending',
   foreshadows: 'pending',
+  storyline: 'pending',
 }
 
 const FORESHADOW_TRANSITIONS: Record<ForeshadowStatus, readonly ForeshadowStatus[]> = {
@@ -278,6 +294,7 @@ export function buildChapterOrganizationPrompt(input: {
   knownItemNames: string[]
   existingRelations: CharacterRelation[]
   foreshadows: Foreshadow[]
+  storyArcs?: StoryArc[]
   /** H5: 由 CONTEXT_SOURCES + assembleContext() 生成的受控上下文快照。 */
   contextSnapshot?: string
 }): ChatMessage[] {
@@ -294,6 +311,11 @@ export function buildChapterOrganizationPrompt(input: {
     .slice(0, 80)
     .map(item => `- #${item.id} ${item.name} [${item.status}] ${item.description.slice(0, 240)}`)
     .join('\n') || '无'
+  const storyArcList = (input.storyArcs ?? [])
+    .filter(item => item.id != null)
+    .slice(0, 120)
+    .map(item => `- #${item.id} ${item.name} [${item.type}] ${String(item.description ?? '').slice(0, 240)} stages=${item.stages}`)
+    .join('\n') || '无'
 
   return [
     {
@@ -309,7 +331,8 @@ JSON 结构：
   "inventoryEvents":[{"itemName":"物品","heldByName":"角色名","action":"gain|consume","quantity":1,"note":"说明","sourceQuote":"逐字引文"}],
   "storyEvents":[{"title":"事件标题","storyTime":"正文明确时间或空串","importance":1,"description":"说明","sourceQuote":"逐字引文"}],
   "relations":[{"char1":"角色名","char2":"角色名","type":"family|lover|friend|rival|enemy|master|student|ally|subordinate|other","label":"关系名","description":"说明","bidirectional":true,"sourceQuote":"逐字引文"}],
-  "foreshadowUpdates":[{"foreshadowId":1,"toStatus":"planted|echoed|resolved","note":"为何推进","sourceQuote":"逐字引文"}]
+  "foreshadowUpdates":[{"foreshadowId":1,"toStatus":"planted|echoed|resolved","note":"为何推进","sourceQuote":"逐字引文"}],
+  "storyline":{"progress":[{"arcId":1,"currentStageId":"阶段ID或null","status":"dormant|active|climax|resolved|abandoned","progressNote":"推进说明","involvedEntities":["实体"],"quote":"逐字引文"}],"crossings":[{"arcIdA":1,"arcIdB":2,"note":"交汇说明","quote":"逐字引文"}],"newArcs":[{"name":"候选新线","type":"main|sub","description":"登记理由","quote":"逐字引文"}]}
 }
 
 规则：
@@ -319,7 +342,7 @@ JSON 结构：
 4. 年表只写改变剧情进程的大事，importance 为 1-3。
 5. 关系只写本章新建立或明确改变的关系；已有同类型关系不重复。
 6. 伏笔只可单向推进 planned→planted/echoed/resolved、planted→echoed/resolved、echoed→resolved；普通提及不等于呼应或回收。
-7. 没有候选的分区返回空数组。`,
+7. 普通分区没有候选时返回空数组；storyline 没有候选时，内部三个字段分别返回空数组。`,
     },
     {
       role: 'user',
@@ -339,6 +362,9 @@ ${relationList}
 
 【未完成伏笔】
 ${foreshadowList}
+
+【已登记故事线与阶段闭集】
+${storyArcList}
 
 【正文】
 ${input.chapterText}
@@ -361,6 +387,7 @@ export function parseChapterOrganizationOutput(input: {
   characters: Character[]
   existingRelations: CharacterRelation[]
   foreshadows: Foreshadow[]
+  storyArcs?: StoryArc[]
   budget: AgentTeamBudgetEvidence
   createdAt?: number
 }): ChapterOrganizationCandidate | null {
@@ -392,6 +419,11 @@ export function parseChapterOrganizationOutput(input: {
       existingRelations: input.existingRelations,
     }),
     foreshadowUpdates: parseForeshadowCandidates(root.foreshadowUpdates, normalizedText, input.foreshadows),
+    storyline: parseStorylineProgressResult({
+      raw: JSON.stringify(root.storyline ?? {}),
+      chapterContent: normalizedText,
+      arcs: input.storyArcs ?? [],
+    }),
     domainStatus: { ...DOMAIN_STATUS },
     domainErrors: {},
     budget: input.budget,
@@ -409,6 +441,7 @@ export async function runChapterOrganization(input: {
   knownItemNames: string[]
   existingRelations: CharacterRelation[]
   foreshadows: Foreshadow[]
+  storyArcs?: StoryArc[]
   contextSnapshot?: string
   budget: AgentTeamBudgetTracker
   call: (messages: ChatMessage[]) => Promise<string>
@@ -601,6 +634,9 @@ export function selectAllChapterOrganizationCandidates(
     storyEvents: indexes(candidate.storyEvents.length),
     relations: indexes(candidate.relations.length),
     foreshadowUpdates: indexes(candidate.foreshadowUpdates.length),
+    storylineProgress: indexes(candidate.storyline?.progress.length ?? 0),
+    storylineCrossings: indexes(candidate.storyline?.crossings.length ?? 0),
+    newStoryArcs: indexes(candidate.storyline?.newArcs.length ?? 0),
   }
 }
 
@@ -612,6 +648,7 @@ export function summarizeChapterOrganizationCandidate(candidate: ChapterOrganiza
     `年表 ${candidate.storyEvents.length}`,
     `关系 ${candidate.relations.length}`,
     `伏笔 ${candidate.foreshadowUpdates.length}`,
+    `故事线 ${(candidate.storyline?.progress.length ?? 0) + (candidate.storyline?.crossings.length ?? 0) + (candidate.storyline?.newArcs.length ?? 0)}`,
   ].join(' · ')
 }
 
@@ -665,6 +702,7 @@ export async function adoptChapterOrganizationSelection(input: {
     timeline: 0,
     relations: 0,
     foreshadows: 0,
+    storyline: 0,
   }
 
   const applyDomain = async (
@@ -845,6 +883,34 @@ export async function adoptChapterOrganizationSelection(input: {
     }
     await useForeshadowStore.getState().loadAll(workspaceScope)
     return count
+  })
+
+  const storyline = candidate.storyline ?? { progress: [], crossings: [], newArcs: [] }
+  const storylineProgress = selectedAt(storyline.progress, input.selection.storylineProgress ?? [])
+  const storylineCrossings = selectedAt(storyline.crossings, input.selection.storylineCrossings ?? [])
+  const newStoryArcs = selectedAt(storyline.newArcs, input.selection.newStoryArcs ?? [])
+  const storylineCount = storylineProgress.length + storylineCrossings.length + newStoryArcs.length
+  await applyDomain('storyline', storylineCount, async () => {
+    const chapter = await db.chapters.get(candidate.chapterId)
+    if (!chapter || !await assertRecordInScope(workspaceScope, 'chapters', chapter, { owner: 'work' })) {
+      throw new Error('故事线采纳找不到当前作品的来源章节。')
+    }
+    const result = await adoptStorylineAnalysisCandidates({
+      projectId: candidate.projectId,
+      chapterId: candidate.chapterId,
+      scope: workspaceScope,
+      snapshot: {
+        serialized: '',
+        chapterContentHash: await hashCanonicalValue(htmlToPlainText(chapter.content || '')),
+        arcs: [],
+      },
+      candidate: {
+        progress: storylineProgress,
+        crossings: storylineCrossings,
+        newArcs: newStoryArcs,
+      },
+    })
+    return result.written.length
   })
 
   const run = await updateChapterOrganizationRun({

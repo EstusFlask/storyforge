@@ -26,18 +26,29 @@ import { runChapterMemoryTask } from '../../lib/ai/chapter-memory/run-chapter-me
 import { prepareContinuityContext } from '../../lib/ai/chapter-memory/continuity-context'
 import { isPlanReconciliationCurrent } from '../../lib/ai/chapter-memory/plan-reconciliation'
 import { findNextCanonicalChapter, findPreviousCanonicalChapter } from '../../lib/ai/chapter-memory/canonical-chapter-sequence'
-import { chat, resolveRequestConfig } from '../../lib/ai/client'
+import { resolveRequestConfig } from '../../lib/ai/client'
+import { executeRegisteredAIEntryV1 } from '../../lib/agent/formal-ai-entry'
 import { getAIConfigRequiredMessage, isAIConfigReady } from '../../lib/ai/config-readiness'
 import { db } from '../../lib/db/schema'
 import { buildGenreConstraintContext } from '../../lib/ai/genre-metadata'
 import { buildStylePromptInjection } from '../../lib/ai/writing-styles'
 import { assembleContext } from '../../lib/registry/assemble-context'
+import { prepareProseGatewayAssemblyV1 } from '../../lib/prose/gateway-context'
 import { resolveChapterDisplayMeta } from '../../lib/outline/chapter-display'
 import { pickBestChapterForOutline } from '../../lib/chapters/selectors'
+import {
+  buildFutureEvolutionPlanV1,
+  type FutureEvolutionPlanV1,
+} from '../../lib/outline/future-evolution'
 import { useCreativeRulesStore } from '../../stores/project-singletons'
 import { useStoryArcStore } from '../../stores/story-arc'
 import { useForeshadowStore } from '../../stores/foreshadow'
-import { htmlToPlainText, plainTextToHtml, countWords } from '../../lib/utils/html'
+import {
+  countWords,
+  htmlToPlainText,
+  normalizeProseForEditorV1,
+  plainTextToHtml,
+} from '../../lib/utils/html'
 import AIStreamOutput from '../shared/AIStreamOutput'
 import ContextBudgetBar from '../shared/ContextBudgetBar'
 import { useDialog } from '../shared/Dialog'
@@ -66,7 +77,14 @@ import { useItemLedgerStore } from '../../stores/item-ledger'
 import { useLocationStore } from '../../stores/location'
 import { useCodexStore } from '../../stores/codex'
 import { buildEditorEntityReferences } from '../../lib/editor/entity-reference'
-import type { ChatMessage, Project, StateDiffItem, WorkspaceScope } from '../../lib/types'
+import type {
+  AgentSkillExecutionBindingV2,
+  ChatMessage,
+  Project,
+  StateDiffItem,
+  WorkspaceScope,
+} from '../../lib/types'
+import { assertAgentSkillBindingMatchesAssemblyV2 } from '../../lib/agent/execution-binding'
 import {
   adoptChapterOrganizationSelection,
   isChapterOrganizationCurrent,
@@ -98,6 +116,7 @@ import {
 } from '../../lib/agent/run/chapter-transition-durable'
 import {
   beginChapterPostAdoptionStepV1,
+  authorizeChapterPostAdoptionV1,
   beginChapterPostAdoptionOrganizationAdoptionV1,
   chapterPostAdoptionChainStateV1,
   commitChapterPostAdoptionOrganizationV1,
@@ -108,6 +127,7 @@ import {
   rejectChapterPostAdoptionOrganizationAdoptionV1,
   recoverChapterPostAdoptionOrganizationV1,
   recoverChapterPostAdoptionConsistencyV1,
+  rejectChapterPostAdoptionAuthorizationV1,
   readChapterPostAdoptionChainStatusV1,
   readLatestChapterPostAdoptionRunV1,
   scheduleChapterPostAdoptionStepsV1,
@@ -127,6 +147,12 @@ import { createContextManifestFromAssemblyV1 } from '../../lib/agent/run/context
 import { readAgentRunV1, type AgentRunSnapshotV1 } from '../../lib/agent/run/event-store'
 import { hashChapterText, normalizeChapterText } from '../../lib/ai/chapter-memory/text-normalization'
 import { hashCanonicalValue } from '../../lib/agent/run/hash'
+import { flushPendingEditsV1 } from '../../lib/authoring/pending-edit-coordinator'
+import {
+  assertWorkspaceContentRevisionFreshV1,
+  captureWorkspaceContentRevisionV1,
+  type WorkspaceContentRevisionVectorV1,
+} from '../../lib/authoring/content-revision'
 import {
   adoptImpactPatchCandidateV1,
   createImpactPatchCandidateV1,
@@ -171,20 +197,28 @@ import {
 import { classifyAgentRunFailureV1 } from '../../lib/agent/run/failure-policy'
 import { resolveScopeLike } from '../../lib/world-engine/scope'
 import {
-  beginProseGenerationStepV1,
+  buildPostAdoptionAuthorizationSnapshotV1,
+  invalidateChapterPostAdoptionDerivativesV1,
+  preflightPostAdoptionAutoV1,
+  readWorkPostAdoptionSettingsV1,
+  updateWorkPostAdoptionSettingsV1,
+  type ResolvedPostAdoptionSettingsV1,
+} from '../../lib/prose/post-adoption-policy'
+import {
+  beginProseGenerationGatewayStepV1,
   commitProseGenerationAdoptionV1,
   createProseGenerationDurableRunV1,
   failProseGenerationStepV1,
+  finalizeProseGenerationGatewayStepV1,
   hashProseGenerationCandidateV1,
   isProseGenerationCandidateCurrentV1,
   markProseGenerationStaleV1,
   persistProseGenerationCandidateV1,
   readLatestProseGenerationCandidateV1,
   recordProseGenerationCandidateV1,
-  recordProseGenerationModelOutputV1,
   rejectProseGenerationCandidateV1,
   recoverProseGenerationCandidateV1,
-  PROSE_GENERATION_SOURCE_KEYS_V1,
+  resolveProseGenerationExecutionBindingV2,
   PROSE_GENERATION_STEP_ID_V1,
   type ProseGenerationCandidateV1,
 } from '../../lib/agent/run/prose-generation-durable'
@@ -229,7 +263,9 @@ interface PendingChapterGeneration {
   prepared: PreparedGenerationNode
   backgroundMemoryIds: number[]
   assembled: Awaited<ReturnType<typeof assembleContext>>
+  generationBinding: AgentSkillExecutionBindingV2
   informationBoundary: InformationBoundaryManifestV1
+  contentRevision: WorkspaceContentRevisionVectorV1
 }
 
 interface Props {
@@ -252,7 +288,7 @@ export default function ChapterEditor({ project, outlineNodeId }: Props) {
   const { cards: stateCards, loadAll: loadStateCards, buildStateContext, buildSelectiveStateContext, applyDiffs } = useStateCardStore()
   const { characters, loadAll: loadCharacters } = useCharacterStore()
   const { creativeRules } = useCreativeRulesStore()
-  const { loadAll: loadArcs } = useStoryArcStore()
+  const { arcs: storyArcs, loadAll: loadArcs } = useStoryArcStore()
   const { buildForeshadowContext, loadAll: loadForeshadows } = useForeshadowStore()
   const { entries: itemEntries, loadAll: loadItemLedger } = useItemLedgerStore()
   const { locations, loadAll: loadLocations } = useLocationStore()
@@ -271,6 +307,7 @@ export default function ChapterEditor({ project, outlineNodeId }: Props) {
   const [analyzingImpact, setAnalyzingImpact] = useState(false)
   const [impactGraph, setImpactGraph] = useState<EditImpactGraphV1 | null>(null)
   const [impactRemediationPlan, setImpactRemediationPlan] = useState<ImpactRemediationPlanV1 | null>(null)
+  const [futureEvolutionPlan, setFutureEvolutionPlan] = useState<FutureEvolutionPlanV1 | null>(null)
   const [impactRemediationBusy, setImpactRemediationBusy] = useState(false)
   const [impactRemediationReceipt, setImpactRemediationReceipt] = useState<string | null>(null)
   const [impactRemediationError, setImpactRemediationError] = useState('')
@@ -333,6 +370,8 @@ export default function ChapterEditor({ project, outlineNodeId }: Props) {
   const [proseCandidate, setProseCandidate] = useState<ProseGenerationCandidateV1 | null>(null)
   const [proseGenerationError, setProseGenerationError] = useState('')
   const [planReconciliationCurrent, setPlanReconciliationCurrent] = useState(false)
+  const [reconciliationAction, setReconciliationAction] = useState<'actual-progress' | 'outline' | null>(null)
+  const [reconciliationActionError, setReconciliationActionError] = useState('')
   const [organizationRun, setOrganizationRun] = useState<ChapterOrganizationRun | null>(null)
   const [organizationCurrent, setOrganizationCurrent] = useState(false)
   const [organizingChapter, setOrganizingChapter] = useState(false)
@@ -342,6 +381,8 @@ export default function ChapterEditor({ project, outlineNodeId }: Props) {
   const [transitionRunId, setTransitionRunId] = useState<number | null>(null)
   const [postAdoptionRunId, setPostAdoptionRunId] = useState<number | null>(null)
   const [postAdoptionChainState, setPostAdoptionChainState] = useState<ChapterPostAdoptionChainStateV1 | null>(null)
+  const [postAdoptionSettings, setPostAdoptionSettings] = useState<ResolvedPostAdoptionSettingsV1 | null>(null)
+  const [postAdoptionInvalidation, setPostAdoptionInvalidation] = useState<{ deletedChunks: number; staleSummaries: number; demotedFacts: number } | null>(null)
   const [transitionError, setTransitionError] = useState('')
   const [consistencyRun, setConsistencyRun] = useState<ConsistencyAgentRun | null>(null)
   const [consistencyCurrent, setConsistencyCurrent] = useState(false)
@@ -371,6 +412,7 @@ export default function ChapterEditor({ project, outlineNodeId }: Props) {
     let active = true
     setImpactGraph(null)
     setImpactRemediationPlan(null)
+    setFutureEvolutionPlan(null)
     setImpactRemediationReceipt(null)
     setImpactRemediationError('')
     setImpactPostCorrectionReplan(null)
@@ -857,10 +899,17 @@ export default function ChapterEditor({ project, outlineNodeId }: Props) {
 
   useEffect(() => {
     let cancelled = false
-    void resolveScopeLike(project.id!).then(scope => {
-      if (!cancelled) setEditorWorkspaceScope(scope)
+    void resolveScopeLike(project.id!).then(async scope => {
+      const settings = await readWorkPostAdoptionSettingsV1(scope)
+      if (!cancelled) {
+        setEditorWorkspaceScope(scope)
+        setPostAdoptionSettings(settings)
+      }
     }).catch(() => {
-      if (!cancelled) setEditorWorkspaceScope(null)
+      if (!cancelled) {
+        setEditorWorkspaceScope(null)
+        setPostAdoptionSettings(null)
+      }
     })
     return () => { cancelled = true }
   }, [project.id])
@@ -1009,22 +1058,29 @@ export default function ChapterEditor({ project, outlineNodeId }: Props) {
   const [charCtx, setCharCtx] = useState('')
   useEffect(() => {
     let cancelled = false
-    assembleContext({
+    if (!currentChapter?.id || !outlineNode?.id) {
+      setWorldCtx('')
+      setCharCtx('')
+      return () => { cancelled = true }
+    }
+    void prepareProseGatewayAssemblyV1({
       projectId: project.id!,
       worldGroupId: chapterWorldGroupId ?? null,
-      outlineNodeId: outlineNode?.id ?? null,
-      chapterId: currentChapter?.id ?? null,
-      provider: aiConfig.provider,
-      model: aiConfig.model,
-      sourceKeys: ['contextMemo', 'chapterOutline', 'canonAssertions', 'worldview', 'storyCore', 'characterDrivenPlan', 'powerSystem', 'cultivationProgress', 'codex', 'characters', 'creativeRules', 'worldRules', 'historical', 'locations', 'userStyleProfile'],
+      chapterId: currentChapter.id,
+      outlineNodeId: outlineNode.id,
+      operation: 'review',
+      authorRequest: '预览当前章节受控创作上下文',
+      perspectiveCharacterId,
+      config: aiConfig,
     }).then(assembled => {
       if (cancelled) return
-      const charIdx = assembled.included.indexOf('characters')
       setWorldCtx(assembled.text)
-      setCharCtx(charIdx >= 0 ? assembled.segments[charIdx]?.content ?? '' : '')
+      setCharCtx('')
+    }).catch(() => {
+      if (!cancelled) { setWorldCtx(''); setCharCtx('') }
     })
     return () => { cancelled = true }
-  }, [project.id, chapterWorldGroupId, outlineNode?.id, currentChapter?.id, aiConfig.provider, aiConfig.model])
+  }, [project.id, chapterWorldGroupId, outlineNode?.id, currentChapter?.id, aiConfig, perspectiveCharacterId])
 
   // A2: 按需召回 — 根据章节大纲+标题+已有文本筛选相关状态卡
   const selectiveState = useMemo(() => {
@@ -1073,7 +1129,7 @@ export default function ChapterEditor({ project, outlineNodeId }: Props) {
         chapterId,
         chapterTitle,
         chapterContent: chapter.content,
-        call: messages => chat(messages, aiConfig, {
+        call: messages => executeRegisteredAIEntryV1('prose.chapter.memory', messages, aiConfig, {
           category: 'chapter.memory',
           projectId: project.id!,
         }),
@@ -1112,112 +1168,59 @@ export default function ChapterEditor({ project, outlineNodeId }: Props) {
     })()
   }
 
-  const buildFullWorldCtx = async (taskType: MemoryTaskType = 'write') => {
+  const buildFullWorldCtx = async (
+    operation: 'generate' | 'continue',
+    taskType: MemoryTaskType = 'write',
+  ) => {
     // 引用手法注入（Phase 20）
     let citedIds: number[] = []
     try {
       citedIds = JSON.parse(creativeRules?.citedReferenceIds || '[]')
     } catch { /* ignore */ }
 
-    const stateRef = [
-      outlineNode?.title,
-      outlineNode?.summary,
-      currentChapter?.title,
-      plainText.slice(-2000),
-    ].filter(Boolean).join(' ')
-
-    const assembled = await assembleContext({
+    const generationBinding = await resolveProseGenerationExecutionBindingV2({
+      operation,
+      perspectiveCharacterId,
+    })
+    if (!currentChapter?.id || !outlineNode?.id) throw new Error('正文生成缺少目标章节或章纲。')
+    const assembled = await prepareProseGatewayAssemblyV1({
       projectId: project.id!,
       worldGroupId: chapterWorldGroupId ?? null,
-      outlineNodeId: outlineNode?.id ?? null,
-      chapterId: currentChapter?.id ?? null,
-      currentChapterOrder: currentChapter?.order ?? 0,
-      provider: aiConfig.provider,
-      model: aiConfig.model,
+      chapterId: currentChapter.id,
+      outlineNodeId: outlineNode.id,
+      operation,
+      authorRequest: [customInstruction.trim(), outlineNode.title, outlineNode.summary, plainText.slice(-2_000)]
+        .filter(Boolean).join('\n'),
+      perspectiveCharacterId,
       citedReferenceIds: citedIds,
-      stateReferenceText: stateRef,
-      extraStateIds,
-      // 角色也由同一次 assembleContext 装配，随后从主文本中拆出一次注入；
-      // 这样 durable Context Manifest 能覆盖真正发送给模型的全部注册表来源。
-      sourceKeys: [
-        'contextMemo',
-        'chapterOutline',
-        'detailedOutline', // FB-9:正文生成读入本章场景细纲
-        'chapterContinuityHandoff',
-        'previousPlanReconciliation',
-        'previousChapterEnding',
-        'recentChapterSummaries',
-        'worldview',
-        'storyCore',
-        'characterDrivenPlan',
-        'powerSystem',
-        'cultivationProgress',
-        'codex',
-        'creativeRules',
-        'worldRules',
-        'historical',
-        'locations',
-        'foreshadows',
-        'storyArcs',
-        'storylineProgress',
-        'emotionBeats',
-        'stateCards',
-        'currentFacts', // NS-4:当前章生效的已确认事实，回注生成防止前后矛盾
-        'consistencyDossier', // MEMORY-9:结构化事实/依赖/本地关键词的可追溯一致性档案
-        'canonAssertions', // CONSISTENCY-3:不依赖章节时点的已确认世界宪法
-        ...(perspectiveCharacterId != null
-          ? ['characterKnowledge'] as const
-          : []), // CONSISTENCY-2:只有明确视角时才注入该角色认知
-        'heldItems', // CONSISTENCY-1:当前已持有物品，避免新章重复写首次获得
-        'retrievedPassages', // NS-5:相关前文召回，防远距离细节/伏笔矛盾
-        'references',
-        'userStyleProfile',
-        'characters',
-      ],
-      ...(perspectiveCharacterId != null ? { characterId: perspectiveCharacterId } : {}),
+      config: aiConfig,
     })
 
-    console.log(`[assembleContext] ${taskType} 模式 — included:${assembled.included.join(',')} trimmed:${assembled.trimmed.join(',') || 'none'} tokens:${assembled.totalInputTokens}`)
+    console.log(`[ContextGateway] ${taskType} 模式 — path:${assembled.contextGatewayExecution.path} selected:${assembled.contextGatewayExecution.retrievalTrace.mandatory.length + assembled.contextGatewayExecution.retrievalTrace.autoSelected.length} tokens:${assembled.totalInputTokens}`)
 
     // Phase E: 题材约束 + 写作风格注入
     const genreCtx = buildGenreConstraintContext(project.genres?.length ? project.genres : project.genre)
     const styleCtx = project.writingStyleId ? buildStylePromptInjection(project.writingStyleId) : ''
 
-    const segmentFor = (key: string) => {
-      const index = assembled.included.indexOf(key)
-      return index >= 0 ? assembled.segments[index]?.content ?? '' : ''
-    }
-    const continuityKeys = new Set([
-      'chapterContinuityHandoff',
-      'previousPlanReconciliation',
-      'previousChapterEnding',
-      'recentChapterSummaries',
-      'characters',
-    ])
-    const assembledSegmentsWithoutContinuity = assembled.segments
-      .filter((_, index) => !continuityKeys.has(assembled.included[index]))
-    const assembledWithoutContinuity = assembledSegmentsWithoutContinuity
-      .map(segment => segment.content)
-      .join('\n\n')
-    const parts = [assembledWithoutContinuity]
+    const parts = [assembled.text]
     if (genreCtx) parts.push(genreCtx)
     if (styleCtx) parts.push(styleCtx)
-    const worldRulesIdx = assembled.included.indexOf('worldRules')
     const maxContext = aiConfig.contextWindow && aiConfig.contextWindow > 0
       ? aiConfig.contextWindow
       : getModelPreset(aiConfig.provider, aiConfig.model).maxContext
     const continuityBudgetTokens = maxContext <= 8_192 ? 3000 : maxContext <= 32_768 ? 6000 : 10_000
     return {
       text: parts.filter(Boolean).join('\n\n'),
-      segments: assembledSegmentsWithoutContinuity,
+      segments: assembled.segments,
       assembled,
-      characterContext: segmentFor('characters'),
-      worldRulesContext: worldRulesIdx >= 0 ? assembled.segments[worldRulesIdx]?.content ?? '' : '',
+      generationBinding,
+      characterContext: '',
+      worldRulesContext: '',
       continuity: {
-        handoff: segmentFor('chapterContinuityHandoff'),
-        planReconciliation: segmentFor('previousPlanReconciliation'),
-        previousTail: segmentFor('previousChapterEnding'),
-        recentSummaries: segmentFor('recentChapterSummaries'),
+        handoff: '',
+        planReconciliation: '',
+        previousTail: '',
+        recentSummaries: '',
       },
       continuityBudgetTokens,
     }
@@ -1246,14 +1249,21 @@ export default function ChapterEditor({ project, outlineNodeId }: Props) {
     prepared: PreparedGenerationNode
     messages?: ChatMessage[]
     assembled?: Awaited<ReturnType<typeof assembleContext>>
+    generationBinding: AgentSkillExecutionBindingV2
     informationBoundary: InformationBoundaryManifestV1
+    contentRevision: WorkspaceContentRevisionVectorV1
   }): Promise<void> => {
     if (!currentChapter?.id || !input.assembled) {
       throw new Error('正文生成缺少章节或受控上下文快照。')
     }
+    assertAgentSkillBindingMatchesAssemblyV2(input.generationBinding, input.assembled, '正文生成')
     const chapterId = currentChapter.id
     const chapterTitle = outlineNode?.title || currentChapter.title || '未知章节'
     const scope = await resolveScopeLike(project.id!)
+    await assertWorkspaceContentRevisionFreshV1(input.contentRevision, {
+      scope,
+      worldGroupId: chapterWorldGroupId ?? null,
+    })
     const sourceChapter = await db.chapters.get(chapterId)
     if (!sourceChapter) throw new Error('正文生成开始前找不到章节。')
     const sourceTextHash = await hashChapterText(sourceChapter.content ?? '')
@@ -1285,22 +1295,17 @@ export default function ChapterEditor({ project, outlineNodeId }: Props) {
       chapterId,
       operation: input.operation,
       semanticReview: false,
+      perspectiveCharacterId,
+      generationBinding: input.generationBinding,
     })
-    const contextManifest = await createContextManifestFromAssemblyV1({
-      runId: snapshot.run.id,
-      stepId: PROSE_GENERATION_STEP_ID_V1,
-      attempt: 1,
-      projectId: project.id!,
-      worldGroupId: chapterWorldGroupId ?? null,
-      declaredSourceKeys: PROSE_GENERATION_SOURCE_KEYS_V1,
-      assembled: input.assembled,
-      boundary: { chapterId, outlineNodeId: sourceChapter.outlineNodeId },
-      readerVersion: 'chapter-prose-generation-context-v1',
-    })
-    snapshot = await beginProseGenerationStepV1({
+    const begun = await beginProseGenerationGatewayStepV1({
       scope,
       snapshot,
-      contextManifest,
+      worldGroupId: chapterWorldGroupId ?? null,
+      chapterId,
+      outlineNodeId: sourceChapter.outlineNodeId,
+      assembled: input.assembled,
+      messages: actualMessages,
       binding: {
         operation: input.operation,
         sourceTextHash,
@@ -1310,6 +1315,9 @@ export default function ChapterEditor({ project, outlineNodeId }: Props) {
       budgetReservationTokens: generationReservation.estimatedInputTokens
         + generationReservation.reservedOutputTokens,
     })
+    snapshot = begun.snapshot
+    const gatewayAttempt = begun.attempt
+    let gatewayManifestHash = ''
     proseSnapshotRef.current = snapshot
 
     let traceError: unknown = null
@@ -1324,12 +1332,15 @@ export default function ChapterEditor({ project, outlineNodeId }: Props) {
         modelResponded: async output => {
           budget.settleCall(generationReservation, output)
           generationSettled = true
-          snapshot = await recordProseGenerationModelOutputV1({
+          const finalized = await finalizeProseGenerationGatewayStepV1({
             scope,
             snapshot,
+            attempt: gatewayAttempt,
             output: String(output ?? ''),
             usedTokens: generationReservation.estimatedInputTokens + estimateTokens(String(output ?? '')),
           })
+          snapshot = finalized.snapshot
+          gatewayManifestHash = finalized.manifest.manifestHash
           proseSnapshotRef.current = snapshot
         },
         candidateReady: async output => {
@@ -1344,14 +1355,17 @@ export default function ChapterEditor({ project, outlineNodeId }: Props) {
             worldGroupId: chapterWorldGroupId ?? null,
             operation: input.operation,
             sourceTextHash,
+            contentRevision: input.contentRevision,
             outputText,
             outputTextHash: await hashCanonicalValue(outputText),
+            gatewayEvidenceVersion: 3 as const,
             expectedContentHash: await hashChapterText(
               input.operation === 'continue'
-                ? [normalizeChapterText(sourceChapter.content ?? ''), normalizeChapterText(outputText)]
-                    .filter(Boolean)
-                    .join('\n')
-                : outputText,
+                ? [
+                    normalizeChapterText(sourceChapter.content ?? ''),
+                    normalizeProseForEditorV1(outputText),
+                  ].filter(Boolean).join('\n')
+                : normalizeProseForEditorV1(outputText),
             ),
             informationBoundaryHash: input.informationBoundary.manifestHash,
             perspectiveCharacterId,
@@ -1359,13 +1373,14 @@ export default function ChapterEditor({ project, outlineNodeId }: Props) {
             createdAt: Date.now(),
           }
           const candidateHash = await hashProseGenerationCandidateV1(baseCandidate)
+          if (!gatewayManifestHash) throw new Error('正文候选缺少已完成的 ContextManifestV3。')
           const candidate: ProseGenerationCandidateV1 = {
             ...baseCandidate,
             durable: {
               runId: snapshot.run.id,
               stepId: PROSE_GENERATION_STEP_ID_V1,
               attempt: 1,
-              contextManifestHash: contextManifest.manifestHash,
+              contextManifestHash: gatewayManifestHash,
               candidateHash,
             },
           }
@@ -1424,10 +1439,12 @@ export default function ChapterEditor({ project, outlineNodeId }: Props) {
     backgroundMemoryIds: number[],
     messages?: ChatMessage[],
     assembled?: Awaited<ReturnType<typeof assembleContext>>,
+    generationBinding?: AgentSkillExecutionBindingV2,
     informationBoundary?: InformationBoundaryManifestV1,
+    contentRevision?: WorkspaceContentRevisionVectorV1,
   ) => {
-    if (!informationBoundary) {
-      setProseGenerationError('正文生成缺少信息边界快照，已阻止模型调用。')
+    if (!informationBoundary || !generationBinding || !contentRevision) {
+      setProseGenerationError('正文生成缺少 Skill 或信息边界快照，已阻止模型调用。')
       return
     }
     ai.setOperation(operation)
@@ -1439,7 +1456,9 @@ export default function ChapterEditor({ project, outlineNodeId }: Props) {
       prepared,
       messages,
       assembled,
+      generationBinding,
       informationBoundary,
+      contentRevision,
     }).catch(error => {
       console.error('[ChapterEditor] 生成节点执行失败:', error)
     })
@@ -1452,7 +1471,9 @@ export default function ChapterEditor({ project, outlineNodeId }: Props) {
     messages: ChatMessage[],
     backgroundMemoryIds: number[],
     assembled: Awaited<ReturnType<typeof assembleContext>>,
+    generationBinding: AgentSkillExecutionBindingV2,
     informationBoundary: InformationBoundaryManifestV1,
+    contentRevision: WorkspaceContentRevisionVectorV1,
   ) => {
     const node = chapterGenerationNode(operation, category, informationBoundary)
     const prepared = prepareGenerationNode(node, messages)
@@ -1464,7 +1485,9 @@ export default function ChapterEditor({ project, outlineNodeId }: Props) {
         prepared,
         backgroundMemoryIds,
         assembled,
+        generationBinding,
         informationBoundary,
+        contentRevision,
       })
       return
     }
@@ -1476,24 +1499,42 @@ export default function ChapterEditor({ project, outlineNodeId }: Props) {
       backgroundMemoryIds,
       undefined,
       assembled,
+      generationBinding,
       informationBoundary,
+      contentRevision,
     )
   }
 
   const handleGenerate = async () => {
     if (!outlineNode) return
     setProseGenerationError('')
+    try {
+      await flushPendingEditsV1()
+    } catch (error) {
+      setProseGenerationError(error instanceof Error ? error.message : '作者编辑保存失败，已阻止正式生成。')
+      return
+    }
     await persistCurrentEditorContent()
     const backgroundMemoryIds = await prepareContinuityBeforeGeneration()
+    const scope = await resolveScopeLike(project.id!)
+    const contentRevision = await captureWorkspaceContentRevisionV1({
+      scope,
+      worldGroupId: chapterWorldGroupId ?? null,
+    })
     const {
       text: fullCtx,
       segments: assembledSegments,
       assembled,
+      generationBinding,
       characterContext,
       worldRulesContext,
       continuity,
       continuityBudgetTokens,
-    } = await buildFullWorldCtx('write')
+    } = await buildFullWorldCtx('generate', 'write')
+    await assertWorkspaceContentRevisionFreshV1(contentRevision, {
+      scope,
+      worldGroupId: chapterWorldGroupId ?? null,
+    })
     const informationBoundary = await buildChapterInformationBoundaryV1({
       scope: await resolveScopeLike(project.id!),
       chapterId: currentChapter?.id ?? null,
@@ -1529,22 +1570,40 @@ export default function ChapterEditor({ project, outlineNodeId }: Props) {
       messages,
       backgroundMemoryIds,
       assembled,
+      generationBinding,
       informationBoundary,
+      contentRevision,
     )
   }
 
   const handleContinue = async () => {
     if (!plainText || !outlineNode) return
     setProseGenerationError('')
+    try {
+      await flushPendingEditsV1()
+    } catch (error) {
+      setProseGenerationError(error instanceof Error ? error.message : '作者编辑保存失败，已阻止正式续写。')
+      return
+    }
     await persistCurrentEditorContent()
     const backgroundMemoryIds = await prepareContinuityBeforeGeneration()
+    const scope = await resolveScopeLike(project.id!)
+    const contentRevision = await captureWorkspaceContentRevisionV1({
+      scope,
+      worldGroupId: chapterWorldGroupId ?? null,
+    })
     const {
       text: fullCtx,
       assembled,
+      generationBinding,
       characterContext,
       continuity,
       continuityBudgetTokens,
-    } = await buildFullWorldCtx('write')
+    } = await buildFullWorldCtx('continue', 'write')
+    await assertWorkspaceContentRevisionFreshV1(contentRevision, {
+      scope,
+      worldGroupId: chapterWorldGroupId ?? null,
+    })
     const informationBoundary = await buildChapterInformationBoundaryV1({
       scope: await resolveScopeLike(project.id!),
       chapterId: currentChapter?.id ?? null,
@@ -1568,7 +1627,9 @@ export default function ChapterEditor({ project, outlineNodeId }: Props) {
       messages,
       backgroundMemoryIds,
       assembled,
+      generationBinding,
       informationBoundary,
+      contentRevision,
     )
   }
 
@@ -1577,7 +1638,9 @@ export default function ChapterEditor({ project, outlineNodeId }: Props) {
     if (!selected) return
     const messages = buildPolishPrompt(selected, customInstruction || '优化文笔，使表达更生动')
     ai.setOperation('polish')
-    ai.start(messages, undefined, { category: 'chapter.polish', projectId: project.id! })
+    ai.start(messages, undefined, {
+      formalEntryId: 'prose.selection.polish', category: 'chapter.polish', projectId: project.id!,
+    })
   }
 
   const handleExpand = () => {
@@ -1585,7 +1648,9 @@ export default function ChapterEditor({ project, outlineNodeId }: Props) {
     if (!selected) return
     const messages = buildExpandPrompt(selected, customInstruction.trim() || undefined)
     ai.setOperation('expand')
-    ai.start(messages, undefined, { category: 'chapter.expand', projectId: project.id! })
+    ai.start(messages, undefined, {
+      formalEntryId: 'prose.selection.expand', category: 'chapter.expand', projectId: project.id!,
+    })
   }
 
   const handleDeAI = async () => {
@@ -1605,12 +1670,14 @@ export default function ChapterEditor({ project, outlineNodeId }: Props) {
     if (!ok) return
     const messages = buildDeAIPrompt(target)
     ai.setOperation(isFull ? 'deai-full' : 'deai')
-    ai.start(messages, undefined, { category: 'chapter.deai', projectId: project.id! })
+    ai.start(messages, undefined, {
+      formalEntryId: 'prose.selection.deai', category: 'chapter.deai', projectId: project.id!,
+    })
   }
 
   // G8：按审校报告让 AI 改全文 —— 走和「生成正文」相同的预览→采纳/关闭流程
   const handleReviseByReport = async (report: ReviewResult) => {
-    if (!plainText.trim()) return
+    if (!plainText.trim() || !currentChapter?.id || !outlineNode?.id) return
     const ok = await dialog.confirm({
       title: '按审校报告让 AI 改全文？',
       message: `将依据本章审校报告修改整章正文（约 ${countWords(plainText)} 字），篇幅与原文保持相近。改写结果会先预览，确认后才替换原文。`,
@@ -1618,9 +1685,22 @@ export default function ChapterEditor({ project, outlineNodeId }: Props) {
     })
     if (!ok) return
     reviseReportRef.current = report
-    const messages = buildReviewRevisePrompt(plainText, report, worldCtx, charCtx)
+    await persistCurrentEditorContent()
+    const assembled = await prepareProseGatewayAssemblyV1({
+      projectId: project.id!,
+      worldGroupId: chapterWorldGroupId ?? null,
+      chapterId: currentChapter.id,
+      outlineNodeId: outlineNode.id,
+      operation: 'revise',
+      authorRequest: `按审校报告修订本章：${JSON.stringify(report)}`,
+      perspectiveCharacterId,
+      config: aiConfig,
+    })
+    const messages = buildReviewRevisePrompt(plainText, report, assembled.text, '')
     ai.setOperation('revise-full')
-    ai.start(messages, undefined, { category: 'review.revise', projectId: project.id! })
+    ai.start(messages, undefined, {
+      formalEntryId: 'prose.chapter.revise', category: 'review.revise', projectId: project.id!,
+    })
   }
 
   const handleRunChapterOrganization = async (force = false) => {
@@ -1727,10 +1807,11 @@ export default function ChapterEditor({ project, outlineNodeId }: Props) {
         knownItemNames: itemEntries.map(entry => entry.itemName),
         existingRelations,
         foreshadows: useForeshadowStore.getState().foreshadows,
+        storyArcs,
         // 正文已在专用区完整提供；这里只追加其它登记来源，避免正文重复消耗 tokens。
         contextSnapshot: organizationContextSnapshot,
         budget,
-        call: messages => chat(messages, aiConfig, {
+        call: messages => executeRegisteredAIEntryV1('prose.chapter.organize', messages, aiConfig, {
           category: 'chapter.organize',
           projectId: project.id!,
           configOverrides: { maxTokens: 8_000 },
@@ -1830,7 +1911,7 @@ export default function ChapterEditor({ project, outlineNodeId }: Props) {
             updatePostAdoptionSnapshot(verified.snapshot)
           } catch (verificationError) {
             // 其它后处理步骤可能仍在运行；终态验证会在最后一步完成后重试。
-            console.info('[ChapterPostAdoption] 六域采纳后暂不能签发终态回执:', verificationError)
+            console.info('[ChapterPostAdoption] 七域采纳后暂不能签发终态回执:', verificationError)
             try {
               updatePostAdoptionSnapshot(await readAgentRunV1(workspaceScope, snapshot.run.id))
             } catch {
@@ -1872,7 +1953,7 @@ export default function ChapterEditor({ project, outlineNodeId }: Props) {
                 scope: staleScope,
                 runId: organizationRun.candidate.durable.runId,
                 candidateHash: organizationRun.candidate.durable.candidateHash,
-                reason: '正文已变化；作者确认前的六域交接候选已失效。',
+                reason: '正文已变化；作者确认前的七域交接候选已失效。',
               })
             } else {
               await markChapterOrganizationStaleV1({
@@ -1903,9 +1984,16 @@ export default function ChapterEditor({ project, outlineNodeId }: Props) {
       const graph = await buildEditImpactGraphV1(project.id, currentChapter.id)
       const remediationPlan = await buildImpactRemediationPlanV1(graph)
       const impactScope = await resolveScopeLike(project.id)
-      const reviewRecords = await readImpactAuthorReviewsV1({ scope: impactScope, plan: remediationPlan })
+      const [reviewRecords, futurePlan] = await Promise.all([
+        readImpactAuthorReviewsV1({ scope: impactScope, plan: remediationPlan }),
+        buildFutureEvolutionPlanV1({
+          scope: impactScope,
+          worldGroupId: chapterWorldGroupId ?? null,
+        }),
+      ])
       setImpactGraph(graph)
       setImpactRemediationPlan(remediationPlan)
+      setFutureEvolutionPlan(futurePlan)
       setImpactPostCorrectionReplan(null)
       setImpactDownstreamSchedule(null)
       setImpactRemediationReceipt(null)
@@ -1942,6 +2030,7 @@ export default function ChapterEditor({ project, outlineNodeId }: Props) {
         demotedFacts > 0 ? `其中 ${demotedFacts} 条证据已失效→标记 stale 待复核` : '证据均仍成立',
         `建议复核后续 ${graph.downstreamChapterIds.length} 章、${graph.nodes.filter(node => node.kind === 'summary').length} 个摘要节点`,
         `治理计划 ${remediationPlan.counts.deterministic} 项可确定性重建、${remediationPlan.counts.authorConfirmed} 项须作者确认`,
+        `未来边界保护 ${futurePlan.frontier.protectedOutlineNodeIds.length} 章、允许继续规划 ${futurePlan.frontier.futureOutlineNodeIds.length} 章`,
         `证据指纹 ${graph.graphHash.slice(0, 12)}`,
       ]
       setImpactInfo(parts.join('；'))
@@ -1963,6 +2052,7 @@ export default function ChapterEditor({ project, outlineNodeId }: Props) {
     setImpactInfo(null)
     setImpactGraph(null)
     setImpactRemediationPlan(null)
+    setFutureEvolutionPlan(null)
     setImpactPostCorrectionReplan(null)
     setImpactDownstreamSchedule(null)
     setImpactRemediationReceipt(null)
@@ -2394,6 +2484,7 @@ export default function ChapterEditor({ project, outlineNodeId }: Props) {
         projectId: project.id!,
         ...task,
         call: messages => memoryAI.start(messages, undefined, {
+          formalEntryId: 'prose.chapter.memory',
           category: 'chapter.memory',
           projectId: project.id!,
         }),
@@ -2426,7 +2517,7 @@ export default function ChapterEditor({ project, outlineNodeId }: Props) {
   }
 
   const handleConfirmActualProgress = async () => {
-    if (!currentChapter?.id || !currentChapter.planReconciliation) return
+    if (!currentChapter?.id || !currentChapter.planReconciliation || reconciliationAction) return
     const reconciliation = currentChapter.planReconciliation
     const confirmedActualProgress = [
       ...reconciliation.completedGoals.map(item => `已完成：${item.text}`),
@@ -2434,31 +2525,47 @@ export default function ChapterEditor({ project, outlineNodeId }: Props) {
       ...reconciliation.newConstraints.map(item => `新增约束：${item.text}`),
       ...reconciliation.unfinishedGoals.map(item => `仍未完成：${item.text}`),
     ].join('；')
-    await updateChapter(currentChapter.id, {
-      planReconciliation: {
-        ...reconciliation,
-        reviewStatus: 'confirmed-constraint',
-        confirmedActualProgress,
-        reviewedAt: Date.now(),
-      },
-    })
+    setReconciliationAction('actual-progress')
+    setReconciliationActionError('')
+    try {
+      await updateChapter(currentChapter.id, {
+        planReconciliation: {
+          ...reconciliation,
+          reviewStatus: 'confirmed-constraint',
+          confirmedActualProgress,
+          reviewedAt: Date.now(),
+        },
+      })
+    } catch (error) {
+      setReconciliationActionError(error instanceof Error ? error.message : '实际进展约束写入失败，请重试。')
+    } finally {
+      setReconciliationAction(null)
+    }
   }
 
   const handleApplyOutlineCandidate = async () => {
     const reconciliation = currentChapter?.planReconciliation
-    if (!currentChapter?.id || !outlineNode?.id || !reconciliation?.proposedOutlineSummary) return
-    await updateNode(outlineNode.id, { summary: reconciliation.proposedOutlineSummary })
-    await updateChapter(currentChapter.id, {
-      planReconciliation: {
-        ...reconciliation,
-        reviewStatus: 'applied-outline',
-        reviewedAt: Date.now(),
-      },
-    })
+    if (!currentChapter?.id || !outlineNode?.id || !reconciliation?.proposedOutlineSummary || reconciliationAction) return
+    setReconciliationAction('outline')
+    setReconciliationActionError('')
+    try {
+      await updateNode(outlineNode.id, { summary: reconciliation.proposedOutlineSummary })
+      await updateChapter(currentChapter.id, {
+        planReconciliation: {
+          ...reconciliation,
+          reviewStatus: 'applied-outline',
+          reviewedAt: Date.now(),
+        },
+      })
+    } catch (error) {
+      setReconciliationActionError(error instanceof Error ? error.message : '本章章纲更新失败，请重试。')
+    } finally {
+      setReconciliationAction(null)
+    }
   }
 
   // HARNESS-20/41: 正文采纳后的单一 post-adoption barrier。
-  // 六域结构抽取复用“整理本章”Agent；检索、章节记忆和确定性一致性守卫均有独立证据。
+  // 七域结构抽取复用“整理本章”Agent；检索、章节记忆和确定性一致性守卫均有独立证据。
   const handleAutoPostGenerate = async (task: {
     chapterId: number
     chapterTitle: string
@@ -2483,6 +2590,8 @@ export default function ChapterEditor({ project, outlineNodeId }: Props) {
       : null
     const transitionWorldGroupId = transitionOutline?.worldGroupId ?? chapterWorldGroupId ?? null
     const expectedSourceTextHash = await hashChapterText(task.chapterContent)
+    const organizationRequestConfig = resolveRequestConfig(aiConfig, { category: 'chapter.organize' }).config
+    const memoryRequestConfig = resolveRequestConfig(aiConfig, { category: 'chapter.memory' }).config
     setTransitionError('')
     setTransitionCandidate(null)
     transitionCandidateRef.current = null
@@ -2510,14 +2619,17 @@ export default function ChapterEditor({ project, outlineNodeId }: Props) {
     transitionSnapshotRef.current = snapshot
     snapshot = await scheduleChapterPostAdoptionStepsV1({ scope, snapshot })
 
-    const assembledFor = async (sourceKeys: readonly string[]) => assembleContext({
+    const assembledFor = async (
+      sourceKeys: readonly string[],
+      requestConfig = aiConfig,
+    ) => assembleContext({
       projectId: project.id!,
       scope,
       worldGroupId: transitionWorldGroupId,
       chapterId: task.chapterId,
       outlineNodeId: transitionChapter?.outlineNodeId ?? null,
-      provider: aiConfig.provider,
-      model: aiConfig.model,
+      provider: requestConfig.provider,
+      model: requestConfig.model,
       sourceKeys: [...sourceKeys],
       stateReferenceText: task.chapterPlainText,
       extraStateIds,
@@ -2551,14 +2663,13 @@ export default function ChapterEditor({ project, outlineNodeId }: Props) {
       setPostAdoptionChainState(chapterPostAdoptionChainStateV1(next))
     }
     const shouldRunStep = (stepId: ChapterPostAdoptionStepIdV1): boolean => {
-      if (task.resumeRunId == null) return true
       return isChapterPostAdoptionStepRunnableV1(
         buildChapterPostAdoptionResumePlanV1(snapshot),
         stepId,
       )
     }
 
-    // 1. 一次综合抽取六域候选；作者确认前业务表零写入。
+    // 1. 一次综合抽取七域候选；作者确认前业务表零写入。
     if (!shouldRunStep(CHAPTER_POST_ADOPTION_STEP_IDS_V1.organization)) {
       if (snapshot.projection.steps[CHAPTER_POST_ADOPTION_STEP_IDS_V1.organization]?.status === 'awaiting_confirmation') {
         setShowOrganization(true)
@@ -2567,7 +2678,10 @@ export default function ChapterEditor({ project, outlineNodeId }: Props) {
     setAutoProcessing('extracting')
     try {
       await ensureFresh()
-      const organizationAssembly = await assembledFor(CHAPTER_POST_ADOPTION_STEP_SOURCE_KEYS_V1.organization)
+      const organizationAssembly = await assembledFor(
+        CHAPTER_POST_ADOPTION_STEP_SOURCE_KEYS_V1.organization,
+        organizationRequestConfig,
+      )
       const organizationManifest = await manifestFor(
         CHAPTER_POST_ADOPTION_STEP_IDS_V1.organization,
         1,
@@ -2580,6 +2694,10 @@ export default function ChapterEditor({ project, outlineNodeId }: Props) {
         stepId: CHAPTER_POST_ADOPTION_STEP_IDS_V1.organization,
         contextManifest: organizationManifest,
         binding: { chapterId: task.chapterId, sourceTextHash: expectedSourceTextHash },
+        modelIdentity: {
+          provider: organizationRequestConfig.provider,
+          model: organizationRequestConfig.model,
+        },
       }))
       const [allRelations] = await Promise.all([
         db.characterRelations.where('projectId').equals(project.id!).toArray(),
@@ -2613,9 +2731,10 @@ export default function ChapterEditor({ project, outlineNodeId }: Props) {
         knownItemNames: itemEntries.map(entry => entry.itemName),
         existingRelations,
         foreshadows: useForeshadowStore.getState().foreshadows,
+        storyArcs,
         contextSnapshot: organizationContextSnapshot,
         budget,
-        call: messages => chat(messages, aiConfig, {
+        call: messages => executeRegisteredAIEntryV1('prose.chapter.organize', messages, aiConfig, {
           category: 'chapter.organize',
           projectId: project.id!,
           configOverrides: { maxTokens: 8_000 },
@@ -2658,7 +2777,7 @@ export default function ChapterEditor({ project, outlineNodeId }: Props) {
         ...failure,
       }))
       if (!controller.signal.aborted) {
-        setTransitionError(error instanceof Error ? error.message : '六域交接候选生成失败')
+        setTransitionError(error instanceof Error ? error.message : '七域交接候选生成失败')
       }
       if (controller.signal.aborted) return
     } finally {
@@ -2669,7 +2788,10 @@ export default function ChapterEditor({ project, outlineNodeId }: Props) {
     // 2. summary + handoff 仍只调用一次模型，并由原子 CAS 写回 chapters。
     if (shouldRunStep(CHAPTER_POST_ADOPTION_STEP_IDS_V1.memory)) try {
       await ensureFresh()
-      const memoryAssembly = await assembledFor(CHAPTER_POST_ADOPTION_STEP_SOURCE_KEYS_V1.memory)
+      const memoryAssembly = await assembledFor(
+        CHAPTER_POST_ADOPTION_STEP_SOURCE_KEYS_V1.memory,
+        memoryRequestConfig,
+      )
       updateSnapshot(await beginChapterPostAdoptionStepV1({
         scope,
         snapshot,
@@ -2681,6 +2803,10 @@ export default function ChapterEditor({ project, outlineNodeId }: Props) {
           memoryAssembly,
         ),
         binding: { chapterId: task.chapterId, sourceTextHash: expectedSourceTextHash },
+        modelIdentity: {
+          provider: memoryRequestConfig.provider,
+          model: memoryRequestConfig.model,
+        },
       }))
       const result = await handleChapterMemory({
         chapterId: task.chapterId,
@@ -2822,10 +2948,6 @@ export default function ChapterEditor({ project, outlineNodeId }: Props) {
       setConsistencyRun(run)
       setConsistencyCurrent(true)
       useReviewResultStore.getState().setConsistency(task.chapterId, toConsistencyAuditResult(durableGuard))
-      if (snapshot.projection.steps[CHAPTER_POST_ADOPTION_STEP_IDS_V1.organization]?.status === 'succeeded') {
-        const verified = await verifyChapterPostAdoptionRunV1({ scope, runId: snapshot.run.id })
-        updateSnapshot(verified.snapshot)
-      }
     } catch (error) {
       const failure = await classifyAgentRunFailureV1(error)
       updateSnapshot(await failChapterPostAdoptionStepV1({
@@ -2836,9 +2958,133 @@ export default function ChapterEditor({ project, outlineNodeId }: Props) {
       }))
       setTransitionError(error instanceof Error ? error.message : '正文一致性守卫失败')
     }
+
+    const selectedStepIds = (snapshot.contract.automationAuthorization?.taskTypes
+      ?? ['organization', 'memory', 'retrieval', 'consistency']).map(taskType => (
+      taskType === 'organization' ? CHAPTER_POST_ADOPTION_STEP_IDS_V1.organization
+        : taskType === 'memory' ? CHAPTER_POST_ADOPTION_STEP_IDS_V1.memory
+          : taskType === 'retrieval' ? CHAPTER_POST_ADOPTION_STEP_IDS_V1.retrieval
+            : CHAPTER_POST_ADOPTION_STEP_IDS_V1.consistency
+    ))
+    if (selectedStepIds.every(stepId => snapshot.projection.steps[stepId]?.status === 'succeeded')) {
+      try {
+        const verified = await verifyChapterPostAdoptionRunV1({ scope, runId: snapshot.run.id })
+        updateSnapshot(verified.snapshot)
+      } catch (error) {
+        setTransitionError(error instanceof Error ? error.message : '章后终态验证失败')
+      }
+    }
     } finally {
       if (organizationAbortRef.current === controller) organizationAbortRef.current = null
       setOrganizingChapter(false)
+    }
+  }
+
+  const preparePostAdoptionAfterCommit = async (task: {
+    chapterId: number
+    chapterTitle: string
+    chapterContent: string
+    chapterPlainText: string
+    parent?: {
+      runId: number
+      receiptHash: string
+      artifactHash: string
+    }
+  }) => {
+    const scope = await resolveScopeLike(project.id!)
+    const invalidation = await invalidateChapterPostAdoptionDerivativesV1({
+      scope,
+      chapterId: task.chapterId,
+    })
+    setPostAdoptionInvalidation(invalidation)
+    const settings = await readWorkPostAdoptionSettingsV1(scope)
+    setPostAdoptionSettings(settings)
+    if (settings.policy === 'off') {
+      setPostAdoptionRunId(null)
+      setPostAdoptionChainState(null)
+      setTransitionError('正文已采纳并完成本地失效标记；当前 Work 已关闭章后 AI 任务。')
+      return
+    }
+    const sourceTextHash = await hashChapterText(task.chapterContent)
+    const organizationRoute = resolveRequestConfig(aiConfig, { category: 'chapter.organize' }).config
+    const memoryRoute = resolveRequestConfig(aiConfig, { category: 'chapter.memory' }).config
+    const authorization = await buildPostAdoptionAuthorizationSnapshotV1({
+      scope,
+      chapterId: task.chapterId,
+      sourceTextHash,
+      modelRoutes: [
+        { taskType: 'organization', provider: organizationRoute.provider, model: organizationRoute.model },
+        { taskType: 'memory', provider: memoryRoute.provider, model: memoryRoute.model },
+      ],
+      settings,
+    })
+    if (settings.policy === 'auto-with-budget') {
+      const preflight = preflightPostAdoptionAutoV1(authorization)
+      if (!preflight.allowed) {
+        setPostAdoptionRunId(null)
+        setPostAdoptionChainState(null)
+        setTransitionError(`章后自动任务已在调用前停止：${preflight.reason}`)
+        return
+      }
+    }
+    const chapter = await db.chapters.get(task.chapterId)
+    const transitionOutline = chapter?.outlineNodeId != null
+      ? await db.outlineNodes.get(chapter.outlineNodeId)
+      : null
+    const snapshot = await createChapterPostAdoptionDurableRunV1({
+      scope,
+      worldGroupId: transitionOutline?.worldGroupId ?? chapterWorldGroupId ?? null,
+      chapterId: task.chapterId,
+      parent: task.parent,
+      authorization,
+    })
+    updatePostAdoptionSnapshot(snapshot)
+    if (settings.policy === 'suggest') return
+    await handleAutoPostGenerate({ ...task, resumeRunId: snapshot.run.id })
+  }
+
+  const handleAuthorizePostAdoption = async () => {
+    if (!currentChapter?.id || postAdoptionRunId == null || organizingChapter) return
+    try {
+      const scope = await resolveScopeLike(project.id!)
+      let snapshot = await readAgentRunV1(scope, postAdoptionRunId)
+      snapshot = await authorizeChapterPostAdoptionV1({ scope, snapshot, source: 'author-click' })
+      updatePostAdoptionSnapshot(snapshot)
+      await handleAutoPostGenerate({
+        chapterId: currentChapter.id,
+        chapterTitle: outlineNode?.title || currentChapter.title || '未知章节',
+        chapterContent: currentChapter.content ?? content,
+        chapterPlainText: htmlToPlainText(currentChapter.content ?? content),
+        resumeRunId: snapshot.run.id,
+      })
+    } catch (error) {
+      setTransitionError(error instanceof Error ? error.message : '章后建议授权失败')
+    }
+  }
+
+  const handleRejectPostAdoption = async () => {
+    if (postAdoptionRunId == null) return
+    try {
+      const scope = await resolveScopeLike(project.id!)
+      const snapshot = await rejectChapterPostAdoptionAuthorizationV1({
+        scope,
+        snapshot: await readAgentRunV1(scope, postAdoptionRunId),
+      })
+      updatePostAdoptionSnapshot(snapshot)
+      setTransitionError('已保留本地失效标记，未启动章后模型任务。')
+    } catch (error) {
+      setTransitionError(error instanceof Error ? error.message : '章后建议拒绝失败')
+    }
+  }
+
+  const persistPostAdoptionSettings = async (next: ResolvedPostAdoptionSettingsV1) => {
+    try {
+      const scope = editorWorkspaceScope ?? await resolveScopeLike(project.id!)
+      const saved = await updateWorkPostAdoptionSettingsV1({ scope, settings: next })
+      setPostAdoptionSettings(saved)
+      setTransitionError('')
+    } catch (error) {
+      setTransitionError(error instanceof Error ? error.message : '章后策略保存失败')
     }
   }
 
@@ -2871,10 +3117,8 @@ export default function ChapterEditor({ project, outlineNodeId }: Props) {
       })
       return
     }
-    // G6：去掉段落之间的多余空行——丢弃纯空行，每个非空行成一段，段间距交给 CSS（不要空段落）
-    const normalizeProse = (t: string) =>
-      t.split(/\r?\n/).map(l => l.trimEnd()).filter(l => l.trim().length > 0).join('\n')
-    const html = plainTextToHtml(normalizeProse(text))
+    // G6：候选哈希和编辑器写入复用同一个纯文本规范化规则。
+    const html = plainTextToHtml(normalizeProseForEditorV1(text))
     const shouldAutoProcess = aiAction === 'generate' || aiAction === 'continue'
 
     // H7:正文生成/续写的确认先经过 durable candidate + adopt(CAS)，再更新编辑器。
@@ -2883,7 +3127,7 @@ export default function ChapterEditor({ project, outlineNodeId }: Props) {
     if (durableCandidate && durableCandidate.operation === aiAction) {
       const beforeHtml = editorRef.current.getHTML()
       let fullHtml = html
-      let fullText = normalizeProse(text)
+      let fullText = normalizeProseForEditorV1(text)
       if (aiAction === 'continue') {
         editorRef.current.appendContent(html)
         fullHtml = editorRef.current.getHTML()
@@ -2910,7 +3154,7 @@ export default function ChapterEditor({ project, outlineNodeId }: Props) {
         setContent(fullHtml)
         setPlainText(fullText)
         setSavedContent(fullHtml)
-        void handleAutoPostGenerate({
+        void preparePostAdoptionAfterCommit({
           chapterId: acceptedChapterId,
           chapterTitle: acceptedChapterTitle,
           chapterContent: fullHtml,
@@ -2969,7 +3213,7 @@ export default function ChapterEditor({ project, outlineNodeId }: Props) {
       setContent(fullHtml)
       setPlainText(fullText)
       setSavedContent(fullHtml)
-      void handleAutoPostGenerate({
+      void preparePostAdoptionAfterCommit({
         chapterId: acceptedChapterId,
         chapterTitle: acceptedChapterTitle,
         chapterContent: fullHtml,
@@ -3093,6 +3337,7 @@ export default function ChapterEditor({ project, outlineNodeId }: Props) {
           analyzingImpact={analyzingImpact}
           impactInfo={impactInfo}
           impactRemediationPlan={impactRemediationPlan}
+          futureEvolutionPlan={futureEvolutionPlan}
           impactDownstreamSchedule={impactDownstreamSchedule}
           impactRemediationBusy={impactRemediationBusy}
           impactRemediationReceipt={impactRemediationReceipt}
@@ -3303,7 +3548,9 @@ export default function ChapterEditor({ project, outlineNodeId }: Props) {
                 pending.backgroundMemoryIds,
                 messages,
                 pending.assembled,
+                pending.generationBinding,
                 pending.informationBoundary,
+                pending.contentRevision,
               )
             }}
           />
@@ -3348,6 +3595,88 @@ export default function ChapterEditor({ project, outlineNodeId }: Props) {
         </div>
       )}
 
+      {postAdoptionSettings && (
+        <details className="mb-3 rounded-lg border border-border bg-bg-surface p-3 text-xs text-text-secondary">
+          <summary className="cursor-pointer font-medium text-text-primary">正文采纳后的演化策略</summary>
+          <div className="mt-3 space-y-3">
+            <label className="flex flex-wrap items-center gap-2">
+              <span>运行方式</span>
+              <select
+                value={postAdoptionSettings.policy}
+                onChange={event => void persistPostAdoptionSettings({
+                  ...postAdoptionSettings,
+                  policy: event.target.value as ResolvedPostAdoptionSettingsV1['policy'],
+                })}
+                className="rounded border border-border bg-bg-base px-2 py-1 text-text-primary"
+              >
+                <option value="off">关闭（只做本地失效标记）</option>
+                <option value="suggest">建议（默认，确认后运行）</option>
+                <option value="auto-with-budget">预算内自动运行</option>
+              </select>
+            </label>
+            <div className="flex flex-wrap gap-3">
+              {(['organization', 'memory', 'retrieval', 'consistency'] as const).map(taskType => (
+                <label key={taskType} className="inline-flex items-center gap-1">
+                  <input
+                    type="checkbox"
+                    checked={postAdoptionSettings.taskTypes.includes(taskType)}
+                    onChange={event => void persistPostAdoptionSettings({
+                      ...postAdoptionSettings,
+                      taskTypes: event.target.checked
+                        ? [...postAdoptionSettings.taskTypes, taskType]
+                        : postAdoptionSettings.taskTypes.filter(item => item !== taskType),
+                    })}
+                    className="accent-accent"
+                  />
+                  {taskType === 'organization' ? '七域候选'
+                    : taskType === 'memory' ? '章节记忆'
+                      : taskType === 'retrieval' ? '检索重建'
+                        : '一致性守卫'}
+                </label>
+              ))}
+            </div>
+            {postAdoptionSettings.policy === 'auto-with-budget' && (
+              <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                {([
+                  ['maxModelCalls', '调用上限', 1],
+                  ['maxInputTokens', '输入 token', 1000],
+                  ['maxOutputTokens', '输出 token', 1000],
+                  ['maxCostUsd', '费用上限 USD', 0.01],
+                ] as const).map(([key, label, step]) => (
+                  <label key={key} className="space-y-1">
+                    <span className="block text-text-muted">{label}</span>
+                    <input
+                      type="number"
+                      min={0}
+                      step={step}
+                      defaultValue={postAdoptionSettings.budget[key]}
+                      onBlur={event => void persistPostAdoptionSettings({
+                        ...postAdoptionSettings,
+                        budget: { ...postAdoptionSettings.budget, [key]: Number(event.target.value) },
+                      })}
+                      className="w-full rounded border border-border bg-bg-base px-2 py-1 text-text-primary"
+                    />
+                  </label>
+                ))}
+                <label className="col-span-2 inline-flex items-center gap-2 sm:col-span-4">
+                  <input
+                    type="checkbox"
+                    checked={postAdoptionSettings.budget.allowUnknownCost}
+                    onChange={event => void persistPostAdoptionSettings({
+                      ...postAdoptionSettings,
+                      budget: { ...postAdoptionSettings.budget, allowUnknownCost: event.target.checked },
+                    })}
+                    className="accent-accent"
+                  />
+                  允许免费或尚无可信价格表的模型在其它预算通过时自动运行
+                </label>
+              </div>
+            )}
+            <p className="text-text-muted">检索依赖章节记忆，一致性守卫依赖检索；保存时会自动补齐必要前置任务。</p>
+          </div>
+        </details>
+      )}
+
       {/* Phase A1/A3: 自动后处理状态指示 */}
       {autoProcessing !== 'idle' && (
         <div className="mb-3 p-3 bg-emerald-500/10 border border-emerald-500/20 rounded-lg">
@@ -3363,12 +3692,19 @@ export default function ChapterEditor({ project, outlineNodeId }: Props) {
           ? 'bg-amber-500/10 border-amber-500/20 text-amber-300'
           : 'bg-sky-500/10 border-sky-500/20 text-sky-300'}`}>
           <div>
-            章节后处理 Run #{postAdoptionRunId ?? transitionRunId ?? '—'} · 六域交接、章节记忆、检索与一致性守卫统一记录，可恢复
+            章节后处理 Run #{postAdoptionRunId ?? transitionRunId ?? '—'} · 七域交接、章节记忆、检索与一致性守卫统一记录，可恢复
           </div>
+          {postAdoptionInvalidation && (
+            <div className="mt-1">
+              本地失效：清理检索块 {postAdoptionInvalidation.deletedChunks}，标记摘要 {postAdoptionInvalidation.staleSummaries}，降级失证事实 {postAdoptionInvalidation.demotedFacts}。
+            </div>
+          )}
           {postAdoptionChainState && (
             <div className="mt-1">
               全链状态：{postAdoptionChainState === 'downstream-completed'
                 ? '正文与章后交接均已完成'
+                : postAdoptionChainState === 'downstream-suggested'
+                  ? '正文已完成，章后任务等待作者启动'
                 : postAdoptionChainState === 'downstream-awaiting-confirmation'
                   ? '正文已完成，章后交接等待作者确认'
                   : postAdoptionChainState === 'downstream-failed'
@@ -3383,12 +3719,44 @@ export default function ChapterEditor({ project, outlineNodeId }: Props) {
             </div>
           )}
           {organizationRun?.candidate.durable?.stepId === CHAPTER_POST_ADOPTION_STEP_IDS_V1.organization && (
-            <div className="mt-1">六域交接候选待作者确认，确认后才会写入状态、事实、物品、年表、关系与伏笔。</div>
+            <div className="mt-1">七域交接候选待作者确认，确认后才会写入状态、事实、物品、年表、关系、伏笔与故事线。</div>
           )}
           {transitionCandidate && transitionCandidate.stateDiffs.length > 0 && (
             <div className="mt-1">状态候选待作者确认：{transitionCandidate.stateDiffs.length} 条</div>
           )}
           {transitionError && <div className="mt-1">{transitionError}</div>}
+          {postAdoptionChainState === 'downstream-suggested' && transitionSnapshotRef.current?.contract.automationAuthorization && (
+            <div className="mt-2 rounded border border-sky-400/20 bg-sky-950/20 p-2">
+              <div>
+                预计 {transitionSnapshotRef.current.contract.automationAuthorization.estimate.modelCalls} 次模型调用；输入约 {transitionSnapshotRef.current.contract.automationAuthorization.estimate.inputTokensMin.toLocaleString()}–{transitionSnapshotRef.current.contract.automationAuthorization.estimate.inputTokensMax.toLocaleString()} tokens；输出约 {transitionSnapshotRef.current.contract.automationAuthorization.estimate.outputTokensMin.toLocaleString()}–{transitionSnapshotRef.current.contract.automationAuthorization.estimate.outputTokensMax.toLocaleString()} tokens。
+              </div>
+              <div className="mt-1 text-sky-200/80">
+                任务：{transitionSnapshotRef.current.contract.automationAuthorization.taskTypes.join('、')}；
+                路由：{transitionSnapshotRef.current.contract.automationAuthorization.modelRoutes?.map(route => `${route.taskType}=${route.provider}/${route.model}`).join('；') || '旧版运行未冻结'}；
+                预计费用：{transitionSnapshotRef.current.contract.automationAuthorization.estimate.costUsdMax == null
+                  ? '未知（自动模式需另行授权未知价格）'
+                  : `$${transitionSnapshotRef.current.contract.automationAuthorization.estimate.costUsdMin?.toFixed(4)}–$${transitionSnapshotRef.current.contract.automationAuthorization.estimate.costUsdMax.toFixed(4)}`}。
+              </div>
+              <div className="mt-2 flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  className="rounded bg-sky-500 px-2 py-1 text-[11px] font-medium text-white disabled:opacity-50"
+                  onClick={() => void handleAuthorizePostAdoption()}
+                  disabled={organizingChapter}
+                >
+                  确认并开始章后任务
+                </button>
+                <button
+                  type="button"
+                  className="rounded border border-sky-400/30 px-2 py-1 text-[11px] text-sky-200 disabled:opacity-50"
+                  onClick={() => void handleRejectPostAdoption()}
+                  disabled={organizingChapter}
+                >
+                  本次不运行
+                </button>
+              </div>
+            </div>
+          )}
           {postAdoptionChainState === 'downstream-failed' && (
             <button
               type="button"
@@ -3407,6 +3775,8 @@ export default function ChapterEditor({ project, outlineNodeId }: Props) {
         summary={currentChapter.summary}
         hasText={!!plainText}
         memoryBusy={autoProcessing === 'memory' || memoryAI.isStreaming}
+        reconciliationBusy={reconciliationAction}
+        reconciliationError={reconciliationActionError}
         reconciliation={currentChapter.planReconciliation}
         reconciliationCurrent={planReconciliationCurrent}
         onGenerateMemory={() => { void handleManualMemory() }}

@@ -157,8 +157,8 @@ function stableFacts(rows: readonly TemporalFact[]): StableTemporalFactV1[] {
     .map(row => JSON.parse(canonicalStringify(row)) as StableTemporalFactV1)
 }
 
-function stripFactId(row: TemporalFact): Record<string, unknown> {
-  const { id: _id, ...rest } = row
+function stripFactId(row: object): Record<string, unknown> {
+  const { id: _id, ragDocumentId: _ragDocumentId, ...rest } = row as Record<string, unknown>
   return JSON.parse(canonicalStringify(rest)) as Record<string, unknown>
 }
 
@@ -421,10 +421,9 @@ async function currentEvidence(scope: WorkspaceScope, candidate: ConstitutionExt
   const originalIds = new Set(candidate.originalFacts.map(row => row.id))
   const currentById = new Map(current.originalFacts.map(row => [row.id, row]))
   const originalUnchanged = candidate.originalFacts.every(row => canonicalStringify(currentById.get(row.id)) === canonicalStringify(row))
-  const added = current.originalFacts.filter(row => !originalIds.has(row.id)).map(row => {
-    const { id: _id, ...rest } = row
-    return rest
-  })
+  const added = current.originalFacts
+    .filter(row => !originalIds.has(row.id))
+    .map(row => stripFactId(row))
   return {
     sourcesFresh: await hashCanonicalValue(current.sources) === candidate.sourcesHash,
     subjectsFresh: await hashCanonicalValue(current.subjects) === candidate.subjectsHash,

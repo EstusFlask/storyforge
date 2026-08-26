@@ -186,7 +186,7 @@ async function runVariantCase(input: {
     })
     const transformed = await session.sourceTransformer({
       source: {
-        key: 'worldview',
+        key: 'ragSelection',
         label: 'H17 合成世界上下文',
         layer: 'L2',
         budgetTokens: input.contextTargetTokens,

@@ -1,8 +1,11 @@
 import type { CreativeArtifactIssueV1 } from './creative-reliability'
+import {
+  evaluateStructuredOutputV1,
+  StructuredOutputPipelineErrorV1,
+  type StructuredOutputNormalizationStepV1,
+} from './structured-output-pipeline'
 
-export type CreativeJsonNormalizationStepV1 =
-  | 'trim-outer-whitespace'
-  | 'remove-single-json-fence'
+export type CreativeJsonNormalizationStepV1 = StructuredOutputNormalizationStepV1
 
 export interface CreativeJsonEnvelopeResultV1 {
   version: 1
@@ -13,85 +16,61 @@ export interface CreativeJsonEnvelopeResultV1 {
   issues: CreativeArtifactIssueV1[]
 }
 
-function issue(code: string, path: string, message: string): CreativeArtifactIssueV1 {
-  return {
+function creativeCode(code: string): string {
+  if (code === 'structured-output-invalid-json') return 'creative-json-invalid'
+  if (code === 'structured-output-root-mismatch') return 'creative-json-not-single-object'
+  return 'creative-json-not-single-object'
+}
+
+function creativeIssue(error: StructuredOutputPipelineErrorV1): CreativeArtifactIssueV1[] {
+  return error.evidence.issues.map(item => ({
     version: 1,
-    code,
+    code: creativeCode(item.code),
     severity: 'error',
-    disposition: 'repairable',
-    path,
-    message,
-    suggestedAction: 'repair-once',
+    disposition: item.repairable ? 'repairable' : 'blocking',
+    path: item.path,
+    message: item.message,
+    suggestedAction: item.repairable ? 'repair-once' : 'replan',
     evidenceRefs: [],
     deterministic: true,
-  }
+  }))
 }
 
 /**
- * 只执行能够证明语义无损的 JSON 外壳归一化。它不会从解释文字中搜索对象、
- * 不会选择多个对象，也不会补字段或猜测领域语义。
+ * CreativeArtifact compatibility adapter over the single WEH-0E structured
+ * output pipeline. It accepts only deterministic envelope salvage and never
+ * invents fields or creative content.
  */
 export function normalizeCreativeJsonEnvelopeV1(raw: string): CreativeJsonEnvelopeResultV1 {
-  const originalText = raw
-  let normalizedText = raw
-  const steps: CreativeJsonNormalizationStepV1[] = []
-  const trimmed = normalizedText.trim()
-  if (trimmed !== normalizedText) {
-    normalizedText = trimmed
-    steps.push('trim-outer-whitespace')
-  }
-
-  const fence = normalizedText.match(/^```(?:json)?\s*\n([\s\S]*?)\n```$/i)
-  if (fence) {
-    normalizedText = fence[1].trim()
-    steps.push('remove-single-json-fence')
-  }
-
-  if (!normalizedText.startsWith('{') || !normalizedText.endsWith('}')) {
-    return {
-      version: 1,
-      originalText,
-      normalizedText,
-      value: null,
-      steps,
-      issues: [issue(
-        'creative-json-not-single-object',
-        '$',
-        '模型响应必须是单个 JSON 对象；解释文字、多个对象或数组外壳不能自动猜测。',
-      )],
-    }
-  }
-
-  let value: unknown
   try {
-    value = JSON.parse(normalizedText)
-  } catch {
+    const result = evaluateStructuredOutputV1({
+      raw,
+      contract: {
+        version: 1,
+        schemaId: 'creative-json-object-envelope.v1',
+        target: 'creative-candidate',
+        root: 'object',
+        maxChars: 120_000,
+      },
+      parse: value => value as Record<string, unknown>,
+    })
     return {
       version: 1,
-      originalText,
-      normalizedText,
-      value: null,
-      steps,
-      issues: [issue('creative-json-invalid', '$', '模型响应不是有效 JSON。')],
+      originalText: raw,
+      normalizedText: result.evidence.normalizedText,
+      value: result.output,
+      steps: result.evidence.normalizationSteps,
+      issues: [],
     }
-  }
-  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+  } catch (error) {
+    if (!(error instanceof StructuredOutputPipelineErrorV1)) throw error
     return {
       version: 1,
-      originalText,
-      normalizedText,
+      originalText: raw,
+      normalizedText: error.evidence.normalizedText,
       value: null,
-      steps,
-      issues: [issue('creative-json-root-not-object', '$', '模型响应根必须是 JSON 对象。')],
+      steps: error.evidence.normalizationSteps,
+      issues: creativeIssue(error),
     }
-  }
-  return {
-    version: 1,
-    originalText,
-    normalizedText,
-    value: value as Record<string, unknown>,
-    steps,
-    issues: [],
   }
 }
-

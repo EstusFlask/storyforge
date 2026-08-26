@@ -20,8 +20,12 @@ export function createChapterGenerationNode(input: {
     editableInput: true,
     assembleInput: messages => messages.map(message => ({ ...message })),
     run: messages => category === 'chapter.content'
-      ? ai.start(messages, undefined, { category: 'chapter.content', projectId })
-      : ai.start(messages, undefined, { category: 'chapter.continue', projectId }),
+      ? ai.start(messages, undefined, {
+        formalEntryId: 'prose.chapter.generate', category: 'chapter.content', projectId,
+      })
+      : ai.start(messages, undefined, {
+        formalEntryId: 'prose.chapter.continue', category: 'chapter.continue', projectId,
+      }),
     ...(gate ? { gate } : {}),
   }
 }

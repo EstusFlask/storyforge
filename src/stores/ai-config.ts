@@ -4,6 +4,7 @@ import { normalizeProviderModel, PROVIDER_PRESETS } from '../lib/types'
 import { createLog, updateLog } from '../lib/ai/logger'
 import { nanoid } from '../lib/utils/id'
 import { buildOpenAIEndpoint, normalizeOpenAIBaseUrl } from '../lib/ai/openai-endpoint'
+import { isProviderQuotaRejectionV1 } from '../lib/ai/provider-rejection'
 import {
   sanitizeAITaskRoutes,
   type AITaskKind,
@@ -169,6 +170,8 @@ function saveCreativeQualityMode(mode: CreativeQualityModeV1): void {
 function getChineseExplanation(status: number, msg: string): string {
   const lower = msg.toLowerCase()
 
+  if (lower.includes('user location is not supported'))
+    return '当前请求所在地不在该平台 API 支持范围内；更换模型或 Key 不会解决，需要从受支持地区访问'
   if (lower.includes('无可用渠道') || lower.includes('distributor'))
     return '该模型当前无可用上游渠道，请切换其他模型或稍后重试'
   if (lower.includes('api key format is incorrect'))
@@ -180,8 +183,8 @@ function getChineseExplanation(status: number, msg: string): string {
     || lower.includes('account overdue')
     || lower.includes('accountoverdueerror')
   ) return '账户存在逾期欠费，本次请求已在账户校验层被阻断；结清欠费后再重试'
-  if (lower.includes('insufficient balance') || lower.includes('insufficient_balance'))
-    return '账户余额不足，请充值后使用'
+  if (isProviderQuotaRejectionV1({ status, message: msg }))
+    return '账户余额不足或配额已用完，本次请求未获 Provider 执行；补足额度后再重试'
 
   // 按 HTTP 状态码
   if (status === 401) return 'API Key 无效或已过期'
@@ -468,7 +471,10 @@ export const useAIConfigStore = create<AIConfigStore>((set, get) => ({
     const url = buildOpenAIEndpoint(normalized.baseUrl, 'chat/completions')
     const startTime = Date.now()
     const controller = new AbortController()
-    const timeoutId = window.setTimeout(() => controller.abort(), 15_000)
+    // NVIDIA 的托管开发端点常有冷启动；连接探活只限制输出，不把首 token
+    // 超过 15 秒误判为 Key/模型失效。真实生成仍由调用方自己的 signal 控制。
+    const timeoutMs = config.provider === 'nvidia' ? 60_000 : 20_000
+    const timeoutId = window.setTimeout(() => controller.abort(), timeoutMs)
 
     // 创建日志
     const log = createLog({
@@ -490,6 +496,7 @@ export const useAIConfigStore = create<AIConfigStore>((set, get) => ({
         body: JSON.stringify({
           model: config.model,
           messages: [{ role: 'user', content: '请回复"连接成功"' }],
+          max_tokens: 32,
         }),
       })
 
@@ -499,18 +506,27 @@ export const useAIConfigStore = create<AIConfigStore>((set, get) => ({
       if (response.ok) {
         updateLog(log.id, { status: 'success', statusCode: response.status, duration, responseBody: bodyText.slice(0, 200) })
         const prefix = normalized.warnings.length ? `${normalized.warnings.join(' ')} ` : ''
-        return { ok: true, message: `✅ ${prefix}连接成功`, statusCode: response.status, duration }
+        return {
+          ok: true,
+          message: `✅ ${prefix}最小连接成功；仅证明当前模型可完成短请求，不代表长输出或批量评测额度`,
+          statusCode: response.status,
+          duration,
+        }
       }
 
       // 解析错误信息
       let rawErrorMsg = `HTTP ${response.status}`
       try {
-        const errJson = JSON.parse(bodyText)
+        const parsed = JSON.parse(bodyText)
+        // Gemini OpenAI compatibility can wrap its normal error object in a
+        // one-element array. Normalize both shapes before classification.
+        const errJson = Array.isArray(parsed) ? parsed[0] : parsed
         if (errJson.error?.message) rawErrorMsg = errJson.error.message
         else if (errJson.message) rawErrorMsg = errJson.message
         else if (errJson.error_msg) rawErrorMsg = errJson.error_msg
+        else if (bodyText.trim()) rawErrorMsg = bodyText.slice(0, 500)
       } catch {
-        if (bodyText.length < 200) rawErrorMsg += ': ' + bodyText
+        if (bodyText.trim()) rawErrorMsg += ': ' + bodyText.slice(0, 500)
       }
 
       // 常见英文错误 → 中文翻译映射

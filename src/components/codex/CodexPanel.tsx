@@ -26,6 +26,7 @@ import { resolveScopeLike } from '../../lib/world-engine/scope'
 import {
   abandonCodexExtractionV1,
   adoptCodexExtractionCandidateV1,
+  generateCodexEnrichmentCandidateV1,
   generateCodexExtractionCandidateV1,
   readPendingCodexExtractionCandidateV1,
   readRecoverableCodexExtractionV1,
@@ -79,6 +80,7 @@ export default function CodexPanel({ project, fixedDomain, fixedCategoryKeys, em
   // 词条排序方式:order=手动顺序 / importance=重要度降序 / pinyin=拼音首字母
   const [sortMode, setSortMode] = useState<'order' | 'importance' | 'pinyin'>('order')
   const [extractOpen, setExtractOpen] = useState(false)
+  const [candidateOperation, setCandidateOperation] = useState<'extract' | 'enrich'>('extract')
   const [extractText, setExtractText] = useState('')
   const [supplementTags, setSupplementTags] = useState(true)
   const [extracting, setExtracting] = useState(false)
@@ -211,12 +213,13 @@ export default function CodexPanel({ project, fixedDomain, fixedCategoryKeys, em
     if (activeEntryId === entry.id) setActiveEntryId(null)
   }
 
-  const openExtractor = () => {
+  const openExtractor = (operation: 'extract' | 'enrich') => {
     if (!scopeReady) {
       toast.error('世界数据尚未加载完成，请稍后再试。')
       return
     }
-    setExtractText(extractionSourceText)
+    setCandidateOperation(operation)
+    setExtractText(operation === 'extract' ? extractionSourceText : '')
     setCandidates([])
     setSelectedCandidates(new Set())
     setSelectionFrozen(false)
@@ -230,7 +233,10 @@ export default function CodexPanel({ project, fixedDomain, fixedCategoryKeys, em
     if (!extractOpen || !activeCat?.id || !scopeReady) return
     let active = true
     void resolveScopeLike(projectId).then(async scope => {
-      const filter = { scope, categoryId: activeCat.id!, worldGroupId: scopedWorldGroupId ?? null }
+      const filter = {
+        scope, categoryId: activeCat.id!, worldGroupId: scopedWorldGroupId ?? null,
+        operation: candidateOperation,
+      }
       const pending = await readPendingCodexExtractionCandidateV1(filter)
       return { pending, recoverable: pending ? null : await readRecoverableCodexExtractionV1(filter) }
     }).then(result => {
@@ -238,7 +244,9 @@ export default function CodexPanel({ project, fixedDomain, fixedCategoryKeys, em
       if (result.pending) {
         setExtractRunId(result.pending.snapshot.run.id)
         setCandidates(result.pending.candidate.entries)
-        setExtractText(result.pending.candidate.plan.request.sourceText)
+        setExtractText((result.pending.candidate.plan.request.operation ?? 'extract') === 'extract'
+          ? result.pending.candidate.plan.request.sourceText
+          : result.pending.candidate.plan.request.authorRequest)
         setSupplementTags(result.pending.candidate.plan.request.supplementTags)
         setSelectedCandidates(new Set(
           result.pending.selectedIndexes ?? result.pending.candidate.entries.map((_, index) => index),
@@ -252,7 +260,9 @@ export default function CodexPanel({ project, fixedDomain, fixedCategoryKeys, em
           safeToResume: result.recoverable.safeToResume,
         })
         if (result.recoverable.request) {
-          setExtractText(result.recoverable.request.sourceText)
+          setExtractText((result.recoverable.request.operation ?? 'extract') === 'extract'
+            ? result.recoverable.request.sourceText
+            : result.recoverable.request.authorRequest ?? '')
           setSupplementTags(result.recoverable.request.supplementTags)
         }
       }
@@ -260,18 +270,23 @@ export default function CodexPanel({ project, fixedDomain, fixedCategoryKeys, em
       if (active) setExtractError(error instanceof Error ? error.message : 'Codex 提取运行恢复失败')
     })
     return () => { active = false }
-  }, [activeCat?.id, extractOpen, projectId, scopeReady, scopedWorldGroupId])
+  }, [activeCat?.id, candidateOperation, extractOpen, projectId, scopeReady, scopedWorldGroupId])
 
   const reconcileExtractionState = async () => {
     if (!activeCat?.id || !scopeReady) return
     const scope = await resolveScopeLike(projectId)
-    const filter = { scope, categoryId: activeCat.id, worldGroupId: scopedWorldGroupId ?? null }
+    const filter = {
+      scope, categoryId: activeCat.id, worldGroupId: scopedWorldGroupId ?? null,
+      operation: candidateOperation,
+    }
     const pending = await readPendingCodexExtractionCandidateV1(filter)
     if (pending) {
       setExtractRunId(pending.snapshot.run.id)
       setRecoverable(null)
       setCandidates(pending.candidate.entries)
-      setExtractText(pending.candidate.plan.request.sourceText)
+      setExtractText((pending.candidate.plan.request.operation ?? 'extract') === 'extract'
+        ? pending.candidate.plan.request.sourceText
+        : pending.candidate.plan.request.authorRequest)
       setSupplementTags(pending.candidate.plan.request.supplementTags)
       setSelectedCandidates(new Set(
         pending.selectedIndexes ?? pending.candidate.entries.map((_, index) => index),
@@ -291,34 +306,48 @@ export default function CodexPanel({ project, fixedDomain, fixedCategoryKeys, em
       safeToResume: recovery.safeToResume,
     } : null)
     if (recovery?.request) {
-      setExtractText(recovery.request.sourceText)
+      setExtractText((recovery.request.operation ?? 'extract') === 'extract'
+        ? recovery.request.sourceText
+        : recovery.request.authorRequest ?? '')
       setSupplementTags(recovery.request.supplementTags)
     }
   }
 
   const handleExtractEntries = async () => {
     if (!activeCat || !extractText.trim()) return
-    const effectiveConfig = resolveRequestConfig(aiConfig, { category: 'codex.extract' }).config
+    const effectiveConfig = resolveRequestConfig(aiConfig, {
+      category: candidateOperation === 'extract' ? 'codex.extract' : 'codex.enrich',
+    }).config
     if (!isAIConfigReady(effectiveConfig)) { toast.error(getAIConfigRequiredMessage(effectiveConfig)); return }
     setExtracting(true)
     setExtractError(null)
     try {
-      const generated = await generateCodexExtractionCandidateV1({
-        scope: await resolveScopeLike(projectId),
-        request: {
-          categoryId: activeCat.id!,
-          worldGroupId: scopedWorldGroupId ?? null,
-          sourceText: extractText,
-          supplementTags,
-        },
-        aiConfig,
-      })
+      const shared = {
+        scope: await resolveScopeLike(projectId), aiConfig,
+      }
+      const generated = candidateOperation === 'extract'
+        ? await generateCodexExtractionCandidateV1({
+            ...shared,
+            request: {
+              categoryId: activeCat.id!, worldGroupId: scopedWorldGroupId ?? null,
+              sourceText: extractText, supplementTags,
+            },
+          })
+        : await generateCodexEnrichmentCandidateV1({
+            ...shared,
+            request: {
+              categoryId: activeCat.id!, worldGroupId: scopedWorldGroupId ?? null,
+              authorRequest: extractText, supplementTags,
+            },
+          })
       setExtractRunId(generated.snapshot.run.id)
       setRecoverable(null)
       setCandidates(generated.candidate.entries)
       setSelectedCandidates(new Set(generated.candidate.entries.map((_, index) => index)))
       setSelectionFrozen(false)
-      if (!generated.candidate.entries.length) toast.info('AI 未从这段内容中识别出可独立登记的词条。')
+      if (!generated.candidate.entries.length) toast.info(candidateOperation === 'extract'
+        ? 'AI 未从这段内容中识别出可独立登记的词条。'
+        : 'AI 未提出可单独确认的新词条建议。')
     } catch (error) {
       setExtractError(error instanceof Error ? error.message : 'Codex 词条提取失败')
       try {
@@ -531,11 +560,18 @@ export default function CodexPanel({ project, fixedDomain, fixedCategoryKeys, em
           </div>
           <div className="m-2 space-y-1.5">
             <button
-              onClick={openExtractor}
+              onClick={() => openExtractor('extract')}
               disabled={!activeCatId || !scopeReady}
               className="w-full px-2 py-1.5 text-xs rounded-lg border border-accent/30 text-accent hover:bg-accent/10 disabled:opacity-40 inline-flex items-center justify-center gap-1"
             >
               <Sparkles className="w-3.5 h-3.5" /> AI 从内容拆分词条
+            </button>
+            <button
+              onClick={() => openExtractor('enrich')}
+              disabled={!activeCatId || !scopeReady}
+              className="w-full px-2 py-1.5 text-xs rounded-lg border border-violet-500/30 text-violet-400 hover:bg-violet-500/10 disabled:opacity-40 inline-flex items-center justify-center gap-1"
+            >
+              <Sparkles className="w-3.5 h-3.5" /> AI 补全新词条建议
             </button>
             <button
               onClick={handleAddEntry}
@@ -589,8 +625,15 @@ export default function CodexPanel({ project, fixedDomain, fixedCategoryKeys, em
           <div className="w-full max-w-2xl max-h-[85vh] overflow-y-auto bg-bg-surface border border-border rounded-xl p-4 space-y-3" onClick={e => e.stopPropagation()}>
             <div className="flex items-center justify-between">
               <div>
-                <h3 className="font-semibold text-text-primary">AI 拆分「{activeCat.name}」词条</h3>
-                <p className="text-xs text-text-muted">AI 只生成候选，确认后才原子写入；既有同名项会排除，并发变化会拒绝采纳。</p>
+                <h3 className="font-semibold text-text-primary">
+                  {candidateOperation === 'extract' ? 'AI 逐字证据拆分' : 'AI 创意补全建议'}「{activeCat.name}」
+                </h3>
+                <p className="text-xs text-text-muted">
+                  {candidateOperation === 'extract'
+                    ? '抽取只允许原文中有逐字引文的词条。'
+                    : '补全可创造新内容，但会明确标记为“AI 新建建议”。'}
+                  候选确认后才原子写入，两种运行分别确认。
+                </p>
               </div>
               <button disabled={extracting} className="disabled:opacity-40" onClick={() => {
                 if (extracting) return
@@ -601,7 +644,9 @@ export default function CodexPanel({ project, fixedDomain, fixedCategoryKeys, em
             </div>
             <textarea value={extractText} onChange={e => setExtractText(e.target.value)} rows={8}
               disabled={extractRunId != null || recoverable != null}
-              placeholder="粘贴或编辑要拆分的整段设定内容"
+              placeholder={candidateOperation === 'extract'
+                ? '粘贴或编辑要拆分的整段设定内容'
+                : '说明希望补全的方向，例如“为当前种族补充两个可推动剧情的民族分支”'}
               className="w-full p-3 bg-bg-base border border-border rounded-lg text-sm text-text-primary resize-y disabled:opacity-60" />
             <label className="flex items-start gap-2 text-xs text-text-secondary">
               <input type="checkbox" checked={supplementTags} onChange={e => setSupplementTags(e.target.checked)}
@@ -611,7 +656,9 @@ export default function CodexPanel({ project, fixedDomain, fixedCategoryKeys, em
             <button onClick={handleExtractEntries} disabled={extracting || !extractText.trim() || extractRunId != null || recoverable != null}
               className="px-3 py-1.5 bg-accent text-white rounded-lg text-sm disabled:opacity-40 inline-flex items-center gap-1.5">
               {extracting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
-              {extracting ? 'AI 拆分中…' : '开始拆分'}
+              {extracting
+                ? candidateOperation === 'extract' ? 'AI 拆分中…' : 'AI 补全中…'
+                : candidateOperation === 'extract' ? '开始拆分' : '生成补全建议'}
             </button>
             {recoverable && (
               <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-3 text-xs text-text-secondary">
@@ -654,6 +701,15 @@ export default function CodexPanel({ project, fixedDomain, fixedCategoryKeys, em
                     <div className="min-w-0">
                       <div className="font-medium text-sm text-text-primary">{item.name}</div>
                       <div className="text-xs text-text-muted">{item.summary}</div>
+                      {item.provenance === 'ai-created-suggestion' ? (
+                        <div className="mt-1 text-[10px] text-violet-400">AI 新建建议 · 非原文抽取</div>
+                      ) : item.evidenceQuotes?.length ? (
+                        <div className="mt-1 space-y-0.5 text-[10px] text-emerald-400">
+                          {item.evidenceQuotes.map((quote, quoteIndex) => (
+                            <div key={quoteIndex}>原文证据：“{quote}”</div>
+                          ))}
+                        </div>
+                      ) : null}
                       {item.tags.length > 0 && <div className="mt-1 text-[10px] text-accent">{item.tags.map(t => `#${t}`).join(' ')}</div>}
                     </div>
                   </label>

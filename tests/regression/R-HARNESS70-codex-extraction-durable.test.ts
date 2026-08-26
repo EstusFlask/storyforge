@@ -6,6 +6,7 @@ import { exportProjectJSON, importProjectJSON } from '../../src/lib/export/json-
 import { getAgentSkillV1 } from '../../src/lib/agent/skill-registry'
 import { CONTEXT_SOURCE_BY_KEY } from '../../src/lib/registry/context-sources'
 import { PROJECT_TABLES } from '../../src/lib/registry/project-tables'
+import { backfillResourceUidsV1 } from '../../src/lib/context-gateway/resource-identity'
 import { parseCodexEntriesStrictV1 } from '../../src/lib/ai/adapters/structured-extract-adapter'
 import * as codexAdapter from '../../src/lib/ai/adapters/structured-extract-adapter'
 import {
@@ -48,6 +49,7 @@ async function seed(suffix = '') {
     description: '生于旧港。', fields: JSON.stringify({ habitat: '旧港' }), refs: '{}', tags: '[]',
     importance: 1, order: 0, createdAt: now, updatedAt: now,
   } as any) as number
+  await backfillResourceUidsV1(projectId)
   return {
     scope: { projectId, worldId, workId } satisfies WorkspaceScope,
     projectId, worldId, workId, worldGroupId, categoryId, existingId,
@@ -58,6 +60,7 @@ function entry(name: string, habitat = '月潮湿地') {
   return {
     name, icon: '🌱', summary: `${name}会随月潮发光。`, description: `${name}只在退潮后成熟。`,
     fields: { habitat }, tags: ['月潮', '灵植'], importance: 3,
+    evidenceQuotes: [name], provenance: 'verbatim-extraction' as const,
   }
 }
 
@@ -65,7 +68,7 @@ function response(...entries: ReturnType<typeof entry>[]) {
   return JSON.stringify(entries)
 }
 
-function request(fixture: Awaited<ReturnType<typeof seed>>, sourceText = '月栖花生于月潮湿地，只在退潮后成熟。') {
+function request(fixture: Awaited<ReturnType<typeof seed>>, sourceText = '月栖花生于月潮湿地，只在退潮后成熟。星露藤与它共生。') {
   return {
     categoryId: fixture.categoryId,
     worldGroupId: fixture.worldGroupId,
@@ -83,7 +86,8 @@ describe.sequential('R-HARNESS70 · Codex 词条 durable 分块抽取与原子�
     expect(PROJECT_TABLES.find(item => item.name === 'codexEntries')).toMatchObject({ exportable: true, worldScoped: true })
     expect(getAgentSkillV1('world-origin.codex-extract')).toMatchObject({
       agentId: 'world-origin', executionMode: 'codex-extract',
-      contextSourceKeys: ['manualText', 'codexExtractionBaseline'],
+      contextSourceKeys: ['manualText', 'ragSelection'],
+      contextGateway: { rollout: 'required', providerSourceKeys: ['ragSelection'] },
       writeTargets: [{ table: 'codexEntries' }],
     })
     const fixture = await seed()
@@ -138,28 +142,29 @@ describe.sequential('R-HARNESS70 · Codex 词条 durable 分块抽取与原子�
 
   it('严格协议拒绝围栏、额外字段、未知 schema、类型修复、重复名和非法 importance', () => {
     const valid = entry('月栖花')
-    expect(() => parseCodexEntriesStrictV1(`\`\`\`json\n${response(valid)}\n\`\`\``, ['habitat'])).toThrow('严格 JSON')
-    expect(() => parseCodexEntriesStrictV1(JSON.stringify([{ ...valid, extra: true }]), ['habitat'])).toThrow('字段')
-    expect(() => parseCodexEntriesStrictV1(JSON.stringify([{ ...valid, fields: { unknown: '值' } }]), ['habitat'])).toThrow('未登记字段')
-    expect(() => parseCodexEntriesStrictV1(JSON.stringify([{ ...valid, tags: '月潮' }]), ['habitat'])).toThrow('类型')
-    expect(() => parseCodexEntriesStrictV1(JSON.stringify([valid, valid]), ['habitat'])).toThrow('名称重复')
-    expect(() => parseCodexEntriesStrictV1(JSON.stringify([{ ...valid, importance: 9 }]), ['habitat'])).toThrow('范围')
-    expect(() => parseCodexEntriesStrictV1(JSON.stringify([{ ...valid, summary: '' }]), ['habitat'])).toThrow('范围')
+    const policy = { operation: 'extract' as const, sourceText: '月栖花生于月潮湿地。' }
+    expect(() => parseCodexEntriesStrictV1(`\`\`\`json\n${response(valid)}\n\`\`\``, ['habitat'], policy)).toThrow('严格 JSON')
+    expect(() => parseCodexEntriesStrictV1(JSON.stringify([{ ...valid, extra: true }]), ['habitat'], policy)).toThrow('字段')
+    expect(() => parseCodexEntriesStrictV1(JSON.stringify([{ ...valid, fields: { unknown: '值' } }]), ['habitat'], policy)).toThrow('未登记字段')
+    expect(() => parseCodexEntriesStrictV1(JSON.stringify([{ ...valid, tags: '月潮' }]), ['habitat'], policy)).toThrow('类型')
+    expect(() => parseCodexEntriesStrictV1(JSON.stringify([valid, valid]), ['habitat'], policy)).toThrow('名称重复')
+    expect(() => parseCodexEntriesStrictV1(JSON.stringify([{ ...valid, importance: 9 }]), ['habitat'], policy)).toThrow('范围')
+    expect(() => parseCodexEntriesStrictV1(JSON.stringify([{ ...valid, summary: '' }]), ['habitat'], policy)).toThrow('范围')
     expect(() => parseCodexEntriesStrictV1(JSON.stringify([{ ...valid, fields: { tier: '越界' } }]), [
       { key: 'tier', label: '品级', type: 'select', options: ['凡品', '灵品'] },
-    ])).toThrow('登记选项')
+    ], policy)).toThrow('登记选项')
     expect(() => parseCodexEntriesStrictV1(JSON.stringify([{ ...valid, fields: { age: '千年' } }]), [
       { key: 'age', label: '年份', type: 'number' },
-    ])).toThrow('数值字段')
+    ], policy)).toThrow('数值字段')
     expect(() => parseCodexEntriesStrictV1(JSON.stringify([{ ...valid, fields: { origin: '月港' } }]), [
       { key: 'origin', label: '来源', type: 'ref' },
-    ])).toThrow('不得伪造引用')
+    ], policy)).toThrow('不得伪造引用')
   })
 
   it('模型重复已有词条或前置分块候选时整次失败，不静默去重', async () => {
     const existing = await seed('existing-name')
     await expect(generateCodexExtractionCandidateV1({
-      scope: existing.scope, request: request(existing),
+      scope: existing.scope, request: request(existing, '旧潮草生于旧港。'),
       runAI: async () => response(entry('旧潮草')),
     })).rejects.toThrow('重复输出已有词条')
 
@@ -182,7 +187,7 @@ describe.sequential('R-HARNESS70 · Codex 词条 durable 分块抽取与原子�
     await expect(generateCodexExtractionCandidateV1({
       scope: fixture.scope,
       request: request(fixture),
-      runAI: async () => response({ ...entry('星露藤'), tags: [] }),
+      runAI: async () => response({ ...entry('月栖花'), tags: [] }),
     })).rejects.toThrow('标签数量')
   })
 

@@ -1,8 +1,15 @@
 import { db } from '../../db/schema'
 import { adopt } from '../../registry/adopt'
 import { hashChapterText, CHAPTER_TEXT_NORMALIZATION_VERSION } from '../../ai/chapter-memory/text-normalization'
-import type { AgentConversation, AgentEvent, Chapter, WorkspaceScope } from '../../types'
-import type { ContextManifestV1, VerificationReceiptV1 } from '../../types/agent-run'
+import type { AgentConversation, AgentEvent, Chapter, ChatMessage, WorkspaceScope } from '../../types'
+import type {
+  AgentRunFormalAIEntryBindingV1,
+  ContextManifestV1,
+  ContextManifestV2,
+  ContextManifestV3,
+  VerificationReceiptV1,
+} from '../../types/agent-run'
+import type { AssembleContextResult } from '../../registry/types'
 import {
   appendAgentRunEventV1,
   createAgentRunV1,
@@ -11,6 +18,7 @@ import {
 } from './event-store'
 import { createVerificationReceiptV1 } from './verification-receipt'
 import { hashCanonicalValue } from './hash'
+import { createContextManifestFromAssemblyV1, createContextManifestV2FromV1 } from './context-manifest'
 import {
   assertRecordInScope,
   readOwnedRows,
@@ -31,10 +39,35 @@ import {
 import { AgentTeamBudgetTracker, type AgentTeamBudgetEvidence } from '../team-budget'
 import {
   assertAgentSkillExecutionBindingV1,
+  assertAgentSkillExecutionBindingIntegrityV2,
   createAgentSkillExecutionBindingV1,
+  createAgentSkillExecutionBindingV2,
 } from '../execution-binding'
-import { getAgentSkillV1 } from '../skill-registry'
-import type { AgentSkillExecutionBindingV1 } from '../../types/agent-run'
+import { getAgentSkillV1, resolveAgentSkillContextSourceKeysV1 } from '../skill-registry'
+import type {
+  AgentRunContractV2,
+  AgentRunContractV3,
+  AgentRunStepExecutionBindingV2,
+  AgentSkillExecutionBindingV1,
+  AgentSkillExecutionBindingV2,
+} from '../../types/agent-run'
+import {
+  assertWorkspaceContentRevisionFreshV1,
+  parseWorkspaceContentRevisionV1,
+  type WorkspaceContentRevisionVectorV1,
+} from '../../authoring/content-revision'
+import {
+  assertFormalAIEntrySnapshotIntegrityV1,
+  freezeFormalAIEntryBindingV1,
+} from '../formal-ai-entry'
+import {
+  finalizeContextGatewayAttemptEvidenceV1,
+  recordContextGatewayPreflightEvidenceV1,
+  type ContextGatewayPreflightEvidenceV1,
+} from '../../context-gateway/attempt-evidence'
+import type { ContextGatewayExecutionV1 } from '../../context-gateway/execution'
+import { assertContextGatewayCandidateAdoptableV1 } from '../../context-gateway/execution'
+import { proseGatewayExecutionFromAssemblyV1 } from '../../prose/gateway-context'
 
 export const PROSE_GENERATION_STEP_ID_V1 = 'prose-generation'
 export const PROSE_SEMANTIC_REVIEW_STEP_ID_V1 = 'prose-semantic-review'
@@ -45,46 +78,35 @@ export const PROSE_GENERATION_VERIFIER_SET_V2 = 'prose-generation-terminal-v2-in
 export const PROSE_GENERATION_VERIFIER_SET_V3 = 'prose-generation-terminal-v3-semantic-review'
 export const PROSE_GENERATION_CANDIDATE_TYPE_V1 = 'prose-generation-candidate'
 
-/**
- * These are the sources used by the chapter editor's actual generation
- * prompt. Keeping the list here makes the durable contract auditable and
- * prevents a future prompt edit from silently widening the read boundary.
- */
-export const PROSE_GENERATION_SOURCE_KEYS_V1 = [
-  'contextMemo',
-  'chapterOutline',
-  'detailedOutline',
-  'chapterContinuityHandoff',
-  'previousPlanReconciliation',
-  'previousChapterEnding',
-  'recentChapterSummaries',
-  'worldview',
-  'storyCore',
-  'characterDrivenPlan',
-  'powerSystem',
-  'cultivationProgress',
-  'codex',
-  'creativeRules',
-  'worldRules',
-  'historical',
-  'locations',
-  'foreshadows',
-  'storyArcs',
-  'storylineProgress',
-  'emotionBeats',
-  'stateCards',
-  'currentFacts',
-  'consistencyDossier',
-  'canonAssertions',
-  'characterKnowledge',
-  'heldItems',
-  'retrievedPassages',
-  'references',
-  'userStyleProfile',
-  'characters',
-] as const
+/** Historical read-only alias. Formal V2 runs resolve the exact runtime set. */
+export const PROSE_GENERATION_SOURCE_KEYS_V1: readonly string[] = Object.freeze(
+  resolveAgentSkillContextSourceKeysV1(
+    getAgentSkillV1('prose.generate', 'prose'),
+  ),
+)
 
 export type ProseGenerationOperationV1 = 'generate' | 'continue'
+
+export function proseGenerationFormalEntryIdV1(operation: ProseGenerationOperationV1): string {
+  return operation === 'continue' ? 'prose.chapter.continue' : 'prose.chapter.generate'
+}
+
+export async function resolveProseGenerationExecutionBindingV2(input: {
+  operation: ProseGenerationOperationV1
+  perspectiveCharacterId?: number | null
+}): Promise<AgentSkillExecutionBindingV2> {
+  const skill = getAgentSkillV1(`prose.${input.operation}`, 'prose')
+  return createAgentSkillExecutionBindingV2(skill, {
+    // Perspective-scoped knowledge is selected inside the single ragSelection
+    // Gateway packet; it is no longer a second optional CONTEXT_SOURCES read.
+    optionalContextActivations: [],
+    writeTargets: [{
+      table: 'chapters',
+      fields: ['content', 'wordCount'],
+      mode: 'author-confirmed',
+    }],
+  })
+}
 
 export interface ProseGenerationDurableEvidenceV1 {
   runId: number
@@ -112,8 +134,12 @@ export interface ProseGenerationCandidateV1 {
   operation: ProseGenerationOperationV1
   /** Hash of the chapter content at the moment the model request started. */
   sourceTextHash: string
+  /** Absent on candidates generated before WEH-0C. */
+  contentRevision?: WorkspaceContentRevisionVectorV1
   outputText: string
   outputTextHash: string
+  /** Present when exact Context Gateway V3 evidence is required for adoption. */
+  gatewayEvidenceVersion?: 3
   /** Expected normalized chapter hash after this candidate is adopted. */
   expectedContentHash: string
   /** H9：新候选绑定生成时的信息边界；旧候选缺省以保持刷新恢复兼容。 */
@@ -148,6 +174,7 @@ export function buildProseGenerationRunContractV1(input: {
   chapterId: number
   operation: ProseGenerationOperationV1
   semanticReview?: boolean
+  formalEntry?: AgentRunFormalAIEntryBindingV1
 }) {
   const semanticReview = input.semanticReview === true
   const generationSkill = getAgentSkillV1(
@@ -175,7 +202,7 @@ export function buildProseGenerationRunContractV1(input: {
     },
     ...(semanticReview ? {
       executionBindings: [
-        { stepId: PROSE_GENERATION_STEP_ID_V1, ...createAgentSkillExecutionBindingV1(generationSkill) },
+        { stepId: PROSE_GENERATION_STEP_ID_V1, ...createAgentSkillExecutionBindingV1(generationSkill), ...(input.formalEntry ? { formalEntry: input.formalEntry } : {}) },
         { stepId: PROSE_SEMANTIC_REVIEW_STEP_ID_V1, ...createAgentSkillExecutionBindingV1(reviewSkill) },
         { stepId: PROSE_SEMANTIC_REVISION_STEP_ID_V1, ...createAgentSkillExecutionBindingV1(revisionSkill) },
         { stepId: PROSE_SEMANTIC_REREVIEW_STEP_ID_V1, ...createAgentSkillExecutionBindingV1(reviewSkill) },
@@ -228,6 +255,66 @@ export function buildProseGenerationRunContractV1(input: {
   }
 }
 
+export interface BuildProseGenerationRunContractV2Input {
+  projectId: number
+  worldGroupId: number | null
+  chapterId: number
+  operation: ProseGenerationOperationV1
+  semanticReview?: boolean
+  perspectiveCharacterId?: number | null
+  generationBinding?: AgentSkillExecutionBindingV2
+  formalEntry?: AgentRunFormalAIEntryBindingV1
+}
+
+export async function buildProseGenerationRunContractV2(
+  input: BuildProseGenerationRunContractV2Input,
+): Promise<AgentRunContractV2> {
+  const legacy = buildProseGenerationRunContractV1(input)
+  const expectedGeneration = await resolveProseGenerationExecutionBindingV2(input)
+  const generationBinding = input.generationBinding ?? expectedGeneration
+  await assertAgentSkillExecutionBindingIntegrityV2(generationBinding, '正文生成 binding')
+  if (await hashCanonicalValue(generationBinding) !== await hashCanonicalValue(expectedGeneration)) {
+    throw new Error('正文生成 binding 与本轮 Skill/视角边界不一致。')
+  }
+
+  const stepBindings: AgentRunStepExecutionBindingV2[] = [{
+    stepId: PROSE_GENERATION_STEP_ID_V1,
+    ...generationBinding,
+    ...(input.formalEntry ? { formalEntry: input.formalEntry } : {}),
+  }]
+  if (input.semanticReview === true) {
+    const optionalContextActivations = generationBinding.optionalContextActivations
+    for (const [stepId, skillId] of [
+      [PROSE_SEMANTIC_REVIEW_STEP_ID_V1, 'prose.review'],
+      [PROSE_SEMANTIC_REVISION_STEP_ID_V1, 'prose.revise'],
+      [PROSE_SEMANTIC_REREVIEW_STEP_ID_V1, 'prose.review'],
+    ] as const) {
+      stepBindings.push({
+        stepId,
+        ...await createAgentSkillExecutionBindingV2(getAgentSkillV1(skillId, 'prose'), {
+          optionalContextActivations,
+          writeTargets: [],
+        }),
+      })
+    }
+  }
+  const contextSourceKeys = [...new Set(stepBindings.flatMap(binding => binding.contextSourceKeys))]
+  const writeTargets = generationBinding.writeTargets.map(target => ({ ...target, fields: [...target.fields] }))
+  return {
+    ...legacy,
+    version: 2,
+    permissions: { contextSourceKeys, writeTargets },
+    executionBindings: stepBindings,
+  }
+}
+
+export async function buildProseGenerationRunContractV3(
+  input: BuildProseGenerationRunContractV2Input,
+): Promise<AgentRunContractV3> {
+  const v2 = await buildProseGenerationRunContractV2(input)
+  return { ...v2, version: 3, executionBoundary: 'formal' }
+}
+
 function requiresSemanticReview(snapshot: AgentRunSnapshotV1): boolean {
   return snapshot.contract.acceptance.some(criterion => (
     criterion.id === 'prose-generation.semantic-review'
@@ -241,9 +328,11 @@ export function assertProseGenerationExecutionBindingsV1(snapshot: AgentRunSnaps
   const operation = snapshot.contract.objective.startsWith('续写') ? 'continue' : 'generate'
   const expected = new Map<string, ReturnType<typeof getAgentSkillV1>>([
     [PROSE_GENERATION_STEP_ID_V1, getAgentSkillV1(`prose.${operation}`, 'prose')],
-    [PROSE_SEMANTIC_REVIEW_STEP_ID_V1, getAgentSkillV1('prose.review', 'prose')],
-    [PROSE_SEMANTIC_REVISION_STEP_ID_V1, getAgentSkillV1('prose.revise', 'prose')],
-    [PROSE_SEMANTIC_REREVIEW_STEP_ID_V1, getAgentSkillV1('prose.review', 'prose')],
+    ...(requiresSemanticReview(snapshot) ? [
+      [PROSE_SEMANTIC_REVIEW_STEP_ID_V1, getAgentSkillV1('prose.review', 'prose')],
+      [PROSE_SEMANTIC_REVISION_STEP_ID_V1, getAgentSkillV1('prose.revise', 'prose')],
+      [PROSE_SEMANTIC_REREVIEW_STEP_ID_V1, getAgentSkillV1('prose.review', 'prose')],
+    ] as const : []),
   ])
   if (snapshot.contract.executionBindings.length !== expected.size) {
     throw new Error('正文生成 RunContract execution bindings 数量无效。')
@@ -251,8 +340,12 @@ export function assertProseGenerationExecutionBindingsV1(snapshot: AgentRunSnaps
   for (const binding of snapshot.contract.executionBindings) {
     const skill = expected.get(binding.stepId)
     if (!skill) throw new Error(`正文生成 RunContract 包含未知 execution binding：${binding.stepId}`)
-    const { stepId: _stepId, ...skillBinding } = binding
-    assertAgentSkillExecutionBindingV1(skillBinding, skill, `正文生成 ${binding.stepId}`)
+    const { stepId: _stepId, formalEntry: _formalEntry, ...skillBinding } = binding
+    if (skillBinding.version === 1) {
+      assertAgentSkillExecutionBindingV1(skillBinding, skill, `正文生成 ${binding.stepId}`)
+    } else if (skillBinding.skillId !== skill.id) {
+      throw new Error(`正文生成 ${binding.stepId} 与冻结 Skill 身份不一致`)
+    }
   }
 }
 
@@ -263,22 +356,22 @@ async function verifySemanticReviewEvidence(
   if (!evidence || evidence.version !== 1 || evidence.final.verdict !== 'pass') return false
   try {
     new AgentTeamBudgetTracker(evidence.budget.profile, evidence.budget)
-    assertAgentSkillExecutionBindingV1(
-      evidence.initial.reviewer.executionBinding,
-      getAgentSkillV1('prose.review', 'prose'),
-      '正文语义初审 execution binding',
-    )
-    assertAgentSkillExecutionBindingV1(
-      evidence.final.reviewer.executionBinding,
-      getAgentSkillV1('prose.review', 'prose'),
-      '正文语义复核 execution binding',
-    )
+    const verifyBinding = async (
+      binding: AgentSkillExecutionBindingV1 | AgentSkillExecutionBindingV2,
+      skillId: 'prose.review' | 'prose.revise',
+      label: string,
+    ) => {
+      if (binding.version === 1) {
+        assertAgentSkillExecutionBindingV1(binding, getAgentSkillV1(skillId, 'prose'), label)
+      } else {
+        await assertAgentSkillExecutionBindingIntegrityV2(binding, label)
+        if (binding.skillId !== skillId) throw new Error(`${label} Skill 身份不一致`)
+      }
+    }
+    await verifyBinding(evidence.initial.reviewer.executionBinding, 'prose.review', '正文语义初审 execution binding')
+    await verifyBinding(evidence.final.reviewer.executionBinding, 'prose.review', '正文语义复核 execution binding')
     if (evidence.revision) {
-      assertAgentSkillExecutionBindingV1(
-        evidence.revision.executionBinding,
-        getAgentSkillV1('prose.revise', 'prose'),
-        '正文语义修订 execution binding',
-      )
+      await verifyBinding(evidence.revision.executionBinding, 'prose.revise', '正文语义修订 execution binding')
     }
   } catch {
     return false
@@ -358,16 +451,22 @@ export async function createProseGenerationDurableRunV1(input: {
   chapterId: number
   operation: ProseGenerationOperationV1
   semanticReview?: boolean
+  perspectiveCharacterId?: number | null
+  generationBinding?: AgentSkillExecutionBindingV2
 }): Promise<AgentRunSnapshotV1> {
+  const formalEntry = await freezeFormalAIEntryBindingV1(proseGenerationFormalEntryIdV1(input.operation))
   return createAgentRunV1({
     scope: input.scope,
     worldGroupId: input.worldGroupId,
-    contract: buildProseGenerationRunContractV1({
+    contract: await buildProseGenerationRunContractV3({
       projectId: input.scope.projectId,
       worldGroupId: input.worldGroupId,
       chapterId: input.chapterId,
       operation: input.operation,
       semanticReview: input.semanticReview,
+      perspectiveCharacterId: input.perspectiveCharacterId,
+      generationBinding: input.generationBinding,
+      formalEntry,
     }),
   })
 }
@@ -387,6 +486,149 @@ async function append(
   } as any)
 }
 
+export async function proseGenerationManifestV1(input: {
+  runId: number
+  scope: WorkspaceScope
+  worldGroupId: number | null
+  chapterId: number
+  outlineNodeId: number
+  operation: ProseGenerationOperationV1
+  assembled: AssembleContextResult
+}): Promise<ContextManifestV1> {
+  return createContextManifestFromAssemblyV1({
+    runId: input.runId,
+    stepId: PROSE_GENERATION_STEP_ID_V1,
+    attempt: 1,
+    projectId: input.scope.projectId,
+    worldGroupId: input.worldGroupId,
+    declaredSourceKeys: resolveAgentSkillContextSourceKeysV1(getAgentSkillV1(`prose.${input.operation}`, 'prose')),
+    assembled: input.assembled,
+    boundary: { chapterId: input.chapterId, outlineNodeId: input.outlineNodeId },
+    readerVersion: 'chapter-prose-gateway-context-v1',
+  })
+}
+
+export interface ProseGatewayAttemptV1 {
+  execution: ContextGatewayExecutionV1
+  baseManifest: ContextManifestV2
+  preflight: ContextGatewayPreflightEvidenceV1
+}
+
+/** Required-Gateway prose path: exact packet and rendered request are durable
+ * before the registered model entry is called. */
+export async function beginProseGenerationGatewayStepV1(input: {
+  scope: WorkspaceScope
+  snapshot: AgentRunSnapshotV1
+  worldGroupId: number | null
+  chapterId: number
+  outlineNodeId: number
+  assembled: AssembleContextResult
+  messages: ChatMessage[]
+  binding: {
+    operation: ProseGenerationOperationV1
+    sourceTextHash: string
+    promptHash: string
+    informationBoundaryHash?: string
+  }
+  budgetReservationTokens?: number
+}): Promise<{ snapshot: AgentRunSnapshotV1; attempt: ProseGatewayAttemptV1 }> {
+  assertProseGenerationExecutionBindingsV1(input.snapshot)
+  const frozen = input.snapshot.contract.executionBindings?.find(item => item.stepId === PROSE_GENERATION_STEP_ID_V1)
+  if (frozen?.version === 2) {
+    const { stepId: _stepId, formalEntry: _formalEntry, ...skillBinding } = frozen
+    await assertAgentSkillExecutionBindingIntegrityV2(skillBinding, '正文 required Gateway binding')
+  }
+  const execution = proseGatewayExecutionFromAssemblyV1(input.assembled)
+  if (!execution) throw new Error('正式正文生成缺少 required Context Gateway 执行结果。')
+  const formalEntry = frozen?.formalEntry
+  if (!formalEntry) throw new Error('正文生成 RunContract 缺少 FormalAIEntry snapshot。')
+  const entry = await assertFormalAIEntrySnapshotIntegrityV1(formalEntry)
+  if (entry.entryId !== proseGenerationFormalEntryIdV1(input.binding.operation)
+    || entry.skillId !== `prose.${input.binding.operation}` || !entry.adoptAllowed
+    || !entry.adoptionTargets.includes('chapters')) {
+    throw new Error('正文生成 FormalAIEntry 与 operation/Skill/采纳目标不匹配。')
+  }
+  const manifestV1 = await proseGenerationManifestV1({
+    runId: input.snapshot.run.id,
+    scope: input.scope,
+    worldGroupId: input.worldGroupId,
+    chapterId: input.chapterId,
+    outlineNodeId: input.outlineNodeId,
+    operation: input.binding.operation,
+    assembled: input.assembled,
+  })
+  const baseManifest = await createContextManifestV2FromV1({ manifest: manifestV1, scope: input.scope })
+  let snapshot = await append(input.scope, input.snapshot, 'step.scheduled', { stepId: PROSE_GENERATION_STEP_ID_V1 })
+  snapshot = await append(input.scope, snapshot, 'step.started', { stepId: PROSE_GENERATION_STEP_ID_V1, attempt: 1 })
+  const recorded = await recordContextGatewayPreflightEvidenceV1({
+    scope: input.scope,
+    runId: snapshot.run.id,
+    stepId: PROSE_GENERATION_STEP_ID_V1,
+    attempt: 1,
+    contextPacket: execution.contextPacket,
+    selector: execution.selector,
+    renderedRequest: input.messages,
+    sourceSnapshots: execution.sourceSnapshots,
+    toolTranscript: execution.toolTranscript,
+    expectedLastSequence: snapshot.projection.lastSequence,
+  })
+  snapshot = await append(input.scope, recorded.snapshot, 'model.requested', {
+    stepId: PROSE_GENERATION_STEP_ID_V1,
+    attempt: 1,
+    bindingHash: await hashCanonicalValue(input.binding),
+  })
+  if (input.budgetReservationTokens != null) {
+    snapshot = await append(input.scope, snapshot, 'budget.reserved', {
+      stepId: PROSE_GENERATION_STEP_ID_V1,
+      modelCalls: 1,
+      toolCalls: 0,
+      tokens: Math.max(1, Math.floor(input.budgetReservationTokens)),
+    })
+  }
+  return { snapshot, attempt: { execution, baseManifest, preflight: recorded.evidence } }
+}
+
+/** Finalize exact response and ContextManifestV3 before candidate.persisted. */
+export async function finalizeProseGenerationGatewayStepV1(input: {
+  scope: WorkspaceScope
+  snapshot: AgentRunSnapshotV1
+  attempt: ProseGatewayAttemptV1
+  output: string
+  usedTokens?: number
+}): Promise<{ snapshot: AgentRunSnapshotV1; manifest: ContextManifestV3 }> {
+  const outputHash = await hashCanonicalValue(input.output)
+  let snapshot = await append(input.scope, input.snapshot, 'model.responded', {
+    stepId: PROSE_GENERATION_STEP_ID_V1,
+    attempt: 1,
+    outputHash,
+  })
+  if (input.usedTokens != null) {
+    snapshot = await append(input.scope, snapshot, 'budget.settled', {
+      stepId: PROSE_GENERATION_STEP_ID_V1,
+      modelCalls: 1,
+      toolCalls: 0,
+      tokens: Math.max(0, Math.floor(input.usedTokens)),
+    })
+  }
+  const finalized = await finalizeContextGatewayAttemptEvidenceV1({
+    scope: input.scope,
+    runId: snapshot.run.id,
+    stepId: PROSE_GENERATION_STEP_ID_V1,
+    attempt: 1,
+    baseManifest: input.attempt.baseManifest,
+    preflight: input.attempt.preflight,
+    selector: input.attempt.execution.selector,
+    sufficiency: input.attempt.execution.sufficiency,
+    retrievalTrace: input.attempt.execution.retrievalTrace,
+    gatewayVersionHash: input.attempt.execution.contextPacket.gatewayVersionHash,
+    policyHash: input.attempt.execution.contextPacket.policyHash,
+    rawResponse: input.output,
+    candidateHash: outputHash,
+    expectedLastSequence: snapshot.projection.lastSequence,
+  })
+  return { snapshot: finalized.snapshot, manifest: finalized.manifest }
+}
+
 export async function beginProseGenerationStepV1(input: {
   scope: WorkspaceScope
   snapshot: AgentRunSnapshotV1
@@ -399,6 +641,16 @@ export async function beginProseGenerationStepV1(input: {
   }
   budgetReservationTokens?: number
 }): Promise<AgentRunSnapshotV1> {
+  assertProseGenerationExecutionBindingsV1(input.snapshot)
+  const formalSnapshot = input.snapshot.contract.executionBindings
+    ?.find(item => item.stepId === PROSE_GENERATION_STEP_ID_V1)?.formalEntry
+  if (!formalSnapshot) throw new Error('正文生成 RunContract 缺少 FormalAIEntry snapshot。')
+  const formalEntry = await assertFormalAIEntrySnapshotIntegrityV1(formalSnapshot)
+  if (formalEntry.entryId !== proseGenerationFormalEntryIdV1(input.binding.operation)
+    || formalEntry.skillId !== `prose.${input.binding.operation}`
+    || !formalEntry.adoptAllowed || !formalEntry.adoptionTargets.includes('chapters')) {
+    throw new Error('正文生成 FormalAIEntry 与 operation/Skill/采纳目标不匹配。')
+  }
   if (input.contextManifest.runId !== input.snapshot.run.id
     || input.contextManifest.stepId !== PROSE_GENERATION_STEP_ID_V1) {
     throw new Error('正文生成 Context Manifest 与 durable run 不匹配。')
@@ -464,7 +716,7 @@ export async function beginProseSemanticStepV1(input: {
   snapshot: AgentRunSnapshotV1
   stepId: ProseSemanticStepIdV1
   contextManifest: ContextManifestV1
-  executionBinding: AgentSkillExecutionBindingV1
+  executionBinding: AgentSkillExecutionBindingV1 | AgentSkillExecutionBindingV2
   requestBinding: unknown
   reservedTokens: number
 }): Promise<AgentRunSnapshotV1> {
@@ -561,7 +813,7 @@ export async function failProseSemanticStepV1(input: {
 function isProseGenerationCandidate(value: unknown): value is ProseGenerationCandidateV1 {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false
   const candidate = value as Partial<ProseGenerationCandidateV1>
-  return candidate.version === 1
+  const valid = candidate.version === 1
     && candidate.type === PROSE_GENERATION_CANDIDATE_TYPE_V1
     && typeof candidate.projectId === 'number'
     && typeof candidate.chapterId === 'number'
@@ -569,6 +821,7 @@ function isProseGenerationCandidate(value: unknown): value is ProseGenerationCan
     && typeof candidate.sourceTextHash === 'string'
     && typeof candidate.outputText === 'string'
     && typeof candidate.outputTextHash === 'string'
+    && (candidate.gatewayEvidenceVersion === undefined || candidate.gatewayEvidenceVersion === 3)
     && typeof candidate.expectedContentHash === 'string'
     && (candidate.informationBoundaryHash === undefined || typeof candidate.informationBoundaryHash === 'string')
     && (candidate.perspectiveCharacterId === undefined
@@ -584,11 +837,23 @@ function isProseGenerationCandidate(value: unknown): value is ProseGenerationCan
     ))
     && !!candidate.durable
     && candidate.durable.stepId === PROSE_GENERATION_STEP_ID_V1
+  if (!valid) return false
+  if (candidate.contentRevision !== undefined) {
+    try {
+      candidate.contentRevision = parseWorkspaceContentRevisionV1(candidate.contentRevision)
+    } catch {
+      return false
+    }
+  }
+  return true
 }
 
 export async function hashProseGenerationCandidateV1(
   candidate: Omit<ProseGenerationCandidateV1, 'durable'>,
 ): Promise<string> {
+  // ContextManifestV3 already binds the exact response/candidate hash. Using
+  // outputTextHash avoids a circular hash through durable.contextManifestHash.
+  if (candidate.gatewayEvidenceVersion === 3) return candidate.outputTextHash
   return hashCanonicalValue(candidate)
 }
 
@@ -870,6 +1135,36 @@ export async function commitProseGenerationAdoptionV1(input: {
   contentHtml: string
   wordCount: number
 }): Promise<{ snapshot: AgentRunSnapshotV1; receiptHash: string; receipt?: VerificationReceiptV1 }> {
+  if (input.candidate.contentRevision) {
+    try {
+      await assertWorkspaceContentRevisionFreshV1(input.candidate.contentRevision, {
+        scope: input.scope,
+        worldGroupId: input.candidate.worldGroupId,
+      })
+    } catch (error) {
+      await markProseGenerationStaleV1({
+        scope: input.scope,
+        runId: input.runId,
+        reason: error instanceof Error ? error.message : 'content_revision_changed',
+      })
+      throw new Error(`正文候选已过期：${error instanceof Error ? error.message : String(error)}`)
+    }
+  }
+  if (input.candidate.gatewayEvidenceVersion === 3) {
+    await assertContextGatewayCandidateAdoptableV1({
+      skill: getAgentSkillV1(`prose.${input.candidate.operation}`, 'prose'),
+      writeTarget: 'chapters.content',
+      scope: input.scope,
+      worldGroupId: input.candidate.worldGroupId,
+      chapterId: input.candidate.chapterId,
+      characterId: input.candidate.perspectiveCharacterId ?? null,
+      runId: input.runId,
+      stepId: input.candidate.durable.stepId,
+      attempt: input.candidate.durable.attempt,
+      candidateHash: input.candidate.durable.candidateHash,
+      contextManifestHash: input.candidate.durable.contextManifestHash,
+    })
+  }
   if (!await isProseGenerationCandidateCurrentV1(input.candidate)) {
     await markProseGenerationStaleV1({
       scope: input.scope,

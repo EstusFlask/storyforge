@@ -4,7 +4,7 @@ import { CONTEXT_SOURCE_BY_KEY } from '../registry/context-sources'
 import { FIELD_BY_TARGET } from '../registry/field-registry'
 import { REGISTRY_BY_NAME } from '../registry/project-tables'
 import type {
-  AgentRunContractV1,
+  AgentRunContract,
   AgentRunProjectionV1,
   AgentRunRecord,
   AnyAgentRunEventV1,
@@ -16,7 +16,7 @@ import { hashCanonicalValue } from '../agent/run/hash'
 
 export interface MemorySettlementSnapshotV1 {
   run: AgentRunRecord & { id: number }
-  contract: AgentRunContractV1
+  contract: AgentRunContract
   events: AnyAgentRunEventV1[]
   projection: AgentRunProjectionV1
 }
@@ -69,7 +69,20 @@ async function artifactRefsForRun(
   }
   for (const event of snapshot.events) {
     const sourceExportId = `${common.runExportId}:event:${event.sequence}`
-    if (event.type === 'candidate.persisted' || event.type === 'candidate.revised') {
+    if (event.type === 'evidence.artifact.recorded') {
+      refs.push(await artifactRef({
+        sourceKind: 'agent-run-artifact',
+        sourceExportId: `${common.runExportId}:artifact:${event.payload.artifactKind}:${event.payload.contentHash}`,
+        ...common,
+        ...(event.payload.stepId == null ? {} : {
+          stepId: event.payload.stepId,
+          attempt: event.payload.attempt,
+        }),
+        contentHash: event.payload.contentHash,
+        artifactKind: event.payload.artifactKind,
+        authority: 'evidence',
+      }))
+    } else if (event.type === 'candidate.persisted' || event.type === 'candidate.revised') {
       const candidateHash = event.payload.candidateHash
       const step = snapshot.projection.steps[event.payload.stepId]
       const authority = step?.confirmation === 'reject'
@@ -100,7 +113,8 @@ async function artifactRefsForRun(
       }))
     }
   }
-  return refs.sort((left, right) => left.artifactId.localeCompare(right.artifactId))
+  return [...new Map(refs.map(ref => [ref.artifactId, ref])).values()]
+    .sort((left, right) => left.artifactId.localeCompare(right.artifactId))
 }
 
 /**

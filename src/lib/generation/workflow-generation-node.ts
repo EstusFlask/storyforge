@@ -21,6 +21,7 @@ export function createWorkflowGenerationNode(input: {
     editableInput: true,
     assembleInput: messages => messages.map(message => ({ ...message })),
     run: messages => ai.start(messages, undefined, {
+      formalEntryId: 'prompt.workflow.step',
       category: category,
       projectId,
     }),

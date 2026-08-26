@@ -5,6 +5,7 @@
  * 内置 IME 组合输入保护。
  */
 import { useState, useEffect, useRef, useCallback } from 'react'
+import { registerPendingDraftFlusherV1 } from '../../lib/authoring/pending-edit-coordinator'
 import { containTextareaWheel, parseCssPixels } from './textarea-scroll'
 
 /* ── InlineInput（单行） ────────────────────────────────────── */
@@ -13,7 +14,7 @@ export function InlineInput({
   value, onChange, placeholder, className, prefix, suffix,
 }: {
   value: string
-  onChange: (v: string) => void
+  onChange: (v: string) => void | Promise<void>
   placeholder?: string
   className?: string
   prefix?: string
@@ -22,13 +23,33 @@ export function InlineInput({
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState(value)
   const composingRef = useRef(false)
+  const editingRef = useRef(false)
+  const draftRef = useRef(value)
+  const valueRef = useRef(value)
+  const onChangeRef = useRef(onChange)
 
-  useEffect(() => { if (!composingRef.current) setDraft(value) }, [value])
+  valueRef.current = value
+  onChangeRef.current = onChange
+  useEffect(() => {
+    if (!composingRef.current) {
+      draftRef.current = value
+      setDraft(value)
+    }
+  }, [value])
 
-  const commit = () => {
+  const commit = useCallback(async () => {
+    editingRef.current = false
     setEditing(false)
-    if (draft !== value) onChange(draft)
-  }
+    if (draftRef.current !== valueRef.current) await onChangeRef.current(draftRef.current)
+  }, [])
+
+  useEffect(() => editing
+    ? registerPendingDraftFlusherV1(commit)
+    : undefined, [commit, editing])
+
+  useEffect(() => () => {
+    if (editingRef.current) void commit()
+  }, [commit])
 
   if (editing) {
     return (
@@ -37,15 +58,23 @@ export function InlineInput({
         onCompositionStart={() => { composingRef.current = true }}
         onCompositionEnd={(e) => {
           composingRef.current = false
-          setDraft((e.target as HTMLInputElement).value)
+          const next = (e.target as HTMLInputElement).value
+          draftRef.current = next
+          setDraft(next)
         }}
         onChange={e => {
+          draftRef.current = e.target.value
           setDraft(e.target.value)
         }}
-        onBlur={commit}
+        onBlur={() => { void commit() }}
         onKeyDown={e => {
-          if (e.key === 'Escape') { setDraft(value); setEditing(false) }
-          if (e.key === 'Enter') commit()
+          if (e.key === 'Escape') {
+            draftRef.current = valueRef.current
+            editingRef.current = false
+            setDraft(valueRef.current)
+            setEditing(false)
+          }
+          if (e.key === 'Enter') void commit()
         }}
         placeholder={placeholder}
         className={`bg-transparent border-b border-accent/50 outline-none w-full ${className || ''}`}
@@ -56,14 +85,14 @@ export function InlineInput({
 
   if (!value) {
     return (
-      <div onClick={() => setEditing(true)} className={`cursor-text min-h-[1.2em] ${className || ''} opacity-40`}>
+      <div onClick={() => { editingRef.current = true; setEditing(true) }} className={`cursor-text min-h-[1.2em] ${className || ''} opacity-40`}>
         {placeholder || '点击编辑…'}
       </div>
     )
   }
 
   return (
-    <div onClick={() => setEditing(true)} className={`cursor-text min-h-[1.2em] ${className || ''}`}>
+    <div onClick={() => { editingRef.current = true; setEditing(true) }} className={`cursor-text min-h-[1.2em] ${className || ''}`}>
       {prefix}{value}{suffix}
     </div>
   )
@@ -75,7 +104,7 @@ export function InlineTextarea({
   value, onChange, placeholder, className, minRows = 2, maxRows = 16,
 }: {
   value: string
-  onChange: (v: string) => void
+  onChange: (v: string) => void | Promise<void>
   placeholder?: string
   className?: string
   minRows?: number
@@ -85,8 +114,19 @@ export function InlineTextarea({
   const [draft, setDraft] = useState(value)
   const ref = useRef<HTMLTextAreaElement>(null)
   const composingRef = useRef(false)
+  const editingRef = useRef(false)
+  const draftRef = useRef(value)
+  const valueRef = useRef(value)
+  const onChangeRef = useRef(onChange)
 
-  useEffect(() => { if (!composingRef.current) setDraft(value) }, [value])
+  valueRef.current = value
+  onChangeRef.current = onChange
+  useEffect(() => {
+    if (!composingRef.current) {
+      draftRef.current = value
+      setDraft(value)
+    }
+  }, [value])
 
   const resize = useCallback(() => {
     const el = ref.current
@@ -104,10 +144,19 @@ export function InlineTextarea({
 
   useEffect(() => { if (editing) resize() }, [draft, editing, resize])
 
-  const commit = () => {
+  const commit = useCallback(async () => {
+    editingRef.current = false
     setEditing(false)
-    if (draft !== value) onChange(draft)
-  }
+    if (draftRef.current !== valueRef.current) await onChangeRef.current(draftRef.current)
+  }, [])
+
+  useEffect(() => editing
+    ? registerPendingDraftFlusherV1(commit)
+    : undefined, [commit, editing])
+
+  useEffect(() => () => {
+    if (editingRef.current) void commit()
+  }, [commit])
 
   if (editing) {
     return (
@@ -117,12 +166,24 @@ export function InlineTextarea({
         onCompositionStart={() => { composingRef.current = true }}
         onCompositionEnd={(e) => {
           composingRef.current = false
-          setDraft((e.target as HTMLTextAreaElement).value)
+          const next = (e.target as HTMLTextAreaElement).value
+          draftRef.current = next
+          setDraft(next)
         }}
-        onChange={e => { setDraft(e.target.value) }}
+        onChange={e => {
+          draftRef.current = e.target.value
+          setDraft(e.target.value)
+        }}
         onWheel={containTextareaWheel}
-        onBlur={commit}
-        onKeyDown={e => { if (e.key === 'Escape') { setDraft(value); setEditing(false) } }}
+        onBlur={() => { void commit() }}
+        onKeyDown={e => {
+          if (e.key === 'Escape') {
+            draftRef.current = valueRef.current
+            editingRef.current = false
+            setDraft(valueRef.current)
+            setEditing(false)
+          }
+        }}
         placeholder={placeholder}
         className={className || 'w-full bg-transparent border border-accent/30 rounded px-2 py-1 text-sm text-text-primary outline-none resize-none'}
         autoFocus
@@ -132,14 +193,14 @@ export function InlineTextarea({
 
   if (!value) {
     return (
-      <div onClick={() => setEditing(true)} className="text-sm text-text-muted/40 cursor-text py-0.5">
+      <div onClick={() => { editingRef.current = true; setEditing(true) }} className="text-sm text-text-muted/40 cursor-text py-0.5">
         {placeholder || '点击编辑…'}
       </div>
     )
   }
 
   return (
-    <div onClick={() => setEditing(true)} className="text-sm text-text-primary leading-relaxed whitespace-pre-wrap cursor-text py-0.5">
+    <div onClick={() => { editingRef.current = true; setEditing(true) }} className="text-sm text-text-primary leading-relaxed whitespace-pre-wrap cursor-text py-0.5">
       {value}
     </div>
   )

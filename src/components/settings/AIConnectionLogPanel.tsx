@@ -17,7 +17,7 @@ export default function AIConnectionLogPanel({ logs, onClear }: Props) {
       </div>
       <div className="max-h-[200px] overflow-y-auto space-y-1 font-mono text-xs">
         {logs.length === 0 ? (
-          <p className="text-text-muted">暂无日志，点击「测试连接」生成</p>
+          <p className="text-text-muted">暂无日志，点击「测试最小连接」生成</p>
         ) : (
           logs.map(log => (
             <pre key={log.id} className="text-text-secondary whitespace-pre-wrap break-all">{formatLog(log)}</pre>

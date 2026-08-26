@@ -11,6 +11,7 @@ import {
   NARRATIVE_NODE_KINDS,
 } from '../types'
 import type { PortableStoryGameDraftV1 } from './world-generation'
+import { parseStructuredOutputV1 } from '../agent/structured-output-pipeline'
 
 export type WorldGameAuthoringProductV1 = Extract<
   GameProductType,
@@ -277,31 +278,40 @@ export function parseWorldGameNarrativeCandidateV1(
   draft: string,
   request: WorldGameAuthoringRequestV1,
 ): WorldGameNarrativeCandidateV1 {
-  const source = draft.trim()
-  if (!source || source.length > 160_000) throw new Error('AI 游戏候选为空或过长')
-  const fenced = /^```(?:json)?\s*([\s\S]*?)```\s*$/i.exec(source)?.[1]?.trim() ?? source
-  let value: unknown
-  try { value = JSON.parse(fenced) } catch { throw new Error('AI 游戏候选不是严格 JSON') }
-  if (!isRecord(value)) throw new Error('AI 游戏候选必须是对象')
-  exactKeys(value, ['version', 'title', 'description', 'moduleKind', 'entryNodeKey', 'nodes'], 'AI 游戏候选')
-  if (value.version !== 1) throw new Error('AI 游戏候选版本不支持')
-  if (!NARRATIVE_MODULE_KINDS.includes(value.moduleKind as NarrativeModuleKind)) {
-    throw new Error('AI 游戏候选 moduleKind 无效')
-  }
-  if (!Array.isArray(value.nodes) || value.nodes.length < 5 || value.nodes.length > 18) {
-    throw new Error('AI 游戏候选必须包含 5-18 个节点')
-  }
-  const allowedSpeakers = new Set(request.characterExportIds)
-  const candidate: WorldGameNarrativeCandidateV1 = {
-    version: 1,
-    title: stringValue(value.title, 'AI 游戏标题', 160),
-    description: stringValue(value.description, 'AI 游戏说明', 2_000),
-    moduleKind: value.moduleKind as NarrativeModuleKind,
-    entryNodeKey: stableKey(value.entryNodeKey, 'entryNodeKey'),
-    nodes: value.nodes.map((node, index) => parseNode(node, index, allowedSpeakers)),
-  }
-  assertPlayableGraph(candidate)
-  return candidate
+  return parseStructuredOutputV1({
+    raw: draft,
+    contract: {
+      version: 1,
+      schemaId: 'world-game-narrative-candidate.v1',
+      target: `worldRelease:${request.worldReleaseId}:narrativeModule:${request.narrativeModuleExportId}`,
+      root: 'object',
+      maxChars: 160_000,
+      allowedRootFields: ['version', 'title', 'description', 'moduleKind', 'entryNodeKey', 'nodes'],
+      requiredRootFields: ['version', 'title', 'description', 'moduleKind', 'entryNodeKey', 'nodes'],
+    },
+    parse: parsed => {
+      const value = parsed as Record<string, unknown>
+      exactKeys(value, ['version', 'title', 'description', 'moduleKind', 'entryNodeKey', 'nodes'], 'AI 游戏候选')
+      if (value.version !== 1) throw new Error('AI 游戏候选版本不支持')
+      if (!NARRATIVE_MODULE_KINDS.includes(value.moduleKind as NarrativeModuleKind)) {
+        throw new Error('AI 游戏候选 moduleKind 无效')
+      }
+      if (!Array.isArray(value.nodes) || value.nodes.length < 5 || value.nodes.length > 18) {
+        throw new Error('AI 游戏候选必须包含 5-18 个节点')
+      }
+      const allowedSpeakers = new Set(request.characterExportIds)
+      const candidate: WorldGameNarrativeCandidateV1 = {
+        version: 1,
+        title: stringValue(value.title, 'AI 游戏标题', 160),
+        description: stringValue(value.description, 'AI 游戏说明', 2_000),
+        moduleKind: value.moduleKind as NarrativeModuleKind,
+        entryNodeKey: stableKey(value.entryNodeKey, 'entryNodeKey'),
+        nodes: value.nodes.map((node, index) => parseNode(node, index, allowedSpeakers)),
+      }
+      assertPlayableGraph(candidate)
+      return candidate
+    },
+  })
 }
 
 export function worldGameRequestToSourceSelectionV1(

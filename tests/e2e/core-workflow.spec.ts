@@ -475,8 +475,9 @@ test('可见资料库精确选择字段，节点冻结权重与实际召回', as
   await expect(page.getByRole('heading', { name: '资料与检索库', exact: true })).toBeVisible()
   await page.getByText('世界观主世界观', { exact: true }).click()
   await expect(page.getByText('潮汐退去后，第一座浮空城从海床升起。', { exact: true })).toBeVisible()
-  await page.getByRole('spinbutton', { name: '默认权重' }).fill('2.5')
-  await expect(page.getByRole('spinbutton', { name: '默认权重' })).toHaveValue('2.5')
+  const worldviewResource = page.getByRole('group').filter({ hasText: '世界观主世界观' })
+  await worldviewResource.getByRole('spinbutton', { name: '默认权重' }).fill('2.5')
+  await expect(worldviewResource.getByRole('spinbutton', { name: '默认权重' })).toHaveValue('2.5')
 
   await sidebarButton(page, '节点模式').click()
   await page.getByRole('button', { name: '创建空白节点图', exact: true }).click()
@@ -1096,12 +1097,25 @@ test('上下文窗口、四类通用任务与主 Agent 角色模型路由跨模�
   await presetName.fill('审查模型')
   await presetName.locator('xpath=..').getByRole('button', { name: '保存', exact: true }).click()
 
-  await page.getByLabel('创作生成模型预设').selectOption({ label: '创作模型 · deepseek/deepseek-chat' })
-  await page.getByLabel('结构提取模型预设').selectOption({ label: '创作模型 · deepseek/deepseek-chat' })
-  await page.getByLabel('分析总结模型预设').selectOption({ label: '审查模型 · deepseek/deepseek-review' })
-  await page.getByLabel('审查校验模型预设').selectOption({ label: '审查模型 · deepseek/deepseek-review' })
-  await page.getByLabel('主 Agent 编排模型预设').selectOption({ label: '审查模型 · deepseek/deepseek-review' })
-  await page.getByLabel('正文领域 Agent模型预设').selectOption({ label: '创作模型 · deepseek/deepseek-chat' })
+  const creationPresetId = await page
+    .getByLabel('创作生成模型预设')
+    .locator('option')
+    .filter({ hasText: '创作模型' })
+    .getAttribute('value')
+  const reviewPresetId = await page
+    .getByLabel('分析总结模型预设')
+    .locator('option')
+    .filter({ hasText: '审查模型' })
+    .getAttribute('value')
+  expect(creationPresetId).toBeTruthy()
+  expect(reviewPresetId).toBeTruthy()
+
+  await page.getByLabel('创作生成模型预设').selectOption(creationPresetId!)
+  await page.getByLabel('结构提取模型预设').selectOption(creationPresetId!)
+  await page.getByLabel('分析总结模型预设').selectOption(reviewPresetId!)
+  await page.getByLabel('审查校验模型预设').selectOption(reviewPresetId!)
+  await page.getByLabel('主 Agent 编排模型预设').selectOption(reviewPresetId!)
+  await page.getByLabel('正文领域 Agent模型预设').selectOption(creationPresetId!)
   await page.getByLabel('正文领域 Agent上下文输入档位').selectOption('lean')
   await page.getByLabel('主 Agent 团队总预算').selectOption('economy')
 
@@ -1479,7 +1493,7 @@ test('神明与信仰面板一次生成结构化候选，刷新恢复后采纳�
       divineRules: '作者确认版：神谕必须由两名无血缘见证者共同记录。',
     },
   }
-  await candidate.fill(JSON.stringify(edited, null, 2))
+  await candidate.fill(JSON.stringify(edited.value, null, 2))
   await page.getByRole('button', { name: '采纳', exact: true }).click()
   await expect(page.getByText(edited.value.divineRules, { exact: true })).toBeVisible()
   await expect(candidate).toHaveCount(0)
@@ -3082,6 +3096,8 @@ test('Codex 内容拆分刷新恢复候选，作者确认后才原子新增词�
               fields: { type: '浮空城邦', scope: '潮汐海外环', feature: '七座潮汐锚维持高度' },
               tags: ['浮空城', '潮汐锚'],
               importance: 4,
+              evidenceQuotes: ['月环城悬浮在潮汐海上空，由七座潮汐锚固定。'],
+              provenance: 'verbatim-extraction',
             }]),
           },
           finish_reason: 'stop',

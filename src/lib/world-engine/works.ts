@@ -1,6 +1,13 @@
 /** WORLD-2C C5 · Work creation and switching inside one World. */
 import { db } from '../db/schema'
-import type { Work, WorkspaceScope, World } from '../types/world-ownership'
+import type {
+  PostAdoptionBudgetV1,
+  PostAdoptionPolicyV1,
+  PostAdoptionTaskTypeV1,
+  Work,
+  WorkspaceScope,
+  World,
+} from '../types/world-ownership'
 import type { Project, ProjectStatus } from '../types/project'
 import { ensureWorkspaceOwnership } from './ownership'
 import { assertRecordInScope, resolveScope } from './scope'
@@ -113,6 +120,15 @@ export async function createWorldWork(projectId: number, input: CreateWorkInput)
     targetWordCount: input.targetWordCount ?? ownership.work.targetWordCount,
     writingStyleId: ownership.work.writingStyleId,
     methodologyId: ownership.work.methodologyId,
+    postAdoptionPolicy: 'suggest',
+    postAdoptionTaskTypes: ['organization', 'memory', 'retrieval', 'consistency'],
+    postAdoptionBudget: {
+      maxModelCalls: 2,
+      maxInputTokens: 48_000,
+      maxOutputTokens: 16_000,
+      maxCostUsd: 0.25,
+      allowUnknownCost: false,
+    },
     createdAt: ts,
     updatedAt: ts,
   }
@@ -183,5 +199,26 @@ export async function selectWorkNarrativeModule(
       }
     }
     await db.works.update(scope.workId, { activeNarrativeModuleId: moduleId, updatedAt: Date.now() })
+  })
+}
+
+/** PROGRESS-1 governed Work-root configuration write; never contains AI output. */
+export async function updateWorkPostAdoptionPolicyV1(input: {
+  scope: WorkspaceScope
+  policy: PostAdoptionPolicyV1
+  taskTypes: PostAdoptionTaskTypeV1[]
+  budget: PostAdoptionBudgetV1
+}): Promise<void> {
+  const work = await db.works.get(input.scope.workId)
+  if (
+    !work
+    || work.projectId !== input.scope.projectId
+    || work.worldId !== input.scope.worldId
+  ) throw new Error('[works] 章后策略不能写入其他 Work')
+  await db.works.update(input.scope.workId, {
+    postAdoptionPolicy: input.policy,
+    postAdoptionTaskTypes: [...input.taskTypes],
+    postAdoptionBudget: { ...input.budget },
+    updatedAt: Date.now(),
   })
 }

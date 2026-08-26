@@ -50,6 +50,18 @@ export function createGenerationNodeDurableTraceV1(input: {
   snapshot: AgentRunSnapshotV1
   stepId: string
   manifest?: ContextManifestV1
+  /** Required-Gateway adapters persist exact preflight after step.started and before model.requested. */
+  beforeModelEvidence?: (input: {
+    snapshot: AgentRunSnapshotV1
+    prepared: PreparedGenerationNode
+    messages: ChatMessage[]
+  }) => Promise<AgentRunSnapshotV1>
+  /** Required-Gateway adapters finalize ContextManifestV3 after response and before candidate.persisted. */
+  afterModelRespondedEvidence?: (input: {
+    snapshot: AgentRunSnapshotV1
+    output: unknown
+    candidateHash: string
+  }) => Promise<AgentRunSnapshotV1>
   now?: () => number
 }): GenerationNodeDurableTraceV1 {
   if (input.snapshot.run.id == null) throw new Error('Durable trace 缺少持久化 runId')
@@ -57,6 +69,9 @@ export function createGenerationNodeDurableTraceV1(input: {
     throw new Error('Durable trace 只能绑定尚未执行的 planned run')
   }
   if (input.manifest) {
+    if (input.beforeModelEvidence || input.afterModelRespondedEvidence) {
+      throw new Error('Durable trace 不得同时使用旧 ContextManifestV1 与 Gateway evidence hooks')
+    }
     if (input.manifest.runId !== input.snapshot.run.id || input.manifest.stepId !== input.stepId) {
       throw new Error('Durable trace 的 Context Manifest 与 run/step 不匹配')
     }
@@ -99,6 +114,9 @@ export function createGenerationNodeDurableTraceV1(input: {
     async beforeModel({ prepared, messages }: { prepared: PreparedGenerationNode; messages: ChatMessage[] }) {
       await append('step.scheduled', { stepId: input.stepId })
       await append('step.started', { stepId: input.stepId, attempt: 1 })
+      if (input.beforeModelEvidence) {
+        snapshot = await input.beforeModelEvidence({ snapshot, prepared, messages })
+      }
       if (input.manifest) {
         await append('context.assembled', {
           stepId: input.stepId,
@@ -141,6 +159,64 @@ export function createGenerationNodeDurableTraceV1(input: {
       persistCandidate: () => Promise<T>
     }): Promise<T> {
       const outputHash = await hashCanonicalValue(output)
+      if (input.afterModelRespondedEvidence) {
+        if (modelOutputHash && modelOutputHash !== outputHash) {
+          throw new Error('同一 Gateway attempt 的模型响应已经冻结，不能以不同输出重试候选事务')
+        }
+        let nextSnapshot = snapshot
+        if (!modelOutputHash) {
+          nextSnapshot = await appendAgentRunEventV1({
+            scope: input.scope,
+            runId: snapshot.run.id,
+            type: 'model.responded',
+            payload: {
+              stepId: input.stepId,
+              attempt: 1,
+              outputHash,
+            },
+            expectedLastSequence: snapshot.projection.lastSequence,
+            now: now(),
+          })
+          nextSnapshot = await input.afterModelRespondedEvidence({
+            snapshot: nextSnapshot,
+            output,
+            candidateHash,
+          })
+          // Response and exact Gateway evidence intentionally survive a failed
+          // candidate transaction. Advance the local CAS cursor now so a retry
+          // only replays the candidate body + candidate.persisted transaction.
+          snapshot = nextSnapshot
+          modelOutputHash = outputHash
+        }
+        const committed = await db.transaction(
+          'rw',
+          scopeTransactionTables(
+            db.agentConversations,
+            db.agentEvents,
+            db.agentRuns,
+            db.agentRunEvents,
+          ),
+          async () => {
+            const persisted = await persistCandidate()
+            const committedSnapshot = await appendAgentRunEventV1({
+              scope: input.scope,
+              runId: snapshot.run.id,
+              type: 'candidate.persisted',
+              payload: {
+                stepId: input.stepId,
+                attempt: 1,
+                candidateHash,
+                requiresConfirmation,
+              },
+              expectedLastSequence: nextSnapshot.projection.lastSequence,
+              now: now(),
+            })
+            return { persisted, nextSnapshot: committedSnapshot }
+          },
+        )
+        snapshot = committed.nextSnapshot
+        return committed.persisted
+      }
       const committed = await db.transaction(
         'rw',
         scopeTransactionTables(

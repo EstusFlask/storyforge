@@ -1,5 +1,9 @@
 import { useCallback, useMemo, useRef, useState } from 'react'
-import { resolveRequestConfig, streamChat, type StreamResult, type AICallMeta } from '../lib/ai/client'
+import { resolveRequestConfig, type StreamResult } from '../lib/ai/client'
+import {
+  streamRegisteredAIEntryV1,
+  type FormalAICallMetaV1,
+} from '../lib/agent/formal-ai-entry'
 import { getAIConfigRequiredMessage, isAIConfigReady } from '../lib/ai/config-readiness'
 import { useAIConfigStore } from '../stores/ai-config'
 import {
@@ -26,7 +30,7 @@ export interface UseAIStreamReturn {
    * @param messages 聊天消息
    * @param overrideConfig 临时覆盖的配置片段（例如导入面板需要 maxTokens=16384）
    */
-  start: (messages: ChatMessage[], overrideConfig?: Partial<AIConfig>, meta?: AICallMeta) => Promise<string>
+  start: (messages: ChatMessage[], overrideConfig: Partial<AIConfig> | undefined, meta: FormalAICallMetaV1) => Promise<string>
   /** 停止生成 */
   stop: () => void
   /** 重置状态 */
@@ -118,8 +122,8 @@ export function useAIStream(sessionKey?: string): UseAIStreamReturn {
 
   const start = useCallback(async (
     messages: ChatMessage[],
-    overrideConfig?: Partial<AIConfig>,
-    meta?: AICallMeta,
+    overrideConfig: Partial<AIConfig> | undefined,
+    meta: FormalAICallMetaV1,
   ): Promise<string> => {
     // 重置状态
     if (sessionKey) {
@@ -160,7 +164,7 @@ export function useAIStream(sessionKey?: string): UseAIStreamReturn {
     const streamResult: StreamResult = {}
 
     try {
-      const stream = streamChat(messages, config, controller.signal, streamResult, meta)
+      const stream = streamRegisteredAIEntryV1(messages, config, meta, controller.signal, streamResult)
       for await (const chunk of stream) {
         if (controller.signal.aborted) break
         accumulated += chunk

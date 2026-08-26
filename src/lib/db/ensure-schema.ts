@@ -5,6 +5,7 @@ export const REQUIRED_TABLES = [
   'agentConversations',
   'agentEvents',
   'agentRunCheckpoints',
+  'agentRunArtifacts',
   'agentRunEvents',
   'agentRuns',
   'adventureModules',

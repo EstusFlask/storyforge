@@ -1,4 +1,3 @@
-import JSON5 from 'json5'
 import { useAIConfigStore } from '../../stores/ai-config'
 import { buildCharacterPrompt } from '../ai/adapters/character-adapter'
 import { chat, resolveRequestConfig } from '../ai/client'
@@ -20,6 +19,7 @@ import type {
 import { prepareGenerationNode } from '../generation/generation-node'
 import { adopt } from '../registry/adopt'
 import type { AdoptResult } from '../registry/types'
+import type { AssembleContextResult } from '../registry/types'
 import type {
   AIConfig,
   Character,
@@ -37,23 +37,35 @@ import {
 } from '../world-engine/scope'
 import {
   attachAgentContextInputStateV1,
-  mergeContextEvidence,
+  evidenceFromContextResult,
   resolveAgentContextPolicy,
-  splitAgentContextPolicy,
   type AgentContextEvidence,
   type AgentContextProfile,
 } from './context-policy'
-import {
-  createAgentContextCompressionSessionV1,
-  type AgentContextCompressionRuntimeV1,
-} from './context-compression'
-import { AGENT_TOOL_BY_NAME, executeAgentTool } from './tool-registry'
+import type { AgentContextCompressionRuntimeV1 } from './context-compression'
 import {
   buildAgentSkillInputGuidanceV1,
-  resolveAgentSkillInputStateV1,
   resolveAgentSkillV1,
   type AgentSkillId,
 } from './skill-registry'
+import {
+  executeContextGatewayV1,
+  type ContextGatewayExecutionV1,
+} from '../context-gateway/execution'
+import { isContextGatewayRequiredForWriteTargetV1 } from '../context-gateway/skill-policy'
+import {
+  assembleContextGatewayPacketV1,
+  contextGatewayInputStateSourceKeysV1,
+  projectContextGatewayInputStateV1,
+} from './context-gateway-input'
+import type { MasterCandidateModelIdentityV1 } from './master-candidate-semantic-review'
+import { parseStructuredOutputV1 } from './structured-output-pipeline'
+import {
+  renderFrozenPromptExecutionV1,
+  type PromptExecutionEvidenceV1,
+  type PromptExecutionOptionsV1,
+} from './prompt-execution'
+import type { ChatMessage } from '../types'
 
 export const MAX_CHARACTER_CANDIDATE_CHARS = 40_000
 const MAX_CHARACTER_NAME_CHARS = 80
@@ -81,12 +93,15 @@ export interface CharacterCopilotInput {
   worldGroupId: number | null
   authorRequest: string
   inputGuidance: string
+  assembled: AssembleContextResult
   worldContext: string
   characterContext: string
   contextSources: string[]
   snapshot: CharacterRosterSnapshot
   config: AIConfig
   generationOverrides?: { temperature?: number; maxTokens?: number }
+  frozenPromptMessages?: ChatMessage[]
+  promptExecutionEvidence?: PromptExecutionEvidenceV1
   routingCategory?: string
   signal?: AbortSignal
 }
@@ -94,9 +109,13 @@ export interface CharacterCopilotInput {
 export interface PreparedCharacterCopilot {
   node: GenerationNode<CharacterCopilotInput, CharacterCopilotCandidate, AdoptResult>
   prepared: PreparedGenerationNode
+  input: CharacterCopilotInput
   contextSources: string[]
   snapshot: CharacterRosterSnapshot
   contextEvidence: AgentContextEvidence
+  modelIdentity: MasterCandidateModelIdentityV1
+  promptExecutionEvidence?: PromptExecutionEvidenceV1
+  contextGatewayExecution?: ContextGatewayExecutionV1
 }
 
 interface CharacterCopilotDependencies {
@@ -173,36 +192,6 @@ function assertAuthorRequest(value: string): string {
   return request
 }
 
-function parseJsonObject(draft: string): Record<string, unknown> {
-  const input = draft.trim()
-  if (!input) throw new Error('角色候选为空。')
-  if (input.length > MAX_CHARACTER_CANDIDATE_CHARS) {
-    throw new Error(`角色候选超过 ${MAX_CHARACTER_CANDIDATE_CHARS} 字符。`)
-  }
-  const fullFence = /```(?:json)?\s*([\s\S]*?)```/i.exec(input)
-  const candidate = fullFence?.[1]?.trim() ?? input
-  const start = candidate.indexOf('{')
-  const end = candidate.lastIndexOf('}')
-  if (start < 0 || end < start) throw new Error('角色候选不是完整的 JSON 对象。')
-  const json = candidate.slice(start, end + 1)
-  const trailing = candidate.slice(end + 1).trim()
-  if (trailing) throw new Error('角色候选 JSON 后包含额外文本。')
-  let parsed: unknown
-  try {
-    parsed = JSON.parse(json)
-  } catch {
-    try {
-      parsed = JSON5.parse(json)
-    } catch {
-      throw new Error('角色候选不是有效的 JSON 对象。')
-    }
-  }
-  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-    throw new Error('角色候选必须是单个 JSON 对象。')
-  }
-  return parsed as Record<string, unknown>
-}
-
 function stringField(
   source: Record<string, unknown>,
   field: string,
@@ -220,46 +209,61 @@ function stringField(
 }
 
 export function parseCharacterCandidateDraft(draft: string): CharacterCopilotCandidate {
-  const source = parseJsonObject(draft)
-  const unknown = Object.keys(source).filter(field => !CANDIDATE_FIELD_SET.has(field))
-  if (unknown.length) throw new Error(`角色候选包含不允许的字段：${unknown.join('、')}。`)
+  return parseStructuredOutputV1({
+    raw: draft,
+    contract: {
+      version: 1,
+      schemaId: 'character-candidate.v1',
+      target: 'characters.add',
+      root: 'object',
+      maxChars: MAX_CHARACTER_CANDIDATE_CHARS,
+      allowedRootFields: [...CANDIDATE_FIELDS],
+      requiredRootFields: ['name', 'roleWeight', 'moralAxis', 'orderAxis', 'shortDescription'],
+      unknownRootFieldMessage: '角色候选包含不允许的字段。',
+    },
+    parse: value => {
+      const source = value as Record<string, unknown>
+      const unknown = Object.keys(source).filter(field => !CANDIDATE_FIELD_SET.has(field))
+      if (unknown.length) throw new Error(`角色候选包含不允许的字段：${unknown.join('、')}。`)
 
-  const roleWeight = source.roleWeight
-  const moralAxis = source.moralAxis
-  const orderAxis = source.orderAxis
-  if (!ROLE_WEIGHTS.includes(roleWeight as CharacterRoleWeight)) {
-    throw new Error('roleWeight 只能是 main / secondary / npc / extra。')
-  }
-  if (!MORAL_AXES.includes(moralAxis as CharacterMoralAxis)) {
-    throw new Error('moralAxis 只能是 good / neutral / evil。')
-  }
-  if (!ORDER_AXES.includes(orderAxis as CharacterOrderAxis)) {
-    throw new Error('orderAxis 只能是 lawful / neutral / chaotic。')
-  }
+      const roleWeight = source.roleWeight
+      const moralAxis = source.moralAxis
+      const orderAxis = source.orderAxis
+      if (!ROLE_WEIGHTS.includes(roleWeight as CharacterRoleWeight)) {
+        throw new Error('roleWeight 只能是 main / secondary / npc / extra。')
+      }
+      if (!MORAL_AXES.includes(moralAxis as CharacterMoralAxis)) {
+        throw new Error('moralAxis 只能是 good / neutral / evil。')
+      }
+      if (!ORDER_AXES.includes(orderAxis as CharacterOrderAxis)) {
+        throw new Error('orderAxis 只能是 lawful / neutral / chaotic。')
+      }
 
-  const dimensions = Object.fromEntries(
-    CHARACTER_DIMENSIONS.map(dimension => [
-      dimension.key,
-      stringField(source, dimension.key, {
-        required: dimension.key === 'shortDescription',
-        max: dimension.key === 'shortDescription'
-          ? MAX_CHARACTER_SUMMARY_CHARS
-          : MAX_CHARACTER_FIELD_CHARS,
-      }),
-    ]),
-  ) as Record<CharacterDimensionKey, string>
-  const result: CharacterCopilotCandidate = {
-    name: stringField(source, 'name', { required: true, max: MAX_CHARACTER_NAME_CHARS }),
-    roleWeight: roleWeight as CharacterRoleWeight,
-    moralAxis: moralAxis as CharacterMoralAxis,
-    orderAxis: orderAxis as CharacterOrderAxis,
-    relationships: stringField(source, 'relationships'),
-    ...dimensions,
-  }
-  if (JSON.stringify(result).length > MAX_CHARACTER_CANDIDATE_CHARS) {
-    throw new Error(`角色候选超过 ${MAX_CHARACTER_CANDIDATE_CHARS} 字符。`)
-  }
-  return result
+      const dimensions = Object.fromEntries(
+        CHARACTER_DIMENSIONS.map(dimension => [
+          dimension.key,
+          stringField(source, dimension.key, {
+            required: dimension.key === 'shortDescription',
+            max: dimension.key === 'shortDescription'
+              ? MAX_CHARACTER_SUMMARY_CHARS
+              : MAX_CHARACTER_FIELD_CHARS,
+          }),
+        ]),
+      ) as Record<CharacterDimensionKey, string>
+      const result: CharacterCopilotCandidate = {
+        name: stringField(source, 'name', { required: true, max: MAX_CHARACTER_NAME_CHARS }),
+        roleWeight: roleWeight as CharacterRoleWeight,
+        moralAxis: moralAxis as CharacterMoralAxis,
+        orderAxis: orderAxis as CharacterOrderAxis,
+        relationships: stringField(source, 'relationships'),
+        ...dimensions,
+      }
+      if (JSON.stringify(result).length > MAX_CHARACTER_CANDIDATE_CHARS) {
+        throw new Error(`角色候选超过 ${MAX_CHARACTER_CANDIDATE_CHARS} 字符。`)
+      }
+      return result
+    },
+  })
 }
 
 function structuredOutputContract(): string {
@@ -278,7 +282,12 @@ ${dimensionLines}
 姓名与 shortDescription 必填。所有字段必须是字符串；三轴只能使用上面的英文枚举。`
 }
 
+function characterHardSystem(input: CharacterCopilotInput): string {
+  return `${input.inputGuidance}\n\n${structuredOutputContract()}\n\n权限与作用域：本轮只生成一名新角色候选；不得修改世界观、故事核心、故事线、大纲、物品或任何已有角色。正式上下文是只读约束，候选必须等待作者确认后才可采纳。`
+}
+
 function buildCharacterCopilotPrompt(input: CharacterCopilotInput) {
+  if (input.frozenPromptMessages) return input.frozenPromptMessages.map(message => ({ ...message }))
   const messages = buildCharacterPrompt(
     input.projectName,
     input.genres,
@@ -286,16 +295,15 @@ function buildCharacterCopilotPrompt(input: CharacterCopilotInput) {
     input.characterContext,
     input.authorRequest,
   )
-  const contract = structuredOutputContract()
-  const inputPolicy = input.inputGuidance
+  const contract = characterHardSystem(input)
   const systemIndex = messages.findIndex(message => message.role === 'system')
   if (systemIndex >= 0) {
     messages[systemIndex] = {
       ...messages[systemIndex],
-      content: `${messages[systemIndex].content}\n\n${inputPolicy}\n\n${contract}`,
+      content: `${messages[systemIndex].content}\n\n${contract}`,
     }
   } else {
-    messages.unshift({ role: 'system', content: `${inputPolicy}\n\n${contract}` })
+    messages.unshift({ role: 'system', content: contract })
   }
   return messages
 }
@@ -336,6 +344,7 @@ export async function prepareCharacterCopilot(input: {
   /** 节点级 AI preset 的解析结果；未提供时沿用全局路由配置。 */
   configOverride?: AIConfig
   generationOverrides?: { temperature?: number; maxTokens?: number }
+  promptExecution?: PromptExecutionOptionsV1
   contextCompressionRuntime?: AgentContextCompressionRuntimeV1
   signal?: AbortSignal
 }): Promise<PreparedCharacterCopilot> {
@@ -356,50 +365,42 @@ export async function prepareCharacterCopilot(input: {
   const contextProfile = input.contextProfile ?? 'full'
   const skill = resolveAgentSkillV1('character', input.skillId)
   const authorRequest = assertAuthorRequest(input.authorRequest)
-  const compression = input.contextCompressionRuntime
-    ? createAgentContextCompressionSessionV1({
-        policy: skill.contextCompression,
-        config,
-        projectId: input.projectId,
-        authorRequest,
-        routingCategory,
+  const contextPolicy = resolveAgentContextPolicy(skill.contextTaskKind, contextProfile)
+  const gatewayRequired = isContextGatewayRequiredForWriteTargetV1(skill, 'characters.name')
+  if (gatewayRequired && !scope) {
+    throw new Error('角色创建 Gateway required 入口需要稳定 WorkspaceScope，旧项目必须先完成所有权迁移。')
+  }
+  const contextGatewayExecution = gatewayRequired
+    ? await executeContextGatewayV1({
+        skill,
+        scope: scope!,
+        worldGroupId,
+        budgetTokens: Math.min(contextPolicy.maxInputTokens, skill.contextGateway!.maxRetrievedTokens),
+        query: [
+          '创建一名与现有世界、故事核心、故事线和角色关系兼容但不重复的新角色。',
+          '按任务选择相关种族、地点、力量体系和角色认知证据，不要围绕已有材料复述。',
+          authorRequest,
+        ].join('\n'),
+        additionalReadsEnabled: false,
         signal: input.signal,
-        runtime: input.contextCompressionRuntime,
       })
     : undefined
-  const tools = skill.readToolNames.map(name => AGENT_TOOL_BY_NAME.get(name)!)
-  if (tools.length < 2 || tools.some(tool => !tool)) {
-    throw new Error(`Agent Skill ${skill.id} 的只读工具契约无效`)
+  if (!contextGatewayExecution) {
+    throw new Error('角色创建正式入口缺少 required Context Gateway。')
   }
-  const contextPolicy = resolveAgentContextPolicy(skill.contextTaskKind, contextProfile)
-  const toolPolicies = splitAgentContextPolicy(
-    contextPolicy,
-    tools.map(tool => tool.inputBudgetTokens),
+  const assembled = assembleContextGatewayPacketV1(
+    contextGatewayExecution,
+    contextPolicy.maxInputTokens,
   )
-  const executionContext = {
-    projectId: input.projectId,
-    worldGroupId,
-    provider: config.provider,
-    model: config.model,
-    sourceTransformer: compression?.sourceTransformer,
-  }
-  const toolResults = await Promise.all(tools.map((tool, index) => (
-    executeAgentTool(tool.name, { ...executionContext, contextPolicy: toolPolicies[index] }, {})
-  )))
-  const failed = toolResults.find(result => !result.ok)
-  if (failed && !failed.ok) throw new Error(failed.error || '无法读取角色生成所需的正式上下文。')
-  const charactersIndex = tools.findIndex(tool => tool.name === 'read_characters')
-  const characters = charactersIndex >= 0 ? toolResults[charactersIndex] : null
-  if (!characters?.ok) throw new Error('角色 Skill 缺少 read_characters 正式来源。')
   const afterRead = await readCharacterRosterSnapshot(input.projectId, worldGroupId, scope)
   if (beforeRead.serialized !== afterRead.serialized) throw new CharacterCopilotStaleError()
 
-  const contextResults = toolResults.map(result => result.meta)
-  const inputState = resolveAgentSkillInputStateV1(skill, contextResults)
+  const inputState = projectContextGatewayInputStateV1(skill, contextGatewayExecution, assembled)
   const contextEvidence = attachAgentContextInputStateV1(
-    mergeContextEvidence(contextProfile, contextResults),
+    evidenceFromContextResult(contextProfile, assembled),
     inputState,
   )
+  contextEvidence.inputStateSourceKeys = contextGatewayInputStateSourceKeysV1(skill, contextGatewayExecution)
   const inputGuidance = buildAgentSkillInputGuidanceV1(skill, inputState)
   const nodeInput: CharacterCopilotInput = {
     projectId: input.projectId,
@@ -409,29 +410,67 @@ export async function prepareCharacterCopilot(input: {
     worldGroupId,
     authorRequest,
     inputGuidance,
+    assembled,
     worldContext: [
-      ...toolResults
-        .filter((_, index) => index !== charactersIndex)
-        .map(result => result.content),
+      assembled.text,
       input.supplementalContext?.trim()
         ? `【本轮上游候选（尚未采纳，不属于 Canon）】\n${input.supplementalContext.trim()}`
         : '',
     ].filter(Boolean).join('\n\n'),
-    characterContext: characters.content,
-    contextSources: [...new Set(toolResults.flatMap(result => result.meta.included))],
+    characterContext: '',
+    contextSources: assembled.included,
     snapshot: afterRead,
     config,
     generationOverrides: input.generationOverrides,
     routingCategory,
     signal: input.signal,
   }
+  if (input.promptExecution) {
+    const rendered = await renderFrozenPromptExecutionV1({
+      options: input.promptExecution,
+      context: {
+        projectName: project.name,
+        genres: nodeInput.genres,
+        worldContext: nodeInput.worldContext || '（暂无）',
+        existingCharacters: nodeInput.characterContext || '（暂无）',
+        characters: nodeInput.characterContext || '（暂无）',
+        userHint: '',
+      },
+      hardSystem: characterHardSystem(nodeInput),
+      authorInstruction: authorRequest,
+      additionalUserMessages: [
+        `【Harness 登记的世界与故事上下文】\n${nodeInput.worldContext || '（暂无）'}`,
+        `【Harness 登记的已有角色】\n${nodeInput.characterContext || '（暂无）'}`,
+      ],
+    })
+    const generationOverrides = {
+      maxTokens: 6_000,
+      temperature: nodeInput.config.temperature,
+      ...rendered.generationOverrides,
+      ...input.generationOverrides,
+    }
+    if ((generationOverrides.maxTokens ?? 0) > skill.maxOutputTokens) {
+      throw new Error(`Prompt 请求输出 ${generationOverrides.maxTokens} tokens，超过 Skill 上限 ${skill.maxOutputTokens}；已在模型调用前阻止。`)
+    }
+    nodeInput.frozenPromptMessages = rendered.messages
+    nodeInput.promptExecutionEvidence = {
+      ...rendered.evidence,
+      effectiveTemperature: generationOverrides.temperature ?? null,
+      effectiveMaxTokens: generationOverrides.maxTokens ?? null,
+    }
+    nodeInput.generationOverrides = generationOverrides
+  }
   const node = createCharacterCopilotNode(nodeInput)
   return {
     node,
     prepared: prepareGenerationNode(node, nodeInput),
+    input: nodeInput,
     contextSources: nodeInput.contextSources,
     snapshot: afterRead,
     contextEvidence,
+    modelIdentity: { provider: config.provider, model: config.model },
+    promptExecutionEvidence: nodeInput.promptExecutionEvidence,
+    contextGatewayExecution,
   }
 }
 
@@ -552,10 +591,6 @@ export async function adoptCharacterCopilotCandidate(input: {
   )
 }
 
-function compactCharacterRequestText(value: string | null | undefined, max: number): string {
-  return (value ?? '').trim().replace(/\s+/g, ' ').slice(0, max)
-}
-
 /**
  * 分步骤角色面板与主 Agent 共用的任务合同入口。
  * Prompt 参数仍可见、可审计，但不再由组件直接拼接上下文或决定写回路径。
@@ -569,15 +604,11 @@ export function formatCharacterGenerationRequestV1(input: {
   const parts = [
     '生成一名新角色。只创建角色候选，不修改世界观、故事核心、故事线、大纲、物品或已有角色。',
   ]
-  const hint = compactCharacterRequestText(input.hint, 640)
+  const hint = (input.hint ?? '').trim()
   if (hint) parts.push(`作者要求与本轮维度：${hint}`)
-  if (input.parameterValues && Object.keys(input.parameterValues).length) {
-    const serialized = compactCharacterRequestText(JSON.stringify(input.parameterValues), 240)
-    if (serialized) parts.push(`模板参数：${serialized}`)
+  const request = parts.join('\n')
+  if (request.length > 8_000) {
+    throw new Error('角色作者要求超过 8000 字符；没有截断，已在模型调用前阻止。')
   }
-  const systemOverride = compactCharacterRequestText(input.systemOverride, 160)
-  if (systemOverride) parts.push(`自定义系统要求：${systemOverride}`)
-  const userOverride = compactCharacterRequestText(input.userOverride, 160)
-  if (userOverride) parts.push(`自定义用户要求：${userOverride}`)
-  return parts.join('\n').slice(0, 1_000)
+  return request
 }

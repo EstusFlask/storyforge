@@ -73,6 +73,7 @@ export function categoryMeta(category: string | undefined): CategoryMeta {
 interface ModelPrice { input: number; output: number }
 
 const MODEL_PRICING: Array<{ match: (m: string) => boolean; price: ModelPrice }> = [
+  { match: m => /^gemini-3\.5-flash$/i.test(m), price: { input: 1.5, output: 9.0 } },
   { match: m => /gemini.*flash/i.test(m), price: { input: 0.3, output: 2.5 } },
   { match: m => /gemini/i.test(m), price: { input: 1.6, output: 6.0 } },        // 截图：$1.6/1M 输入
   { match: m => /gpt-4o-mini|4o-mini/i.test(m), price: { input: 0.15, output: 0.6 } },
@@ -81,7 +82,10 @@ const MODEL_PRICING: Array<{ match: (m: string) => boolean; price: ModelPrice }>
   { match: m => /claude.*haiku/i.test(m), price: { input: 0.8, output: 4 } },
   { match: m => /claude.*opus/i.test(m), price: { input: 15, output: 75 } },
   { match: m => /claude/i.test(m), price: { input: 3, output: 15 } },
-  { match: m => /deepseek/i.test(m), price: { input: 0.27, output: 1.1 } },
+  { match: m => /^deepseek-v4-pro$/i.test(m), price: { input: 0.435, output: 0.87 } },
+  { match: m => /^deepseek-v4-flash$/i.test(m), price: { input: 0.14, output: 0.28 } },
+  // NVIDIA NIM 上的同名模型使用免费开发端点和平台限速，不能套用 DeepSeek 直连价格。
+  { match: m => /^deepseek-(chat|reasoner)$/i.test(m), price: { input: 0.14, output: 0.28 } },
   { match: m => /qwen|通义/i.test(m), price: { input: 0.5, output: 2 } },
   { match: m => /kimi|moonshot/i.test(m), price: { input: 1, output: 3 } },
   { match: m => /doubao|豆包/i.test(m), price: { input: 0.3, output: 1 } },

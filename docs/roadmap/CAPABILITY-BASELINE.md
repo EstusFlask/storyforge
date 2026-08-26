@@ -395,6 +395,7 @@
 ### 已有能力
 
 - 当前正式 AI 创作已由统一 Agent + durable Harness 承载：Master Agent/领域 Skill 冻结任务、权限、版本与预算，候选、checkpoint、父子 lineage、终态回执和用量进入统一 ledger；作者确认后才经受治理采纳写入 Canon。
+- 分步骤候选现已把 Phase 0 运行证据统一投影到作者界面：逐来源显示全文/压缩/截断、字符/token 前后数量与原始 SHA-256，候选同时绑定内容修订、Context Manifest 和 candidate hash；采纳消息保存 adoption hash，只有 deterministic terminal receipt 存在时五段生命周期才显示终态完成。正式错误统一为十二类并带 fingerprint；标准故障注入仅限 DEV/test 内存开关，生产 UI 不可触达。当前证据仍不持久化每份原始上下文正文或压缩正文，其可寻址存储归后续记忆整合与 Context Gateway 阶段，不能把哈希摘要冒充原文档案。
 - Agent + Harness / CREL 本轮已阶段性开发完成并进入实验性社区观察：`HARNESS-0～86`、`CREL-0～14` 已进入已完成索引，不再保留旧 A/B、旧质量门或无边界扩充 Harness 的待开发项。分级 `CreativeArtifactV1`、1+1 调用上限、免费确定性归一化、一次定向修复、`NarrativeBrief`、部分设定临时假设、统一预览与本地反馈均复用现有 Harness，不建立平行 Runner 或数据库。历史 held-out FAIL 与作者 A/B 0/6 不变；旧 A/B/质量门已由产品决策关闭为阻塞项，不视为通过。
 - AGENT-1 Tool Registry 当前提供 14 个只读工具：Phase 27.1-a 首批 13 个与 27.1-d 的
   `read_inspiration_workspace` 全部经 `CONTEXT_SOURCES → assembleContext()` 读取，带

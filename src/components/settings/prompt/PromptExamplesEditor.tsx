@@ -108,7 +108,7 @@ ${template.systemPrompt}
       const result = await ai.start([
         { role: 'system', content: '你是一位提示词工程师助手，擅长为提示词模板生成示例数据。' },
         { role: 'user', content: metaPrompt },
-      ], undefined, { category: 'prompt.examples' })
+      ], undefined, { formalEntryId: 'prompt.examples.generate', category: 'prompt.examples' })
       // 解析输出
       const parts = result.split(/===EXAMPLE===/i).map(s => s.trim()).filter(Boolean)
       const newExamples: PromptExample[] = parts.slice(0, 3).map(t => ({

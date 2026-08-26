@@ -1,20 +1,46 @@
 import {
-  acceptAgentRunContractV1,
+  acceptAgentRunContract,
   appendAgentRunEventV1,
   allocateInMemoryAgentRunIdV1,
   createContextManifestFromAssemblyV1,
+  createContextManifestV2FromV1,
   createAgentRunV1,
   createGenerationNodeDurableTraceV1,
   createGenerationNodeShadowTraceV1,
+  hashCanonicalValue,
+  readAgentRunV1,
   type AgentRunSnapshotV1,
   type GenerationNodeDurableTraceV1,
   type GenerationNodeShadowTraceV1,
 } from '../agent/run'
+import {
+  finalizeContextGatewayAttemptEvidenceV1,
+  recordContextGatewayPreflightEvidenceV1,
+  type ContextGatewayPreflightEvidenceV1,
+} from '../context-gateway/attempt-evidence'
+import {
+  assertAgentSkillBindingMatchesAssemblyV2,
+  createAgentSkillExecutionBindingV2,
+} from '../agent/execution-binding'
+import {
+  getAgentSkillV1,
+  resolveAgentSkillContextSourceKeysV1,
+} from '../agent/skill-registry'
 import { getOrCreateAgentConversation } from '../agent/conversations'
 import type { GenerationNodeShadowTrace } from '../generation/generation-node'
+import {
+  assertWorkspaceContentRevisionFreshV1,
+  captureWorkspaceContentRevisionV1,
+  type WorkspaceContentRevisionVectorV1,
+} from '../authoring/content-revision'
 import type { AssembleContextResult } from '../registry/types'
 import { resolveScope } from '../world-engine/scope'
-import type { AgentRunContractV1, WorkspaceScope } from '../types'
+import type {
+  AgentExecutionBoundaryV1,
+  AgentRunContractV3,
+  AgentSkillExecutionBindingV2,
+  WorkspaceScope,
+} from '../types'
 import type { OutlineGenerationRequest } from './generation-request'
 import {
   encodeGenerationOperation,
@@ -22,34 +48,21 @@ import {
 } from './generation-request'
 import {
   OUTLINE_GENERATION_CONVERSATION_PURPOSE,
+  OUTLINE_GENERATION_TERMINAL_VERIFIER_V1,
   persistOutlineGenerationCandidateV1,
   type OutlineGenerationBatchRefV1,
   type OutlineGenerationCandidateV1,
 } from './candidate-lifecycle'
+import { outlineGatewayExecutionFromAssemblyV1 } from './gateway-context'
 
 export * from './candidate-lifecycle'
 
-export const OUTLINE_GENERATION_SOURCE_KEYS = [
-  'canonAssertions',
-  'worldview',
-  'storyCore',
-  'activeNarrativeBlueprint',
-  'characterDrivenPlan',
-  'powerSystem',
-  'cultivationProgress',
-  'codex',
-  'characters',
-  'creativeRules',
-  'worldRules',
-  'historical',
-  'locations',
-  'foreshadows',
-  'storyArcs',
-  'storylineProgress',
-  'existingVolumeOutlines',
-  'writtenChapterProgress',
-  'priorOutlineCandidate',
-] as const
+/** Historical read-only alias. Formal V2 runs resolve the exact runtime set. */
+export const OUTLINE_GENERATION_SOURCE_KEYS: readonly string[] = Object.freeze(
+  resolveAgentSkillContextSourceKeysV1(
+    getAgentSkillV1('outline.compose', 'outline'),
+  ),
+)
 
 export const OUTLINE_DURABLE_HARNESS_STORAGE_KEY = 'storyforge:harness:outline-durable-v1'
 
@@ -72,47 +85,106 @@ function writeFields(request: OutlineGenerationRequest): string[] {
   return ['parentId', 'type', 'title', 'summary', 'order']
 }
 
-function outlineRunContract(input: {
+function outlineSkillId(request: OutlineGenerationRequest): 'outline.volumes' | 'outline.chapters' {
+  return request.kind === 'volumes' || request.kind === 'single-volume'
+    ? 'outline.volumes'
+    : 'outline.chapters'
+}
+
+export function resolveOutlineGenerationSourceKeysV2(input: {
+  request: OutlineGenerationRequest
+  hasPriorOutlineCandidate?: boolean
+}): string[] {
+  const skill = getAgentSkillV1(outlineSkillId(input.request), 'outline')
+  return resolveAgentSkillContextSourceKeysV1(skill, {
+    includeOptional: input.hasPriorOutlineCandidate === true,
+  })
+}
+
+export async function resolveOutlineGenerationExecutionBindingV2(input: {
+  request: OutlineGenerationRequest
+  priorOutlineCandidateText?: string
+  executionBoundary?: AgentExecutionBoundaryV1
+}): Promise<AgentSkillExecutionBindingV2> {
+  const skill = getAgentSkillV1(outlineSkillId(input.request), 'outline')
+  const priorText = input.priorOutlineCandidateText?.trim() ?? ''
+  return createAgentSkillExecutionBindingV2(skill, {
+    optionalContextActivations: priorText ? [{
+      sourceKey: 'priorOutlineCandidate',
+      reasonCode: 'prior-outline-candidate',
+      boundaryHash: await hashCanonicalValue(priorText),
+    }] : [],
+    writeTargets: (input.executionBoundary ?? 'formal') === 'formal' ? [{
+      table: 'outlineNodes',
+      fields: writeFields(input.request),
+      mode: 'author-confirmed',
+    }] : [],
+  })
+}
+
+async function outlineRunContract(input: {
   projectId: number
   worldGroupId: number | null
   request: OutlineGenerationRequest
   assembled: AssembleContextResult
-}): AgentRunContractV1 {
+  priorOutlineCandidateText?: string
+  executionBoundary: AgentExecutionBoundaryV1
+  binding?: AgentSkillExecutionBindingV2
+}): Promise<AgentRunContractV3> {
   const stepId = encodeGenerationOperation(input.request)
   const outlineNodeId = targetOutlineNodeId(input.request)
+  const binding = input.binding ?? await resolveOutlineGenerationExecutionBindingV2({
+    request: input.request,
+    priorOutlineCandidateText: input.priorOutlineCandidateText,
+    executionBoundary: input.executionBoundary,
+  })
+  assertAgentSkillBindingMatchesAssemblyV2(binding, input.assembled, `大纲 ${stepId}`)
   return {
-    version: 1,
+    version: 3,
+    executionBoundary: input.executionBoundary,
     objective: `生成${outlineGenerationModuleKey(input.request) === 'outline.volume' ? '卷纲' : '章纲'}候选：${stepId}`,
-    workflowKind: 'direct-generation',
+    workflowKind: input.executionBoundary === 'formal' ? 'long-running-resumable' : 'direct-generation',
     scope: {
       projectId: input.projectId,
       worldGroupId: input.worldGroupId,
       outlineNodeIds: outlineNodeId == null ? undefined : [outlineNodeId],
     },
     permissions: {
-      contextSourceKeys: [...OUTLINE_GENERATION_SOURCE_KEYS],
-      writeTargets: [
-        { table: 'outlineNodes', fields: writeFields(input.request), mode: 'candidate-only' },
-      ],
+      contextSourceKeys: [...binding.contextSourceKeys],
+      writeTargets: binding.writeTargets.map(target => ({ ...target, fields: [...target.fields] })),
     },
+    executionBindings: [{ stepId, ...binding }],
     budget: {
       maxModelCalls: 1,
       maxToolCalls: 0,
       maxInputTokens: input.assembled.inputBudget,
-      maxOutputTokens: 8_000,
+      maxOutputTokens: binding.maxOutputTokens,
       maxAttemptsPerStep: 1,
     },
-    acceptance: [
-      { id: 'outline.output-present', kind: 'output-present', required: true },
+    acceptance: input.executionBoundary === 'formal' ? [
+      { id: 'outline.output', kind: 'output-present', required: true },
+      { id: 'outline.confirmed', kind: 'author-confirmed', required: true },
+      { id: 'outline.adopted', kind: 'adoption-committed', required: true },
+      { id: 'outline.post-state', kind: 'post-state-matches', required: true },
+    ] : [
+      { id: 'outline.output', kind: 'output-present', required: true },
     ],
-    verificationPlan: [
-      {
-        id: 'outline.shadow-terminal',
-        kind: 'terminal',
-        verifier: 'shadow-output-presence-v1',
-        criterionIds: ['outline.output-present'],
-      },
-    ],
+    verificationPlan: input.executionBoundary === 'formal' ? [{
+      id: 'outline.terminal',
+      kind: 'terminal',
+      verifier: OUTLINE_GENERATION_TERMINAL_VERIFIER_V1,
+      criterionIds: [
+        'outline.output',
+        'outline.confirmed',
+        'outline.adopted',
+        'outline.post-state',
+      ],
+    }] : [{
+      id: 'outline.shadow-terminal',
+      kind: 'terminal',
+      verifier: 'shadow-output-presence-v1',
+      criterionIds: ['outline.output'],
+    }],
     failurePolicy: {
       onProtocolError: 'fail',
       onVerificationFailure: 'fail',
@@ -127,6 +199,7 @@ async function outlineManifest(input: {
   worldGroupId: number | null
   request: OutlineGenerationRequest
   assembled: AssembleContextResult
+  binding: AgentSkillExecutionBindingV2
 }) {
   const outlineNodeId = targetOutlineNodeId(input.request)
   return createContextManifestFromAssemblyV1({
@@ -135,7 +208,7 @@ async function outlineManifest(input: {
     attempt: 1,
     projectId: input.projectId,
     worldGroupId: input.worldGroupId,
-    declaredSourceKeys: OUTLINE_GENERATION_SOURCE_KEYS,
+    declaredSourceKeys: input.binding.contextSourceKeys,
     assembled: input.assembled,
     boundary: outlineNodeId == null ? undefined : { outlineNodeId },
     readerVersion: 'assemble-context-v1',
@@ -147,21 +220,36 @@ export async function createOutlineGenerationShadowTraceV1(input: {
   worldGroupId: number | null
   request: OutlineGenerationRequest
   assembled: AssembleContextResult
+  priorOutlineCandidateText?: string
+  binding?: AgentSkillExecutionBindingV2
+  executionBoundary?: AgentExecutionBoundaryV1
 }): Promise<GenerationNodeShadowTraceV1> {
   const runId = allocateInMemoryAgentRunIdV1()
   const stepId = encodeGenerationOperation(input.request)
-  const acceptedContract = await acceptAgentRunContractV1(outlineRunContract(input))
+  const executionBoundary = input.executionBoundary ?? 'evaluation'
+  const binding = input.binding ?? await resolveOutlineGenerationExecutionBindingV2({
+    ...input,
+    executionBoundary,
+  })
+  const acceptedContract = await acceptAgentRunContract(await outlineRunContract({
+    ...input,
+    executionBoundary,
+    binding,
+  }))
   const manifest = await outlineManifest({
     runId,
     projectId: input.projectId,
     worldGroupId: input.worldGroupId,
     request: input.request,
     assembled: input.assembled,
+    binding,
   })
   return createGenerationNodeShadowTraceV1({ runId, stepId, acceptedContract, manifest })
 }
 
 export interface OutlineGenerationTraceV1 extends GenerationNodeShadowTrace {
+  readonly executionBoundary: AgentExecutionBoundaryV1
+  readonly adoptable: boolean
   readonly mode: 'durable-shadow' | 'shadow-only'
   readonly shadow: GenerationNodeShadowTraceV1
   readonly durable?: GenerationNodeDurableTraceV1
@@ -171,6 +259,11 @@ export interface OutlineGenerationTraceV1 extends GenerationNodeShadowTrace {
   terminateRun: (input: { status: 'failed' | 'cancelled'; code: string }) => Promise<void>
 }
 
+export type OutlineGenerationTraceFaultBoundaryV1 =
+  | 'trace-initialization'
+  | 'before-model-evidence'
+  | 'candidate-persistence'
+
 function composeOutlineTraces(input: {
   shadow: GenerationNodeShadowTraceV1
   durable?: GenerationNodeDurableTraceV1
@@ -178,13 +271,17 @@ function composeOutlineTraces(input: {
   conversationId?: number
   request: OutlineGenerationRequest
   batch?: OutlineGenerationBatchRefV1
+  contentRevision?: WorkspaceContentRevisionVectorV1
   initializationError?: string
+  executionBoundary: AgentExecutionBoundaryV1
+  faultInjector?: (boundary: OutlineGenerationTraceFaultBoundaryV1) => void | Promise<void>
 }): OutlineGenerationTraceV1 {
   const diagnostics: string[] = input.initializationError ? [input.initializationError] : []
   const traces: GenerationNodeShadowTrace[] = [input.shadow]
   if (input.durable) traces.push(input.durable)
   let persistedCandidate: OutlineGenerationCandidateV1 | null = null
   let pendingModelOutput: unknown
+  const strict = input.executionBoundary === 'formal'
   const notify = async (action: (trace: GenerationNodeShadowTrace) => Promise<void>) => {
     for (const trace of traces) {
       try {
@@ -196,10 +293,13 @@ function composeOutlineTraces(input: {
         } catch {
           // Trace diagnostics must not replace the generation result.
         }
+        if (strict) throw error
       }
     }
   }
   return {
+    executionBoundary: input.executionBoundary,
+    adoptable: strict && Boolean(input.durable),
     mode: input.durable ? 'durable-shadow' : 'shadow-only',
     shadow: input.shadow,
     durable: input.durable,
@@ -207,7 +307,12 @@ function composeOutlineTraces(input: {
     get traceErrors() {
       return [...diagnostics]
     },
-    beforeModel: value => notify(trace => trace.beforeModel(value)),
+    async beforeModel(value) {
+      if (input.faultInjector && !import.meta.env.PROD) {
+        await input.faultInjector('before-model-evidence')
+      }
+      await notify(trace => trace.beforeModel(value))
+    },
     // Durable model.responded is committed together with the candidate body.
     // The in-memory shadow still observes the response immediately.
     modelResponded: value => {
@@ -217,8 +322,15 @@ function composeOutlineTraces(input: {
         : trace.modelResponded(value))
     },
     async candidateReady(output: unknown) {
-      if (typeof output !== 'string' || !input.durable || !input.scope || input.conversationId == null) return
+      if (typeof output !== 'string') return
+      if (!input.durable || !input.scope || input.conversationId == null) {
+        if (strict) throw new Error('正式大纲运行缺少 durable candidate store')
+        return
+      }
       try {
+        if (input.faultInjector && !import.meta.env.PROD) {
+          await input.faultInjector('candidate-persistence')
+        }
         persistedCandidate = await persistOutlineGenerationCandidateV1({
           scope: input.scope,
           conversationId: input.conversationId,
@@ -226,6 +338,7 @@ function composeOutlineTraces(input: {
           durable: input.durable,
           output,
           batch: input.batch,
+          contentRevision: input.contentRevision,
         })
       } catch (error) {
         diagnostics.push(error instanceof Error ? error.message : String(error))
@@ -234,6 +347,7 @@ function composeOutlineTraces(input: {
         } catch {
           // Candidate tracing remains behavior-neutral until the durable path is authoritative.
         }
+        if (strict) throw error
       }
     },
     // The H0 shadow remains behavior-neutral. Durable outline runs do not
@@ -251,8 +365,15 @@ function composeOutlineTraces(input: {
       await trace.stepFailed(value)
     }),
     async persistCandidate(output: string) {
-      if (!input.durable || !input.scope || input.conversationId == null || !output.trim()) return null
+      if (!output.trim()) return null
+      if (!input.durable || !input.scope || input.conversationId == null) {
+        if (strict) throw new Error('正式大纲运行缺少 durable candidate store')
+        return null
+      }
       if (persistedCandidate?.output === output) return persistedCandidate
+      if (input.faultInjector && !import.meta.env.PROD) {
+        await input.faultInjector('candidate-persistence')
+      }
       persistedCandidate = await persistOutlineGenerationCandidateV1({
         scope: input.scope,
         conversationId: input.conversationId,
@@ -260,12 +381,13 @@ function composeOutlineTraces(input: {
         durable: input.durable,
         output,
         batch: input.batch,
+        contentRevision: input.contentRevision,
       })
       return persistedCandidate
     },
     async terminateRun({ status, code }) {
       if (!input.durable || !input.scope) return
-      const projection = input.durable.projection()
+      const projection = (await readAgentRunV1(input.scope, input.durable.runId)).projection
       if (['completed', 'failed', 'cancelled', 'recovery_required'].includes(projection.state)) return
       await appendAgentRunEventV1({
         scope: input.scope,
@@ -288,18 +410,52 @@ export async function createOutlineGenerationTraceV1(input: {
   worldGroupId: number | null
   request: OutlineGenerationRequest
   assembled: AssembleContextResult
+  priorOutlineCandidateText?: string
   batch?: OutlineGenerationBatchRefV1
+  contentRevision?: WorkspaceContentRevisionVectorV1
   durable?: boolean
+  executionBoundary?: AgentExecutionBoundaryV1
+  /** Development/test-only deterministic interruption hook. */
+  faultInjector?: (boundary: OutlineGenerationTraceFaultBoundaryV1) => void | Promise<void>
 }): Promise<OutlineGenerationTraceV1> {
-  const shadow = await createOutlineGenerationShadowTraceV1(input)
-  if ((input.durable ?? isOutlineDurableHarnessEnabledV1()) === false) {
-    return composeOutlineTraces({ shadow, request: input.request, batch: input.batch })
+  const executionBoundary = input.executionBoundary ?? 'formal'
+  const binding = await resolveOutlineGenerationExecutionBindingV2({ ...input, executionBoundary })
+  assertAgentSkillBindingMatchesAssemblyV2(binding, input.assembled, `大纲 ${encodeGenerationOperation(input.request)}`)
+  const shadow = await createOutlineGenerationShadowTraceV1({ ...input, executionBoundary, binding })
+  const durableEnabled = input.durable ?? isOutlineDurableHarnessEnabledV1()
+  if (!durableEnabled) {
+    if (executionBoundary === 'formal') {
+      throw new Error('正式大纲运行必须启用 durable Harness，已阻止模型调用。')
+    }
+    return composeOutlineTraces({
+      shadow,
+      request: input.request,
+      batch: input.batch,
+      executionBoundary,
+      faultInjector: input.faultInjector,
+    })
   }
 
   let created: AgentRunSnapshotV1 | null = null
   let scope: WorkspaceScope | null = null
   try {
+    if (input.faultInjector && !import.meta.env.PROD) {
+      await input.faultInjector('trace-initialization')
+    }
     scope = await resolveScope({ projectId: input.projectId })
+    const resolvedScope = scope
+    const contentRevision = input.contentRevision ?? (executionBoundary === 'formal'
+      ? await captureWorkspaceContentRevisionV1({
+          scope,
+          worldGroupId: input.worldGroupId,
+        })
+      : undefined)
+    if (contentRevision) {
+      await assertWorkspaceContentRevisionFreshV1(contentRevision, {
+        scope,
+        worldGroupId: input.worldGroupId,
+      })
+    }
     const conversation = await getOrCreateAgentConversation({
       projectId: input.projectId,
       worldGroupId: input.worldGroupId,
@@ -312,20 +468,66 @@ export async function createOutlineGenerationTraceV1(input: {
       scope,
       worldGroupId: input.worldGroupId,
       conversationId: conversation.id,
-      contract: outlineRunContract(input),
+      contract: await outlineRunContract({ ...input, executionBoundary, binding }),
     })
-    const manifest = await outlineManifest({
+    const manifestV1 = await outlineManifest({
       runId: created.run.id,
       projectId: input.projectId,
       worldGroupId: input.worldGroupId,
       request: input.request,
       assembled: input.assembled,
+      binding,
     })
+    const gatewayExecution = outlineGatewayExecutionFromAssemblyV1(input.assembled)
+    if (executionBoundary === 'formal' && !gatewayExecution) {
+      throw new Error('正式大纲运行缺少 required Context Gateway 执行结果，已阻止模型调用。')
+    }
+    const baseManifest = gatewayExecution
+      ? await createContextManifestV2FromV1({ manifest: manifestV1, scope: resolvedScope })
+      : null
+    let preflight: ContextGatewayPreflightEvidenceV1 | null = null
     const durable = createGenerationNodeDurableTraceV1({
-      scope,
+      scope: resolvedScope,
       snapshot: created,
       stepId: encodeGenerationOperation(input.request),
-      manifest,
+      ...(gatewayExecution && baseManifest ? {
+        beforeModelEvidence: async ({ snapshot, messages }) => {
+          const recorded = await recordContextGatewayPreflightEvidenceV1({
+            scope: resolvedScope,
+            runId: snapshot.run.id!,
+            stepId: encodeGenerationOperation(input.request),
+            attempt: 1,
+            contextPacket: gatewayExecution.contextPacket,
+            selector: gatewayExecution.selector,
+            renderedRequest: messages,
+            sourceSnapshots: gatewayExecution.sourceSnapshots,
+            toolTranscript: gatewayExecution.toolTranscript,
+            expectedLastSequence: snapshot.projection.lastSequence,
+          })
+          preflight = recorded.evidence
+          return recorded.snapshot
+        },
+        afterModelRespondedEvidence: async ({ snapshot, output, candidateHash }) => {
+          if (!preflight) throw new Error('大纲 Gateway 缺少模型调用前的 exact preflight 证据。')
+          const finalized = await finalizeContextGatewayAttemptEvidenceV1({
+            scope: resolvedScope,
+            runId: snapshot.run.id!,
+            stepId: encodeGenerationOperation(input.request),
+            attempt: 1,
+            baseManifest,
+            preflight,
+            selector: gatewayExecution.selector,
+            sufficiency: gatewayExecution.sufficiency,
+            retrievalTrace: gatewayExecution.retrievalTrace,
+            gatewayVersionHash: gatewayExecution.contextPacket.gatewayVersionHash,
+            policyHash: gatewayExecution.contextPacket.policyHash,
+            rawResponse: output,
+            candidateHash,
+            expectedLastSequence: snapshot.projection.lastSequence,
+          })
+          return finalized.snapshot
+        },
+      } : { manifest: manifestV1 }),
     })
     return composeOutlineTraces({
       shadow,
@@ -334,6 +536,9 @@ export async function createOutlineGenerationTraceV1(input: {
       conversationId: conversation.id,
       request: input.request,
       batch: input.batch,
+      contentRevision,
+      executionBoundary,
+      faultInjector: input.faultInjector,
     })
   } catch (error) {
     const initializationError = error instanceof Error ? error.message : String(error)
@@ -346,11 +551,14 @@ export async function createOutlineGenerationTraceV1(input: {
         expectedLastSequence: created.projection.lastSequence,
       }).catch(() => undefined)
     }
+    if (executionBoundary === 'formal') throw error
     return composeOutlineTraces({
       shadow,
       request: input.request,
       batch: input.batch,
       initializationError,
+      executionBoundary,
+      faultInjector: input.faultInjector,
     })
   }
 }

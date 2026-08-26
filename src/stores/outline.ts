@@ -4,6 +4,7 @@ import type { OutlineNode } from '../lib/types'
 import { normalizeOutlineNode } from '../lib/outline/normalize'
 import { useChapterStore } from './chapter'
 import { assertRecordInScope, readOwnedRows, resolveReadScopeLike, resolveScopeLike, stampNewRecord, type WorkspaceScopeLike } from '../lib/world-engine/scope'
+import { coordinatePendingEditV1 } from '../lib/authoring/pending-edit-coordinator'
 
 interface OutlineStore {
   nodes: OutlineNode[]
@@ -52,39 +53,43 @@ export const useOutlineStore = create<OutlineStore>((set, get) => ({
   },
 
   updateNode: async (id, data) => {
-    const ts = now()
-    const beforeMigration = get().nodes.find(n => n.id === id) ?? await db.outlineNodes.get(id)
-    const projectId = beforeMigration?.projectId
-    if (projectId == null) return
-    const scope = await resolveScopeLike(projectId)
-    const before = await db.outlineNodes.get(id)
-    if (!before || !await assertRecordInScope(scope, 'outlineNodes', before, { owner: 'work' })) return
-    await db.outlineNodes.update(id, { ...data, updatedAt: ts })
-    if (
-      before?.type === 'chapter'
-      && Object.prototype.hasOwnProperty.call(data, 'title')
-      && typeof data.title === 'string'
-    ) {
-      const chapterIds = (await db.chapters.where('outlineNodeId').equals(id).primaryKeys()) as number[]
-      if (chapterIds.length) {
-        await db.chapters.bulkUpdate(chapterIds.map(chapterId => ({
-          key: chapterId,
-          changes: { title: data.title, updatedAt: ts },
-        })))
-        useChapterStore.setState(state => ({
-          chapters: state.chapters.map(chapter =>
-            chapter.outlineNodeId === id ? { ...chapter, title: data.title!, updatedAt: ts } : chapter,
+    await coordinatePendingEditV1({
+      key: `outline-node:${id}`,
+      persist: async () => {
+        const ts = now()
+        const initial = await db.outlineNodes.get(id)
+        if (!initial) return
+        const scope = await resolveScopeLike(initial.projectId)
+        const before = await db.outlineNodes.get(id)
+        if (!before || !await assertRecordInScope(scope, 'outlineNodes', before, { owner: 'work' })) return
+        await db.outlineNodes.update(id, { ...data, updatedAt: ts })
+        if (
+          before.type === 'chapter'
+          && Object.prototype.hasOwnProperty.call(data, 'title')
+          && typeof data.title === 'string'
+        ) {
+          const chapterIds = (await db.chapters.where('outlineNodeId').equals(id).primaryKeys()) as number[]
+          if (chapterIds.length) {
+            await db.chapters.bulkUpdate(chapterIds.map(chapterId => ({
+              key: chapterId,
+              changes: { title: data.title, updatedAt: ts },
+            })))
+            useChapterStore.setState(state => ({
+              chapters: state.chapters.map(chapter =>
+                chapter.outlineNodeId === id ? { ...chapter, title: data.title!, updatedAt: ts } : chapter,
+              ),
+              currentChapter: state.currentChapter?.outlineNodeId === id
+                ? { ...state.currentChapter, title: data.title!, updatedAt: ts }
+                : state.currentChapter,
+            }))
+          }
+        }
+        set({
+          nodes: get().nodes.map(n =>
+            n.id === id ? normalizeOutlineNode({ ...n, ...data, updatedAt: ts }) : n
           ),
-          currentChapter: state.currentChapter?.outlineNodeId === id
-            ? { ...state.currentChapter, title: data.title!, updatedAt: ts }
-            : state.currentChapter,
-        }))
-      }
-    }
-    set({
-      nodes: get().nodes.map(n =>
-        n.id === id ? normalizeOutlineNode({ ...n, ...data, updatedAt: ts }) : n
-      ),
+        })
+      },
     })
   },
 

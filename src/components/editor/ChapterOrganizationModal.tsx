@@ -32,6 +32,7 @@ const DOMAIN_META: Record<ChapterOrganizationDomain, { label: string; descriptio
   timeline: { label: '故事年表', description: '确认后替换本章的剧情大事' },
   relations: { label: '角色关系', description: '只新增已登记角色之间的新关系' },
   foreshadows: { label: '伏笔推进', description: '只允许单向推进，不覆盖后来修改' },
+  storyline: { label: '故事线演化', description: '推进、交汇与新线都需要作者确认后写入' },
 }
 
 const STATUS_LABEL = {
@@ -42,7 +43,7 @@ const STATUS_LABEL = {
 } as const
 
 function selectedSet(selection: ChapterOrganizationSelection, key: keyof ChapterOrganizationSelection) {
-  return new Set(selection[key])
+  return new Set(selection[key] ?? [])
 }
 
 export default function ChapterOrganizationModal({
@@ -63,7 +64,7 @@ export default function ChapterOrganizationModal({
     setSelection(selectAllChapterOrganizationCandidates(candidate))
   }, [candidate])
 
-  const total = useMemo(() => Object.values(selection).reduce((sum, indexes) => sum + indexes.length, 0), [selection])
+  const total = useMemo(() => Object.values(selection).reduce((sum, indexes) => sum + (indexes?.length ?? 0), 0), [selection])
   const allResolved = Object.values(candidate.domainStatus).every(
     status => status === 'adopted' || status === 'skipped',
   )
@@ -147,7 +148,7 @@ export default function ChapterOrganizationModal({
               整理本章 · {candidate.chapterTitle}
             </h3>
             <p className="mt-1 text-xs text-text-muted">
-              一次模型调用生成六类候选；未勾选内容不会写入项目。
+              一次模型调用生成七类候选；未勾选内容不会写入项目。
             </p>
           </div>
           <button onClick={onClose} disabled={busy} aria-label="关闭整理本章"
@@ -230,6 +231,33 @@ export default function ChapterOrganizationModal({
               title: `${item.name} · ${item.fromStatus} → ${item.toStatus}`,
               detail: item.note,
               quote: item.sourceQuote,
+            })),
+          })}
+          {renderSection({
+            domain: 'storyline',
+            key: 'storylineProgress',
+            items: (candidate.storyline?.progress ?? []).map(item => ({
+              title: `故事线 #${item.arcId} · ${item.status}`,
+              detail: [item.currentStageId ? `阶段 ${item.currentStageId}` : '', item.progressNote].filter(Boolean).join(' · '),
+              quote: item.evidenceQuote,
+            })),
+          })}
+          {renderSection({
+            domain: 'storyline',
+            key: 'storylineCrossings',
+            items: (candidate.storyline?.crossings ?? []).map(item => ({
+              title: `故事线 #${item.arcIdA} × #${item.arcIdB}`,
+              detail: item.note,
+              quote: item.evidenceQuote,
+            })),
+          })}
+          {renderSection({
+            domain: 'storyline',
+            key: 'newStoryArcs',
+            items: (candidate.storyline?.newArcs ?? []).map(item => ({
+              title: `候选${item.arcType === 'main' ? '主线' : '支线'} · ${item.name}`,
+              detail: item.description,
+              quote: item.evidenceQuote,
             })),
           })}
 

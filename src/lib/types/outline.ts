@@ -19,7 +19,7 @@ export const STORY_STRUCTURES: Record<StoryStructure, { label: string; blocks: s
 }
 
 /** 大纲节点 */
-export interface OutlineNode {
+export interface OutlineNode extends RagDocumentMetadata {
   id?: number
   projectId: number
   parentId: number | null    // null = 顶层

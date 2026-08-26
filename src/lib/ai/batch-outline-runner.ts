@@ -17,6 +17,11 @@ import {
 import type { AssembleContextResult } from '../registry/types'
 import type { ChatMessage, OutlineNode, Project } from '../types'
 import type { OutlineGenerationTraceV1 } from '../outline/harness'
+import {
+  assertWorkspaceContentRevisionFreshV1,
+  captureWorkspaceContentRevisionV1,
+} from '../authoring/content-revision'
+import { resolveScopeLike } from '../world-engine/scope'
 
 export interface BatchOutlineProgress {
   currentVolumeIndex: number
@@ -108,14 +113,10 @@ async function finalizeFailedTrace(input: {
   code: string
 }): Promise<void> {
   if (!input.trace) return
-  try {
-    await input.trace.terminateRun({
-      status: input.cancelled ? 'cancelled' : 'failed',
-      code: input.code,
-    })
-  } catch (error) {
-    console.warn('[BatchOutline] 未能提交卷级运行终止证据。', error)
-  }
+  await input.trace.terminateRun({
+    status: input.cancelled ? 'cancelled' : 'failed',
+    code: input.code,
+  })
 }
 
 /**
@@ -176,9 +177,18 @@ export async function runBatchOutlineGeneration(
         ? previous
         : null
       const predecessorCandidateHash = scopedPrevious?.candidate.candidateHash
+      const scope = await resolveScopeLike(project.id)
+      const contentRevision = await captureWorkspaceContentRevisionV1({
+        scope,
+        worldGroupId: volume.worldGroupId ?? null,
+      })
       const assembled = await assembleContext({
         volume,
         priorOutlineCandidateText: scopedPrevious ? priorCandidateContext(scopedPrevious) : undefined,
+      })
+      await assertWorkspaceContentRevisionFreshV1(contentRevision, {
+        scope,
+        worldGroupId: volume.worldGroupId ?? null,
       })
       if (signal?.aborted) {
         return cancelledResult({ batchGroupId, chaptersByVolume, candidatesByVolume, failures, startTime })
@@ -202,6 +212,7 @@ export async function runBatchOutlineGeneration(
         worldGroupId: volume.worldGroupId ?? null,
         request,
         assembled,
+        priorOutlineCandidateText: scopedPrevious ? priorCandidateContext(scopedPrevious) : undefined,
         durable: true,
         batch: {
           batchGroupId,
@@ -209,11 +220,15 @@ export async function runBatchOutlineGeneration(
           batchTotal: volumes.length,
           ...(predecessorCandidateHash ? { predecessorCandidateHash } : {}),
         },
+        contentRevision,
       })
       if (!trace.durable) {
         throw new Error(`durable 运行初始化失败：${trace.initializationError ?? '未知原因'}`)
       }
-      const generation = await runGenerationNode(node, prepared, { shadowTrace: trace })
+      const generation = await runGenerationNode(node, prepared, {
+        shadowTrace: trace,
+        traceFailureMode: 'throw',
+      })
       if (generation.gate?.status === 'blocked') {
         throw new Error(generation.gate.issues.map(issue => issue.message).join('；'))
       }

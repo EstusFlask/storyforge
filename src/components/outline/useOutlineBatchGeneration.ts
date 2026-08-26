@@ -7,18 +7,18 @@ import {
   parseChapterOutlineOutput,
   type ParsedChapter,
 } from '../../lib/ai/parse-outline-output'
-import { adoptGeneratedOutlineItems } from '../../lib/outline/adopt-generation'
 import type { RunOptions } from '../../lib/ai/adapters/outline-adapter'
 import {
-  beginOutlineGenerationAdoptionV1,
-  commitOutlineGenerationAdoptionV1,
+  adoptOutlineGenerationCandidateV1,
   rejectOutlineGenerationCandidateV1,
   restoreLatestOutlineGenerationBatchV1,
   type OutlineGenerationCandidateV1,
 } from '../../lib/outline/harness'
 import { decodeGenerationOperation } from '../../lib/outline/generation-request'
+import type { OutlineGenerationRequest } from '../../lib/outline/generation-request'
 import type { AssembleContextResult } from '../../lib/registry/types'
 import type { OutlineNode, Project } from '../../lib/types'
+import { flushPendingEditsV1 } from '../../lib/authoring/pending-edit-coordinator'
 
 interface Options {
   project: Project
@@ -28,6 +28,7 @@ interface Options {
   hint: string
   runOptions: RunOptions
   assembleContext: (
+    request: OutlineGenerationRequest,
     worldGroupId: number | null,
     outlineNodeId?: number | null,
     priorOutlineCandidateText?: string,
@@ -115,6 +116,7 @@ export function useOutlineBatchGeneration({
     abortRef.current = controller
 
     try {
+      await flushPendingEditsV1()
       const generationResult = await runBatchOutlineGeneration({
         project,
         nodes,
@@ -122,6 +124,7 @@ export function useOutlineBatchGeneration({
         userHint: hint || undefined,
         runOptions,
         assembleContext: ({ volume, priorOutlineCandidateText }) => assembleContext(
+          { kind: 'chapters', volumeId: volume.id! },
           multiWorldEnabled ? (volume.worldGroupId ?? null) : null,
           volume.id,
           priorOutlineCandidateText,
@@ -195,28 +198,10 @@ export function useOutlineBatchGeneration({
         baseExistingTitles: existingChapters.map(chapter => chapter.title),
       }
       try {
-        await beginOutlineGenerationAdoptionV1(candidate, intent)
-        const adoption = await adoptGeneratedOutlineItems({
-          projectId: project.id,
-          worldGroupId: volume.worldGroupId ?? null,
-          parentId: volumeId,
-          type: 'chapter',
-          items: chapters,
-          startingOrder: existingChapters.length,
-        })
-        if (adoption.writtenCount === 0) {
-          throw new Error(adoption.skippedReasons.join('；') || '未写入任何章节')
-        }
-        await commitOutlineGenerationAdoptionV1(candidate, {
-          kind: 'chapters',
-          volumeId,
-          items: chapters,
-          result: adoption,
-        }, intent)
+        await adoptOutlineGenerationCandidateV1({ candidate, intent })
       } catch (error) {
         const reason = error instanceof Error ? error.message : String(error)
         errors.push(`「${volume.title}」：${reason}`)
-        await rejectOutlineGenerationCandidateV1(candidate, reason).catch(() => undefined)
       }
     }
     await reloadOutline()

@@ -15,6 +15,7 @@ import {
   rebuildProjectRetrievalChunks,
 } from '../../src/lib/retrieval/retrieval'
 import { createRagSelectionTrace, type NodeFlow, type NodeFlowGraph } from '../../src/lib/types'
+import { backfillResourceUidsV1 } from '../../src/lib/context-gateway/resource-identity'
 
 async function seedProject() {
   const now = Date.now()
@@ -85,6 +86,7 @@ async function seedProject() {
     createdAt: now,
     updatedAt: now,
   }) as number
+  await backfillResourceUidsV1(projectId)
   return { projectId, worldviewId, characterId, chapterId }
 }
 

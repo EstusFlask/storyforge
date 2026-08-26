@@ -11,8 +11,15 @@ import type {
 import { prepareGenerationNode } from '../generation/generation-node'
 import { walkOutlineChaptersInCanonicalOrder } from '../outline/canonical-outline-walk'
 import { adopt } from '../registry/adopt'
-import { assembleContext } from '../registry/assemble-context'
 import { rebuildChapterChunks } from '../retrieval/retrieval'
+import {
+  prepareProseGatewayAssemblyV1,
+  type ProseGatewayAssemblyV1,
+} from '../prose/gateway-context'
+import {
+  contextGatewayInputStateSourceKeysV1,
+  projectContextGatewayInputStateV1,
+} from './context-gateway-input'
 import type { AIConfig, Chapter, ChatMessage, OutlineNode, Project, WorkspaceScope } from '../types'
 import { countWords, htmlToPlainText, plainTextToHtml } from '../utils/html'
 import {
@@ -24,14 +31,10 @@ import {
 import {
   attachAgentContextInputStateV1,
   evidenceFromContextResult,
-  resolveAgentContextPolicy,
   type AgentContextEvidence,
   type AgentContextProfile,
 } from './context-policy'
-import {
-  createAgentContextCompressionSessionV1,
-  type AgentContextCompressionRuntimeV1,
-} from './context-compression'
+import type { AgentContextCompressionRuntimeV1 } from './context-compression'
 import {
   buildChapterInformationBoundaryV1,
   buildInformationBoundaryInstructionV1,
@@ -41,7 +44,6 @@ import {
 import {
   getDefaultAgentSkillV1,
   buildAgentSkillInputGuidanceV1,
-  resolveAgentSkillInputStateV1,
   resolveAgentSkillV1,
   resolveAgentSkillContextSourceKeysV1,
   type AgentSkillExecutionModeV1,
@@ -103,7 +105,7 @@ export interface ProseCopilotInput {
   outlineNode: OutlineNode
   chapter: Chapter | null
   snapshot: ProseCopilotSnapshot
-  assembled: Awaited<ReturnType<typeof assembleContext>>
+  assembled: ProseGatewayAssemblyV1
   narrativeBrief: NarrativeBriefV1
   creativeReliabilityEnabled?: boolean
   previousTail: string
@@ -129,6 +131,7 @@ export interface PreparedProseCopilot {
   contextEvidence: AgentContextEvidence
   perspectiveCharacterId?: number | null
   informationBoundary: InformationBoundaryManifestV1
+  contextGatewayExecution: ProseGatewayAssemblyV1['contextGatewayExecution']
   input: ProseCopilotInput
   modelIdentity: { provider: string; model: string }
   runRaw: (messages: ChatMessage[]) => Promise<CreativeRawModelResultV1>
@@ -558,18 +561,6 @@ export async function prepareProseCopilot(input: {
     { category: routingCategory },
   ).config
   const contextProfile = input.contextProfile ?? 'full'
-  const contextPolicy = resolveAgentContextPolicy(skill.contextTaskKind, contextProfile)
-  const compression = input.contextCompressionRuntime
-    ? createAgentContextCompressionSessionV1({
-        policy: skill.contextCompression,
-        config,
-        projectId: input.projectId,
-        authorRequest: request,
-        routingCategory,
-        signal: input.signal,
-        runtime: input.contextCompressionRuntime,
-      })
-    : undefined
   if (perspectiveCharacterId != null) {
     const character = await db.characters.get(perspectiveCharacterId)
     const visible = character
@@ -592,38 +583,34 @@ export async function prepareProseCopilot(input: {
     informationBoundary.manifestHash,
     perspectiveFromChapter,
   )
-  const sourceKeys = resolveAgentSkillContextSourceKeysV1(skill, {
-    includeOptional: perspectiveCharacterId != null,
-  })
-  const previous = scopedOutlineChapters(nodes, worldGroupId)
-    .filter(item => item.ordinal < target.ordinal)
-    .reverse()
-    .map(item => chapters.find(chapter => chapter.outlineNodeId === item.outlineNode.id))
-    .find(chapter => Boolean(htmlToPlainText(chapter?.content ?? '').trim()))
-  const previousTail = htmlToPlainText(previous?.content ?? '').slice(-1800)
-  const assembled = await assembleContext({
+  const assembled = await prepareProseGatewayAssemblyV1({
     projectId: input.projectId,
     scope,
     worldGroupId,
-    outlineNodeId: target.outline.id,
+    operation,
+    outlineNodeId: target.outline.id!,
     chapterId: target.chapter?.id ?? null,
-    currentChapterOrder: target.chapter?.order ?? target.ordinal - 1,
-    previousChapterEnding: previousTail,
-    stateReferenceText: [target.outline.title, target.outline.summary].join(' '),
-    provider: config.provider,
-    model: config.model,
-    sourceKeys,
-    ...(perspectiveCharacterId != null ? { characterId: perspectiveCharacterId } : {}),
-    inputBudgetMaxTokens: contextPolicy.maxInputTokens,
-    sourceBudgetScale: contextPolicy.sourceBudgetScale,
-    sourceTransformer: compression?.sourceTransformer,
+    authorRequest: request,
+    perspectiveCharacterId,
+    config,
+    contextProfile,
+    requireDetailedOutline: false,
+    signal: input.signal,
   })
   const current = await readSnapshot(scope, snapshot, worldGroupId)
   if (!sameSnapshot(current, snapshot)) throw new ProseCopilotStaleError()
-  const inputState = resolveAgentSkillInputStateV1(skill, [assembled])
+  const inputState = projectContextGatewayInputStateV1(
+    skill,
+    assembled.contextGatewayExecution,
+    assembled,
+  )
   const contextEvidence = attachAgentContextInputStateV1(
     evidenceFromContextResult(contextProfile, assembled),
     inputState,
+  )
+  contextEvidence.inputStateSourceKeys = contextGatewayInputStateSourceKeysV1(
+    skill,
+    assembled.contextGatewayExecution,
   )
   const inputGuidance = buildAgentSkillInputGuidanceV1(skill, inputState)
   const narrativeBrief = buildNarrativeBriefV1({
@@ -647,7 +634,7 @@ export async function prepareProseCopilot(input: {
     assembled,
     narrativeBrief,
     creativeReliabilityEnabled,
-    previousTail,
+    previousTail: '',
     config,
     parameterValues: input.parameterValues,
     perspectiveCharacterId,
@@ -693,6 +680,7 @@ export async function prepareProseCopilot(input: {
     contextEvidence,
     perspectiveCharacterId,
     informationBoundary,
+    contextGatewayExecution: assembled.contextGatewayExecution,
     input: nodeInput,
     modelIdentity: { provider: config.provider, model: config.model },
     runRaw,

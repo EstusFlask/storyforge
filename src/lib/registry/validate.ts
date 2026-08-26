@@ -12,6 +12,7 @@ import { PROJECT_TABLES, REGISTRY_BY_NAME } from './project-tables'
 import { FIELD_REGISTRY, FIELD_BY_TARGET } from './field-registry'
 import { ADOPTION_EXTENSIONS, ADOPTION_SCHEMAS } from './adoption-schema'
 import { CONTEXT_SOURCES } from './context-sources'
+import { CONTEXT_RESOURCE_KINDS_V1 } from './types'
 
 /** 解析 'tableName[field]' → tableName */
 function parseTargetTable(target: string): string | null {
@@ -41,6 +42,18 @@ export function checkRegistry(): RegistryValidationResult {
 
   // ref / remap target 表名存在性
   for (const spec of PROJECT_TABLES) {
+    if (spec.resourceIdentity) {
+      if (!CONTEXT_RESOURCE_KINDS_V1.includes(spec.resourceIdentity.contextKind)) {
+        errors.push(`${spec.name}.resourceIdentity.contextKind 未登记: ${spec.resourceIdentity.contextKind}`)
+      }
+      if (!spec.resourceIdentity.label.trim()) {
+        errors.push(`${spec.name}.resourceIdentity.label 不能为空`)
+      }
+      if (spec.resourceIdentity.descriptorMode === 'registered-fields'
+        && !(FIELD_BY_TARGET.get(spec.name)?.length)) {
+        errors.push(`${spec.name}.resourceIdentity 要求 registered-fields，但 FIELD_REGISTRY 无字段`)
+      }
+    }
     if (spec.communityShare === 'world' && !spec.releaseSection) {
       errors.push(`${spec.name}.communityShare=world 必须登记 releaseSection`)
     }
@@ -110,10 +123,20 @@ export function checkRegistry(): RegistryValidationResult {
       if (!REGISTRY_BY_NAME.has(rm.remapVia)) {
         errors.push(`${spec.name}.exportRemap 指向不存在的表: ${rm.remapVia}`)
       }
+      if (rm.deferred && (rm.selfTree || rm.onUnmapped === 'drop' || rm.onUnmapped === 'require')) {
+        errors.push(`${spec.name}.exportRemap deferred 只允许可空的非树引用: ${rm.field}`)
+      }
     }
   }
 
   const fieldKeys = new Set<string>()
+  const generatableFieldsByDomain = new Map<string, Set<string>>()
+  for (const field of FIELD_REGISTRY.filter(item => item.aiGeneration)) {
+    const domain = field.aiGeneration!.domain
+    const fields = generatableFieldsByDomain.get(domain) ?? new Set<string>()
+    fields.add(field.field)
+    generatableFieldsByDomain.set(domain, fields)
+  }
   for (const field of FIELD_REGISTRY) {
     if (!REGISTRY_BY_NAME.has(field.target)) {
       errors.push(`FIELD_REGISTRY 指向不存在的表: ${field.target}.${field.field}`)
@@ -124,6 +147,50 @@ export function checkRegistry(): RegistryValidationResult {
     if (field.type === 'enum' && (!field.enums || field.enums.length === 0)) {
       errors.push(`FIELD_REGISTRY enum 缺少枚举值: ${key}`)
     }
+    if (field.aiGeneration) {
+      const capability = field.aiGeneration
+      const expectedTarget = capability.domain === 'worldview-foundation' ? 'worldviews' : 'storyCores'
+      if (field.target !== expectedTarget) {
+        errors.push(`FIELD_REGISTRY ${capability.domain} 生成能力挂载到错误目标: ${key}`)
+      }
+      if (!capability.label.trim() || !capability.outputSchemaId.trim() || capability.maxChars < 2) {
+        errors.push(`FIELD_REGISTRY 生成能力 label/schema/maxChars 无效: ${key}`)
+      }
+      if (capability.kind === 'text' && !['string', 'longtext'].includes(field.type)) {
+        errors.push(`FIELD_REGISTRY 生成能力 kind=text 但字段不是文本: ${key}`)
+      }
+      if (capability.kind !== 'text' && field.type !== 'object') {
+        errors.push(`FIELD_REGISTRY 生成能力 kind=${capability.kind} 但字段不是 object: ${key}`)
+      }
+      if (!capability.modes.length || new Set(capability.modes).size !== capability.modes.length) {
+        errors.push(`FIELD_REGISTRY 生成能力 modes 为空或重复: ${key}`)
+      }
+      for (const dependency of capability.directDependencies) {
+        if (dependency === field.field || !generatableFieldsByDomain.get(capability.domain)?.has(dependency)) {
+          errors.push(`FIELD_REGISTRY 生成能力直接依赖无效: ${key} -> ${dependency}`)
+        }
+      }
+    }
+  }
+
+  for (const domain of generatableFieldsByDomain.keys()) {
+    const dependencyGraph = new Map(FIELD_REGISTRY
+      .filter(field => field.aiGeneration?.domain === domain)
+      .map(field => [field.field, [...field.aiGeneration!.directDependencies]]))
+    const visiting = new Set<string>()
+    const visited = new Set<string>()
+    const visit = (field: string): void => {
+      if (visiting.has(field)) {
+        errors.push(`FIELD_REGISTRY ${domain} 生成能力依赖成环: ${field}`)
+        return
+      }
+      if (visited.has(field)) return
+      visiting.add(field)
+      for (const dependency of dependencyGraph.get(field) ?? []) visit(dependency)
+      visiting.delete(field)
+      visited.add(field)
+    }
+    for (const field of dependencyGraph.keys()) visit(field)
   }
 
   const adoptionTargets = new Set<string>()
@@ -182,6 +249,7 @@ export function checkRegistry(): RegistryValidationResult {
   }
 
   const sourceKeys = new Set<string>()
+  const providerIds = new Set<string>()
   for (const source of CONTEXT_SOURCES) {
     if (sourceKeys.has(source.key)) errors.push(`CONTEXT_SOURCES key 重复登记: ${source.key}`)
     sourceKeys.add(source.key)
@@ -199,6 +267,22 @@ export function checkRegistry(): RegistryValidationResult {
     }
     if (source.budgetTokens <= 0) {
       errors.push(`CONTEXT_SOURCES budgetTokens 必须为正数: ${source.key}`)
+    }
+    if (source.resources) {
+      const provider = source.resources
+      if (providerIds.has(provider.providerId)) {
+        errors.push(`CONTEXT_SOURCES resource providerId 重复: ${provider.providerId}`)
+      }
+      providerIds.add(provider.providerId)
+      if (!provider.providerVersion.trim() || !provider.normalizationVersion.trim()) {
+        errors.push(`CONTEXT_SOURCES resource provider 缺版本: ${source.key}`)
+      }
+      if (!provider.kinds.length) errors.push(`CONTEXT_SOURCES resource provider kinds 不能为空: ${source.key}`)
+      for (const kind of provider.kinds) {
+        if (!CONTEXT_RESOURCE_KINDS_V1.includes(kind)) {
+          errors.push(`CONTEXT_SOURCES resource provider kind 未登记: ${source.key}.${kind}`)
+        }
+      }
     }
   }
 

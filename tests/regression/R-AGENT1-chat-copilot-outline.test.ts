@@ -4,7 +4,7 @@ import {
   OutlineCopilotStaleError,
   createOutlineCopilotNode,
   parseOutlineCandidateDraft,
-  prepareOutlineCopilot,
+  prepareOutlineCopilot as prepareOutlineCopilotRaw,
   revalidateOutlineCreativeDraftV1,
   runOutlineCreativeReliabilityV1,
   type OutlineCopilotInput,
@@ -25,6 +25,16 @@ import { resolveScopeLike } from '../../src/lib/world-engine/scope'
 import { useAIConfigStore } from '../../src/stores/ai-config'
 import { buildNarrativeBriefV1 } from '../../src/lib/agent/narrative-brief'
 import { AgentTeamBudgetTracker } from '../../src/lib/agent/team-budget'
+import { backfillResourceUidsV1 } from '../../src/lib/context-gateway/resource-identity'
+import { ensureWorkspaceOwnership } from '../../src/lib/world-engine/ownership'
+
+async function prepareOutlineCopilot(
+  ...args: Parameters<typeof prepareOutlineCopilotRaw>
+): ReturnType<typeof prepareOutlineCopilotRaw> {
+  await ensureWorkspaceOwnership(args[0].projectId)
+  await backfillResourceUidsV1(args[0].projectId)
+  return prepareOutlineCopilotRaw(...args)
+}
 
 async function addProject(enableMultiWorld = false): Promise<Project> {
   const now = Date.now()
@@ -131,7 +141,8 @@ describe('AGENT-1 27.1-d · ChatCopilot 大纲闭环', () => {
 
     expect(prepared.mode).toBe('volumes')
     expect(prepared.parentVolumeId).toBeNull()
-    expect(prepared.contextSources).toContain('worldview')
+    expect(prepared.contextSources).toEqual(['ragSelection'])
+    expect(prepared.contextEvidence.inputStateSourceKeys).toContain('worldview')
     expect(prepared.contextEvidence.inputState).toMatchObject({
       state: 'partial',
       handling: 'reference-and-create',

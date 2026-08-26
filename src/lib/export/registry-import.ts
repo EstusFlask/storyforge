@@ -11,6 +11,7 @@
 import Dexie from 'dexie'
 import { db } from '../db/schema'
 import { PROJECT_TABLES } from '../registry/project-tables'
+import { backfillResourceUidsInCurrentTransactionV1 } from '../context-gateway/resource-identity'
 import { remapWorldPortalTargets } from '../utils/world-portals'
 import { transactionTablesFor } from '../registry/lifecycle'
 import { importLegacyArraysToCodex } from '../migrations/legacy-to-codex-upgrade'
@@ -31,6 +32,7 @@ import {
   isWorkspaceUid,
   isWorkCode,
 } from '../memory/identity'
+import { assertAgentRunArtifactRecordIntegrityV1 } from '../memory/artifact-record'
 
 const STRICT_EXPORT_VERSION = 4
 
@@ -129,7 +131,11 @@ function restoreStrictOwner(
   }
 }
 
-/** 表级拓扑排序:被 remapVia 指向的表必须先导入(selfTree 不算表间依赖) */
+/**
+ * 表级拓扑排序：被 remapVia 指向的表通常必须先导入。注册表显式标记
+ * deferred 的可空反向外键可先落 null，再由 deferredForeignKeys 在所有
+ * 映射可用后回填，用于表达 Character ↔ Chapter 等合法双向可空引用。
+ */
 function deriveImportOrder(specs: TableSpec[]): TableSpec[] {
   const done = new Set<string>()
   const order: TableSpec[] = []
@@ -149,7 +155,9 @@ function deriveImportOrder(specs: TableSpec[]): TableSpec[] {
     for (const spec of specs) {
       if (done.has(spec.name)) continue
       const fieldDeps = (spec.exportRemap ?? [])
-        .filter(rm => !rm.selfTree && rm.remapVia !== spec.name)
+        .filter(rm => !rm.selfTree
+          && rm.remapVia !== spec.name
+          && rm.deferred !== true)
         .map(rm => rm.remapVia)
       const refDeps = (spec.exportRefRemap ?? [])
         .filter(ref => ref.remapVia !== spec.name)
@@ -354,6 +362,9 @@ export async function deriveImportProjectJSON(data: ProjectExportData): Promise<
         }
 
         if (spec.owner === 'project') obj.projectId = newProjectId
+        if (spec.portableData?.kind === 'exact-run-artifact') {
+          await Dexie.waitFor(assertAgentRunArtifactRecordIntegrityV1(obj))
+        }
         if (spec.portableData?.kind === 'binary-blob') {
           const binary = restorePortableBinaryBlob(
             obj[spec.portableData.field],
@@ -479,6 +490,8 @@ export async function deriveImportProjectJSON(data: ProjectExportData): Promise<
         idMaps: newIdMaps,
       })
     }
+
+    await backfillResourceUidsInCurrentTransactionV1(newProjectId)
 
     return newProjectId
   })

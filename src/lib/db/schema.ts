@@ -57,6 +57,7 @@ import type {
   AgentRunRecord,
   AgentRunEventRecord,
   AgentRunCheckpointRecord,
+  AgentRunArtifactRecordV1,
   NodeFlow,
   NodeRunRecord,
   SimulationSession,
@@ -205,6 +206,7 @@ class StoryForgeDB extends Dexie {
   agentRuns!: Table<AgentRunRecord, number>
   agentRunEvents!: Table<AgentRunEventRecord, number>
   agentRunCheckpoints!: Table<AgentRunCheckpointRecord, number>
+  agentRunArtifacts!: Table<AgentRunArtifactRecordV1, number>
 
   // FLOW-2 —— 独立自由节点文档与逐节点可见运行记录
   nodeFlows!: Table<NodeFlow, number>
@@ -636,6 +638,40 @@ class StoryForgeDB extends Dexie {
         if (!Object.prototype.hasOwnProperty.call(run, 'simulationSessionId')) {
           run.simulationSessionId = null
         }
+      })
+    })
+
+    // v63 / CTXG-2: exact Harness evidence bodies. Historical event hashes are
+    // preserved verbatim; no body is guessed from old summaries or projections.
+    this.version(63).stores({
+      agentRunArtifacts: '++id, projectId, &[projectId+artifactKind+contentHash], contentHash, retentionState, createdAt',
+    })
+
+    // v64 / STORY-1: storyArcs are executable projections of StoryCore intent.
+    // Existing author-created arcs remain manual/active; no source lineage is
+    // guessed. The two new indexes are required by registered setNull lifecycle
+    // references and portable import/export remapping.
+    this.version(64).stores({
+      storyArcs: '++id, projectId, type, sourceStoryCoreId, producerRunId',
+    }).upgrade(async tx => {
+      await tx.table('storyArcs').toCollection().modify(arc => {
+        if (!Object.prototype.hasOwnProperty.call(arc, 'origin')) arc.origin = 'manual'
+        if (!Object.prototype.hasOwnProperty.call(arc, 'status')) arc.status = 'active'
+      })
+    })
+
+    // v65 / CODEX-1: adopted extraction/enrichment provenance. The Run index
+    // is required by PROJECT_TABLES setNull lifecycle; historical author rows
+    // remain author Canon and never receive invented AI evidence.
+    this.version(65).stores({
+      codexEntries: '++id, projectId, categoryId, worldGroupId, order, producerRunId',
+    }).upgrade(async tx => {
+      await tx.table('codexEntries').toCollection().modify(entry => {
+        if (!Object.prototype.hasOwnProperty.call(entry, 'origin')) entry.origin = 'manual'
+        if (!Object.prototype.hasOwnProperty.call(entry, 'sourceEvidenceQuotes')) entry.sourceEvidenceQuotes = '[]'
+        if (!Object.prototype.hasOwnProperty.call(entry, 'sourceContentHash')) entry.sourceContentHash = ''
+        if (!Object.prototype.hasOwnProperty.call(entry, 'producerRunId')) entry.producerRunId = null
+        if (!Object.prototype.hasOwnProperty.call(entry, 'producerCandidateHash')) entry.producerCandidateHash = null
       })
     })
   }

@@ -42,7 +42,7 @@ export default function AIConnectionTestSection({
           ) : (
             <Wifi className="w-4 h-4" />
           )}
-          {testing ? '测试中...' : '测试连接'}
+          {testing ? '测试中...' : '测试最小连接'}
         </button>
         <button onClick={onToggleLogs} aria-pressed={showLogs}
           className="flex items-center gap-1.5 px-3 py-2 text-text-muted hover:text-text-secondary text-sm transition-colors">
@@ -56,6 +56,9 @@ export default function AIConnectionTestSection({
           {result.duration && <p className="text-xs mt-0.5 opacity-70">耗时 {result.duration}ms</p>}
         </div>
       )}
+      <p className="px-1 text-[10px] text-text-muted">
+        只验证当前 Key、Base URL 和模型能完成一次极短请求；不代表长输出、批量评测或剩余额度充足。
+      </p>
       {showCorsHint && (
         <p className="text-xs text-amber-400 px-1">
           {isDevelopment

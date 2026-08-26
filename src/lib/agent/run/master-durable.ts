@@ -23,8 +23,13 @@ import {
   type MasterCandidatePayload,
 } from '../orchestrator'
 import { parseCharacterSupplementTaskInputV1 } from '../character-supplement-copilot'
+import { parseCharacterLifecycleTaskInputV1 } from '../character-lifecycle-copilot'
 import type { AgentTeamBudgetEvidence } from '../team-budget'
 import { parseCreativeArtifactV1 } from '../creative-reliability'
+import {
+  parseStructuredOutputRunEvidenceV1,
+  structuredOutputFailureEvidenceV1,
+} from '../structured-output-pipeline'
 import { parseNarrativeBriefV1 } from '../narrative-brief'
 import { parseInformationBoundaryManifestV1 } from '../information-boundary'
 import {
@@ -68,6 +73,7 @@ import {
   classifyAgentRunFailureV1,
   matchingFailureCountV1,
 } from './failure-policy'
+import { maybeInjectHarnessFaultV1 } from '../dev-fault-injection'
 import {
   MASTER_CANDIDATE_STEP_VERIFIER_SET_VERSION_V1,
   contextManifestHashForStepAttemptV1,
@@ -92,11 +98,42 @@ import {
   runMasterCandidateSemanticReviewWithClientV1,
   verifyMasterCandidateSemanticReviewArtifactV1,
 } from '../master-candidate-semantic-review'
-import { STORY_CORE_FIELDS } from '../story-core-copilot'
+import { STORY_CORE_FIELDS, resolveStoryCoreFieldV1 } from '../story-core-copilot'
 import { CREATIVE_RULES_FIELDS } from '../creative-rules-copilot'
-import { WORLDVIEW_AGENT_FIELDS } from '../worldview-field-copilot'
+import {
+  WORLDVIEW_AGENT_FIELDS,
+  parseWorldviewFieldOutputBudgetV1,
+  resolveWorldviewAgentFieldV1,
+} from '../worldview-field-copilot'
 import { MAX_INSPIRATION_FRAGMENTS } from '../../inspiration/workspace'
 import { parseCharacterRevisionTaskInputV1 } from '../character-revision-copilot'
+import {
+  parseStoryArcMutationRequestV1,
+  type StoryArcMutationRequestV1,
+} from '../story-arc-copilot'
+import { parseWorkspaceContentRevisionV1 } from '../../authoring/content-revision'
+import {
+  assertPromptEvidenceMatchesOptionsV1,
+  parsePromptExecutionEvidenceV1,
+  parsePromptExecutionOptionsV1,
+  type GovernedPromptModuleKeyV1,
+} from '../prompt-execution'
+import {
+  computeMasterCandidateHashV1,
+  isMasterCandidateContextGatewayRequiredV1,
+} from './master-candidate-hash'
+import {
+  finalizeContextGatewayAttemptEvidenceV1,
+  recordContextGatewayPreflightEvidenceV1,
+  type ContextGatewayPreflightEvidenceV1,
+} from '../../context-gateway/attempt-evidence'
+import {
+  createContextManifestFromAssemblyV1,
+  createContextManifestV2FromV1,
+} from './context-manifest'
+import { isContextGatewayRequiredForWriteTargetV1 } from '../../context-gateway/skill-policy'
+import type { ContextManifestV2 } from '../../types/agent-run'
+import { recordAgentRunArtifactV1 } from '../../memory/artifact-store'
 
 export const MASTER_AGENT_PLAN_CHECKPOINT_KIND_V1 = 'master-agent-plan'
 export const MASTER_AGENT_PLAN_CHECKPOINT_VERSION_V1 = 1 as const
@@ -377,6 +414,27 @@ function readOptionalCharacterSupplementRequest(
   }
 }
 
+function readOptionalCharacterLifecycleRequest(
+  value: Record<string, unknown>,
+  agentId: DomainAgentId,
+  skillId: AgentSkillId | undefined,
+  label: string,
+) {
+  const present = Object.prototype.hasOwnProperty.call(value, 'characterLifecycleRequest')
+  if (!present) {
+    if (skillId === 'character.lifecycle') fail(label + '.characterLifecycleRequest 缺失')
+    return undefined
+  }
+  if (agentId !== 'character' || skillId !== 'character.lifecycle') {
+    fail(label + '.characterLifecycleRequest 无效')
+  }
+  try {
+    return parseCharacterLifecycleTaskInputV1(value.characterLifecycleRequest)
+  } catch (error) {
+    fail(`${label}.characterLifecycleRequest 无效：${error instanceof Error ? error.message : String(error)}`)
+  }
+}
+
 function readOptionalStorylineProgressChapterId(
   value: Record<string, unknown>,
   agentId: DomainAgentId,
@@ -396,6 +454,23 @@ function readOptionalStorylineProgressChapterId(
   return chapterId
 }
 
+function readOptionalStoryArcMutationRequest(
+  value: Record<string, unknown>,
+  agentId: DomainAgentId,
+  skillId: AgentSkillId | undefined,
+  label: string,
+): StoryArcMutationRequestV1 | undefined {
+  if (!Object.prototype.hasOwnProperty.call(value, 'storyArcMutationRequest')) return undefined
+  if (agentId !== 'outline' || skillId !== 'outline.story-arcs') {
+    fail(label + '.storyArcMutationRequest 无效')
+  }
+  try {
+    return parseStoryArcMutationRequestV1(value.storyArcMutationRequest)
+  } catch (error) {
+    fail(`${label}.storyArcMutationRequest 无效：${error instanceof Error ? error.message : String(error)}`)
+  }
+}
+
 function readOptionalSkillId(
   value: Record<string, unknown>,
   agentId: DomainAgentId,
@@ -406,7 +481,7 @@ function readOptionalSkillId(
   const skill = getAgentSkillV1(value.skillId, agentId)
   const allowedModes: Record<DomainAgentId, ReadonlySet<string>> = {
     'world-origin': new Set(['complete', 'worldview-field', 'story-core', 'creative-rules']),
-    character: new Set(['create', 'supplement']),
+    character: new Set(['create', 'supplement', 'lifecycle']),
     inspiration: new Set(['reverse']),
     outline: new Set(['auto', 'story-arcs', 'storyline-progress', 'character-driven', 'character-revision', 'world-game', 'volumes', 'chapters']),
     prose: new Set(['auto', 'generate', 'continue']),
@@ -415,6 +490,17 @@ function readOptionalSkillId(
     fail(`${label}.skillId 不是主计划可直接执行的生成 Skill`)
   }
   return skill.id as AgentSkillId
+}
+
+function promptModuleForPlanTaskV1(
+  agentId: DomainAgentId,
+  skillId: AgentSkillId | undefined,
+): GovernedPromptModuleKeyV1 | null {
+  const skill = resolveAgentSkillV1(agentId, skillId)
+  if (skill.executionMode === 'worldview-field') return 'worldview.dimension'
+  if (skill.executionMode === 'story-core') return 'story.generate'
+  if (agentId === 'character' && skill.executionMode === 'create') return 'character.generate'
+  return null
 }
 
 function assertAcyclic(plan: MasterAgentPlan): void {
@@ -448,7 +534,7 @@ export function parseMasterAgentPlanV1(value: unknown): MasterAgentPlan {
     assertKeysWithOptional(
       item,
       ['id', 'agentId', 'instruction', 'dependsOn'],
-      ['perspectiveCharacterId', 'skillId', 'inspirationFragmentIds', 'characterDrivenPlanId', 'characterRevisionRequest', 'characterSupplementRequest', 'storylineProgressChapterId'],
+      ['perspectiveCharacterId', 'skillId', 'inspirationFragmentIds', 'characterDrivenPlanId', 'characterRevisionRequest', 'characterSupplementRequest', 'characterLifecycleRequest', 'storylineProgressChapterId', 'storyArcMutationRequest', 'promptExecution'],
       '主 Agent 计划任务 ' + (index + 1),
     )
     const id = readString(item.id, `主 Agent 计划任务 ${index + 1}.id`, MAX_TASK_ID_CHARS)
@@ -493,12 +579,30 @@ export function parseMasterAgentPlanV1(value: unknown): MasterAgentPlan {
       skillId,
       '主 Agent 计划任务 ' + id,
     )
+    const characterLifecycleRequest = readOptionalCharacterLifecycleRequest(
+      item,
+      agentId,
+      skillId,
+      '主 Agent 计划任务 ' + id,
+    )
     const storylineProgressChapterId = readOptionalStorylineProgressChapterId(
       item,
       agentId,
       skillId,
       '主 Agent 计划任务 ' + id,
     )
+    const storyArcMutationRequest = readOptionalStoryArcMutationRequest(
+      item,
+      agentId,
+      skillId,
+      '主 Agent 计划任务 ' + id,
+    )
+    const expectedPromptModule = promptModuleForPlanTaskV1(agentId, skillId)
+    const promptExecution = item.promptExecution === undefined
+      ? undefined
+      : expectedPromptModule
+        ? parsePromptExecutionOptionsV1(item.promptExecution, expectedPromptModule)
+        : fail(`主 Agent 计划任务 ${id} 的 Skill 不允许 Prompt 执行选项`)
     return {
       id,
       agentId,
@@ -510,7 +614,10 @@ export function parseMasterAgentPlanV1(value: unknown): MasterAgentPlan {
       ...(characterDrivenPlanId !== undefined ? { characterDrivenPlanId } : {}),
       ...(characterRevisionRequest !== undefined ? { characterRevisionRequest } : {}),
       ...(characterSupplementRequest !== undefined ? { characterSupplementRequest } : {}),
+      ...(characterLifecycleRequest !== undefined ? { characterLifecycleRequest } : {}),
       ...(storylineProgressChapterId !== undefined ? { storylineProgressChapterId } : {}),
+      ...(storyArcMutationRequest !== undefined ? { storyArcMutationRequest } : {}),
+      ...(promptExecution !== undefined ? { promptExecution } : {}),
     }
   })
   const workflow = value.workflow === undefined
@@ -540,6 +647,7 @@ function sourceKeysForPlan(plan: MasterAgentPlan): string[] {
     return resolveAgentSkillContextSourceKeysV1(skill, {
       includeOptional: (task.agentId === 'prose' && task.perspectiveCharacterId != null)
         || (task.skillId === 'character.supplement' && task.characterSupplementRequest?.useEvidence === true),
+      includeGatewayProviders: true,
     })
   }))]
 }
@@ -578,8 +686,37 @@ function semanticReviewTaskIdsForPlan(plan: MasterAgentPlan): string[] {
     .filter(task => (
       task.dependsOn.length === 0
       && (task.agentId === 'world-origin' || task.agentId === 'inspiration')
+      && requiredContextGatewayWriteTargetForTaskV1(task) == null
     ))
     .map(task => task.id)
+}
+
+function requiredContextGatewayWriteTargetForTaskV1(task: MasterAgentTask): string | undefined {
+  const skill = resolveAgentSkillV1(task.agentId, task.skillId)
+  const specializedWriteTarget = skill.executionMode === 'worldview-field'
+    ? `worldviews.${resolveWorldviewAgentFieldV1(task.instruction)}`
+    : skill.executionMode === 'story-core'
+      ? `storyCores.${resolveStoryCoreFieldV1(task.instruction)}`
+      : skill.executionMode === 'story-arcs'
+        ? 'storyArcs.name'
+      : task.agentId === 'character' && skill.executionMode === 'create'
+        ? 'characters.name'
+      : task.agentId === 'character' && skill.executionMode === 'supplement'
+        ? `characters.${task.characterSupplementRequest?.dimensions[0] ?? 'shortDescription'}`
+      : task.agentId === 'character' && skill.executionMode === 'lifecycle'
+        ? 'characters.narrativeStatus'
+    : undefined
+  if (specializedWriteTarget
+    && isContextGatewayRequiredForWriteTargetV1(skill, specializedWriteTarget)) {
+    return specializedWriteTarget
+  }
+  // Required Gateway rollout is a Skill contract, not a hard-coded list of
+  // domains. Once outline/detail/prose Skills move to required, the Master
+  // Agent must derive their canary target from the same frozen write registry
+  // instead of silently retaining the pre-migration world/character allowlist.
+  return skill.writeTargets
+    .flatMap(target => target.fields.map(field => `${target.table}.${field}`))
+    .find(target => isContextGatewayRequiredForWriteTargetV1(skill, target))
 }
 
 export function buildMasterAgentRunContractV1(input: {
@@ -660,6 +797,19 @@ export function buildMasterAgentRunContractV1(input: {
         ...plan.tasks.map(task => ({
           stepId: taskStepId(task.id),
           ...createAgentSkillExecutionBindingV1(resolveAgentSkillV1(task.agentId, task.skillId)),
+          ...(task.promptExecution ? {
+            promptExecution: {
+              version: 1 as const,
+              moduleKey: task.promptExecution.moduleKey,
+              templateId: task.promptExecution.template.id,
+              templateName: task.promptExecution.template.name,
+              templateScope: task.promptExecution.template.scope,
+              templateUpdatedAt: task.promptExecution.template.updatedAt,
+              templateHash: task.promptExecution.templateHash,
+              parameterValuesHash: task.promptExecution.parameterValuesHash,
+              overridesHash: task.promptExecution.overridesHash,
+            },
+          } : {}),
         })),
         ...plan.tasks.flatMap(task => semanticReviewTaskIdSet.has(task.id)
           ? [1, 2].map(attempt => ({
@@ -760,7 +910,11 @@ function sameTaskIdentity(left: MasterAgentTask, right: MasterAgentTask): boolea
       === JSON.stringify(right.characterRevisionRequest ?? null)
     && JSON.stringify(left.characterSupplementRequest ?? null)
       === JSON.stringify(right.characterSupplementRequest ?? null)
+    && JSON.stringify(left.characterLifecycleRequest ?? null)
+      === JSON.stringify(right.characterLifecycleRequest ?? null)
     && (left.storylineProgressChapterId ?? null) === (right.storylineProgressChapterId ?? null)
+    && JSON.stringify(left.storyArcMutationRequest ?? null)
+      === JSON.stringify(right.storyArcMutationRequest ?? null)
 }
 
 function sameTaskDefinition(left: MasterAgentTask, right: MasterAgentTask): boolean {
@@ -1056,13 +1210,8 @@ export async function replanDurableMasterAgentRunV1(
   ))
 }
 
-function candidateHashInput(payload: MasterCandidatePayload, draft: string): unknown {
-  const { candidateHash: _candidateHash, ...withoutHash } = payload
-  return { draft, payload: withoutHash }
-}
-
 async function computeCandidateHash(payload: MasterCandidatePayload, draft: string): Promise<string> {
-  return hashCanonicalValue(candidateHashInput(payload, draft))
+  return computeMasterCandidateHashV1(payload, draft)
 }
 
 function parseCandidatePayload(value: unknown, label: string): MasterCandidatePayload {
@@ -1104,6 +1253,12 @@ function parseCandidatePayload(value: unknown, label: string): MasterCandidatePa
   if (payload.creativeArtifact !== undefined) {
     payload.creativeArtifact = parseCreativeArtifactV1(payload.creativeArtifact)
   }
+  if (payload.structuredOutputEvidence !== undefined) {
+    payload.structuredOutputEvidence = parseStructuredOutputRunEvidenceV1(payload.structuredOutputEvidence)
+  }
+  if (payload.promptExecutionEvidence !== undefined) {
+    payload.promptExecutionEvidence = parsePromptExecutionEvidenceV1(payload.promptExecutionEvidence)
+  }
   if (payload.narrativeBrief !== undefined) {
     payload.narrativeBrief = parseNarrativeBriefV1(payload.narrativeBrief)
   }
@@ -1126,6 +1281,17 @@ function parseCandidatePayload(value: unknown, label: string): MasterCandidatePa
       payload.contextSources.length !== payload.contextEvidence.included.length
       || payload.contextSources.some((source, index) => source !== payload.contextEvidence!.included[index])
     ) fail(`${label} payload contextSources 与上下文证据不一致`)
+  }
+  if (payload.contextManifestHash !== undefined) {
+    readHash(payload.contextManifestHash, `${label} payload contextManifestHash`)
+    if (!payload.contextEvidence) fail(`${label} payload Context Manifest 缺少上下文证据`)
+  }
+  if (payload.contentRevision !== undefined) {
+    try {
+      payload.contentRevision = parseWorkspaceContentRevisionV1(payload.contentRevision)
+    } catch (error) {
+      fail(`${label} payload contentRevision 无效：${error instanceof Error ? error.message : String(error)}`)
+    }
   }
   if (typeof payload.runId !== 'number' || !Number.isInteger(payload.runId) || payload.runId < 1) fail(`${label} payload runId 无效`)
   if (
@@ -1163,9 +1329,32 @@ function parseCandidatePayload(value: unknown, label: string): MasterCandidatePa
     && !WORLDVIEW_AGENT_FIELDS.includes(payload.worldviewField)
   ) fail(label + ' worldviewField 无效')
   if (
+    payload.worldviewFieldOperation !== undefined
+    && !['create', 'expand', 'rewrite', 'polish'].includes(payload.worldviewFieldOperation)
+  ) fail(label + ' worldviewFieldOperation 无效')
+  if (payload.worldviewFieldOutputBudget !== undefined) {
+    try {
+      payload.worldviewFieldOutputBudget = parseWorldviewFieldOutputBudgetV1(
+        payload.worldviewFieldOutputBudget,
+      )
+    } catch (error) {
+      fail(`${label} worldviewFieldOutputBudget 无效：${error instanceof Error ? error.message : String(error)}`)
+    }
+  }
+  if ((payload.worldviewFieldOperation === undefined) !== (payload.worldviewFieldOutputBudget === undefined)) {
+    fail(label + ' worldviewFieldOperation 与 worldviewFieldOutputBudget 必须同时存在')
+  }
+  if (
     payload.storylineProgressChapterId !== undefined
     && (!Number.isInteger(payload.storylineProgressChapterId) || payload.storylineProgressChapterId < 1)
   ) fail(label + ' storylineProgressChapterId 无效')
+  if (payload.storyArcMutationRequest !== undefined) {
+    try {
+      payload.storyArcMutationRequest = parseStoryArcMutationRequestV1(payload.storyArcMutationRequest)
+    } catch (error) {
+      fail(`${label} storyArcMutationRequest 无效：${error instanceof Error ? error.message : String(error)}`)
+    }
+  }
   if (
     payload.characterDrivenPlanId !== undefined
     && (!Number.isInteger(payload.characterDrivenPlanId) || payload.characterDrivenPlanId < 1)
@@ -1184,6 +1373,13 @@ function parseCandidatePayload(value: unknown, label: string): MasterCandidatePa
       fail(`${label} characterSupplementRequest 无效：${error instanceof Error ? error.message : String(error)}`)
     }
   }
+  if (payload.characterLifecycleRequest !== undefined) {
+    try {
+      payload.characterLifecycleRequest = parseCharacterLifecycleTaskInputV1(payload.characterLifecycleRequest)
+    } catch (error) {
+      fail(`${label} characterLifecycleRequest 无效：${error instanceof Error ? error.message : String(error)}`)
+    }
+  }
   budgetEvidence(payload.teamBudgetEvidence, `${label} payload teamBudgetEvidence`)
   return payload
 }
@@ -1198,6 +1394,12 @@ function assertCandidateMatchesTaskSkill(
   if (candidateSkill.id !== taskSkill.id) fail(`${label} 的 Skill 与计划不一致`)
   if (payload.executionBinding !== undefined) {
     assertAgentSkillExecutionBindingV1(payload.executionBinding, taskSkill, `${label} executionBinding`)
+  }
+  if (task.promptExecution !== undefined) {
+    if (!payload.promptExecutionEvidence) fail(`${label} 缺少冻结 Prompt 的实际运行证据`)
+    assertPromptEvidenceMatchesOptionsV1(payload.promptExecutionEvidence, task.promptExecution)
+  } else if (payload.promptExecutionEvidence !== undefined) {
+    fail(`${label} 不得为历史或非治理任务伪造 Prompt 运行证据`)
   }
   if (
     taskSkill.executionMode === 'story-core'
@@ -1232,6 +1434,15 @@ function assertCandidateMatchesTaskSkill(
     && !['main', 'sub', 'mixed'].includes(payload.storyArcKind ?? '')
   ) fail(`${label} 的故事线类型与 Skill 不一致`)
   if (
+    taskSkill.executionMode === 'story-arcs'
+    && JSON.stringify(payload.storyArcMutationRequest ?? { operation: 'create' })
+      !== JSON.stringify(task.storyArcMutationRequest ?? { operation: 'create' })
+  ) fail(`${label} 的故事线操作与 Skill 计划不一致`)
+  if (
+    taskSkill.executionMode !== 'story-arcs'
+    && payload.storyArcMutationRequest !== undefined
+  ) fail(`${label} 不得携带故事线操作请求`)
+  if (
     taskSkill.executionMode === 'character-driven'
     && (
       payload.characterDrivenPlanId == null
@@ -1260,6 +1471,15 @@ function assertCandidateMatchesTaskSkill(
     taskSkill.executionMode !== 'supplement'
     && payload.characterSupplementRequest !== undefined
   ) fail(`${label} 不得携带角色补全请求`)
+  if (
+    taskSkill.executionMode === 'lifecycle'
+    && JSON.stringify(payload.characterLifecycleRequest ?? null)
+      !== JSON.stringify(task.characterLifecycleRequest ?? null)
+  ) fail(`${label} 的角色状态请求与 Skill 计划不一致`)
+  if (
+    taskSkill.executionMode !== 'lifecycle'
+    && payload.characterLifecycleRequest !== undefined
+  ) fail(`${label} 不得携带角色状态请求`)
   if (
     task.agentId === 'prose'
     && (taskSkill.executionMode === 'generate' || taskSkill.executionMode === 'continue')
@@ -1310,12 +1530,32 @@ export function assertMasterAgentRunContractExecutionBindingsV1(
   for (const [stepId, skill] of expected) {
     const binding = byStep.get(stepId)
     if (!binding) fail(`主 Agent RunContract 缺少 ${stepId} execution binding`)
-    const { stepId: _stepId, ...skillBinding } = binding
+    if (binding.version !== 1) fail(`主 Agent RunContract ${stepId} 当前只接受 V1 Skill 执行绑定`)
+    const { stepId: _stepId, promptExecution, ...skillBinding } = binding
     assertAgentSkillExecutionBindingV1(
       skillBinding,
       skill,
       `主 Agent RunContract ${stepId}`,
     )
+    const task = plan.tasks.find(item => taskStepId(item.id) === stepId)
+    if (task?.promptExecution) {
+      const expectedPrompt = {
+        version: 1 as const,
+        moduleKey: task.promptExecution.moduleKey,
+        templateId: task.promptExecution.template.id,
+        templateName: task.promptExecution.template.name,
+        templateScope: task.promptExecution.template.scope,
+        templateUpdatedAt: task.promptExecution.template.updatedAt,
+        templateHash: task.promptExecution.templateHash,
+        parameterValuesHash: task.promptExecution.parameterValuesHash,
+        overridesHash: task.promptExecution.overridesHash,
+      }
+      if (canonicalStringify(promptExecution) !== canonicalStringify(expectedPrompt)) {
+        fail(`主 Agent RunContract ${stepId} 的 Prompt 绑定与冻结计划不一致`)
+      }
+    } else if (promptExecution !== undefined) {
+      fail(`主 Agent RunContract ${stepId} 不得携带 Prompt 绑定`)
+    }
   }
 }
 
@@ -1758,13 +1998,87 @@ export async function runDurableMasterAgentPlanV1(
 
   const liveCandidates = new Map<string, MasterAgentDurableCandidateV1>()
   const activeTasks = new Map<string, MasterAgentTask>()
+  const gatewayAttempts = new Map<string, {
+    preflight: ContextGatewayPreflightEvidenceV1
+    baseManifest: ContextManifestV2
+  }>()
+  let gatewayPreflightQueue: Promise<void> = Promise.resolve()
   let previousBudget = restored.latestBudget
+  const recordGatewayPrepared = async (
+    task: MasterAgentTask,
+    prepared: Parameters<NonNullable<MasterAgentExecutionTrace['contextGatewayPrepared']>>[1],
+  ): Promise<void> => {
+    const writeTarget = requiredContextGatewayWriteTargetForTaskV1(task)
+    if (!writeTarget) fail(`主 Agent 任务 ${task.id} 未获 required Gateway canary 权限`)
+    if (!activeTasks.has(task.id)) fail(`主 Agent Gateway preflight 收到未启动任务 ${task.id}`)
+    const stepId = taskStepId(task.id)
+    const step = snapshot.projection.steps[stepId]
+    if (!step || step.status !== 'running') fail(`主 Agent Gateway preflight 步骤 ${stepId} 未运行`)
+    if (gatewayAttempts.has(task.id)) fail(`主 Agent Gateway preflight ${task.id} 不得重复记录`)
+    const skill = resolveAgentSkillV1(task.agentId, task.skillId)
+    const v1 = await createContextManifestFromAssemblyV1({
+      runId: snapshot.run.id,
+      stepId,
+      attempt: step.attempt,
+      projectId: input.scope.projectId,
+      worldGroupId: input.worldGroupId,
+      declaredSourceKeys: skill.contextGateway!.providerSourceKeys,
+      assembled: prepared.assembled,
+      readerVersion: 'context-gateway-execution-v1',
+    })
+    const baseManifest = await createContextManifestV2FromV1({ manifest: v1, scope: input.scope })
+    const recorded = await recordContextGatewayPreflightEvidenceV1({
+      scope: input.scope,
+      runId: snapshot.run.id,
+      stepId,
+      attempt: step.attempt,
+      contextPacket: prepared.execution.contextPacket,
+      selector: prepared.execution.selector,
+      renderedRequest: prepared.renderedRequest,
+      sourceSnapshots: prepared.execution.sourceSnapshots,
+      toolTranscript: prepared.execution.toolTranscript,
+      expectedLastSequence: snapshot.projection.lastSequence,
+      now: now(),
+    })
+    snapshot = recorded.snapshot
+    snapshot = await appendAgentRunEventV1({
+      scope: input.scope,
+      runId: snapshot.run.id,
+      type: 'model.requested',
+      payload: {
+        stepId,
+        attempt: step.attempt,
+        bindingHash: await hashCanonicalValue({
+          plan,
+          task,
+          runId: snapshot.run.id,
+          contractHash: snapshot.run.contractHash,
+          writeTarget,
+          preflightHash: recorded.evidence.preflightHash,
+        }),
+      },
+      expectedLastSequence: snapshot.projection.lastSequence,
+      now: now(),
+    })
+    gatewayAttempts.set(task.id, { preflight: recorded.evidence, baseManifest })
+    await notify(input.onDurableBoundary, 'model.requested', snapshot)
+  }
   const trace: MasterAgentExecutionTrace = {
     async taskStarted(task) {
-      activeTasks.set(task.id, task)
       const stepId = taskStepId(task.id)
       let step = snapshot.projection.steps[stepId]
       if (!step) fail(`主 Agent durable run 缺少步骤 ${stepId}`)
+      if (plan.workflow?.workflowId === 'staged-author-confirmed') {
+        const unconfirmedDependencies = task.dependsOn.filter(taskId => (
+          snapshot.projection.steps[taskStepId(taskId)]?.status !== 'succeeded'
+        ))
+        if (unconfirmedDependencies.length) {
+          fail(
+            `主 Agent 分阶段任务 ${task.id} 的上游 ${unconfirmedDependencies.join('、')} 尚未完成作者采纳，已阻止下游模型调用`,
+          )
+        }
+      }
+      activeTasks.set(task.id, task)
       if (step.status === 'awaiting_confirmation' || step.status === 'succeeded') {
         fail(`主 Agent durable run 步骤 ${stepId} 已有候选或已完成，不得重复调用`)
       }
@@ -1838,24 +2152,73 @@ export async function runDurableMasterAgentPlanV1(
           }
         }
       }
-      snapshot = await appendAgentRunEventV1({
-        scope: input.scope,
-        runId: snapshot.run.id,
-        type: 'model.requested',
-        payload: {
-          stepId,
-          attempt,
-          bindingHash: await hashCanonicalValue({
-            plan,
-            task,
+      if (!requiredContextGatewayWriteTargetForTaskV1(task)) {
+        snapshot = await appendAgentRunEventV1({
+          scope: input.scope,
+          runId: snapshot.run.id,
+          type: 'model.requested',
+          payload: {
+            stepId,
+            attempt,
+            bindingHash: await hashCanonicalValue({
+              plan,
+              task,
+              runId: snapshot.run.id,
+              contractHash: snapshot.run.contractHash,
+            }),
+          },
+          expectedLastSequence: snapshot.projection.lastSequence,
+          now: now(),
+        })
+        await notify(input.onDurableBoundary, 'model.requested', snapshot)
+      }
+    },
+    async contextGatewayPrepared(task, prepared) {
+      const queued = gatewayPreflightQueue.then(() => recordGatewayPrepared(task, prepared))
+      gatewayPreflightQueue = queued.catch(() => undefined)
+      await queued
+    },
+    async taskFailed(task, error) {
+      const failureEvidence = structuredOutputFailureEvidenceV1(error)
+      if (!failureEvidence || !gatewayAttempts.has(task.id)) return
+      const queued = gatewayPreflightQueue.then(async () => {
+        const stepId = taskStepId(task.id)
+        const step = snapshot.projection.steps[stepId]
+        if (!step || step.status !== 'running') return
+        const alreadyResponded = snapshot.events.some(event => (
+          event.type === 'model.responded'
+          && event.payload.stepId === stepId
+          && event.payload.attempt === step.attempt
+        ))
+        if (!alreadyResponded) {
+          snapshot = await appendAgentRunEventV1({
+            scope: input.scope,
             runId: snapshot.run.id,
-            contractHash: snapshot.run.contractHash,
-          }),
-        },
-        expectedLastSequence: snapshot.projection.lastSequence,
-        now: now(),
+            type: 'model.responded',
+            payload: {
+              stepId,
+              attempt: step.attempt,
+              outputHash: await hashCanonicalValue(failureEvidence),
+            },
+            expectedLastSequence: snapshot.projection.lastSequence,
+            now: now(),
+          })
+          await notify(input.onDurableBoundary, 'model.responded', snapshot)
+        }
+        const recorded = await recordAgentRunArtifactV1({
+          scope: input.scope,
+          runId: snapshot.run.id,
+          artifactKind: 'raw-response',
+          content: canonicalStringify(failureEvidence),
+          stepId,
+          attempt: step.attempt,
+          expectedLastSequence: snapshot.projection.lastSequence,
+          now: now(),
+        })
+        snapshot = recorded.snapshot
       })
-      await notify(input.onDurableBoundary, 'model.requested', snapshot)
+      gatewayPreflightQueue = queued.catch(() => undefined)
+      await queued
     },
     async candidateReady(task, candidate) {
       const stepId = taskStepId(task.id)
@@ -1864,8 +2227,8 @@ export async function runDurableMasterAgentPlanV1(
         fail(`主 Agent durable trace 候选身份与当前任务 ${task.id} 不一致`)
       }
       assertCandidateMatchesTaskSkill(task, candidate.payload, `主 Agent durable trace 候选 ${task.id}`)
+      const skill = resolveAgentSkillV1(task.agentId, task.skillId)
       if (candidate.payload.contextEvidence) {
-        const skill = resolveAgentSkillV1(task.agentId, task.skillId)
         validateAgentSkillContextEvidenceV1(skill, candidate.payload.contextEvidence)
         if (
           candidate.payload.contextSources.length !== candidate.payload.contextEvidence.included.length
@@ -1938,18 +2301,67 @@ export async function runDurableMasterAgentPlanV1(
       const draft = candidate.draft
       if (!draft || draft.length > MAX_CANDIDATE_CHARS) fail(`主 Agent 任务 ${task.id} 候选长度无效`)
       const outputHash = await hashCanonicalValue(candidate.runtimeOutput)
-      const contextManifestHash = payload.contextEvidence
-        ? await hashCanonicalValue({
-            version: 1,
-            runId: snapshot.run.id,
+      const gatewayRequired = isMasterCandidateContextGatewayRequiredV1(payload)
+      let contextManifestHash: string | null = null
+      if (gatewayRequired) {
+        const gatewayAttempt = gatewayAttempts.get(task.id)
+        const runtime = candidate.contextGatewayRuntime
+        if (!gatewayAttempt || !runtime) fail(`主 Agent 任务 ${task.id} 缺少 required Gateway exact evidence`)
+        payload.candidateHash = await computeCandidateHash(payload, draft)
+        snapshot = await appendAgentRunEventV1({
+          scope: input.scope,
+          runId: snapshot.run.id,
+          type: 'model.responded',
+          payload: {
             stepId,
             attempt: snapshot.projection.steps[stepId].attempt,
-            contextSources: payload.contextSources,
-            contextEvidence: payload.contextEvidence,
-          })
-        : null
+            outputHash,
+          },
+          expectedLastSequence: snapshot.projection.lastSequence,
+          now: now(),
+        })
+        await notify(input.onDurableBoundary, 'model.responded', snapshot)
+        const finalized = await finalizeContextGatewayAttemptEvidenceV1({
+          scope: input.scope,
+          runId: snapshot.run.id,
+          stepId,
+          attempt: snapshot.projection.steps[stepId].attempt,
+          baseManifest: gatewayAttempt.baseManifest,
+          preflight: gatewayAttempt.preflight,
+          selector: runtime.execution.selector,
+          sufficiency: runtime.execution.sufficiency,
+          retrievalTrace: runtime.execution.retrievalTrace,
+          gatewayVersionHash: runtime.execution.contextPacket.gatewayVersionHash,
+          policyHash: runtime.execution.contextPacket.policyHash,
+          rawResponse: runtime.rawResponse,
+          candidateHash: payload.candidateHash,
+          expectedLastSequence: snapshot.projection.lastSequence,
+          now: now(),
+        })
+        snapshot = finalized.snapshot
+        contextManifestHash = finalized.manifest.manifestHash
+        payload.contextManifestHash = contextManifestHash
+        if (await computeCandidateHash(payload, draft) !== payload.candidateHash) {
+          fail(`主 Agent 任务 ${task.id} 的 Gateway 候选哈希形成循环或漂移`)
+        }
+      } else {
+        contextManifestHash = payload.contextEvidence
+          ? await hashCanonicalValue({
+              version: 1,
+              runId: snapshot.run.id,
+              stepId,
+              attempt: snapshot.projection.steps[stepId].attempt,
+              contextSources: payload.contextSources,
+              contextEvidence: payload.contextEvidence,
+            })
+          : null
+        if (contextManifestHash) payload.contextManifestHash = contextManifestHash
+      }
       const semanticRequired = snapshot.contract.candidateSemanticReviewPolicy
         ?.taskIds.includes(task.id) === true
+      if (gatewayRequired && semanticRequired) {
+        fail(`主 Agent 任务 ${task.id} 的 Gateway canary 尚未开放并行语义终验`)
+      }
       if (semanticRequired) {
         if (
           (task.agentId !== 'world-origin' && task.agentId !== 'inspiration')
@@ -2099,7 +2511,11 @@ export async function runDurableMasterAgentPlanV1(
       }
       const evidence = budgetEvidence(payload.teamBudgetEvidence, `主 Agent 任务 ${task.id} teamBudgetEvidence`)
       if (!budgetAtLeast(evidence, previousBudget)) fail(`主 Agent 任务 ${task.id} 团队预算证据倒退`)
-      payload.candidateHash = await computeCandidateHash(payload, draft)
+      const finalCandidateHash = await computeCandidateHash(payload, draft)
+      if (payload.candidateHash && payload.candidateHash !== finalCandidateHash) {
+        fail(`主 Agent 任务 ${task.id} 的候选在证据冻结后发生变化`)
+      }
+      payload.candidateHash = finalCandidateHash
       const stepReceipt = snapshot.contract.dependencyReceiptPolicy?.requiredForJoin
         ? await createMasterCandidateStepReceiptV1({
             payload,
@@ -2115,6 +2531,7 @@ export async function runDurableMasterAgentPlanV1(
             generator: payload.generator,
           })
         : null
+      maybeInjectHarnessFaultV1('candidate.before-persist')
       const persisted = await db.transaction(
         'rw',
         scopeTransactionTables(db.agentConversations, db.agentEvents, db.agentRuns, db.agentRunEvents),
@@ -2129,7 +2546,7 @@ export async function runDurableMasterAgentPlanV1(
             scope: input.scope,
           })
           let nextSnapshot = snapshot
-          if (payload.contextEvidence) {
+          if (payload.contextEvidence && !gatewayRequired) {
             nextSnapshot = await appendAgentRunEventV1({
               scope: input.scope,
               runId: snapshot.run.id,
@@ -2143,14 +2560,16 @@ export async function runDurableMasterAgentPlanV1(
               now: now(),
             })
           }
-          nextSnapshot = await appendAgentRunEventV1({
-            scope: input.scope,
-            runId: snapshot.run.id,
-            type: 'model.responded',
-            payload: { stepId, attempt: nextSnapshot.projection.steps[stepId].attempt, outputHash },
-            expectedLastSequence: nextSnapshot.projection.lastSequence,
-            now: now(),
-          })
+          if (!gatewayRequired) {
+            nextSnapshot = await appendAgentRunEventV1({
+              scope: input.scope,
+              runId: snapshot.run.id,
+              type: 'model.responded',
+              payload: { stepId, attempt: nextSnapshot.projection.steps[stepId].attempt, outputHash },
+              expectedLastSequence: nextSnapshot.projection.lastSequence,
+              now: now(),
+            })
+          }
           const prior = previousBudget
           nextSnapshot = await appendAgentRunEventV1({
             scope: input.scope,
@@ -2194,6 +2613,7 @@ export async function runDurableMasterAgentPlanV1(
       )
       snapshot = persisted.snapshot
       previousBudget = evidence
+      maybeInjectHarnessFaultV1('candidate.after-persist')
       const durableCandidate: MasterAgentDurableCandidateV1 = {
         event: persisted.event,
         payload,
@@ -2216,6 +2636,9 @@ export async function runDurableMasterAgentPlanV1(
       budget,
       signal: input.signal,
       completedTaskOutputs: restored.outputs,
+      authorConfirmedTaskIds: plan.tasks
+        .filter(task => snapshot.projection.steps[taskStepId(task.id)]?.status === 'succeeded')
+        .map(task => task.id),
       completedTaskAssumptions: Object.fromEntries(restored.candidates.map(candidate => [
         candidate.payload.taskId,
         candidate.payload.creativeArtifact?.assumptions

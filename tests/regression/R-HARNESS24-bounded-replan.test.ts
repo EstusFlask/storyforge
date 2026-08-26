@@ -12,6 +12,10 @@ import { classifyAgentRunFailureV1 } from '../../src/lib/agent/run/failure-polic
 import { AgentTeamBudgetTracker } from '../../src/lib/agent/team-budget'
 import type { MasterAgentPlan } from '../../src/lib/agent/orchestrator'
 import type { WorkspaceScope } from '../../src/lib/types'
+import { backfillResourceUidsV1 } from '../../src/lib/context-gateway/resource-identity'
+import { generateWorkCode, generateWorkspaceUid } from '../../src/lib/memory/identity'
+import { prepareRequiredMasterGatewayFixtureV1 } from '../helpers/master-agent-gateway'
+import { resolveAgentSkillV1 } from '../../src/lib/agent/skill-registry'
 
 async function createWorkspace(label: string): Promise<{
   scope: WorkspaceScope
@@ -20,6 +24,7 @@ async function createWorkspace(label: string): Promise<{
 }> {
   const now = Date.now()
   const projectId = await db.projects.add({
+    workspaceUid: generateWorkspaceUid(),
     name: label,
     genre: 'fantasy',
     genres: ['fantasy'],
@@ -44,6 +49,7 @@ async function createWorkspace(label: string): Promise<{
     projectId,
     worldId,
     title: label,
+    code: generateWorkCode(),
     description: '',
     genres: ['fantasy'],
     status: 'drafting',
@@ -70,6 +76,7 @@ async function createWorkspace(label: string): Promise<{
     worldGroupId,
     scope,
   })
+  await backfillResourceUidsV1(projectId)
   return { scope, worldGroupId, conversationId: conversation.id! }
 }
 
@@ -125,13 +132,22 @@ function executor(input: {
       }
       const output = outputFor(task.id)
       options.budget.settleCall(reservation, output)
+      const skill = resolveAgentSkillV1(task.agentId, task.skillId)
+      const gateway = skill.contextGateway?.rollout === 'required'
+        ? await prepareRequiredMasterGatewayFixtureV1({
+            scope: options.scope,
+            worldGroupId: options.worldGroupId,
+            executionTrace: options.executionTrace,
+          }, task, output)
+        : undefined
       await options.executionTrace.candidateReady(task, {
         payload: {
           version: 1,
           taskId: task.id,
           agentId: task.agentId,
           label: task.agentId,
-          contextSources: ['worldview'],
+          contextSources: gateway?.contextSources ?? ['worldview'],
+          ...(gateway ? { contextEvidence: gateway.contextEvidence } : {}),
           baseSnapshot: task.id === 'world-1'
             ? { id: null, updatedAt: null, worldOrigin: '' }
             : {},
@@ -141,6 +157,7 @@ function executor(input: {
         draft: output,
         runtimeNode: {},
         runtimeOutput: output,
+        ...(gateway ? { contextGatewayRuntime: gateway.contextGatewayRuntime } : {}),
       })
     }
   }

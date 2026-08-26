@@ -3,8 +3,7 @@ import { useOutlineStore } from '../../stores/outline'
 import { useWorldGroupStore } from '../../stores/world-group'
 import { useAIStream } from '../../hooks/useAIStream'
 import { createAISessionKey } from '../../stores/ai-generation-session'
-import { assembleContext } from '../../lib/registry/assemble-context'
-import { OUTLINE_GENERATION_SOURCE_KEYS } from '../../lib/outline/harness'
+import { prepareOutlineGatewayAssemblyV1 } from '../../lib/outline/gateway-context'
 import {
   parseChapterOutlineOutput, parseVolumeOutlineOutput,
   type ParsedVolume, type ParsedChapter,
@@ -12,7 +11,6 @@ import {
 import { useAIConfigStore } from '../../stores/ai-config'
 import { getTopLevelVolumes } from '../../lib/outline/selectors'
 import { normalizeOutlineNode } from '../../lib/outline/normalize'
-import { adoptGeneratedOutlineItems, adoptGeneratedOutlineSummary } from '../../lib/outline/adopt-generation'
 import PromptRunPanel from '../shared/PromptRunPanel'
 import PanelLayout from '../shared/PanelLayout'
 import { CInput } from '../shared/CompositionInput'
@@ -28,7 +26,7 @@ import { useOutlineBatchGeneration } from './useOutlineBatchGeneration'
 import { useOutlineGenerationController } from './useOutlineGenerationController'
 import { useOutlineChapterCountEstimate } from './useOutlineChapterCountEstimate'
 import { useOutlineChapterDrag } from './useOutlineChapterDrag'
-import { decodeGenerationOperation } from '../../lib/outline/generation-request'
+import { decodeGenerationOperation, type OutlineGenerationRequest } from '../../lib/outline/generation-request'
 import { useInitialRecordTarget } from '../shared/initial-record-target'
 
 interface Props {
@@ -199,20 +197,22 @@ export default function OutlinePanel({ project, onOpenChapter, initialNodeId }: 
   }), [parameterValues, systemOverride, userOverride])
 
   const buildOutlineAssembledContext = useCallback(async (
+    request: OutlineGenerationRequest,
     worldGroupId: number | null,
-    outlineNodeId?: number | null,
+    _outlineNodeId?: number | null,
     priorOutlineCandidateText?: string,
   ) => {
-    return await assembleContext({
+    return await prepareOutlineGatewayAssemblyV1({
       projectId: project.id!,
       worldGroupId,
-      outlineNodeId: outlineNodeId ?? null,
+      request,
+      authorRequest: hint.trim() || (request.kind === 'volumes' || request.kind === 'single-volume'
+        ? '依据当前 Canon 规划未写未来卷纲。'
+        : '依据当前 Canon 把目标卷拆分为未写未来章纲。'),
+      config: aiConfig,
       priorOutlineCandidateText,
-      provider: aiConfig.provider,
-      model: aiConfig.model,
-      sourceKeys: [...OUTLINE_GENERATION_SOURCE_KEYS],
     })
-  }, [project.id, aiConfig.provider, aiConfig.model])
+  }, [project.id, aiConfig, hint])
 
   const generation = useOutlineGenerationController({
     project,
@@ -276,79 +276,60 @@ export default function OutlinePanel({ project, onOpenChapter, initialNodeId }: 
 
   const handleConfirmVolumes = async () => {
     if (!previewVolumes) return
+    if (!generation.canAdopt) {
+      toast.error('当前结果缺少可验证的 durable 候选，不能写入正式大纲。')
+      return
+    }
     const targetId = previewTargetId
     const existingCount = volumes.length
-    await generation.beginAdoption(targetId != null ? {
-      version: 1,
-      kind: 'single-volume',
+    const intent = targetId != null ? {
+      version: 1 as const,
+      kind: 'single-volume' as const,
       targetId,
       summary: previewVolumes[0]?.summary ?? '',
+      baseSummary: volumes.find(volume => volume.id === targetId)?.summary ?? '',
     } : {
-      version: 1,
-      kind: 'volumes',
+      version: 1 as const,
+      kind: 'volumes' as const,
       items: previewVolumes,
       startingOrder: existingCount,
       baseExistingTitles: volumes.map(volume => volume.title),
-    })
-    ai.reset()
-    if (targetId != null) {
-      let result: Awaited<ReturnType<typeof adoptGeneratedOutlineSummary>>
-      try {
-        result = await adoptGeneratedOutlineSummary(project.id!, targetId, previewVolumes[0]?.summary ?? '')
-      } catch (error) {
-        const message = error instanceof Error ? error.message : '未知错误'
-        await generation.failAdoption(message)
-        toast.error(`写入本卷卷纲时出错：${message}。`)
-        return
-      }
-      if (!result.written) {
-        await generation.failAdoption(result.reason ?? '未能写入本卷卷纲')
-        toast.error(`未能写入本卷卷纲：${result.reason}`)
-        return
-      }
-      await generation.completeAdoption({ kind: 'single-volume', targetId, result })
-      await loadAll(project.id!)
-      setPreviewVolumes(null)
-      setPreviewTargetId(null)
-      toast.success('本卷卷纲已写入。')
-      return
     }
-    let result: Awaited<ReturnType<typeof adoptGeneratedOutlineItems>>
+    let completion: Awaited<ReturnType<typeof generation.adoptCandidate>>
     try {
-      result = await adoptGeneratedOutlineItems({
-        projectId: project.id!,
-        parentId: null,
-        type: 'volume',
-        items: previewVolumes,
-        startingOrder: existingCount,
-      })
-    } catch (err) {
-      console.error('[Outline] 写入卷失败:', err)
-      await generation.failAdoption(err instanceof Error ? err.message : '写入卷时发生未知错误')
-      toast.error(`写入卷时出错：${err instanceof Error ? err.message : '未知错误'}。请查看控制台获取详情。`)
+      completion = await generation.adoptCandidate(intent)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '未知错误'
+      toast.error(`卷纲采纳未完成：${message}。系统会保留 durable 运行以供刷新恢复。`)
       return
     }
-    if (result.writtenCount === 0) {
-      await generation.failAdoption(result.skippedReasons.join('；') || '未写入任何卷')
-    } else {
-      await generation.completeAdoption({ kind: 'volumes', items: previewVolumes, result })
-    }
+    ai.reset()
     await loadAll(project.id!)
     setPreviewVolumes(null)
     setPreviewTargetId(null)
+    if (targetId != null) {
+      toast.success('本卷卷纲已写入并完成终态验证。')
+      return
+    }
+    const evidence = completion.evidence as {
+      result?: { writtenCount?: number; firstId?: number | null; skippedReasons?: string[] }
+    }
+    const result = evidence.result ?? {}
     if (result.firstId) setSelectedVolId(result.firstId)
     // FB-10:不再静默——全跳过/部分跳过都明确告知用户原因
-    if (result.writtenCount === 0) {
-      toast.error(`未写入任何卷。原因:${result.skippedReasons.join('；') || '与已有卷标题重复(已跳过)'}。若想替换/更新同名卷,请先删除同名卷再采纳。`)
-    } else if (result.writtenCount < previewVolumes.length) {
-      toast.info(`已写入 ${result.writtenCount} 个卷,另有 ${previewVolumes.length - result.writtenCount} 个被跳过(${result.skippedReasons.join('；') || '标题重复'})。`)
+    if ((result.writtenCount ?? 0) < previewVolumes.length) {
+      toast.info(`已写入 ${result.writtenCount ?? 0} 个卷，另有 ${previewVolumes.length - (result.writtenCount ?? 0)} 个被跳过（${result.skippedReasons?.join('；') || '标题重复'}）。`)
     } else {
-      toast.success(`已写入 ${result.writtenCount} 个卷。`)
+      toast.success(`已写入 ${result.writtenCount ?? previewVolumes.length} 个卷并完成终态验证。`)
     }
   }
 
   const handleConfirmChapters = async () => {
     if (!previewChapters) return
+    if (!generation.canAdopt) {
+      toast.error('当前结果缺少可验证的 durable 候选，不能写入正式大纲。')
+      return
+    }
     const targetId = previewTargetId
     const operation = decodeGenerationOperation(ai.operation)
     const destinationVolume = targetId == null
@@ -363,77 +344,44 @@ export default function OutlinePanel({ project, onOpenChapter, initialNodeId }: 
     const existingChapters = destinationVolume
       ? nodes.filter(node => node.parentId === destinationVolume.id && node.type === 'chapter')
       : []
-    await generation.beginAdoption(targetId != null ? {
-      version: 1,
-      kind: 'single-chapter',
+    const intent = targetId != null ? {
+      version: 1 as const,
+      kind: 'single-chapter' as const,
       targetId,
       summary: previewChapters[0]?.summary ?? '',
+      baseSummary: nodes.find(node => node.id === targetId)?.summary ?? '',
     } : {
-      version: 1,
-      kind: 'chapters',
+      version: 1 as const,
+      kind: 'chapters' as const,
       destinationVolumeId: destinationVolume!.id!,
       items: previewChapters,
       startingOrder: existingChapters.length,
       baseExistingTitles: existingChapters.map(chapter => chapter.title),
-    })
-    ai.reset()
-    if (targetId != null) {
-      let result: Awaited<ReturnType<typeof adoptGeneratedOutlineSummary>>
-      try {
-        result = await adoptGeneratedOutlineSummary(project.id!, targetId, previewChapters[0]?.summary ?? '')
-      } catch (error) {
-        const message = error instanceof Error ? error.message : '未知错误'
-        await generation.failAdoption(message)
-        toast.error(`写入本章章纲时出错：${message}。`)
-        return
-      }
-      if (!result.written) {
-        await generation.failAdoption(result.reason ?? '未能写入本章章纲')
-        toast.error(`未能写入本章章纲：${result.reason}`)
-        return
-      }
-      await generation.completeAdoption({ kind: 'single-chapter', targetId, result })
-      await loadAll(project.id!)
-      setPreviewChapters(null)
-      setPreviewTargetId(null)
-      toast.success('本章章纲已写入。')
-      return
     }
-    if (!destinationVolume) return
-    const existingCount = existingChapters.length
-    let result: Awaited<ReturnType<typeof adoptGeneratedOutlineItems>>
+    let completion: Awaited<ReturnType<typeof generation.adoptCandidate>>
     try {
-      result = await adoptGeneratedOutlineItems({
-        projectId: project.id!,
-        worldGroupId: destinationVolume.worldGroupId ?? null,
-        parentId: destinationVolume.id!,
-        type: 'chapter',
-        items: previewChapters,
-        startingOrder: existingCount,
-      })
-    } catch (err) {
-      console.error('[Outline] 写入章节失败:', err)
-      await generation.failAdoption(err instanceof Error ? err.message : '写入章节时发生未知错误')
-      toast.error(`写入章节时出错：${err instanceof Error ? err.message : '未知错误'}。请查看控制台获取详情。`)
+      completion = await generation.adoptCandidate(intent)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '未知错误'
+      toast.error(`章纲采纳未完成：${message}。系统会保留 durable 运行以供刷新恢复。`)
       return
     }
-    if (result.writtenCount === 0) {
-      await generation.failAdoption(result.skippedReasons.join('；') || '未写入任何章节')
-    } else {
-      await generation.completeAdoption({
-        kind: 'chapters',
-        destinationVolumeId: destinationVolume.id,
-        items: previewChapters,
-        result,
-      })
-    }
+    ai.reset()
     await loadAll(project.id!)
     setPreviewChapters(null)
     setPreviewTargetId(null)
-    if (result.writtenCount === 0) {
-      toast.error(`未写入任何章节。原因:${result.skippedReasons.join('；') || '与本卷已有章节标题重复(已跳过)'}。`)
-    } else if (result.writtenCount < previewChapters.length) {
-      toast.info(`已写入 ${result.writtenCount} 章,另有 ${previewChapters.length - result.writtenCount} 章被跳过(${result.skippedReasons.join('；') || '标题重复'})。`)
+    if (targetId != null) {
+      toast.success('本章章纲已写入并完成终态验证。')
+      return
+    }
+    const evidence = completion.evidence as {
+      result?: { writtenCount?: number; skippedReasons?: string[] }
+    }
+    const result = evidence.result ?? {}
+    if ((result.writtenCount ?? 0) < previewChapters.length) {
+      toast.info(`已写入 ${result.writtenCount ?? 0} 章，另有 ${previewChapters.length - (result.writtenCount ?? 0)} 章被跳过（${result.skippedReasons?.join('；') || '标题重复'}）。`)
+    } else {
+      toast.success(`已写入 ${result.writtenCount ?? previewChapters.length} 章并完成终态验证。`)
     }
   }
 
@@ -556,6 +504,8 @@ export default function OutlinePanel({ project, onOpenChapter, initialNodeId }: 
           onConfirmVolumes={() => { void handleConfirmVolumes() }}
           onConfirmChapters={() => { void handleConfirmChapters() }}
           onCancelPreview={clearGenerationPreview}
+          canAdopt={generation.canAdopt}
+          adoptionRecoveryRequired={generation.adoptionRecoveryRequired}
         />
 
         <OutlineVolumeDetail

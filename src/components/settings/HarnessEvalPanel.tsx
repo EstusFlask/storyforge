@@ -1,6 +1,7 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react'
 import { ClipboardCopy, Download, FileJson, LoaderCircle, Play, RotateCcw, ShieldCheck, Upload } from 'lucide-react'
-import { chat, type ChatResult } from '../../lib/ai/client'
+import { type ChatResult } from '../../lib/ai/client'
+import { executeRegisteredAIEntryV1 } from '../../lib/agent/formal-ai-entry'
 import { isAIConfigReady } from '../../lib/ai/config-readiness'
 import { estimateTokens } from '../../lib/ai/context-budget'
 import { computeCostUsd } from '../../lib/ai/usage-log'
@@ -43,6 +44,8 @@ import { useAIConfigStore } from '../../stores/ai-config'
 import { useDialog } from '../shared/Dialog'
 import H86StoryArcEvalPanel from './H86StoryArcEvalPanel'
 import CreativeReliabilityEvalPanel from './CreativeReliabilityEvalPanel'
+
+const RacesGatewayEvalPanel = lazy(() => import('./RacesGatewayEvalPanel'))
 
 interface SplitViewState {
   checkpoint: H4LongConsistencyRunCheckpointV1 | null
@@ -117,8 +120,14 @@ async function evalChatWithRetry(
     try {
       const result: ChatResult = {}
       const output = category === 'eval.h17.compression'
-        ? await chat(messages, config, { category: 'eval.h17.compression' }, controller.signal, result)
-        : await chat(messages, config, { category: 'eval.h17.generation' }, controller.signal, result)
+        ? await executeRegisteredAIEntryV1(
+          'eval.context-compression', messages, config,
+          { category: 'eval.h17.compression' }, controller.signal, result,
+        )
+        : await executeRegisteredAIEntryV1(
+          'eval.context-compression', messages, config,
+          { category: 'eval.h17.generation' }, controller.signal, result,
+        )
       return { output, usage: result.usage }
     } catch (error) {
       lastError = error
@@ -147,7 +156,8 @@ async function callH4Verifier(
   const startedAt = performance.now()
   try {
     const result: ChatResult = {}
-    const output = await chat(
+    const output = await executeRegisteredAIEntryV1(
+      'eval.long-consistency.verifier',
       input.messages,
       { ...config, temperature: 0, maxTokens: 4_000 },
       { category: 'eval.h4.verifier', contextOverflowPolicy: 'reject' },
@@ -186,7 +196,8 @@ async function callH4SubtypeAdjudicator(
   const startedAt = performance.now()
   try {
     const result: ChatResult = {}
-    const output = await chat(
+    const output = await executeRegisteredAIEntryV1(
+      'eval.long-consistency.adjudicator',
       input.messages,
       { ...config, temperature: 0, maxTokens: 2_000 },
       { category: 'eval.h4.verifier', contextOverflowPolicy: 'reject' },
@@ -884,6 +895,9 @@ export default function HarnessEvalPanel() {
       {renderAdjudicationSplit('held-out', 'H85 两阶段判类 Held-out')}
       <H86StoryArcEvalPanel />
       <CreativeReliabilityEvalPanel />
+      <Suspense fallback={null}>
+        <RacesGatewayEvalPanel />
+      </Suspense>
 
       <section className="border-t border-border pt-3">
         <div className="flex flex-wrap items-center justify-between gap-2">

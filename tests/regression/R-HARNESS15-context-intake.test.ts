@@ -147,15 +147,18 @@ describe('R-HARNESS15 · Skill 输入状态与精确上下文交付证据', () =
   it('durable 边界拒绝伪造状态、来源越权和截断 token 证据', () => {
     const skill = getAgentSkillV1('outline.volumes', 'outline')
     const result = contextResult({
-      included: ['worldview'],
-      omitted: ['storyCore', 'characters', 'storyArcs'],
+      included: ['ragSelection'],
       sourceEvidence: [{
-        key: 'worldview',
+        key: 'ragSelection',
         status: 'included',
         delivery: 'full',
         originalTokens: 120,
         inputTokens: 120,
       }],
+    })
+    const logicalInput = contextResult({
+      included: ['worldview'],
+      omitted: ['storyCore', 'characters', 'storyArcs'],
     })
     const evidence = {
       profile: 'balanced' as const,
@@ -163,7 +166,8 @@ describe('R-HARNESS15 · Skill 输入状态与精确上下文交付证据', () =
       omitted: result.omitted,
       trimmed: result.trimmed,
       sourceEvidence: result.sourceEvidence,
-      inputState: resolveAgentSkillInputStateV1(skill, [result]),
+      inputState: resolveAgentSkillInputStateV1(skill, [logicalInput]),
+      inputStateSourceKeys: ['worldview'],
       estimatedInputTokens: 120,
       inputBudgetTokens: 10_000,
     }
@@ -179,7 +183,7 @@ describe('R-HARNESS15 · Skill 输入状态与精确上下文交付证据', () =
     expect(() => validateAgentSkillContextEvidenceV1(skill, {
       ...evidence,
       sourceEvidence: [{
-        key: 'worldview',
+        key: 'ragSelection',
         status: 'included',
         delivery: 'truncated',
         originalTokens: 120,

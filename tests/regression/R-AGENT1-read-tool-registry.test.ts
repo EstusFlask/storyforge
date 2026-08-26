@@ -3,6 +3,10 @@ import { AGENT_READ_TOOLS, executeAgentTool } from '../../src/lib/agent/tool-reg
 import { db } from '../../src/lib/db/schema'
 import { CONTEXT_SOURCE_BY_KEY } from '../../src/lib/registry/context-sources'
 import { PROJECT_TABLES } from '../../src/lib/registry/project-tables'
+import { ensureWorkspaceOwnership } from '../../src/lib/world-engine/ownership'
+import { backfillResourceUidsV1 } from '../../src/lib/context-gateway/resource-identity'
+import { createContextGatewayToolSessionV1 } from '../../src/lib/context-gateway/tool-session'
+import { CANON_RESOURCE_KINDS_V1, CANON_RESOURCE_PROVIDER_V1 } from '../../src/lib/context-gateway/canon-provider'
 
 const EXPECTED_TOOLS = [
   'read_project_status',
@@ -20,6 +24,10 @@ const EXPECTED_TOOLS = [
   'read_inspiration_workspace',
   'read_character_driven_plan',
   'search_text',
+  'list_context_catalog',
+  'search_context',
+  'read_context_resource',
+  'read_original_evidence',
 ]
 
 async function addProject(name: string, enableMultiWorld: boolean) {
@@ -277,6 +285,23 @@ describe('R-AGENT1 · 只读 Tool Registry', () => {
       createdAt: now,
       updatedAt: now,
     } as any)
+    const ownership = await ensureWorkspaceOwnership(projectId)
+    await backfillResourceUidsV1(projectId)
+    const gatewaySession = await createContextGatewayToolSessionV1({
+      scope: { ...ownership.scope, worldGroupId: null },
+      policy: {
+        version: 'context-access-policy-v1', policyId: 'agent1-all-tools-v1',
+        mandatorySourceKeys: [], allowedSourceKeys: ['ragSelection'],
+        allowedResourceKinds: [...CANON_RESOURCE_KINDS_V1],
+        allowedDepths: ['index', 'summary', 'focused', 'full', 'original'],
+        selectorPolicyId: 'agent1-test-v1', maxReadCalls: 10, maxRetrievedTokens: 100_000,
+        allowOriginalRead: true, candidateAccess: 'explicit-resource-key-only',
+      },
+    })
+    const gatewayPage = await CANON_RESOURCE_PROVIDER_V1.listMetadata({
+      scope: gatewaySession.scope, kinds: ['chapter'], limit: 100,
+    })
+    const chapterResourceKey = gatewayPage.items.find(item => item.resourceKey.endsWith(':field:content'))!.resourceKey
     const beforeWithInspiration = await tableCounts()
     const args: Record<string, Record<string, unknown>> = {
       read_outline: { outlineNodeId: nodeId },
@@ -287,10 +312,20 @@ describe('R-AGENT1 · 只读 Tool Registry', () => {
       read_inspiration_workspace: { fragmentIds: ['idea-1'], mode: 'single' },
       read_character_driven_plan: { planId: characterDrivenPlanId },
       search_text: { query: '铜钥匙' },
+      list_context_catalog: { limit: 2 },
+      search_context: { query: '铜钥匙', limit: 2 },
+      read_context_resource: { resourceKey: chapterResourceKey, depth: 'full', maxTokens: 1000 },
     }
+    let originalCapability: string | undefined
     for (const tool of AGENT_READ_TOOLS) {
-      const result = await tool.execute({ projectId }, args[tool.name] ?? {})
+      const toolArgs = tool.name === 'read_original_evidence'
+        ? { sourceRef: originalCapability, maxTokens: 1000 }
+        : args[tool.name] ?? {}
+      const result = await tool.execute({ projectId, contextGatewaySession: gatewaySession }, toolArgs)
       expect(result.ok, `${tool.name}: ${result.error ?? ''}`).toBe(true)
+      if (tool.name === 'read_context_resource') {
+        originalCapability = JSON.parse(result.content).sourceRefCapabilities[0]
+      }
     }
     expect(beforeWithInspiration.inspirationWorkspaces).toBe(before.inspirationWorkspaces + 1)
     expect(await tableCounts()).toEqual(beforeWithInspiration)

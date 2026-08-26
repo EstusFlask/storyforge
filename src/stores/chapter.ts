@@ -4,6 +4,7 @@ import { pickBestChapterForOutline } from '../lib/chapters/selectors'
 import { cascadeDeleteChapterRecords } from '../lib/chapters/lifecycle'
 import type { Chapter } from '../lib/types'
 import { assertRecordInScope, readOwnedRows, resolveReadScopeLike, resolveScopeLike, scopeTransactionTables, stampNewRecord, type WorkspaceScopeLike } from '../lib/world-engine/scope'
+import { coordinatePendingEditV1 } from '../lib/authoring/pending-edit-coordinator'
 
 interface ChapterStore {
   chapters: Chapter[]
@@ -97,32 +98,37 @@ export const useChapterStore = create<ChapterStore>((set, get) => ({
   },
 
   updateChapter: async (id, data) => {
-    const beforeMigration = get().chapters.find(c => c.id === id) ?? await db.chapters.get(id)
-    if (!beforeMigration?.projectId) return
-    const scope = await resolveScopeLike(beforeMigration.projectId)
-    const before = await db.chapters.get(id)
-    if (!before || !await assertRecordInScope(scope, 'chapters', before, { owner: 'work' })) return
-    const updated = { ...data, updatedAt: now() }
-    await db.chapters.update(id, updated)
-    if (Object.prototype.hasOwnProperty.call(data, 'content')) {
-      const projectId = before.projectId
-      if (projectId != null) {
-        const summaryNodes = await readOwnedRows<any>(scope, 'narrativeSummaryNodes', { owner: 'work' })
-        for (const node of summaryNodes) {
-          if (node.id == null) continue
-          if (node.level === 'book' || node.level === 'volume' || node.sourceChapterId === id) {
-            await db.narrativeSummaryNodes.update(node.id, { status: 'stale', updatedAt: now() })
+    await coordinatePendingEditV1({
+      key: `chapter:${id}`,
+      persist: async () => {
+        const initial = await db.chapters.get(id)
+        if (!initial?.projectId) return
+        const scope = await resolveScopeLike(initial.projectId)
+        const before = await db.chapters.get(id)
+        if (!before || !await assertRecordInScope(scope, 'chapters', before, { owner: 'work' })) return
+        const updated = { ...data, updatedAt: now() }
+        await db.chapters.update(id, updated)
+        if (Object.prototype.hasOwnProperty.call(data, 'content')) {
+          const projectId = before.projectId
+          if (projectId != null) {
+            const summaryNodes = await readOwnedRows<any>(scope, 'narrativeSummaryNodes', { owner: 'work' })
+            for (const node of summaryNodes) {
+              if (node.id == null) continue
+              if (node.level === 'book' || node.level === 'volume' || node.sourceChapterId === id) {
+                await db.narrativeSummaryNodes.update(node.id, { status: 'stale', updatedAt: now() })
+              }
+            }
           }
         }
-      }
-    }
-    const chapters = get().chapters.map(c =>
-      c.id === id ? { ...c, ...updated } : c
-    )
-    const currentChapter = get().currentChapter?.id === id
-      ? { ...get().currentChapter!, ...updated }
-      : get().currentChapter
-    set({ chapters, currentChapter })
+        const chapters = get().chapters.map(c =>
+          c.id === id ? { ...c, ...updated } : c
+        )
+        const currentChapter = get().currentChapter?.id === id
+          ? { ...get().currentChapter!, ...updated }
+          : get().currentChapter
+        set({ chapters, currentChapter })
+      },
+    })
   },
 
   refreshChapter: async (id) => {

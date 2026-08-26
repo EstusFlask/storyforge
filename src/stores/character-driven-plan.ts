@@ -124,6 +124,9 @@ export const useCharacterDrivenPlanStore = create<CharacterDrivenPlanStore>((set
     const copy = stampNewRecord(scope, 'characterDrivenPlans', {
       ...source,
       id: undefined,
+      // A copied plan is a new Canon resource. Never inherit the source's
+      // portable identity; stampNewRecord must allocate a fresh one.
+      ragDocumentId: undefined,
       name: `${source.name} v${version}`,
       arcs: stringifyCharacterDrivenPlanArcs(parseCharacterDrivenPlanArcs(source.arcs)),
       generatedVolumes: stringifyCharacterDrivenPlotVolumes(

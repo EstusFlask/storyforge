@@ -1,5 +1,27 @@
 import type { CommunityWorldOrigin, ProjectStatus } from './project'
 
+/**
+ * PROGRESS-1: author-owned policy for work that may follow prose adoption.
+ * Missing fields are intentionally interpreted as `suggest`; this keeps every
+ * pre-PROGRESS-1 Work safe without a destructive IndexedDB migration.
+ */
+export type PostAdoptionPolicyV1 = 'off' | 'suggest' | 'auto-with-budget'
+
+export type PostAdoptionTaskTypeV1 =
+  | 'organization'
+  | 'memory'
+  | 'retrieval'
+  | 'consistency'
+
+export interface PostAdoptionBudgetV1 {
+  maxModelCalls: number
+  maxInputTokens: number
+  maxOutputTokens: number
+  maxCostUsd: number
+  /** Free/unknown-price providers must be explicitly authorized for auto mode. */
+  allowUnknownCost: boolean
+}
+
 /** WORLD-2C: a stable world root inside one local workspace. */
 export interface World {
   id?: number
@@ -31,6 +53,10 @@ export interface Work {
   methodologyId?: string
   activeCharacterDrivenPlanId?: number | null
   activeNarrativeModuleId?: number | null
+  /** PROGRESS-1: omitted on legacy rows and resolved to the safe `suggest` default. */
+  postAdoptionPolicy?: PostAdoptionPolicyV1
+  postAdoptionTaskTypes?: PostAdoptionTaskTypeV1[]
+  postAdoptionBudget?: PostAdoptionBudgetV1
   createdAt: number
   updatedAt: number
 }

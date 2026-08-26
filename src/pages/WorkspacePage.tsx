@@ -1,4 +1,4 @@
-import { useEffect, useState, useMemo, lazy, Suspense } from 'react'
+import { useCallback, useEffect, useRef, useState, useMemo, lazy, Suspense } from 'react'
 import { useLocation, useNavigate, useParams } from 'react-router'
 import { useProjectStore } from '../stores/project'
 import { useWorldviewStore } from '../stores/worldview'
@@ -81,11 +81,14 @@ import {
   completeImpactManualCorrectionV1,
 } from '../lib/agent/run/impact-manual-correction-durable'
 import { executeImpactPostCorrectionReplanV1 } from '../lib/agent/run/impact-post-correction-replan-durable'
+import { flushPendingEditsV1 } from '../lib/authoring/pending-edit-coordinator'
+import { useToast } from '../components/shared/Toast'
 
 export default function WorkspacePage() {
   const { projectId } = useParams()
   const location = useLocation()
   const navigate = useNavigate()
+  const toast = useToast()
   const { loadProject, projects, currentProjectId } = useProjectStore()
   const initialModule = new URLSearchParams(location.search).get('module')
   const initialSidebarModule = initialModule && Object.prototype.hasOwnProperty.call(MODULE_CONTENT_TYPES, initialModule)
@@ -102,8 +105,32 @@ export default function WorkspacePage() {
   const [impactHandoffTarget, setImpactHandoffTarget] = useState<CurrentImpactHandoffTargetV2 | null>(null)
   const [impactCorrectionStatus, setImpactCorrectionStatus] = useState<'idle' | 'pending' | 'verifying' | 'completed'>('idle')
   const [impactCorrectionError, setImpactCorrectionError] = useState<string | null>(null)
+  const navigationTail = useRef<Promise<void>>(Promise.resolve())
   const activeWorldGroupId = useWorldGroupStore(state => state.activeGroupId)
   const worldGroups = useWorldGroupStore(state => state.groups)
+
+  const afterPendingEdits = useCallback((action: () => void, failureMessage: string) => {
+    const transition = navigationTail.current
+      .catch(() => undefined)
+      .then(async () => {
+        await flushPendingEditsV1()
+        action()
+      })
+    navigationTail.current = transition
+    void transition.catch(error => {
+      const detail = error instanceof Error ? error.message : String(error)
+      toast.error(`${failureMessage}：${detail}`)
+    })
+  }, [toast])
+
+  const selectModule = useCallback((module: SidebarModule) => {
+    afterPendingEdits(() => {
+      setImpactHandoff(null)
+      setImpactHandoffTarget(null)
+      setActiveModule(module)
+      if (module !== 'editor') setEditorNodeId(null)
+    }, '当前编辑未能保存，已阻止切换页面')
+  }, [afterPendingEdits])
 
   // 从 Zustand Store 中动态获取当前项目，实现全局响应式更新
   const project = useMemo(() => {
@@ -529,8 +556,8 @@ export default function WorkspacePage() {
       {/* 左侧导航 */}
       <Sidebar
         active={activeModule}
-        onSelect={(m) => { setImpactHandoff(null); setImpactHandoffTarget(null); setActiveModule(m); if (m !== 'editor') setEditorNodeId(null) }}
-        onBack={() => navigate(backPath)}
+        onSelect={selectModule}
+        onBack={() => afterPendingEdits(() => navigate(backPath), '当前编辑未能保存，已阻止离开工作区')}
         projectName={project.name}
         collapsed={sidebarCollapsed}
         onToggleCollapse={() => setSidebarCollapsed(v => !v)}

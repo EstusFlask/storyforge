@@ -20,6 +20,7 @@ import { createVerificationReceiptV1 } from './verification-receipt'
 import { hashCanonicalValue } from './hash'
 import { isMasterAgentRunWorkflowKindV1 } from '../workflow-catalog'
 import { readFreshMasterCandidateStepReceiptV1 } from './master-step-verification'
+import { maybeInjectHarnessFaultV1 } from '../dev-fault-injection'
 
 export const MASTER_AGENT_VERIFIER_SET_VERSION_V1 = 'master-terminal-v1'
 
@@ -129,6 +130,7 @@ export async function verifyMasterAgentRunV1(input: {
   runId: number
   now?: number
 }): Promise<MasterAgentVerificationResultV1> {
+  maybeInjectHarnessFaultV1('terminal.before-verify')
   let snapshot = await readAgentRunV1(input.scope, input.runId)
   if (snapshot.projection.state === 'completed') {
     return { accepted: true, codes: [], snapshot }
@@ -281,5 +283,6 @@ export async function verifyMasterAgentRunV1(input: {
     expectedLastSequence: snapshot.projection.lastSequence,
     now: input.now ?? Date.now(),
   })
+  maybeInjectHarnessFaultV1('terminal.after-receipt')
   return { accepted: true, codes: [], snapshot, receipt }
 }

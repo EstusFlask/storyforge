@@ -21,6 +21,9 @@ export type CharacterOrderAxis = 'lawful' | 'neutral' | 'chaotic'
 /** 旧二值阵营，仅为旧数据兼容保留。新代码使用 moralAxis/orderAxis。 */
 export type CharacterAlignment = 'good' | 'evil'
 
+/** 角色在作品规划层的生命周期；变化只能经作者确认候选写入。 */
+export type CharacterNarrativeStatus = 'planned' | 'active' | 'inactive' | 'retired' | 'deceased'
+
 /** 角色 */
 export interface Character extends RagDocumentMetadata {
   id?: number
@@ -74,9 +77,20 @@ export interface Character extends RagDocumentMetadata {
   activeChapterRange?: string
   /** 退场/死亡章节 ID */
   exitChapterId?: number | null
+  /** 当前规划状态。旧数据缺失时按 active 解释。 */
+  narrativeStatus?: CharacterNarrativeStatus
+  /** 最近一次状态变化所绑定的章节证据。 */
+  statusEvidenceChapterId?: number | null
+  /** 最近一次状态变化所绑定的故事线证据。 */
+  statusEvidenceStoryArcId?: number | null
+  /** 作者可见的状态变化理由。 */
+  statusReason?: string
+  /** 生成该状态候选的 portable durable contract/candidate provenance。 */
+  statusProducerContractHash?: string | null
+  statusProducerCandidateHash?: string | null
 
   // ── Phase 25.4 多世界 ──
-  /** 角色原属世界组 ID（null = 主角/跨世界角色） */
+  /** 角色原属世界组 ID；null 只表示尚未归属/单世界兼容，不代表跨世界。 */
   homeWorldGroupId?: number | null
   /** 是否跨世界角色（主角、系统精灵等，在所有世界中可见） */
   isCrossWorld?: boolean
@@ -86,8 +100,12 @@ export interface Character extends RagDocumentMetadata {
   raceEntryId?: number | null
   /** 主修体系；指向 cultivationSystems。 */
   cultivationSystemId?: number | null
+  /** 通用力量体系；指向 powerSystems，供非修炼题材建立可校验关联。 */
+  powerSystemId?: number | null
   /** 当前设定境界（上游角色卡，不是逐章进度）；指向体系 stages 内的稳定字符串 ID。 */
   cultivationStageId?: string | null
+  /** 结构化常驻地点；location 文本仍保留为作者描述。 */
+  importantLocationId?: number | null
 
   createdAt: number
   updatedAt: number

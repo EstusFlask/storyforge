@@ -296,7 +296,7 @@ export type AuthoringCandidateDomain =
       }
     }
   | {
-      /** FLOW-3D：章节正文后的六域整理候选；正文证据和来源 hash 一并冻结。 */
+      /** FLOW-3D/PROGRESS-1：章节正文后的七域整理候选；正文证据和来源 hash 一并冻结。 */
       kind: 'chapter-organization'
       chapterId: number
       chapterTitle: string

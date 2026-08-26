@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => ({
     busy: false,
     error: null as string | null,
     submitRequest: vi.fn(async () => undefined),
+    submitTargetedRequest: vi.fn(async () => undefined),
     updateCandidate: vi.fn(async () => undefined),
     rejectCandidate: vi.fn(async () => undefined),
     adoptCandidate: vi.fn(async () => undefined),
@@ -140,10 +141,16 @@ describe('R-HARNESS31 · 故事核心面板统一进入主 Agent Harness', () =>
     const generate = Array.from(host.querySelectorAll('button'))
       .find(button => button.textContent?.includes('AI 生成'))!
     await act(async () => generate.click())
-    expect(mocks.copilot.submitRequest).toHaveBeenCalledOnce()
-    expect(mocks.copilot.submitRequest.mock.calls[0][0]).toContain('目标字段=logline')
-    expect(mocks.copilot.submitRequest.mock.calls[0][0]).toContain('生成模式=expand')
-    expect(mocks.copilot.submitRequest.mock.calls[0][0]).toContain('父亲主动遗忘主角')
+    expect(mocks.copilot.submitTargetedRequest).toHaveBeenCalledOnce()
+    const [request, task] = mocks.copilot.submitTargetedRequest.mock.calls[0]
+    expect(request).toContain('目标字段=logline')
+    expect(request).toContain('生成模式=expand')
+    expect(request).toContain('父亲主动遗忘主角')
+    expect(task).toMatchObject({
+      agentId: 'world-origin',
+      skillId: 'world-origin.story-core',
+      promptExecution: { version: 1, moduleKey: 'story.generate' },
+    })
 
     const manualDisplay = Array.from(host.querySelectorAll('div.cursor-text'))
       .find(element => element.textContent === '旧的一句话故事')!

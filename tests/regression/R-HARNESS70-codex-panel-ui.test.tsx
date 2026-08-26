@@ -8,7 +8,7 @@ const mocks = vi.hoisted(() => ({
   addCategory: vi.fn(), deleteCategory: vi.fn(), setCategoryHidden: vi.fn(), updateCategory: vi.fn(),
   addEntry: vi.fn(), updateEntry: vi.fn(), deleteEntry: vi.fn(),
   resolveScopeLike: vi.fn(async () => ({ projectId: 1, worldId: 11, workId: 12 })),
-  generate: vi.fn(), readPending: vi.fn(), readRecoverable: vi.fn(), resume: vi.fn(),
+  generate: vi.fn(), generateEnrichment: vi.fn(), readPending: vi.fn(), readRecoverable: vi.fn(), resume: vi.fn(),
   adopt: vi.fn(async () => ({ written: 1 })), abandon: vi.fn(async () => undefined),
   toastSuccess: vi.fn(), toastInfo: vi.fn(), toastError: vi.fn(),
 }))
@@ -54,6 +54,7 @@ vi.mock('../../src/lib/ai/client', () => ({
 vi.mock('../../src/lib/world-engine/scope', () => ({ resolveScopeLike: mocks.resolveScopeLike }))
 vi.mock('../../src/lib/agent/run/codex-extraction-durable', () => ({
   generateCodexExtractionCandidateV1: mocks.generate,
+  generateCodexEnrichmentCandidateV1: mocks.generateEnrichment,
   readPendingCodexExtractionCandidateV1: mocks.readPending,
   readRecoverableCodexExtractionV1: mocks.readRecoverable,
   resumeCodexExtractionCandidateV1: mocks.resume,
@@ -82,6 +83,7 @@ const scope = { projectId: 1, worldId: 11, workId: 12 }
 const extracted = {
   name: '月栖花', icon: '🌱', summary: '随月潮发光', description: '退潮后成熟',
   fields: { habitat: '月潮湿地' }, tags: ['月潮'], importance: 3,
+  evidenceQuotes: ['月栖花生于月潮湿地。'], provenance: 'verbatim-extraction',
 }
 const request = { categoryId: 21, worldGroupId: 7, sourceText: '月栖花生于月潮湿地。', supplementTags: true }
 const candidate = { entries: [extracted], plan: { request } }
@@ -98,6 +100,15 @@ function setTextarea(element: HTMLTextAreaElement, value: string) {
 }
 
 async function renderPanel() {
+  const host = await renderBasePanel()
+  await act(async () => button(host, 'AI 从内容拆分词条').click())
+  await vi.waitFor(() => expect(mocks.readPending).toHaveBeenCalledWith({
+    scope, categoryId: 21, worldGroupId: 7, operation: 'extract',
+  }))
+  return host
+}
+
+async function renderBasePanel() {
   const host = document.createElement('div')
   document.body.append(host)
   const root = createRoot(host)
@@ -107,10 +118,6 @@ async function renderPanel() {
     extractionSourceText: request.sourceText,
   })))
   await vi.waitFor(() => expect(button(host, 'AI 从内容拆分词条')).toBeTruthy())
-  await act(async () => button(host, 'AI 从内容拆分词条').click())
-  await vi.waitFor(() => expect(mocks.readPending).toHaveBeenCalledWith({
-    scope, categoryId: 21, worldGroupId: 7,
-  }))
   return host
 }
 
@@ -118,6 +125,14 @@ beforeEach(() => {
   mocks.readPending.mockResolvedValue(null)
   mocks.readRecoverable.mockResolvedValue(null)
   mocks.generate.mockResolvedValue({ snapshot: { run: { id: 70 } }, candidate })
+  mocks.generateEnrichment.mockResolvedValue({
+    snapshot: { run: { id: 75 } },
+    candidate: {
+      ...candidate,
+      plan: { request: { ...request, operation: 'enrich', authorRequest: '补充中立群体' } },
+      entries: [{ ...extracted, name: '听潮使', evidenceQuotes: [], provenance: 'ai-created-suggestion' }],
+    },
+  })
   mocks.resume.mockResolvedValue({ snapshot: { run: { id: 70 } }, candidate })
   mocks.adopt.mockResolvedValue({ written: 1 })
 })
@@ -132,6 +147,24 @@ afterEach(async () => {
 })
 
 describe('R-HARNESS70 · Codex durable 提取 UI', () => {
+  it('创意补全使用独立入口和候选标记，不伪装成原文抽取', async () => {
+    const host = await renderBasePanel()
+    await act(async () => button(host, 'AI 补全新词条建议').click())
+    await vi.waitFor(() => expect(mocks.readPending).toHaveBeenCalledWith({
+      scope, categoryId: 21, worldGroupId: 7, operation: 'enrich',
+    }))
+    const textarea = host.querySelector('textarea')!
+    await act(async () => setTextarea(textarea, '补充中立群体'))
+    await act(async () => button(host, '生成补全建议').click())
+    expect(mocks.generateEnrichment).toHaveBeenCalledWith(expect.objectContaining({
+      scope,
+      request: expect.objectContaining({ authorRequest: '补充中立群体' }),
+    }))
+    expect(mocks.generate).not.toHaveBeenCalled()
+    expect(host.textContent).toContain('AI 新建建议 · 非原文抽取')
+    expect(mocks.adopt).not.toHaveBeenCalled()
+  })
+
   it('一次生成只展示 durable 候选，作者确认子集后才统一采纳', async () => {
     const host = await renderPanel()
     expect(mocks.generate).not.toHaveBeenCalled()

@@ -12,6 +12,7 @@ import type { InspirationResultMode } from '../types/inspiration-workspace'
 import type { RagSelectionTraceCollector } from '../types/rag-library'
 import type { WorkspaceScope } from '../types/world-ownership'
 import type {
+  ExactRunArtifactKindV1,
   WorkspaceDocumentCodecV1,
   WorkspaceDocumentEditPolicyV1,
 } from '../types/memory-engineering'
@@ -172,6 +173,11 @@ export interface ExportRemapField {
   /** 是否树形自引用(parentId) */
   selfTree?: boolean
   /**
+   * 可空反向引用允许先导入当前行、最后统一回填，用于解除两个内容表之间
+   * 合法的可空拓扑环。必填或 onUnmapped=drop 的引用不得设为 deferred。
+   */
+  deferred?: true
+  /**
    * 导出后该字段在 JSON 里的名字(历史命名,毫无规律,必须逐字段声明以逐字节兼容旧备份)。
    * 例:worldGroupId → '_worldGroupExportId'、outlineNodeId → '_outlineExportId'、
    *     fromCharacterId → '_fromCharacterIndex'。
@@ -238,6 +244,9 @@ export type PortableDataSpec = {
     hashField: string
     sizeField: string
   }
+} | {
+  /** CTXG-2 immutable UTF-8 body or a verified evidence-pruned tombstone. */
+  kind: 'exact-run-artifact'
 }
 
 /**
@@ -269,6 +278,21 @@ export interface TableSpec<T = any> {
   domainOwner?: DomainOwnershipSpec
   /** MEMORY-2 人工可编辑工作区投影；未登记即禁止落盘。 */
   workspaceProjection?: WorkspaceProjectionSpecV1
+  /**
+   * CTXG-2 portable resource identity. This remains PROJECT_TABLES metadata so
+   * creation, backfill, export/import and Gateway catalog cannot drift into a
+   * fourth hand-written table list.
+   */
+  resourceIdentity?: {
+    version: 1
+    field: 'ragDocumentId'
+    resourceKind: string
+    /** Context Gateway catalog metadata remains on this registry entry. */
+    contextKind: ContextResourceKind
+    label: string
+    /** registered-fields follows FIELD_REGISTRY; semantic-fields derives safe row fields. */
+    descriptorMode: 'registered-fields' | 'semantic-fields'
+  }
   /** MEMORY-10: every table receives one registry-derived disk-memory policy. */
   memoryClassification: WorkspaceMemoryClassificationV1
   /** 树形(parentId 字段名) */
@@ -326,6 +350,22 @@ export interface FieldSpec {
   label?: string
   /** 中文/别名枚举归一,如 主角 -> protagonist */
   enumAliasMap?: Record<string, string>
+  /**
+   * AI generation is opt-in. A registered writable field is not automatically
+   * generatable; formal Skills derive their target set and field contract from
+   * this capability instead of maintaining a second field list.
+   */
+  aiGeneration?: {
+    version: 1
+    domain: 'worldview-foundation' | 'story-intent'
+    label: string
+    kind: 'text' | 'divine-design' | 'natural-resources'
+    directDependencies: readonly string[]
+    modes: readonly ('expand' | 'rewrite' | 'polish')[]
+    outputSchemaId: string
+    maxChars: number
+    temporaryAssumptions: 'allowed' | 'forbidden'
+  }
 }
 
 export interface CompositeIdentity {
@@ -524,6 +564,289 @@ export interface AssembleContextInput {
   continuitySnapshot?: PreparedContinuityContext
 }
 
+export const CONTEXT_RESOURCE_KINDS_V1 = [
+  'workspace', 'world', 'worldview-field', 'story-core-field', 'character',
+  'character-relation', 'story-arc', 'storyline-progress', 'outline-node',
+  'detailed-outline', 'chapter', 'foreshadow', 'location', 'codex-entry',
+  'world-link', 'fact', 'reference', 'narrative-blueprint',
+] as const
+
+export type ContextResourceKind = typeof CONTEXT_RESOURCE_KINDS_V1[number]
+
+export type ContextResourceDepthV1 = 'index' | 'summary' | 'focused' | 'full' | 'original'
+export type ContextResourceAuthorityV1 =
+  | 'author-canon'
+  | 'adopted-canon'
+  | 'confirmed-evidence'
+  | 'derived-summary'
+  | 'candidate'
+
+export interface ContextSourceRefV1 {
+  table: string
+  recordId: number | string
+  field: string
+  revision: number | string
+  contentHash: string
+  anchor?: { start: number; end: number; quoteHash: string }
+}
+
+export interface ContextResourceRelationV1 {
+  kind: 'parent' | 'child' | 'same-entity' | 'appears-in' | 'depends-on' | 'world-link' | 'temporal-neighbor'
+  targetResourceKey: string
+  direction: 'outgoing' | 'incoming' | 'undirected'
+}
+
+export interface ContextTimeRangeV1 {
+  start?: number | string
+  end?: number | string
+  throughChapterId?: number
+}
+
+export interface ContextResourceDescriptorV1 {
+  version: 1
+  resourceKey: string
+  sourceKey: string
+  kind: ContextResourceKind
+  title: string
+  shortSummary: string
+  authority: ContextResourceAuthorityV1
+  /** Canon body identity, independent from retrieval policy. */
+  contentRevision: number | string
+  contentHash: string
+  /** Retrieval policy identity, independent from Canon edits. */
+  policyRevision: number
+  policyHash: string
+  scope: {
+    projectId: number
+    worldId?: number
+    workId?: number
+    worldGroupId?: number | null
+    chapterId?: number
+  }
+  relations: ContextResourceRelationV1[]
+  timeRange?: ContextTimeRangeV1
+  sourceRefs: ContextSourceRefV1[]
+  tokenEstimate: Partial<Record<ContextResourceDepthV1, number>>
+  availableDepths: ContextResourceDepthV1[]
+  priority: 'normal' | 'pinned' | 'must-read'
+  /** CTXG-5: 作者检索权重；旧 V1 descriptor 缺省按 1 处理。 */
+  retrievalWeight?: number
+  /** CTXG-5: 作者为该资源冻结的单次读取上限；旧 V1 descriptor 缺省不额外收窄。 */
+  tokenCap?: number
+}
+
+export interface FrozenResourceScopeV1 {
+  projectId: number
+  worldId?: number
+  workId?: number
+  worldGroupId?: number | null
+  /** Optional operation boundary. Providers may expose target-specific
+   * aggregate resources without materializing one aggregate for every chapter. */
+  chapterId?: number
+  /** undefined = unrestricted catalog; null = explicitly no character
+   * knowledge; number = only this perspective character's knowledge. */
+  characterId?: number | null
+}
+
+export interface ResourceListInputV1 {
+  scope: FrozenResourceScopeV1
+  kinds?: ContextResourceKind[]
+  cursor?: string
+  limit: number
+}
+
+export interface ResourceSearchInputV1 extends ResourceListInputV1 {
+  query: string
+  /** Resource keys matched against the descriptor itself or one-hop relations. */
+  entityKeys?: string[]
+  /** Story-arc resource keys matched independently from general entity filters. */
+  storyArcKeys?: string[]
+  /** Deterministic metadata range filter; it never scans resource bodies. */
+  timeRange?: ContextTimeRangeV1
+}
+
+export interface ResourcePageV1 {
+  version: 1
+  items: ContextResourceDescriptorV1[]
+  nextCursor: string | null
+  scopeFingerprint: string
+}
+
+export interface ResourceReadInputV1 {
+  scope: FrozenResourceScopeV1
+  resourceKey: string
+  depth: Exclude<ContextResourceDepthV1, 'original'>
+  maxTokens: number
+}
+
+export interface OriginalEvidenceReadInputV1 {
+  scope: FrozenResourceScopeV1
+  resourceKey: string
+  sourceRef: ContextSourceRefV1
+  maxTokens: number
+}
+
+export interface ContextResourceReadV1 {
+  version: 1
+  descriptor: ContextResourceDescriptorV1
+  depth: Exclude<ContextResourceDepthV1, 'original'>
+  content: string
+  contentHash: string
+  tokenCount: number
+  sourceRefs: ContextSourceRefV1[]
+}
+
+export interface OriginalEvidenceReadV1 {
+  version: 1
+  descriptor: ContextResourceDescriptorV1
+  sourceRef: ContextSourceRefV1
+  content: string
+  contentHash: string
+  tokenCount: number
+}
+
+export interface ContextResourceProviderV1 {
+  version: 'context-resource-provider-v1'
+  providerId: string
+  providerVersion: string
+  normalizationVersion: string
+  kinds: readonly ContextResourceKind[]
+  listMetadata(input: ResourceListInputV1): Promise<ResourcePageV1>
+  searchMetadata(input: ResourceSearchInputV1): Promise<ResourcePageV1>
+  read(input: ResourceReadInputV1): Promise<ContextResourceReadV1>
+  readOriginal(input: OriginalEvidenceReadInputV1): Promise<OriginalEvidenceReadV1>
+  fingerprint(scope: FrozenResourceScopeV1): Promise<string>
+}
+
+export interface ContextAccessPolicyV1 {
+  version: 'context-access-policy-v1'
+  policyId: string
+  mandatorySourceKeys: string[]
+  allowedSourceKeys: string[]
+  allowedResourceKinds: ContextResourceKind[]
+  allowedDepths: ContextResourceDepthV1[]
+  selectorPolicyId: string
+  maxReadCalls: number
+  maxRetrievedTokens: number
+  perKindMinimumTokens?: Partial<Record<ContextResourceKind, number>>
+  allowOriginalRead: boolean
+  candidateAccess: 'forbidden' | 'explicit-resource-key-only'
+}
+
+export interface ContextSufficiencyObligationV1 {
+  id: string
+  kind: 'mandatory-source' | 'resource-kind' | 'entity' | 'time-boundary' | 'conflict-check'
+  required: boolean
+  status: 'satisfied' | 'missing' | 'conflicted' | 'not-applicable'
+  evidenceResourceKeys: string[]
+  reasonCode: string
+}
+
+export interface ContextSufficiencyReportV1 {
+  version: 'context-sufficiency-v1'
+  obligations: ContextSufficiencyObligationV1[]
+  assumptions: string[]
+  additionalRead: 'forbidden' | 'not-needed' | 'needed'
+  reportHash: string
+}
+
+export interface RetrievalDecisionV1 {
+  resourceKey: string
+  sourceKey: string
+  reason: string
+  depth: ContextResourceDepthV1
+  revision: number | string
+  contentHash: string
+  /** Optional for historical V1 traces; required by ContextManifestV3 evidence. */
+  policyRevision?: number
+  /** Optional for historical V1 traces; required by ContextManifestV3 evidence. */
+  policyHash?: string
+  sourceRefs: ContextSourceRefV1[]
+  tokenCount: number
+}
+
+export interface RetrievalOmissionV1 {
+  resourceKey: string
+  sourceKey: string
+  reasonCode: string
+  tokenEstimate: number
+}
+
+export interface RetrievalQueryTraceV1 {
+  query: string
+  sourceKeys: string[]
+  resultResourceKeys: string[]
+  resultFingerprint: string
+}
+
+export interface RetrievalTraceV1 {
+  version: 1
+  catalogVersion: string
+  selectorPolicyId: string
+  mandatory: RetrievalDecisionV1[]
+  autoSelected: RetrievalDecisionV1[]
+  agentReads: RetrievalDecisionV1[]
+  omitted: RetrievalOmissionV1[]
+  queries: RetrievalQueryTraceV1[]
+  totalTokens: number
+  fallbackUsed: boolean
+  traceHash: string
+}
+
+export interface ContextPacketV1 {
+  version: 'context-packet-v1'
+  scopeFingerprint: string
+  gatewayVersionHash: string
+  policyHash: string
+  sufficiencyReportHash: string
+  retrievalTraceHash: string
+  content: string
+  contentHash: string
+  tokenCount: number
+  sourceRefs: ContextSourceRefV1[]
+  packetHash: string
+}
+
+/** CTXG physical persistence is introduced in CTXG-2; this is its frozen wire contract. */
+export interface AgentRunArtifactV1 {
+  version: 'agent-run-artifact-v1'
+  artifactKind: ExactRunArtifactKindV1
+  projectId: number
+  scopeFingerprint: string
+  contentHash: string
+  byteSize: number
+  encoding: 'utf-8' | 'gzip-utf-8'
+  content: string | Uint8Array
+  createdAt: number
+}
+
+export interface ContextGatewayVersionV1 {
+  version: 'context-gateway-version-v1'
+  gatewayVersion: string
+  selectorVersion: string
+  descriptorContractVersion: 'context-resource-descriptor-v1'
+  providerSetHash: string
+  sufficiencyObligationsVersion: string
+  toolSchemaHash: string
+  normalizationVersion: string
+  versionHash: string
+}
+
+export interface ContextGatewayContractSnapshotV1 {
+  version: 1
+  policy: ContextAccessPolicyV1
+  policyHash: string
+  providers: Array<{
+    sourceKey: string
+    providerId: string
+    providerVersion: string
+    normalizationVersion: string
+    kinds: ContextResourceKind[]
+  }>
+  gateway: ContextGatewayVersionV1
+  snapshotHash: string
+}
+
 export interface ContextSource {
   key: string
   label: string
@@ -544,6 +867,8 @@ export interface ContextSource {
   /** 规划尚未创建正文 Chapter 时，允许用 outlineNodeId 作为规范章序边界。 */
   acceptsOutlineNodeAsChapterBoundary?: boolean
   enabled?: (input: AssembleContextInput) => boolean | Promise<boolean>
+  /** CTXG resource navigation extension. It is the only Provider registration point. */
+  resources?: ContextResourceProviderV1
   read: (input: AssembleContextInput) => Promise<string>
 }
 
@@ -552,7 +877,7 @@ export type AssembleContextSourceDelivery = 'full' | 'compressed' | 'truncated' 
 
 /**
  * Per-source delivery evidence derived by assembleContext(). It records only
- * token counts and delivery state; source text remains in segments/business tables.
+ * counts, hashes and delivery state; source text remains in segments/business tables.
  */
 export interface AssembleContextSourceEvidence {
   key: string
@@ -560,6 +885,10 @@ export interface AssembleContextSourceEvidence {
   delivery: AssembleContextSourceDelivery
   /** SHA-256 of the registered reader's complete raw output before compression or truncation. */
   sourceHash?: string
+  /** UTF-16 character count returned by the registered reader before its source budget was applied. */
+  originalCharacters?: number
+  /** UTF-16 character count actually delivered to the model. Zero for omitted/trimmed sources. */
+  inputCharacters?: number
   /** Tokens returned by the registered reader before its source budget was applied. */
   originalTokens: number
   /** Tokens actually delivered to the model. Zero for omitted/trimmed sources. */

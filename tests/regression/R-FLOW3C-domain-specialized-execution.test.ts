@@ -20,6 +20,7 @@ import {
   runAuthoringGraph,
 } from '../../src/lib/node-authoring/executor'
 import { buildRagLibrary } from '../../src/lib/retrieval/rag-library'
+import { backfillResourceUidsV1 } from '../../src/lib/context-gateway/resource-identity'
 import { useAIConfigStore } from '../../src/stores/ai-config'
 import type { AIConfig, NodeFlow, Project } from '../../src/lib/types'
 import { resolveScopeLike, stampNewRecord } from '../../src/lib/world-engine/scope'
@@ -125,6 +126,7 @@ describe('FLOW-3C · 领域节点专用执行器', () => {
       createdAt: 1,
       updatedAt: 1,
     } as any)
+    await backfillResourceUidsV1(project.id!)
     vi.mocked(chat).mockReset()
     setCreativeReliabilityRuntimeEnabledV1(true)
     useAIConfigStore.setState({
@@ -331,6 +333,10 @@ describe('FLOW-3C · 领域节点专用执行器', () => {
     expect(savedDetail?.scenes).toHaveLength(1)
     expect(savedDetail?.foreshadowIds).toEqual([foreshadowId])
 
+    // Direct Dexie fixture writes bypass the governed adoption path that assigns
+    // portable resource identities. Formal prose Gateway execution must see the
+    // same migrated identity state as a real workspace.
+    await backfillResourceUidsV1(project.id!)
     vi.mocked(chat).mockResolvedValueOnce('潮声在夜色中持续了很久，直到城门从海床升起，露出一条通往旧文明的石阶。主角沿着湿冷的石阶向下，听见远处有人敲响沉重的铜钟，海水在身后重新合拢。石壁上的古老刻痕逐渐亮起，照出一条没有尽头的黑暗长廊。')
     const prose = await executeDomainNode({
       node: node('chapter.prose', { chapterTitle: '第一章：退潮', request: '生成第一章正文' }),
@@ -397,6 +403,7 @@ describe('FLOW-3C · 领域节点专用执行器', () => {
       projectId: project.id!, name: '潮汐测者', shortDescription: '已有角色二。', motivation: '原动机二',
       worldGroupId: null, homeWorldGroupId: null, createdAt: 1, updatedAt: 1,
     } as any)
+    await backfillResourceUidsV1(project.id!)
     const target = (await buildRagLibrary({ projectId: project.id!, worldGroupId: null }))
       .find(entry => entry.tableName === 'characters' && entry.recordId === secondId && entry.fieldKey === 'motivation')
     expect(target).toBeDefined()

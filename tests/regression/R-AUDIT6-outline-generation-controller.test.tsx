@@ -6,6 +6,23 @@ import type { AssembleContextResult } from '../../src/lib/registry/types'
 import type { OutlineNode, Project } from '../../src/lib/types'
 import { useOutlineGenerationController } from '../../src/components/outline/useOutlineGenerationController'
 import { OUTLINE_DURABLE_HARNESS_STORAGE_KEY } from '../../src/lib/outline/harness'
+import { resolveOutlineGenerationSourceKeysV2 } from '../../src/lib/outline/harness'
+
+const revisionMocks = vi.hoisted(() => ({
+  scope: { projectId: 1, worldId: 101, workId: 201 },
+  revision: { version: 1 as const, entries: [], vectorHash: 'a'.repeat(64) },
+}))
+
+vi.mock('../../src/lib/world-engine/scope', async importOriginal => ({
+  ...await importOriginal<typeof import('../../src/lib/world-engine/scope')>(),
+  resolveScope: vi.fn(async () => revisionMocks.scope),
+  resolveScopeLike: vi.fn(async () => revisionMocks.scope),
+}))
+vi.mock('../../src/lib/authoring/content-revision', async importOriginal => ({
+  ...await importOriginal<typeof import('../../src/lib/authoring/content-revision')>(),
+  captureWorkspaceContentRevisionV1: vi.fn(async () => revisionMocks.revision),
+  assertWorkspaceContentRevisionFreshV1: vi.fn(async () => undefined),
+}))
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true
 
@@ -24,16 +41,26 @@ function node(id: number, type: OutlineNode['type'], parentId: number | null, ti
 }
 
 function assembled(text: string): AssembleContextResult {
+  const sourceKeys = resolveOutlineGenerationSourceKeysV2({
+    request: { kind: 'chapters', volumeId: 1 },
+  })
   return {
     text,
-    included: ['storyCore'],
-    segments: [{ label: '故事核心', layer: 'L1', content: '守住主线', tokens: 1, trimmable: true }],
+    included: ['ragSelection'],
+    segments: [{ label: 'Gateway 资料', layer: 'L0', content: '守住主线', tokens: 1, trimmable: false }],
     omitted: [],
     trimmed: [],
     totalInputTokens: 1,
     inputBudget: 48_000,
     overBudgetBeforeTrim: false,
     overBudgetAfterTrim: false,
+    sourceEvidence: sourceKeys.map(key => ({
+      key,
+      status: key === 'ragSelection' ? 'included' as const : 'omitted' as const,
+      delivery: key === 'ragSelection' ? 'full' as const : 'none' as const,
+      originalTokens: key === 'ragSelection' ? 1 : 0,
+      inputTokens: key === 'ragSelection' ? 1 : 0,
+    })),
   }
 }
 
@@ -95,6 +122,7 @@ async function mount(patch: Partial<Parameters<typeof useOutlineGenerationContro
     clearPreview: vi.fn(),
     onInfo: vi.fn(),
     onError: vi.fn(),
+    executionBoundary: 'experimental',
     ...patch,
   }
   function Harness() {
@@ -166,14 +194,23 @@ describe('AUDIT-6 · 大纲生成 controller', () => {
     expect(assembleContext).toHaveBeenCalledOnce()
     expect(ai.setOperation).toHaveBeenCalledWith('outline.chapter:batch:1')
     expect(ai.start).toHaveBeenCalledOnce()
-    expect(ai.start.mock.calls[0][2]).toEqual({ category: 'outline.chapter', projectId: 1 })
+    expect(ai.start.mock.calls[0][2]).toEqual({
+      formalEntryId: 'outline.chapter.generate', category: 'outline.chapter', projectId: 1,
+    })
     expect(controller.pendingRequest).toBeNull()
   })
 
-  it('运行追踪初始化失败不能阻断原模型调用', async () => {
+  it('正式运行追踪初始化失败会在模型调用前 fail-closed', async () => {
     const malformedAssembly = {
       ...assembled('仍可发送'),
       included: ['unregistered-source'],
+      sourceEvidence: [{
+        key: 'unregistered-source',
+        status: 'included' as const,
+        delivery: 'full' as const,
+        originalTokens: 1,
+        inputTokens: 1,
+      }],
     }
     const ai = createAI()
     const onError = vi.fn()
@@ -181,13 +218,14 @@ describe('AUDIT-6 · 大纲生成 controller', () => {
       ai,
       onError,
       assembleContext: vi.fn(async () => malformedAssembly),
+      executionBoundary: 'formal',
     })
 
     await act(async () => { await controller.prepare({ kind: 'chapters', volumeId: 1 }) })
     await act(async () => { await controller.confirm() })
 
-    expect(ai.start).toHaveBeenCalledOnce()
-    expect(onError).not.toHaveBeenCalled()
+    expect(ai.start).not.toHaveBeenCalled()
+    expect(onError).toHaveBeenCalledWith(expect.stringContaining('实际来源集合'))
   })
 
   it('透明模式先停在最终消息闸门，编辑后才把本次副本交给 AI', async () => {

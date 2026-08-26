@@ -54,7 +54,7 @@ export type BuiltInCodexKey =
   | 'originPower' | 'originDeity'                                              // 世界起源:力量体系/神明信仰
 
 /** 词条分类（树状，内置 + 用户自定义） */
-export interface CodexCategory {
+export interface CodexCategory extends RagDocumentMetadata {
   id?: number
   projectId: number
   domain: CodexDomain
@@ -106,6 +106,16 @@ export interface CodexEntry extends RagDocumentMetadata {
   cultivationStageId?: string | null
   /** 城池词条对应的空间地点；人文属性与地点树分层，删除地点只断开软引用。 */
   importantLocationId?: number | null
+  /** 正式词条来源；历史人工词条缺省按 manual 解释。 */
+  origin?: 'manual' | 'verbatim-extraction' | 'ai-created-suggestion' | 'import'
+  /** 抽取候选采用时冻结的逐字引文；AI 新建建议固定为空数组。 */
+  sourceEvidenceQuotes?: string
+  /** 发起抽取/补全时完整原始来源的内容 hash，便于回查而不复制大正文。 */
+  sourceContentHash?: string
+  /** 产生该 AI 词条的 durable Run；运行删除时只断开引用，不删除词条。 */
+  producerRunId?: number | null
+  /** 作者实际采纳的冻结候选 hash。 */
+  producerCandidateHash?: string | null
   order: number
   worldGroupId?: number | null
   createdAt: number

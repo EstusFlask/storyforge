@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => ({
     busy: false,
     error: null as string | null,
     submitRequest: vi.fn(async () => undefined),
+    submitTargetedRequest: vi.fn(async () => undefined),
     updateCandidate: vi.fn(async () => undefined),
     rejectCandidate: vi.fn(async () => undefined),
     adoptCandidate: vi.fn(async () => undefined),
@@ -170,11 +171,11 @@ describe('R-HARNESS32 · 三个世界基座面板统一进入主 Agent Harness',
   it('世界起源、自然环境和人文环境都提交固定单字段 Skill 请求', async () => {
     const origin = await renderPanel(WorldviewOriginPanel)
     await act(async () => generateButton(origin).click())
-    expect(mocks.copilot.submitRequest.mock.calls.at(-1)?.[0]).toContain('目标字段=worldOrigin')
+    expect(mocks.copilot.submitTargetedRequest.mock.calls.at(-1)?.[0]).toContain('目标字段=worldOrigin')
 
     const natural = await renderPanel(WorldviewNaturalPanel)
     await act(async () => generateButton(natural).click())
-    expect(mocks.copilot.submitRequest.mock.calls.at(-1)?.[0]).toContain('目标字段=worldStructure')
+    expect(mocks.copilot.submitTargetedRequest.mock.calls.at(-1)?.[0]).toContain('目标字段=worldStructure')
 
     const humanity = await renderPanel(WorldviewHumanityPanel, { onOpenHistory: vi.fn() })
     const politics = Array.from(humanity.querySelectorAll('button'))
@@ -186,7 +187,7 @@ describe('R-HARNESS32 · 三个世界基座面板统一进入主 Agent Harness',
     const hint = politicsSection.querySelector<HTMLInputElement>('input[placeholder="给 AI 的补充说明（可选）"]')!
     await act(async () => setInputValue(hint, '权力必须受到潮汐历法约束'))
     await act(async () => generateButton(politicsSection).click())
-    const request = mocks.copilot.submitRequest.mock.calls.at(-1)?.[0]
+    const request = mocks.copilot.submitTargetedRequest.mock.calls.at(-1)?.[0]
     expect(request).toContain('目标字段=politicsOverview')
     expect(request).toContain('生成模式=expand')
     expect(request).toContain('潮汐历法约束')
@@ -210,12 +211,13 @@ describe('R-HARNESS32 · 三个世界基座面板统一进入主 Agent Harness',
     expect(host.textContent).not.toContain('正在将信仰体系拆分')
 
     const editor = host.querySelector<HTMLTextAreaElement>('textarea[aria-label="神明与信仰候选内容"]')!
-    const revised = JSON.stringify({
-      field: 'divineDesign',
-      value: { ...divineValue, divineRules: '神谕必须由两名无血缘见证者共同记录。' },
-    })
+    const revisedValue = { ...divineValue, divineRules: '神谕必须由两名无血缘见证者共同记录。' }
+    const revised = JSON.stringify(revisedValue, null, 2)
     await act(async () => setInputValue(editor, revised))
-    expect(mocks.copilot.updateCandidate).toHaveBeenCalledWith(51, revised)
+    expect(mocks.copilot.updateCandidate).toHaveBeenCalledWith(51, JSON.stringify({
+      field: 'divineDesign',
+      value: revisedValue,
+    }, null, 2))
 
     const buttons = Array.from(host.querySelectorAll('button'))
     await act(async () => buttons.find(button => button.textContent?.includes('拒绝'))!.click())
@@ -248,5 +250,34 @@ describe('R-HARNESS32 · 三个世界基座面板统一进入主 Agent Harness',
       projectId: project.id,
       climateByRegion: '盐雾季会让北岸连续失温七日。',
     })
+  })
+
+  it('自然资源原生对象候选刷新后可审查和修改，不退化为旁路文本', async () => {
+    const naturalResources = {
+      rareCreatures: '雾鹿会沿盐雾迁徙。',
+      herbs: '潮眠草只在退潮后的三小时内开花。',
+      minerals: '北岸出产可记录声音的回声盐晶。',
+      others: '贝壳纸是城邦间的主要契约载体。',
+    }
+    mocks.copilot.pendingCandidates = [candidate('naturalResources', '自然资源明细', naturalResources)]
+    const host = await renderPanel(WorldviewNaturalPanel)
+
+    await vi.waitFor(() => {
+      expect(host.querySelector('textarea[aria-label="自然资源明细候选内容"]')).not.toBeNull()
+    })
+    expect(host.querySelector('[aria-label="自然资源有待确认候选"]')).not.toBeNull()
+    expect(host.textContent).toContain('自然资源分类明细（原生结构）')
+
+    const editor = host.querySelector<HTMLTextAreaElement>('textarea[aria-label="自然资源明细候选内容"]')!
+    const revisedValue = {
+      ...naturalResources,
+      others: '贝壳纸是城邦间的契约载体，烧毁后会留下不可伪造的潮纹。',
+    }
+    await act(async () => setInputValue(editor, JSON.stringify(revisedValue, null, 2)))
+
+    expect(mocks.copilot.updateCandidate).toHaveBeenCalledWith(51, JSON.stringify({
+      field: 'naturalResources',
+      value: revisedValue,
+    }, null, 2))
   })
 })

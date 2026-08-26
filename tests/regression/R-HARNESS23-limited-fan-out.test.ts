@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { db } from '../../src/lib/db/schema'
 import { getOrCreateAgentConversation } from '../../src/lib/agent/conversations'
 import {
+  MASTER_AGENT_REPLAN_STORAGE_KEY,
   runDurableMasterAgentPlanV1,
   type DurableMasterAgentResultV1,
 } from '../../src/lib/agent/run/master-durable'
@@ -12,6 +13,8 @@ import { useAIConfigStore } from '../../src/stores/ai-config'
 import { MASTER_WORKFLOW_FAN_OUT_STORAGE_KEY } from '../../src/lib/agent/workflow-catalog'
 import type { MasterAgentPlan } from '../../src/lib/agent/orchestrator'
 import type { WorkspaceScope } from '../../src/lib/types'
+import { backfillResourceUidsV1 } from '../../src/lib/context-gateway/resource-identity'
+import { generateWorkCode, generateWorkspaceUid } from '../../src/lib/memory/identity'
 
 const inspirationResult = {
   worldview: {
@@ -54,6 +57,7 @@ async function createWorkspace(): Promise<{
 }> {
   const now = Date.now()
   const projectId = await db.projects.add({
+    workspaceUid: generateWorkspaceUid(),
     name: '有限并行项目',
     genre: 'fantasy',
     genres: ['fantasy'],
@@ -78,6 +82,7 @@ async function createWorkspace(): Promise<{
     projectId,
     worldId,
     title: '并行作品',
+    code: generateWorkCode(),
     description: '',
     genres: ['fantasy'],
     status: 'drafting',
@@ -113,6 +118,7 @@ async function createWorkspace(): Promise<{
     createdAt: now,
     updatedAt: now,
   } as any)
+  await backfillResourceUidsV1(projectId)
   return { scope: { projectId, worldId, workId }, worldGroupId }
 }
 
@@ -157,6 +163,7 @@ describe.sequential('R-HARNESS23 · 主 Agent 有限 fan-out', { timeout: 15_000
     await db.delete()
     await db.open()
     globalThis.localStorage?.removeItem(MASTER_WORKFLOW_FAN_OUT_STORAGE_KEY)
+    globalThis.localStorage?.setItem(MASTER_AGENT_REPLAN_STORAGE_KEY, 'disabled')
     useAIConfigStore.setState({
       config: {
         ...originalConfig,
@@ -175,6 +182,7 @@ describe.sequential('R-HARNESS23 · 主 Agent 有限 fan-out', { timeout: 15_000
   afterEach(() => {
     vi.unstubAllGlobals()
     globalThis.localStorage?.removeItem(MASTER_WORKFLOW_FAN_OUT_STORAGE_KEY)
+    globalThis.localStorage?.removeItem(MASTER_AGENT_REPLAN_STORAGE_KEY)
     useAIConfigStore.setState({ config: originalConfig, presets: [], taskRoutes: {} })
     db.close()
   })

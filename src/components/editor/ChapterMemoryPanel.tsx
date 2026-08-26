@@ -5,6 +5,8 @@ interface Props {
   summary?: string
   hasText: boolean
   memoryBusy: boolean
+  reconciliationBusy?: 'actual-progress' | 'outline' | null
+  reconciliationError?: string
   reconciliation?: ChapterPlanReconciliation
   reconciliationCurrent: boolean
   onGenerateMemory: () => void
@@ -16,6 +18,8 @@ export default function ChapterMemoryPanel({
   summary,
   hasText,
   memoryBusy,
+  reconciliationBusy = null,
+  reconciliationError = '',
   reconciliation,
   reconciliationCurrent,
   onGenerateMemory,
@@ -80,24 +84,31 @@ export default function ChapterMemoryPanel({
             )))}
           </div>
           {reconciliation.reviewStatus === 'pending' && (
-            <div className="mt-3 flex flex-wrap gap-2">
-              <button
-                type="button"
-                onClick={onConfirmActualProgress}
-                className="px-2 py-1 text-xs rounded bg-amber-500/10 text-amber-300 hover:bg-amber-500/20"
-              >
-                确认并附加实际进展约束
-              </button>
-              {reconciliation.proposedOutlineSummary && (
+            <>
+              <div className="mt-3 flex flex-wrap gap-2">
                 <button
                   type="button"
-                  onClick={onApplyOutlineCandidate}
-                  className="px-2 py-1 text-xs rounded bg-accent/10 text-accent hover:bg-accent/20"
+                  onClick={onConfirmActualProgress}
+                  disabled={reconciliationBusy != null}
+                  className="px-2 py-1 text-xs rounded bg-amber-500/10 text-amber-300 hover:bg-amber-500/20 disabled:cursor-wait disabled:opacity-50"
                 >
-                  用候选更新本章章纲
+                  {reconciliationBusy === 'actual-progress' ? '正在附加实际进展约束...' : '确认并附加实际进展约束'}
                 </button>
+                {reconciliation.proposedOutlineSummary && (
+                  <button
+                    type="button"
+                    onClick={onApplyOutlineCandidate}
+                    disabled={reconciliationBusy != null}
+                    className="px-2 py-1 text-xs rounded bg-accent/10 text-accent hover:bg-accent/20 disabled:cursor-wait disabled:opacity-50"
+                  >
+                    {reconciliationBusy === 'outline' ? '正在更新本章章纲...' : '用候选更新本章章纲'}
+                  </button>
+                )}
+              </div>
+              {reconciliationError && (
+                <p className="mt-2 text-xs text-error" role="alert">{reconciliationError}</p>
               )}
-            </div>
+            </>
           )}
         </div>
       )}

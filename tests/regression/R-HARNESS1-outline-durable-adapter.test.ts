@@ -13,6 +13,7 @@ import {
   type GenerationNode,
 } from '../../src/lib/generation/generation-node'
 import {
+  adoptOutlineGenerationCandidateV1,
   beginOutlineGenerationAdoptionV1,
   commitOutlineGenerationAdoptionV1,
   createOutlineGenerationTraceV1,
@@ -21,15 +22,20 @@ import {
   OUTLINE_GENERATION_ADOPTION_INTENT_PAYLOAD_TYPE,
   OUTLINE_GENERATION_CANDIDATE_PAYLOAD_TYPE,
   OUTLINE_GENERATION_CONVERSATION_PURPOSE,
-  OUTLINE_GENERATION_SOURCE_KEYS,
   recoverPendingOutlineGenerationAdoptionsV1,
   restoreLatestOutlineGenerationCandidateV1,
   staleOutlineGenerationCandidateV1,
+  type OutlineGenerationAdoptionFaultBoundaryV1,
+  type OutlineGenerationTraceFaultBoundaryV1,
 } from '../../src/lib/outline/harness'
 import { adoptGeneratedOutlineItems } from '../../src/lib/outline/adopt-generation'
 import { encodeGenerationOperation, type OutlineGenerationRequest } from '../../src/lib/outline/generation-request'
 import type { AssembleContextResult } from '../../src/lib/registry/types'
 import type { WorkspaceScope } from '../../src/lib/types'
+import { generateWorkspaceUid, generateWorkCode } from '../../src/lib/memory/identity'
+import { backfillResourceUidsV1 } from '../../src/lib/context-gateway/resource-identity'
+import { prepareOutlineGatewayAssemblyV1 } from '../../src/lib/outline/gateway-context'
+import { useAIConfigStore } from '../../src/stores/ai-config'
 
 async function createWorkspace(): Promise<{
   scope: WorkspaceScope
@@ -38,6 +44,7 @@ async function createWorkspace(): Promise<{
 }> {
   const now = Date.now()
   const projectId = await db.projects.add({
+    workspaceUid: generateWorkspaceUid(),
     name: '大纲 durable adapter',
     genre: 'fantasy',
     genres: ['fantasy'],
@@ -61,6 +68,7 @@ async function createWorkspace(): Promise<{
   const workId = await db.works.add({
     projectId,
     worldId,
+    code: generateWorkCode(),
     title: '潮城纪事',
     description: '',
     genres: ['fantasy'],
@@ -76,6 +84,7 @@ async function createWorkspace(): Promise<{
   })
   const worldGroupId = await db.worldGroups.add({
     projectId,
+    worldId,
     name: '主世界',
     order: 0,
     createdAt: now,
@@ -94,27 +103,22 @@ async function createWorkspace(): Promise<{
     createdAt: now,
     updatedAt: now,
   }) as number
+  await backfillResourceUidsV1(projectId)
   return { scope: { projectId, worldId, workId }, worldGroupId, outlineNodeId }
 }
 
-function assembly(): AssembleContextResult {
-  return {
-    text: '【故事核心】潮汐城市必须在七日内迁徙。',
-    segments: [{
-      label: '故事核心',
-      layer: 'L1',
-      content: '【故事核心】潮汐城市必须在七日内迁徙。',
-      tokens: 16,
-      trimmable: true,
-    }],
-    included: ['storyCore'],
-    omitted: OUTLINE_GENERATION_SOURCE_KEYS.filter(key => key !== 'storyCore'),
-    trimmed: [],
-    totalInputTokens: 16,
-    inputBudget: 8_000,
-    overBudgetBeforeTrim: false,
-    overBudgetAfterTrim: false,
-  }
+async function assembly(
+  fixture: Awaited<ReturnType<typeof createWorkspace>>,
+  request: OutlineGenerationRequest = { kind: 'chapters', volumeId: fixture.outlineNodeId },
+): Promise<AssembleContextResult> {
+  return prepareOutlineGatewayAssemblyV1({
+    projectId: fixture.scope.projectId,
+    scope: fixture.scope,
+    worldGroupId: fixture.worldGroupId,
+    request,
+    authorRequest: '潮汐城市必须在七日内迁徙，规划未写未来。',
+    config: useAIConfigStore.getState().config,
+  })
 }
 
 function node(
@@ -135,7 +139,7 @@ async function persistOutlineCandidate(
   request: OutlineGenerationRequest,
   output: string,
 ) {
-  const assembled = assembly()
+  const assembled = await assembly(fixture, request)
   const run = vi.fn(async () => output)
   const generationNode = node(run, encodeGenerationOperation(request))
   const trace = await createOutlineGenerationTraceV1({
@@ -176,7 +180,7 @@ describe.sequential('R-HARNESS1-outline-durable-adapter · 大纲双写接入', 
 
   it('真实 GenerationNode 只调用一次模型，将正文写入既有候选表并让 durable run 等待确认', async () => {
     const fixture = await createWorkspace()
-    const assembled = assembly()
+    const assembled = await assembly(fixture)
     const run = vi.fn(async () => '第一章：潮门关闭前的最后一班船')
     const generationNode = node(run)
     const trace = await createOutlineGenerationTraceV1({
@@ -205,21 +209,36 @@ describe.sequential('R-HARNESS1-outline-durable-adapter · 大纲双写接入', 
     expect(listRecentGenerationShadowTracesV1()).toHaveLength(1)
     const durableRunId = trace.durable!.runId
     const snapshot = await readAgentRunV1(fixture.scope, durableRunId)
+    expect(snapshot.contract).toMatchObject({
+      version: 3,
+      executionBoundary: 'formal',
+      permissions: {
+        writeTargets: [expect.objectContaining({ mode: 'author-confirmed' })],
+      },
+    })
+    expect(snapshot.contract.acceptance.map(item => item.id)).toEqual([
+      'outline.output',
+      'outline.confirmed',
+      'outline.adopted',
+      'outline.post-state',
+    ])
     expect(snapshot.projection.steps[`outline.chapter:batch:${fixture.outlineNodeId}`]).toMatchObject({
       status: 'awaiting_confirmation',
       attempt: 1,
     })
     expect(snapshot.projection.state).toBe('awaiting_confirmation')
-    expect(snapshot.events.map(event => event.type)).toEqual([
+    const generationEventTypes = snapshot.events.map(event => event.type)
+    expect(generationEventTypes.slice(0, 4)).toEqual([
       'run.created',
       'contract.accepted',
       'step.scheduled',
       'step.started',
-      'context.assembled',
-      'model.requested',
-      'model.responded',
-      'candidate.persisted',
     ])
+    expect(generationEventTypes).toContain('evidence.artifact.recorded')
+    expect(generationEventTypes.indexOf('model.requested')).toBeGreaterThan(generationEventTypes.indexOf('step.started'))
+    expect(generationEventTypes.indexOf('model.responded')).toBeGreaterThan(generationEventTypes.indexOf('model.requested'))
+    expect(generationEventTypes.indexOf('context.assembled')).toBeGreaterThan(generationEventTypes.indexOf('model.responded'))
+    expect(generationEventTypes.at(-1)).toBe('candidate.persisted')
     const ledgerText = JSON.stringify({ run: snapshot.run, events: snapshot.events })
     expect(ledgerText).not.toContain('潮汐城市必须在七日内迁徙')
     expect(ledgerText).not.toContain('潮门关闭前的最后一班船')
@@ -232,10 +251,196 @@ describe.sequential('R-HARNESS1-outline-durable-adapter · 大纲双写接入', 
     })
   })
 
+  it.each([
+    'trace-initialization',
+    'before-model-evidence',
+    'candidate-persistence',
+  ] as const)('formal trace 在 %s 故障时 fail-closed', async faultBoundary => {
+    const fixture = await createWorkspace()
+    const assembled = await assembly(fixture)
+    const run = vi.fn(async () => '不会成为无证据候选')
+    const generationNode = node(run)
+    const faultInjector = vi.fn(async (boundary: OutlineGenerationTraceFaultBoundaryV1) => {
+      if (boundary === faultBoundary) throw new Error(`fault:${boundary}`)
+    })
+
+    if (faultBoundary === 'trace-initialization') {
+      await expect(createOutlineGenerationTraceV1({
+        projectId: fixture.scope.projectId,
+        worldGroupId: fixture.worldGroupId,
+        request: { kind: 'chapters', volumeId: fixture.outlineNodeId },
+        assembled,
+        executionBoundary: 'formal',
+        faultInjector,
+      })).rejects.toThrow('fault:trace-initialization')
+    } else {
+      const trace = await createOutlineGenerationTraceV1({
+        projectId: fixture.scope.projectId,
+        worldGroupId: fixture.worldGroupId,
+        request: { kind: 'chapters', volumeId: fixture.outlineNodeId },
+        assembled,
+        executionBoundary: 'formal',
+        faultInjector,
+      })
+      await expect(runGenerationNode(
+        generationNode,
+        prepareGenerationNode(generationNode, assembled),
+        { shadowTrace: trace, traceFailureMode: 'throw' },
+      )).rejects.toThrow(`fault:${faultBoundary}`)
+    }
+
+    expect(run).toHaveBeenCalledTimes(faultBoundary === 'candidate-persistence' ? 1 : 0)
+    expect((await db.agentEvents.toArray()).filter(event => event.kind === 'candidate')).toHaveLength(0)
+    expect((await db.outlineNodes.where('projectId').equals(fixture.scope.projectId).toArray())
+      .filter(row => row.type === 'chapter')).toHaveLength(0)
+  })
+
+  it.each([
+    'before-confirmation',
+    'after-intent',
+    'before-cas',
+    'after-cas',
+    'business-write-in-progress',
+    'after-business-write',
+    'after-adoption-event',
+    'verification-in-progress',
+    'after-terminal-receipt',
+  ] as const)('正式采纳在 %s 中断后保持一次写入或可幂等恢复', async faultBoundary => {
+    const fixture = await createWorkspace()
+    const { candidate, run } = await persistOutlineCandidate(
+      fixture,
+      { kind: 'chapters', volumeId: fixture.outlineNodeId },
+      `故障候选-${faultBoundary}`,
+    )
+    const items = [
+      { title: `第一章-${faultBoundary}`, summary: '开端' },
+      { title: `第二章-${faultBoundary}`, summary: '升级' },
+    ]
+    const intent = {
+      version: 1 as const,
+      kind: 'chapters' as const,
+      destinationVolumeId: fixture.outlineNodeId,
+      items,
+      startingOrder: 0,
+      baseExistingTitles: [],
+    }
+    const faultInjector = async (boundary: OutlineGenerationAdoptionFaultBoundaryV1) => {
+      if (boundary === faultBoundary) throw new Error(`fault:${boundary}`)
+    }
+
+    await expect(adoptOutlineGenerationCandidateV1({
+      candidate,
+      intent,
+      faultInjector,
+    })).rejects.toThrow(`fault:${faultBoundary}`)
+
+    const beforeRecovery = (await db.outlineNodes
+      .where('projectId').equals(fixture.scope.projectId).toArray())
+      .filter(row => row.type === 'chapter')
+    if (faultBoundary === 'before-confirmation'
+      || faultBoundary === 'after-intent'
+      || faultBoundary === 'before-cas'
+      || faultBoundary === 'after-cas') {
+      expect(beforeRecovery).toHaveLength(0)
+    }
+
+    const recovery = await recoverPendingOutlineGenerationAdoptionsV1(fixture.scope.projectId)
+    if (faultBoundary === 'before-confirmation' || faultBoundary === 'after-terminal-receipt') {
+      expect(recovery).toEqual({ recoveredRunIds: [], failed: [] })
+    } else {
+      expect(recovery).toEqual({ recoveredRunIds: [candidate.runId], failed: [] })
+    }
+    const chapters = (await db.outlineNodes
+      .where('projectId').equals(fixture.scope.projectId).toArray())
+      .filter(row => row.type === 'chapter')
+      .sort((left, right) => left.order - right.order)
+    if (faultBoundary === 'before-confirmation') {
+      expect(chapters).toHaveLength(0)
+    } else {
+      expect(chapters.map(row => ({ title: row.title, summary: row.summary, order: row.order })))
+        .toEqual(items.map((item, order) => ({ ...item, order })))
+    }
+    expect(run).toHaveBeenCalledOnce()
+  })
+
+  it('确认后出现并发大纲修改时 CAS 与恢复都阻断候选覆盖', async () => {
+    const fixture = await createWorkspace()
+    const { candidate } = await persistOutlineCandidate(
+      fixture,
+      { kind: 'chapters', volumeId: fixture.outlineNodeId },
+      '并发 CAS 候选',
+    )
+    const intent = {
+      version: 1 as const,
+      kind: 'chapters' as const,
+      destinationVolumeId: fixture.outlineNodeId,
+      items: [{ title: '候选第一章', summary: '候选内容' }],
+      startingOrder: 0,
+      baseExistingTitles: [],
+    }
+    await expect(adoptOutlineGenerationCandidateV1({
+      candidate,
+      intent,
+      faultInjector: async boundary => {
+        if (boundary !== 'after-intent') return
+        await adoptGeneratedOutlineItems({
+          projectId: fixture.scope.projectId,
+          workspaceScope: fixture.scope,
+          worldGroupId: fixture.worldGroupId,
+          parentId: fixture.outlineNodeId,
+          type: 'chapter',
+          items: [{ title: '作者并发新增章', summary: '应被保留' }],
+          startingOrder: 0,
+        })
+      },
+    })).rejects.toThrow('采纳 CAS 已阻断')
+
+    expect(await recoverPendingOutlineGenerationAdoptionsV1(fixture.scope.projectId)).toEqual({
+      recoveredRunIds: [],
+      failed: [{ runId: candidate.runId, reason: '恢复采纳时列表包含确认后的并发修改' }],
+    })
+    const chapters = (await db.outlineNodes.where('projectId').equals(fixture.scope.projectId).toArray())
+      .filter(row => row.type === 'chapter')
+    expect(chapters.map(row => row.title)).toEqual(['作者并发新增章'])
+  })
+
+  it('生成后任一上游 Canon 被作者修改时，content revision 在确认前阻断旧候选', async () => {
+    const fixture = await createWorkspace()
+    const { candidate } = await persistOutlineCandidate(
+      fixture,
+      { kind: 'chapters', volumeId: fixture.outlineNodeId },
+      '基于旧世界状态生成的章纲',
+    )
+    expect(candidate.contentRevision).toMatchObject({ version: 1 })
+    await db.projects.update(fixture.scope.projectId, {
+      description: '作者在生成后补充了新的故事约束',
+      updatedAt: Date.now(),
+    })
+
+    await expect(adoptOutlineGenerationCandidateV1({
+      candidate,
+      intent: {
+        version: 1,
+        kind: 'chapters',
+        destinationVolumeId: fixture.outlineNodeId,
+        items: [{ title: '不应落库的章节', summary: '旧上下文候选' }],
+        startingOrder: 0,
+        baseExistingTitles: [],
+      },
+    })).rejects.toThrow(/候选生成后项目内容已变化.*projects/)
+
+    const chapters = (await db.outlineNodes.where('projectId').equals(fixture.scope.projectId).toArray())
+      .filter(row => row.type === 'chapter')
+    expect(chapters).toHaveLength(0)
+    const staleRun = await readAgentRunV1(fixture.scope, candidate.runId)
+    expect(staleRun.projection.state).toBe('paused')
+    expect(staleRun.projection.steps[candidate.stepId]?.status).toBe('stale')
+  })
+
   it.each(RECOVERY_BATCH_STARTS)('模型返回后、UI 接管前第 %i 轮起连续 5 次刷新均恢复原候选', async batchStart => {
     for (const iteration of recoveryBatch(batchStart)) {
       const fixture = await createWorkspace()
-      const assembled = assembly()
+      const assembled = await assembly(fixture)
       const output = `第一章：潮声中的密令-${iteration}`
       const run = vi.fn(async () => output)
       const generationNode = node(run)
@@ -274,9 +479,9 @@ describe.sequential('R-HARNESS1-outline-durable-adapter · 大纲双写接入', 
     }
   })
 
-  it('候选原子事务中途失败会同时回滚模型响应与正文，并可在同一 trace 重试', async () => {
+  it('候选原子事务中途失败会保留模型与 Gateway 证据、回滚候选正文，并可在同一 trace 重试', async () => {
     const fixture = await createWorkspace()
-    const assembled = assembly()
+    const assembled = await assembly(fixture)
     const generationNode = node(async () => '不会由本测试直接调用')
     const prepared = prepareGenerationNode(generationNode, assembled)
     const trace = await createOutlineGenerationTraceV1({
@@ -308,14 +513,18 @@ describe.sequential('R-HARNESS1-outline-durable-adapter · 大纲双写接入', 
     })).rejects.toThrow('模拟候选写入后的页面中断')
 
     const rolledBack = await readAgentRunV1(fixture.scope, trace.durable!.runId)
-    expect(rolledBack.events.map(event => event.type)).toEqual([
+    const rolledBackTypes = rolledBack.events.map(event => event.type)
+    expect(rolledBackTypes.slice(0, 4)).toEqual([
       'run.created',
       'contract.accepted',
       'step.scheduled',
       'step.started',
-      'context.assembled',
-      'model.requested',
     ])
+    expect(rolledBackTypes).toContain('evidence.artifact.recorded')
+    expect(rolledBackTypes).toContain('model.requested')
+    expect(rolledBackTypes).toContain('model.responded')
+    expect(rolledBackTypes).toContain('context.assembled')
+    expect(rolledBackTypes).not.toContain('candidate.persisted')
     expect((await db.agentEvents
       .where('conversationId')
       .equals(beforeCommit.run.conversationId!)
@@ -331,7 +540,7 @@ describe.sequential('R-HARNESS1-outline-durable-adapter · 大纲双写接入', 
 
   it('作者确认和采纳沿候选哈希推进，业务证据提交后步骤才成功', async () => {
     const fixture = await createWorkspace()
-    const assembled = assembly()
+    const assembled = await assembly(fixture)
     const generationNode = node(async () => '第一章：潮港封锁')
     const trace = await createOutlineGenerationTraceV1({
       projectId: fixture.scope.projectId,
@@ -382,7 +591,7 @@ describe.sequential('R-HARNESS1-outline-durable-adapter · 大纲双写接入', 
 
   it('候选正文被篡改时拒绝刷新恢复和采纳，重试标旧后也不再恢复', async () => {
     const fixture = await createWorkspace()
-    const assembled = assembly()
+    const assembled = await assembly(fixture)
     const generationNode = node(async () => '第一章：原始候选')
     const trace = await createOutlineGenerationTraceV1({
       projectId: fixture.scope.projectId,
@@ -412,7 +621,7 @@ describe.sequential('R-HARNESS1-outline-durable-adapter · 大纲双写接入', 
   it.each(RECOVERY_BATCH_STARTS)('确认后、业务写入前第 %i 轮起连续 5 次中断均按冻结计划恢复一次', async batchStart => {
     for (const iteration of recoveryBatch(batchStart)) {
       const fixture = await createWorkspace()
-      const assembled = assembly()
+      const assembled = await assembly(fixture)
       const run = vi.fn(async () => `确认后中断候选-${iteration}`)
       const generationNode = node(run)
       const trace = await createOutlineGenerationTraceV1({
@@ -473,7 +682,7 @@ describe.sequential('R-HARNESS1-outline-durable-adapter · 大纲双写接入', 
   it.each(RECOVERY_BATCH_STARTS)('部分业务写入后第 %i 轮起连续 5 次中断均补齐缺项且不重复调用', async batchStart => {
     for (const iteration of recoveryBatch(batchStart)) {
       const fixture = await createWorkspace()
-      const assembled = assembly()
+      const assembled = await assembly(fixture)
       const run = vi.fn(async () => `部分写入候选-${iteration}`)
       const generationNode = node(run)
       const trace = await createOutlineGenerationTraceV1({
@@ -649,7 +858,7 @@ describe.sequential('R-HARNESS1-outline-durable-adapter · 大纲双写接入', 
 
   it('关闭 durable 开关时保持原 shadow 行为且不写运行表', async () => {
     const fixture = await createWorkspace()
-    const assembled = assembly()
+    const assembled = await assembly(fixture)
     const run = vi.fn(async () => '候选')
     const generationNode = node(run)
     const trace = await createOutlineGenerationTraceV1({
@@ -658,6 +867,7 @@ describe.sequential('R-HARNESS1-outline-durable-adapter · 大纲双写接入', 
       request: { kind: 'chapters', volumeId: fixture.outlineNodeId },
       assembled,
       durable: false,
+      executionBoundary: 'evaluation',
     })
 
     await runGenerationNode(
@@ -671,6 +881,22 @@ describe.sequential('R-HARNESS1-outline-durable-adapter · 大纲双写接入', 
     expect(await db.agentRuns.count()).toBe(0)
   })
 
+  it('正式运行不能因 durable 开关关闭而降级为 shadow-only', async () => {
+    const fixture = await createWorkspace()
+
+    await expect(createOutlineGenerationTraceV1({
+      projectId: fixture.scope.projectId,
+      worldGroupId: fixture.worldGroupId,
+      request: { kind: 'chapters', volumeId: fixture.outlineNodeId },
+      assembled: await assembly(fixture),
+      durable: false,
+      executionBoundary: 'formal',
+    })).rejects.toThrow('正式大纲运行必须启用 durable Harness')
+
+    expect(await db.agentRuns.count()).toBe(0)
+    expect(await db.agentEvents.count()).toBe(0)
+  })
+
   it('本机回滚开关默认启用，显式 disabled 后关闭 durable 接入', () => {
     expect(isOutlineDurableHarnessEnabledV1()).toBe(true)
     localStorage.setItem(OUTLINE_DURABLE_HARNESS_STORAGE_KEY, 'disabled')
@@ -679,7 +905,7 @@ describe.sequential('R-HARNESS1-outline-durable-adapter · 大纲双写接入', 
 
   it('模型失败继续抛出原错误，并把失败步骤写入 durable ledger', async () => {
     const fixture = await createWorkspace()
-    const assembled = assembly()
+    const assembled = await assembly(fixture)
     const providerError = new Error('provider unavailable')
     const run = vi.fn(async () => { throw providerError })
     const generationNode = node(run)
@@ -707,7 +933,7 @@ describe.sequential('R-HARNESS1-outline-durable-adapter · 大纲双写接入', 
 
   it('确定性 gate 阻断后可将单次生成 run 收口为 failed 终态', async () => {
     const fixture = await createWorkspace()
-    const assembled = assembly()
+    const assembled = await assembly(fixture)
     const generationNode: GenerationNode<AssembleContextResult, string> = {
       ...node(async () => '无法解析的输出'),
       gate: () => ({
@@ -743,7 +969,7 @@ describe.sequential('R-HARNESS1-outline-durable-adapter · 大纲双写接入', 
 
   it('durable 账本在执行前损坏时降级为 shadow，不能改变模型结果或调用数', async () => {
     const fixture = await createWorkspace()
-    const assembled = assembly()
+    const assembled = await assembly(fixture)
     const run = vi.fn(async () => '仍然返回原候选')
     const generationNode = node(run)
     const trace = await createOutlineGenerationTraceV1({

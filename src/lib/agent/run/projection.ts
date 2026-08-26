@@ -131,6 +131,13 @@ function applyEvent(projection: AgentRunProjectionV1, event: AnyAgentRunEventV1)
       expectState(projection, event.type, ['running'])
       assertActiveStep(projection, event.payload)
       break
+    case 'evidence.artifact.recorded':
+      expectState(projection, event.type, ['planned', 'running', 'awaiting_confirmation', 'verifying'])
+      if (event.payload.stepId != null && event.payload.attempt != null) {
+        const step = stepFor(projection, event.payload.stepId)
+        assertAttempt(step, event.payload.attempt)
+      }
+      break
     case 'candidate.persisted': {
       expectState(projection, event.type, ['running'])
       const step = assertActiveStep(projection, event.payload)

@@ -1,7 +1,8 @@
 import { useMemo, useState } from 'react'
 import { Check, Loader2, MessageSquareText, Save, Sparkles, Wrench } from 'lucide-react'
 import { buildStyleCalibrationPrompt } from '../../lib/ai/adapters/style-adapter'
-import { chat, resolveRequestConfig } from '../../lib/ai/client'
+import { resolveRequestConfig } from '../../lib/ai/client'
+import { executeRegisteredAIEntryV1 } from '../../lib/agent/formal-ai-entry'
 import { getAIConfigRequiredMessage, isAIConfigReady } from '../../lib/ai/config-readiness'
 import {
   formatStyleCalibrationFeedback,
@@ -60,7 +61,7 @@ export default function StyleCalibrationPanel({ projectId, profile }: Props) {
         calibrationFeedback,
         sourceText: sourceText.trim(),
       })
-      const output = await chat(messages, aiConfig, {
+      const output = await executeRegisteredAIEntryV1('style.calibration.preview', messages, aiConfig, {
         category: 'style.calibrate',
         projectId,
       })

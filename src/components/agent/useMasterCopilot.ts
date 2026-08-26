@@ -31,10 +31,79 @@ import { useAIConfigStore } from '../../stores/ai-config'
 import { revalidateStoryArcCreativeDraftV1 } from '../../lib/agent/story-arc-copilot'
 import { revalidateOutlineCreativeDraftV1 } from '../../lib/agent/outline-copilot'
 import { revalidateProseCreativeDraftV1 } from '../../lib/agent/prose-copilot'
+import { flushPendingEditsV1 } from '../../lib/authoring/pending-edit-coordinator'
+import {
+  CandidateDraftSyncErrorV1,
+  flushCandidateDraftV1,
+  flushCandidateDraftsV1,
+  hasPendingCandidateDraftsV1,
+  queueCandidateDraftV1,
+} from '../../lib/agent/candidate-draft-coordinator'
+import {
+  creativeArtifactCanAdoptV1,
+  type CreativeArtifactV1,
+} from '../../lib/agent/creative-reliability'
+import {
+  buildPendingHarnessLifecycleEvidenceV1,
+  buildSettledHarnessLifecycleEvidenceV1,
+  type HarnessLifecycleEvidenceV1,
+} from '../../lib/agent/harness-evidence'
+import {
+  classifyHarnessFailureV1,
+  type HarnessFailureClassV1,
+} from '../../lib/agent/run/harness-failure'
+import {
+  StructuredOutputPipelineErrorV1,
+  StructuredOutputRepairFailedErrorV1,
+} from '../../lib/agent/structured-output-pipeline'
 
 function errorMessage(error: unknown): string {
   if (error instanceof Error && error.message.trim()) return error.message
   return '操作失败，请稍后重试。'
+}
+
+function structuredOutputFailurePayload(error: unknown): unknown {
+  if (error instanceof StructuredOutputRepairFailedErrorV1) {
+    return {
+      version: 1,
+      errorClass: 'structured-output-repair-failed',
+      status: error.runEvidence.status,
+      adoptable: false,
+      structuredOutputEvidence: error.runEvidence,
+    }
+  }
+  if (error instanceof StructuredOutputPipelineErrorV1) {
+    return {
+      version: 1,
+      errorClass: 'structured-output-blocked',
+      status: error.evidence.status,
+      adoptable: false,
+      structuredOutputEvidence: {
+        version: 1,
+        schemaId: error.evidence.schemaId,
+        target: error.evidence.target,
+        status: error.evidence.status,
+        attempts: [{ callIndex: 1, purpose: 'generate', evidence: error.evidence }],
+        repair: null,
+      },
+    }
+  }
+  return undefined
+}
+
+async function classifiedFailurePayload(
+  error: unknown,
+  stage?: HarnessFailureClassV1,
+): Promise<{ message: string; payload: Record<string, unknown> }> {
+  const failure = await classifyHarnessFailureV1(error, { stage })
+  const structured = structuredOutputFailurePayload(error)
+  return {
+    message: `【${failure.label}】${errorMessage(error)}`,
+    payload: {
+      ...(structured && typeof structured === 'object' ? structured as Record<string, unknown> : { version: 1 }),
+      harnessFailure: failure,
+    },
+  }
 }
 
 const MASTER_COPILOT_SYNC_EVENT = 'storyforge:master-copilot-sync-v1'
@@ -72,6 +141,39 @@ function releaseMasterCopilotScope(scopeKey: string, owner: symbol): void {
 export interface PendingMasterCandidate {
   event: AgentEvent
   payload: MasterCandidatePayload
+  lifecycle?: HarnessLifecycleEvidenceV1
+}
+
+function revalidateCandidateCreativeArtifactV1(input: {
+  draft: string
+  creativeArtifact: CreativeArtifactV1
+  payload: Readonly<Record<string, unknown>>
+}): CreativeArtifactV1 {
+  const payload = input.payload as unknown as MasterCandidatePayload
+  if (payload.skillId === 'outline.story-arcs' && payload.storyArcKind) {
+    return revalidateStoryArcCreativeDraftV1({
+      draft: input.draft,
+      snapshot: payload.baseSnapshot as Parameters<typeof revalidateStoryArcCreativeDraftV1>[0]['snapshot'],
+      kind: payload.storyArcKind,
+      mutation: payload.storyArcMutationRequest,
+      previousArtifact: input.creativeArtifact,
+    })
+  }
+  if (payload.agentId === 'outline' && payload.outlineMode) {
+    return revalidateOutlineCreativeDraftV1({
+      draft: input.draft,
+      snapshot: payload.baseSnapshot as Parameters<typeof revalidateOutlineCreativeDraftV1>[0]['snapshot'],
+      previousArtifact: input.creativeArtifact,
+    })
+  }
+  if (payload.agentId === 'prose' && payload.informationBoundary) {
+    return revalidateProseCreativeDraftV1({
+      draft: input.draft,
+      informationBoundary: payload.informationBoundary,
+      previousArtifact: input.creativeArtifact,
+    })
+  }
+  return input.creativeArtifact
 }
 
 export function useMasterCopilot(input: {
@@ -89,6 +191,8 @@ export function useMasterCopilot(input: {
   const [error, setError] = useState<string | null>(null)
   const abortRef = useRef<AbortController | null>(null)
   const runtimeCandidates = useRef(new Map<number, ExecutedMasterCandidate>())
+  const localCandidateDrafts = useRef(new Map<number, string>())
+  const activeCandidateScope = useRef('')
   const workspaceScope = useMemo<WorkspaceScope | undefined>(() => (
     project.id != null && project.activeWorldId != null && project.activeWorkId != null
       ? { projectId: project.id, worldId: project.activeWorldId, workId: project.activeWorkId }
@@ -96,9 +200,19 @@ export function useMasterCopilot(input: {
   ), [project.activeWorkId, project.activeWorldId, project.id])
   const scopeKey = `${project.id}:${project.activeWorldId ?? 'legacy'}:${project.activeWorkId ?? 'legacy'}:${worldGroupId ?? 'global'}`
 
+  activeCandidateScope.current = scopeKey
+
+  const overlayLocalCandidateDrafts = useCallback((rows: AgentEvent[]): AgentEvent[] => (
+    rows.map(event => {
+      if (event.id == null) return event
+      const draft = localCandidateDrafts.current.get(event.id)
+      return draft == null ? event : { ...event, content: draft }
+    })
+  ), [])
+
   const reload = useCallback(async (id: number) => {
-    setEvents(await readAgentEvents(id, workspaceScope))
-  }, [workspaceScope])
+    setEvents(overlayLocalCandidateDrafts(await readAgentEvents(id, workspaceScope)))
+  }, [overlayLocalCandidateDrafts, workspaceScope])
 
   useEffect(() => {
     if (conversationId == null || typeof window === 'undefined') return
@@ -132,6 +246,7 @@ export function useMasterCopilot(input: {
     let active = true
     abortRef.current?.abort()
     runtimeCandidates.current.clear()
+    localCandidateDrafts.current.clear()
     setBusy(MASTER_COPILOT_SCOPE_OWNERS.has(scopeKey))
     setRecoveryAvailable(false)
     setError(null)
@@ -163,7 +278,7 @@ export function useMasterCopilot(input: {
         rows = await readAgentEvents(conversation.id!, workspaceScope)
       }
       if (active) {
-        setEvents(rows)
+        setEvents(overlayLocalCandidateDrafts(rows))
         setRecoveryAvailable(workspaceScope
           ? await findResumableMasterAgentRunV1({
               scope: workspaceScope,
@@ -182,7 +297,34 @@ export function useMasterCopilot(input: {
       active = false
       abortRef.current?.abort()
     }
-  }, [project.id, scopeKey, workspaceScope, worldGroupId])
+  }, [overlayLocalCandidateDrafts, project.id, scopeKey, workspaceScope, worldGroupId])
+
+  const candidateDraftPrefix = conversationId == null
+    ? null
+    : `${scopeKey}:conversation:${conversationId}:candidate:`
+  const candidateDraftKey = useCallback((eventId: number) => {
+    if (conversationId == null) throw new Error('Agent 对话尚未就绪。')
+    return `${scopeKey}:conversation:${conversationId}:candidate:${eventId}`
+  }, [conversationId, scopeKey])
+
+  useEffect(() => {
+    if (!candidateDraftPrefix || typeof window === 'undefined') return
+    const prefix = candidateDraftPrefix
+    const flush = () => { void flushCandidateDraftsV1(prefix).catch(() => undefined) }
+    const handleBeforeUnload = (event: BeforeUnloadEvent) => {
+      if (!hasPendingCandidateDraftsV1(prefix)) return
+      flush()
+      event.preventDefault()
+      event.returnValue = ''
+    }
+    window.addEventListener('pagehide', flush)
+    window.addEventListener('beforeunload', handleBeforeUnload)
+    return () => {
+      window.removeEventListener('pagehide', flush)
+      window.removeEventListener('beforeunload', handleBeforeUnload)
+      flush()
+    }
+  }, [candidateDraftPrefix])
 
   const pendingCandidates = useMemo(() => {
     const resolved = new Set<number>()
@@ -192,17 +334,32 @@ export function useMasterCopilot(input: {
     })
     return events
       .filter(event => event.kind === 'candidate' && event.id != null && !resolved.has(event.id))
-      .map(event => ({
-        event,
-        payload: parseAgentEventPayload<MasterCandidatePayload>(event, {
+      .map(event => {
+        const payload = parseAgentEventPayload<MasterCandidatePayload>(event, {
           version: 1,
           taskId: '',
           agentId: 'character',
           label: '候选',
           contextSources: [],
           baseSnapshot: {},
-        }),
-      }))
+        })
+        return {
+          event,
+          payload,
+          lifecycle: buildPendingHarnessLifecycleEvidenceV1({
+            runId: payload.runId,
+            candidateEventId: event.id,
+            contentRevision: payload.contentRevision,
+            contextManifestHash: payload.contextManifestHash,
+            candidateHash: payload.candidateHash,
+            contextEvidence: payload.contextEvidence,
+            promptExecutionEvidence: payload.promptExecutionEvidence,
+            ...(payload.creativeArtifact != null && !creativeArtifactCanAdoptV1(payload.creativeArtifact)
+              ? { blockedReason: '创作可靠性门禁尚未通过' }
+              : {}),
+          }),
+        }
+      })
   }, [events])
 
   const submitRequest = useCallback(async (
@@ -222,6 +379,7 @@ export function useMasterCopilot(input: {
     setError(null)
     if (requestOverride === undefined) setAuthorRequest('')
     try {
+      await flushPendingEditsV1()
       await appendAgentEvent({
         projectId: project.id!,
         conversationId,
@@ -323,13 +481,14 @@ export function useMasterCopilot(input: {
       })
     } catch (error) {
       if (!controller.signal.aborted) {
-        const message = errorMessage(error)
-        setError(message)
+        const failure = await classifiedFailurePayload(error)
+        setError(failure.message)
         await appendAgentEvent({
           projectId: project.id!,
           conversationId,
           kind: 'error',
-          content: message,
+          content: failure.message,
+          payload: failure.payload,
           scope: workspaceScope,
         })
         await appendAgentEvent({
@@ -337,7 +496,7 @@ export function useMasterCopilot(input: {
           conversationId,
           kind: 'message',
           role: 'assistant',
-          content: `本轮没有完成：${message}`,
+          content: `本轮没有完成：${failure.message}`,
           scope: workspaceScope,
         })
       }
@@ -409,13 +568,15 @@ export function useMasterCopilot(input: {
       setRecoveryAvailable(false)
     } catch (error) {
       if (!controller.signal.aborted) {
-        setError(errorMessage(error))
+        const failure = await classifiedFailurePayload(error)
+        setError(failure.message)
         await appendAgentEvent({
           projectId: project.id!,
           conversationId,
           kind: 'message',
           role: 'assistant',
-          content: `恢复本轮失败：${errorMessage(error)}`,
+          content: `恢复本轮失败：${failure.message}`,
+          payload: failure.payload,
           scope: workspaceScope,
         })
       }
@@ -431,41 +592,52 @@ export function useMasterCopilot(input: {
     }
   }, [busy, conversationId, project.id, recordTask, reload, scopeKey, worldGroupId, workspaceScope])
 
-  const updateCandidate = useCallback(async (eventId: number, draft: string) => {
-    const candidate = pendingCandidates.find(item => item.event.id === eventId)
-    let creativeArtifact = candidate?.payload.creativeArtifact
-    if (creativeArtifact && candidate?.payload.skillId === 'outline.story-arcs' && candidate.payload.storyArcKind) {
-      creativeArtifact = revalidateStoryArcCreativeDraftV1({
-          draft,
-          snapshot: candidate.payload.baseSnapshot as Parameters<typeof revalidateStoryArcCreativeDraftV1>[0]['snapshot'],
-          kind: candidate.payload.storyArcKind,
-          previousArtifact: creativeArtifact,
-        })
-    } else if (creativeArtifact && candidate?.payload.agentId === 'outline' && candidate.payload.outlineMode) {
-      creativeArtifact = revalidateOutlineCreativeDraftV1({
-        draft,
-        snapshot: candidate.payload.baseSnapshot as Parameters<typeof revalidateOutlineCreativeDraftV1>[0]['snapshot'],
-        previousArtifact: creativeArtifact,
-      })
-    } else if (creativeArtifact && candidate?.payload.agentId === 'prose' && candidate.payload.informationBoundary) {
-      creativeArtifact = revalidateProseCreativeDraftV1({
-        draft,
-        informationBoundary: candidate.payload.informationBoundary,
-        previousArtifact: creativeArtifact,
-      })
-    }
-    const nextPayload = await updateAgentEventCandidate(
-      eventId,
-      project.id!,
-      draft,
-      workspaceScope,
-      { creativeArtifact },
-    )
+  const updateCandidate = useCallback((eventId: number, draft: string): Promise<void> => {
+    const key = candidateDraftKey(eventId)
+    const editingScope = scopeKey
+    localCandidateDrafts.current.set(eventId, draft)
     setEvents(current => current.map(event => event.id === eventId
-      ? { ...event, content: draft, ...(nextPayload ? { payload: nextPayload } : {}) }
+      ? { ...event, content: draft }
       : event))
-    notifyMasterCopilotSync(scopeKey)
-  }, [pendingCandidates, project.id, scopeKey, workspaceScope])
+    setError(null)
+    queueCandidateDraftV1({
+      key,
+      draft,
+      persist: persistedDraft => updateAgentEventCandidate(
+        eventId,
+        project.id!,
+        persistedDraft,
+        workspaceScope,
+        {
+          revalidateCreativeArtifact: ({ creativeArtifact, payload }) => (
+            revalidateCandidateCreativeArtifactV1({
+              draft: persistedDraft,
+              creativeArtifact,
+              payload,
+            })
+          ),
+        },
+      ),
+      onSynced: (persistedDraft, result) => {
+        if (activeCandidateScope.current !== editingScope) return
+        const currentDraft = localCandidateDrafts.current.get(eventId)
+        if (currentDraft === persistedDraft) localCandidateDrafts.current.delete(eventId)
+        const nextPayload = typeof result === 'string' ? result : null
+        setEvents(current => current.map(event => event.id === eventId
+          ? {
+              ...event,
+              content: localCandidateDrafts.current.get(eventId) ?? persistedDraft,
+              ...(nextPayload ? { payload: nextPayload } : {}),
+            }
+          : event))
+        notifyMasterCopilotSync(editingScope)
+      },
+      onError: syncError => {
+        if (activeCandidateScope.current === editingScope) setError(syncError.message)
+      },
+    })
+    return Promise.resolve()
+  }, [candidateDraftKey, project.id, scopeKey, workspaceScope])
 
   const resolveCandidate = useCallback(async (
     candidate: PendingMasterCandidate,
@@ -476,44 +648,127 @@ export function useMasterCopilot(input: {
     if (!scopeOwner) return
     setBusy(true)
     setError(null)
+    let shouldReload = false
+    let failureStage: HarnessFailureClassV1 = 'candidate'
     try {
+      await flushCandidateDraftV1(candidateDraftKey(candidate.event.id))
+      const persistedEvents = await readAgentEvents(conversationId, workspaceScope)
+      const persistedEvent = persistedEvents.find(event => event.id === candidate.event.id && event.kind === 'candidate')
+      if (!persistedEvent) throw new Error('待确认候选在同步后不存在。')
+      const persistedCandidate: PendingMasterCandidate = {
+        event: persistedEvent,
+        payload: parseAgentEventPayload<MasterCandidatePayload>(persistedEvent, {
+          version: 1,
+          taskId: '',
+          agentId: 'character',
+          label: '候选',
+          contextSources: [],
+          baseSnapshot: {},
+        }),
+      }
+      shouldReload = true
       let message = '候选已拒绝，没有写入项目。'
       let terminalMessage: string | null = null
-      const durableCandidate = candidate.payload.runId != null && candidate.payload.runStepId
+      let lifecycleEvidence: HarnessLifecycleEvidenceV1 | undefined
+      const durableCandidate = persistedCandidate.payload.runId != null && persistedCandidate.payload.runStepId
       if (durableCandidate && decision === 'adopted') {
+        failureStage = 'adoption'
         const adoption = await commitMasterAgentCandidateAdoptionV1({
           scope: workspaceScope!,
-          runId: candidate.payload.runId!,
-          candidateEventId: candidate.event.id,
-          runtime: runtimeCandidates.current.get(candidate.event.id),
+          runId: persistedCandidate.payload.runId!,
+          candidateEventId: persistedCandidate.event.id!,
+          runtime: runtimeCandidates.current.get(persistedCandidate.event.id!),
+          worldGroupId,
         })
         message = adoption.message
+        if (
+          adoption.snapshot.projection.state === 'running'
+          && Object.values(adoption.snapshot.projection.steps).some(step => step.status === 'scheduled')
+        ) {
+          try {
+            const advanced = await runDurableMasterAgentPlanV1({
+              scope: workspaceScope!,
+              worldGroupId,
+              runId: persistedCandidate.payload.runId!,
+              onTask: recordTask,
+            })
+            const generated = advanced.candidates.filter(item => (
+              item.event.id != null
+              && item.event.id !== persistedCandidate.event.id
+              && item.runtime != null
+            ))
+            for (const item of generated) {
+              runtimeCandidates.current.set(item.event.id!, item.runtime!)
+            }
+            if (generated.length) {
+              message = `${message} 已基于采纳后的最新正式内容生成下一阶段候选。`
+            }
+          } catch (advanceError) {
+            message = `${message} 下一阶段尚未生成，可从当前运行继续：${
+              advanceError instanceof Error ? advanceError.message : String(advanceError)
+            }`
+            setRecoveryAvailable(true)
+          }
+        }
+        const pendingLifecycle = buildPendingHarnessLifecycleEvidenceV1({
+          runId: persistedCandidate.payload.runId,
+          candidateEventId: persistedCandidate.event.id,
+          contentRevision: persistedCandidate.payload.contentRevision,
+          contextManifestHash: persistedCandidate.payload.contextManifestHash,
+          candidateHash: persistedCandidate.payload.candidateHash,
+          contextEvidence: persistedCandidate.payload.contextEvidence,
+          promptExecutionEvidence: persistedCandidate.payload.promptExecutionEvidence,
+        })
+        failureStage = 'terminal'
         const verification = await verifyMasterAgentRunV1({
           scope: workspaceScope!,
-          runId: candidate.payload.runId!,
+          runId: persistedCandidate.payload.runId!,
         })
         if (verification.accepted) {
           // Keep the business-adoption message stable for existing callers and
           // surface terminal verification as a separate auditable event.
           terminalMessage = '本轮所有步骤均已通过终态校验。'
+          lifecycleEvidence = buildSettledHarnessLifecycleEvidenceV1({
+            pending: pendingLifecycle,
+            adoptionHash: adoption.adoptionHash,
+            terminal: 'passed',
+            terminalReceiptHash: verification.receipt?.receiptHash
+              ?? verification.snapshot.projection.terminalReceiptHash
+              ?? undefined,
+            terminalDetail: '确定性终验已签发回执',
+          })
+        } else if (verification.codes.includes('run-not-ready')) {
+          lifecycleEvidence = buildSettledHarnessLifecycleEvidenceV1({
+            pending: pendingLifecycle,
+            adoptionHash: adoption.adoptionHash,
+            terminal: 'pending',
+            terminalDetail: '等待本轮其余候选完成确认',
+          })
         } else if (!verification.codes.includes('run-not-ready')) {
           message = `${message} 终态校验未通过：${verification.codes.join('、')}。`
+          lifecycleEvidence = buildSettledHarnessLifecycleEvidenceV1({
+            pending: pendingLifecycle,
+            adoptionHash: adoption.adoptionHash,
+            terminal: 'blocked',
+            terminalDetail: `终验阻断：${verification.codes.join('、')}`,
+          })
         }
       } else if (durableCandidate) {
         await rejectMasterAgentCandidateV1({
           scope: workspaceScope!,
-          runId: candidate.payload.runId!,
-          candidateEventId: candidate.event.id,
+          runId: persistedCandidate.payload.runId!,
+          candidateEventId: persistedCandidate.event.id!,
+          worldGroupId,
         })
       } else if (decision === 'adopted') {
         message = await adoptMasterCandidate({
           projectId: project.id!,
           scope: workspaceScope,
           worldGroupId,
-          event: candidate.event,
-          payload: candidate.payload,
-          draft: candidate.event.content,
-          runtime: runtimeCandidates.current.get(candidate.event.id),
+          event: persistedCandidate.event,
+          payload: persistedCandidate.payload,
+          draft: persistedCandidate.event.content,
+          runtime: runtimeCandidates.current.get(persistedCandidate.event.id!),
         })
       }
       if (!durableCandidate) {
@@ -522,7 +777,7 @@ export function useMasterCopilot(input: {
           conversationId,
           kind: 'confirmation',
           content: message,
-          payload: { candidateEventId: candidate.event.id, decision },
+          payload: { candidateEventId: persistedCandidate.event.id, decision },
           scope: workspaceScope,
         })
       }
@@ -532,6 +787,9 @@ export function useMasterCopilot(input: {
         kind: 'message',
         role: 'assistant',
         content: message,
+        ...(lifecycleEvidence ? {
+          payload: { version: 1, kind: 'harness-lifecycle', lifecycle: lifecycleEvidence },
+        } : {}),
         scope: workspaceScope,
       })
       if (terminalMessage) {
@@ -544,25 +802,30 @@ export function useMasterCopilot(input: {
           scope: workspaceScope,
         })
       }
-      runtimeCandidates.current.delete(candidate.event.id)
+      runtimeCandidates.current.delete(persistedCandidate.event.id!)
+      localCandidateDrafts.current.delete(persistedCandidate.event.id!)
       return true
     } catch (error) {
-      setError(errorMessage(error))
+      const failure = await classifiedFailurePayload(error, failureStage)
+      setError(failure.message)
+      if (error instanceof CandidateDraftSyncErrorV1) return false
+      shouldReload = true
       await appendAgentEvent({
         projectId: project.id!,
         conversationId,
         kind: 'message',
         role: 'assistant',
-        content: errorMessage(error),
+        content: failure.message,
+        payload: failure.payload,
         scope: workspaceScope,
       })
       return false
     } finally {
       releaseMasterCopilotScope(scopeKey, scopeOwner)
-      await reload(conversationId)
+      if (shouldReload) await reload(conversationId)
       notifyMasterCopilotSync(scopeKey)
     }
-  }, [busy, conversationId, project.id, reload, scopeKey, workspaceScope, worldGroupId])
+  }, [busy, candidateDraftKey, conversationId, project.id, recordTask, reload, scopeKey, workspaceScope, worldGroupId])
 
   const stop = useCallback(() => abortRef.current?.abort(), [])
 

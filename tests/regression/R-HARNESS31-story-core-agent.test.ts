@@ -25,6 +25,9 @@ import {
 import { verifyMasterAgentRunV1 } from '../../src/lib/agent/run/master-verification'
 import { AgentTeamBudgetTracker } from '../../src/lib/agent/team-budget'
 import { db } from '../../src/lib/db/schema'
+import { generateWorkspaceUid } from '../../src/lib/memory/identity'
+import { ensureWorkspaceOwnership } from '../../src/lib/world-engine/ownership'
+import { stampNewRecord } from '../../src/lib/world-engine/scope'
 import {
   adoptGenerationNodeOutput,
   runGenerationNode,
@@ -40,53 +43,26 @@ const directWorkflow = {
 async function createWorkspace(): Promise<{ project: Project; scope: WorkspaceScope }> {
   const now = Date.now()
   const projectId = await db.projects.add({
+    workspaceUid: generateWorkspaceUid(),
     name: '镜城纪事',
     genre: 'fantasy',
     genres: ['fantasy'],
     description: '',
     status: 'drafting',
     targetWordCount: 120_000,
-    worldCode: 'harness-31-world',
-    worldVersion: 1,
     createdAt: now,
     updatedAt: now,
   } as Project) as number
-  const worldId = await db.worlds.add({
+  const { scope } = await ensureWorkspaceOwnership(projectId)
+  await db.worldviews.add(stampNewRecord(scope, 'worldviews', {
     projectId,
-    code: 'harness-31-world',
-    name: '镜海世界',
-    description: '',
-    currentVersion: 1,
-    createdAt: now,
-    updatedAt: now,
-  }) as number
-  const workId = await db.works.add({
-    projectId,
-    worldId,
-    title: '镜城纪事',
-    description: '',
-    genres: ['fantasy'],
-    status: 'drafting',
-    targetWordCount: 120_000,
-    createdAt: now,
-    updatedAt: now,
-  }) as number
-  await db.projects.update(projectId, {
-    activeWorldId: worldId,
-    activeWorkId: workId,
-    ownershipSchemaVersion: 1,
-  })
-  await db.worldviews.add({
-    projectId,
-    worldId,
     worldOrigin: '镜海退潮时，城民被典当的记忆会凝成盐晶。',
     factionLayout: '镜税署与拾忆行会争夺盐晶解释权。',
     createdAt: now,
     updatedAt: now,
-  } as never)
-  await db.storyCores.add({
+  }, { owner: 'world' }) as never)
+  await db.storyCores.add(stampNewRecord(scope, 'storyCores', {
     projectId,
-    workId,
     logline: '守灯人追查一枚不属于任何人的记忆盐晶。',
     concept: '记忆可以纳税，也可以被继承。',
     theme: '记忆与责任',
@@ -97,10 +73,10 @@ async function createWorkspace(): Promise<{ project: Project; scope: WorkspaceSc
     subPlots: '拾忆行会内部的继承权争夺。',
     createdAt: now,
     updatedAt: now,
-  } as never)
+  }, { owner: 'work' }) as never)
   const project = await db.projects.get(projectId)
   if (!project) throw new Error('测试项目创建失败')
-  return { project, scope: { projectId, worldId, workId } }
+  return { project, scope }
 }
 
 function request(field: 'logline' | 'centralConflict' = 'logline') {
@@ -179,7 +155,9 @@ describe.sequential('R-HARNESS31 · 故事核心 Agent Skill 与受治理采纳'
     const generated = await runGenerationNode(prepared.node, prepared.prepared)
 
     expect(generated.gate?.status).toBe('pass')
-    expect(prepared.contextSources).toEqual(expect.arrayContaining(['worldview', 'storyCore']))
+    expect(prepared.contextSources).toEqual(['ragSelection'])
+    expect(prepared.contextEvidence.inputStateSourceKeys)
+      .toEqual(expect.arrayContaining(['worldview', 'storyCore']))
     expect(prepared.contextEvidence.inputState).toMatchObject({
       state: 'complete',
       handling: 'grounded-transform',
@@ -200,9 +178,8 @@ describe.sequential('R-HARNESS31 · 故事核心 Agent Skill 与受治理采纳'
     const { project, scope } = await createWorkspace()
     await db.worldviews.clear()
     await db.storyCores.clear()
-    await db.characters.add({
+    await db.characters.add(stampNewRecord(scope, 'characters', {
       projectId: project.id!,
-      worldId: scope.worldId,
       name: '失忆的守灯人',
       roleWeight: 'main',
       moralAxis: 'good',
@@ -214,7 +191,7 @@ describe.sequential('R-HARNESS31 · 故事核心 Agent Skill 与受治理采纳'
       motivation: '找回父亲的记忆并查清潮汐钟的用途。',
       createdAt: Date.now(),
       updatedAt: Date.now(),
-    } as never)
+    }, { owner: 'world' }) as never)
     let prompt = ''
     const prepared = await prepareStoryCoreCopilot({
       projectId: project.id!,
@@ -234,7 +211,7 @@ describe.sequential('R-HARNESS31 · 故事核心 Agent Skill 与受治理采纳'
       handling: 'create-from-request',
       consideredSourceKeys: ['worldview', 'storyCore'],
     })
-    expect(prepared.contextSources).toContain('characters')
+    expect(prepared.contextSources).toEqual(['ragSelection'])
     expect(prompt).toContain('失忆的守灯人')
     expect(prompt).toContain('下游反推证据')
     expect(prompt).toContain('反推当前目标字段')
@@ -346,6 +323,13 @@ describe.sequential('R-HARNESS31 · 故事核心 Agent Skill 与受治理采纳'
         authorRequest: task.instruction,
         skillId: task.skillId,
       }, { runAI: async () => JSON.stringify(candidate()) })
+      if (prepared.contextGatewayExecution) {
+        await options.executionTrace?.contextGatewayPrepared?.(task, {
+          execution: prepared.contextGatewayExecution,
+          assembled: prepared.input.assembled,
+          renderedRequest: prepared.prepared.messages,
+        })
+      }
       const generated = await runGenerationNode(prepared.node, prepared.prepared)
       const durableCandidate: ExecutedMasterCandidate = {
         payload: {
@@ -366,6 +350,14 @@ describe.sequential('R-HARNESS31 · 故事核心 Agent Skill 与受治理采纳'
         draft: JSON.stringify(generated.output, null, 2),
         runtimeNode: prepared.node,
         runtimeOutput: generated.output,
+        ...(prepared.contextGatewayExecution ? {
+          contextGatewayRuntime: {
+            execution: prepared.contextGatewayExecution,
+            assembled: prepared.input.assembled,
+            renderedRequest: prepared.prepared.messages,
+            rawResponse: generated.output,
+          },
+        } : {}),
       }
       await options.executionTrace?.candidateReady?.(task, durableCandidate)
       return [durableCandidate]
@@ -404,5 +396,38 @@ describe.sequential('R-HARNESS31 · 故事核心 Agent Skill 与受治理采纳'
     const tampered = await verifyMasterAgentRunV1({ scope, runId: run.runId })
     expect(tampered.accepted).toBe(false)
     expect(tampered.codes).toContain('story-core-1:post-state-mismatch')
+  })
+
+  it('真实 durable 主 Agent 候选冻结 content revision，上游变化后标旧且不写目标字段', async () => {
+    const { project, scope } = await createWorkspace()
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
+      choices: [{ message: { content: JSON.stringify(candidate()) } }],
+      usage: { prompt_tokens: 31, completion_tokens: 23, total_tokens: 54 },
+    }), { status: 200 })))
+    const conversation = await getOrCreateAgentConversation({
+      projectId: project.id!, scope, worldGroupId: null,
+    })
+    const run = await runDurableMasterAgentPlanV1({
+      scope,
+      worldGroupId: null,
+      conversationId: conversation.id!,
+      plan: plan(),
+      budget: new AgentTeamBudgetTracker('balanced'),
+    })
+    const restored = await restoreMasterAgentCandidatesV1({ scope, runId: run.runId })
+    const durableCandidate = restored.candidates[0]
+    expect(durableCandidate.payload.contentRevision).toMatchObject({ version: 1 })
+    const original = await db.storyCores.get(durableCandidate.payload.baseSnapshot.id)
+    await db.worldviews.toCollection().modify({ worldOrigin: '作者在候选生成后改写了世界起源。' })
+
+    await expect(commitMasterAgentCandidateAdoptionV1({
+      scope,
+      runId: run.runId,
+      candidateEventId: durableCandidate.event.id!,
+    })).rejects.toThrow('主 Agent 候选已过期')
+    expect((await db.storyCores.get(durableCandidate.payload.baseSnapshot.id))?.logline)
+      .toBe(original?.logline)
+    const stale = await restoreMasterAgentCandidatesV1({ scope, runId: run.runId })
+    expect(stale.snapshot.projection.steps['master:story-core-1']?.status).toBe('stale')
   })
 })

@@ -1,8 +1,11 @@
 import { chat } from '../../ai/client'
+import { estimateTokens } from '../../ai/context-budget'
 import {
   buildCodexExtractPromptFromRegisteredContextV1,
+  buildCodexEnrichPromptFromRegisteredContextV1,
   parseCodexEntriesStrictV1,
   readCodexExtractPromptTemplateSnapshotV1,
+  readCodexEnrichPromptTemplateSnapshotV1,
   type ExtractedCodexEntry,
 } from '../../ai/adapters/structured-extract-adapter'
 import { splitExtractionText } from '../../ai/structured-extraction'
@@ -11,6 +14,7 @@ import { parseFieldSchema } from '../../types/codex'
 import { db } from '../../db/schema'
 import { assembleContext } from '../../registry/assemble-context'
 import { adopt } from '../../registry/adopt'
+import type { AssembleContextResult, ContextPacketV1 } from '../../registry/types'
 import { readOwnedRows, scopeTransactionTables } from '../../world-engine/scope'
 import {
   formatCodexExtractionBaselineV1,
@@ -19,7 +23,10 @@ import {
   type CodexExtractionEntryV1,
 } from '../../codex/extraction'
 import { getAgentSkillV1 } from '../skill-registry'
+import { assembleContextGatewayPacketV1 } from '../context-gateway-input'
 import { createAgentSkillExecutionBindingV1 } from '../execution-binding'
+import { executeContextGatewayV1 } from '../../context-gateway/execution'
+import { isPortableResourceUidV1 } from '../../context-gateway/resource-uid'
 import {
   appendAgentRunEventV1,
   createAgentRunV1,
@@ -44,6 +51,13 @@ export interface CodexExtractionRequestV1 {
   worldGroupId: number | null
   sourceText: string
   supplementTags: boolean
+  operation?: 'extract' | 'enrich'
+  authorRequest?: string
+}
+
+interface NormalizedCodexCandidateRequestV1 extends CodexExtractionRequestV1 {
+  operation: 'extract' | 'enrich'
+  authorRequest: string
 }
 
 interface CodexExtractionChunkV1 {
@@ -57,15 +71,20 @@ interface CodexExtractionPlanV1 {
   version: 1
   kind: 'codex-extraction-plan'
   portable: false
+  runId: number
   projectId: number
   worldId: number
   workId: number
-  request: CodexExtractionRequestV1
+  request: NormalizedCodexCandidateRequestV1
   promptTemplateHash: string
   baselineContextManifestHash: string
   baselineContextHash: string
   sourceContextManifestHash: string
   sourceContextHash: string
+  sourceTextHash: string
+  gatewaySelectorHash: string
+  gatewayTraceHash: string
+  gatewayPacket: ContextPacketV1
   baseline: CodexExtractionBaselineV1
   baselineHash: string
   chunks: CodexExtractionChunkV1[]
@@ -112,6 +131,11 @@ interface CodexExtractionFormalItemV1 extends Record<string, unknown> {
   importance: number
   order: number
   worldGroupId: number | null
+  origin: 'verbatim-extraction' | 'ai-created-suggestion'
+  sourceEvidenceQuotes: string
+  sourceContentHash: string
+  producerRunId: number
+  producerCandidateHash: string
 }
 
 interface CodexExtractionAdoptionIntentV1 {
@@ -149,6 +173,9 @@ interface PreparedSourcesV1 {
   baseline: CodexExtractionBaselineV1
   baselineHash: string
   chunks: string[]
+  gatewaySelectorHash: string
+  gatewayTraceHash: string
+  gatewayPacket: ContextPacketV1
 }
 
 function isHash(value: unknown): value is string {
@@ -168,10 +195,11 @@ function sameValue(left: unknown, right: unknown): boolean {
 function sameFormalItem(left: unknown, right: CodexExtractionFormalItemV1): boolean {
   if (!left || typeof left !== 'object' || Array.isArray(left)) return false
   const row = left as Record<string, unknown>
-  return Object.keys(row).length === 11
+  return Object.keys(row).length === 16
     && Object.keys(row).every(key => [
       'categoryId', 'name', 'icon', 'summary', 'description', 'fields',
-      'refs', 'tags', 'importance', 'order', 'worldGroupId',
+      'refs', 'tags', 'importance', 'order', 'worldGroupId', 'origin',
+      'sourceEvidenceQuotes', 'sourceContentHash', 'producerRunId', 'producerCandidateHash',
     ].includes(key))
     && row.categoryId === right.categoryId
     && row.name === right.name
@@ -184,6 +212,11 @@ function sameFormalItem(left: unknown, right: CodexExtractionFormalItemV1): bool
     && row.importance === right.importance
     && row.order === right.order
     && row.worldGroupId === right.worldGroupId
+    && row.origin === right.origin
+    && row.sourceEvidenceQuotes === right.sourceEvidenceQuotes
+    && row.sourceContentHash === right.sourceContentHash
+    && row.producerRunId === right.producerRunId
+    && row.producerCandidateHash === right.producerCandidateHash
 }
 
 async function append(
@@ -207,43 +240,95 @@ async function hashAssembly(assembled: Awaited<ReturnType<typeof assembleContext
   })
 }
 
-function normalizeRequest(request: CodexExtractionRequestV1): CodexExtractionRequestV1 {
+async function exactAssembly(text: string, label: string, inputBudget: number): Promise<AssembleContextResult> {
+  const tokens = estimateTokens(text)
+  return {
+    text,
+    segments: [{ label, layer: 'L0', content: text, tokens, trimmable: false }],
+    included: ['ragSelection'], omitted: [], trimmed: [],
+    sourceEvidence: [{
+      key: 'ragSelection', status: 'included', delivery: 'full',
+      sourceHash: await hashCanonicalValue({ text }),
+      originalCharacters: text.length, inputCharacters: text.length,
+      originalTokens: tokens, inputTokens: tokens,
+    }],
+    totalInputTokens: tokens, inputBudget,
+    overBudgetBeforeTrim: tokens > inputBudget,
+    overBudgetAfterTrim: tokens > inputBudget,
+  }
+}
+
+function normalizeRequest(request: CodexExtractionRequestV1): NormalizedCodexCandidateRequestV1 {
+  const operation = request.operation ?? 'extract'
+  if (!['extract', 'enrich'].includes(operation)) throw new Error('Codex 候选操作无效。')
   const sourceText = request.sourceText.trim()
   if (!Number.isInteger(request.categoryId) || request.categoryId <= 0) throw new Error('Codex 目标分类无效。')
   if (request.worldGroupId !== null && (!Number.isInteger(request.worldGroupId) || request.worldGroupId <= 0)) {
     throw new Error('Codex 目标世界组无效。')
   }
-  if (!sourceText) throw new Error('没有可拆分的设定内容。')
-  return { ...request, sourceText, supplementTags: request.supplementTags === true }
+  const authorRequest = (request.authorRequest ?? '').trim()
+  if (operation === 'extract' && !sourceText) throw new Error('没有可拆分的设定内容。')
+  if (operation === 'enrich' && !authorRequest) throw new Error('请说明希望 AI 补全的方向。')
+  return { ...request, operation, sourceText, authorRequest, supplementTags: request.supplementTags === true }
 }
 
 async function prepareSources(scope: WorkspaceScope, rawRequest: CodexExtractionRequestV1): Promise<PreparedSourcesV1> {
   const request = normalizeRequest(rawRequest)
-  const [baseline, baselineContext, sourceContext] = await Promise.all([
-    readCodexExtractionBaselineV1({
-      scope, categoryId: request.categoryId, worldGroupId: request.worldGroupId,
-    }),
-    assembleContext({
-      projectId: scope.projectId, scope,
-      worldGroupId: request.worldGroupId,
-      codexCategoryId: request.categoryId,
-      sourceKeys: ['codexExtractionBaseline'], inputBudgetMaxTokens: 8_000,
-    }),
-    assembleContext({
-      projectId: scope.projectId, scope,
-      sourceKeys: ['manualText'], manualSourceText: request.sourceText,
-      inputBudgetMaxTokens: 100_000,
-    }),
-  ])
-  if (!baselineContext.included.includes('codexExtractionBaseline')) throw new Error('Codex 登记基线未进入 Context Gateway。')
-  if (baselineContext.text !== formatCodexExtractionBaselineV1(baseline)) throw new Error('Codex 登记基线与读取快照不一致。')
-  if (!sourceContext.included.includes('manualText')) throw new Error('Codex 手工来源未进入 Context Gateway。')
-  const chunks = splitExtractionText(sourceContext.text)
+  const baseline = await readCodexExtractionBaselineV1({
+    scope, categoryId: request.categoryId, worldGroupId: request.worldGroupId,
+  })
+  if (!isPortableResourceUidV1(baseline.category.ragDocumentId, 'codex-category')
+    || baseline.entries.some(entry => !isPortableResourceUidV1(entry.ragDocumentId, 'codex-entry'))) {
+    throw new Error('Codex 资源身份尚未迁移，请刷新工作区后重试。')
+  }
+  const mandatoryResourceKeys = [
+    `codex-entry:${baseline.category.ragDocumentId}`,
+    ...baseline.entries.map(entry => `codex-entry:${entry.ragDocumentId}`),
+  ]
+  const skill = getAgentSkillV1(
+    request.operation === 'extract' ? 'world-origin.codex-extract' : 'world-origin.codex-enrich',
+    'world-origin',
+  )
+  const gatewayExecution = await executeContextGatewayV1({
+    skill, scope, worldGroupId: request.worldGroupId,
+    query: request.operation === 'extract'
+      ? `从作者原文抽取 ${baseline.category.name}，只使用目标分类 schema 与同类既有词条做登记约束。`
+      : `${request.authorRequest}\n为 ${baseline.category.name} 补全新的 Codex 候选；检索相关世界、故事、角色与故事线。`,
+    budgetTokens: skill.contextGateway!.maxRetrievedTokens,
+    mandatoryResourceKeys,
+    mandatoryFullResourceKeys: mandatoryResourceKeys,
+    targetResourceKeys: mandatoryResourceKeys,
+    additionalReadsEnabled: false,
+  })
+  const baselineContext = await exactAssembly(
+    formatCodexExtractionBaselineV1(baseline),
+    'Context Gateway 冻结的 Codex 分类与既有词条基线',
+    8_000,
+  )
+  const sourceContext = request.operation === 'extract'
+    ? await assembleContext({
+        projectId: scope.projectId, scope,
+        sourceKeys: ['manualText'], manualSourceText: request.sourceText,
+        inputBudgetMaxTokens: 100_000,
+      })
+    : assembleContextGatewayPacketV1(gatewayExecution, skill.contextGateway!.maxRetrievedTokens)
+  if (request.operation === 'extract' && !sourceContext.included.includes('manualText')) {
+    throw new Error('Codex 手工来源未进入 Context Gateway。')
+  }
+  if (request.operation === 'enrich' && !sourceContext.text.trim()) {
+    throw new Error('Codex 创意补全需要至少一项已登记世界 Canon。')
+  }
+  const chunks = request.operation === 'extract' ? splitExtractionText(sourceContext.text) : [sourceContext.text]
   if (!chunks.length) throw new Error('没有可拆分的设定内容。')
   if (chunks.length > MAX_MODEL_CALLS) {
     throw new Error(`当前来源需要 ${chunks.length} 个词条提取分块，超过单次上限 ${MAX_MODEL_CALLS}。`)
   }
-  const promptTemplateHash = await hashCanonicalValue(readCodexExtractPromptTemplateSnapshotV1())
+  const promptTemplateHash = await hashCanonicalValue({
+    protocolVersion: 'codex-candidate-evidence-v2',
+    template: request.operation === 'extract'
+      ? readCodexExtractPromptTemplateSnapshotV1()
+      : readCodexEnrichPromptTemplateSnapshotV1(),
+  })
   return {
     promptTemplateHash,
     baselineContext,
@@ -253,21 +338,24 @@ async function prepareSources(scope: WorkspaceScope, rawRequest: CodexExtraction
     baseline,
     baselineHash: await hashCanonicalValue(baseline),
     chunks,
+    gatewaySelectorHash: gatewayExecution.selector.selectorHash,
+    gatewayTraceHash: gatewayExecution.retrievalTrace.traceHash,
+    gatewayPacket: gatewayExecution.contextPacket,
   }
 }
 
 async function createPlan(input: {
   scope: WorkspaceScope
   snapshot: AgentRunSnapshotV1
-  request: CodexExtractionRequestV1
+  request: NormalizedCodexCandidateRequestV1
   prepared: PreparedSourcesV1
 }): Promise<{ snapshot: AgentRunSnapshotV1; plan: CodexExtractionPlanV1 }> {
   let snapshot = input.snapshot
   const baselineManifest = await createContextManifestFromAssemblyV1({
     runId: snapshot.run.id, stepId: CODEX_EXTRACTION_STEP_ID_V1, attempt: 1,
     projectId: input.scope.projectId, worldGroupId: input.request.worldGroupId,
-    declaredSourceKeys: ['codexExtractionBaseline'], assembled: input.prepared.baselineContext,
-    readerVersion: 'codex-extraction-baseline-v1',
+    declaredSourceKeys: ['ragSelection'], assembled: input.prepared.baselineContext,
+    readerVersion: 'codex-extraction-gateway-baseline-v1',
   })
   snapshot = await append(input.scope, snapshot, 'context.assembled', {
     stepId: CODEX_EXTRACTION_STEP_ID_V1, attempt: 1, manifestHash: baselineManifest.manifestHash,
@@ -275,8 +363,13 @@ async function createPlan(input: {
   const sourceManifest = await createContextManifestFromAssemblyV1({
     runId: snapshot.run.id, stepId: CODEX_EXTRACTION_STEP_ID_V1, attempt: 1,
     projectId: input.scope.projectId, worldGroupId: input.request.worldGroupId,
-    declaredSourceKeys: ['manualText'], assembled: input.prepared.sourceContext,
-    readerVersion: 'codex-extraction-manual-v1',
+    declaredSourceKeys: input.request.operation === 'extract'
+      ? ['manualText']
+      : ['ragSelection'],
+    assembled: input.prepared.sourceContext,
+    readerVersion: input.request.operation === 'extract'
+      ? 'codex-extraction-manual-v1'
+      : 'codex-enrichment-world-canon-v1',
   })
   snapshot = await append(input.scope, snapshot, 'context.assembled', {
     stepId: CODEX_EXTRACTION_STEP_ID_V1, attempt: 1, manifestHash: sourceManifest.manifestHash,
@@ -287,6 +380,7 @@ async function createPlan(input: {
   })))
   const body = {
     version: 1 as const, kind: 'codex-extraction-plan' as const, portable: false as const,
+    runId: snapshot.run.id,
     projectId: input.scope.projectId, worldId: input.scope.worldId, workId: input.scope.workId,
     request: normalizeRequest(input.request),
     promptTemplateHash: input.prepared.promptTemplateHash,
@@ -294,6 +388,10 @@ async function createPlan(input: {
     baselineContextHash: input.prepared.baselineContextHash,
     sourceContextManifestHash: sourceManifest.manifestHash,
     sourceContextHash: input.prepared.sourceContextHash,
+    sourceTextHash: await hashCanonicalValue({ sourceText: input.request.sourceText }),
+    gatewaySelectorHash: input.prepared.gatewaySelectorHash,
+    gatewayTraceHash: input.prepared.gatewayTraceHash,
+    gatewayPacket: input.prepared.gatewayPacket,
     baseline: input.prepared.baseline,
     baselineHash: input.prepared.baselineHash,
     chunks,
@@ -301,19 +399,30 @@ async function createPlan(input: {
   return { snapshot, plan: { ...body, planHash: await hashCanonicalValue(body) } }
 }
 
-function contractObjective(categoryId: number): string {
-  return `从作者指定内容拆分分类 #${categoryId} 下可确认的 Codex 词条`
+function contractObjective(categoryId: number, operation: 'extract' | 'enrich' = 'extract'): string {
+  return operation === 'extract'
+    ? `从作者指定内容拆分分类 #${categoryId} 下可确认的 Codex 词条`
+    : `根据已登记世界 Canon 为分类 #${categoryId} 生成可确认的 AI 新建词条建议`
 }
 
-function contract(scope: WorkspaceScope, worldGroupId: number | null, categoryId: number, maxModelCalls: number) {
-  const skill = getAgentSkillV1('world-origin.codex-extract', 'world-origin')
+function contract(
+  scope: WorkspaceScope,
+  worldGroupId: number | null,
+  categoryId: number,
+  maxModelCalls: number,
+  operation: 'extract' | 'enrich',
+) {
+  const skill = getAgentSkillV1(
+    operation === 'extract' ? 'world-origin.codex-extract' : 'world-origin.codex-enrich',
+    'world-origin',
+  )
   return {
     version: 1 as const,
-    objective: contractObjective(categoryId),
+    objective: contractObjective(categoryId, operation),
     workflowKind: 'long-running-resumable' as const,
     scope: { projectId: scope.projectId, worldGroupId },
     permissions: {
-      contextSourceKeys: ['manualText', 'codexExtractionBaseline'],
+      contextSourceKeys: [...skill.contextSourceKeys],
       writeTargets: skill.writeTargets.map(target => ({
         table: target.table, fields: [...target.fields], mode: 'author-confirmed' as const,
       })),
@@ -347,35 +456,56 @@ async function parsePlan(value: unknown): Promise<CodexExtractionPlanV1> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Codex 提取计划检查点无效。')
   const row = value as Record<string, any>
   assertExactKeys(row, [
-    'version', 'kind', 'portable', 'projectId', 'worldId', 'workId', 'request',
+    'version', 'kind', 'portable', 'runId', 'projectId', 'worldId', 'workId', 'request',
     'promptTemplateHash', 'baselineContextManifestHash', 'baselineContextHash',
-    'sourceContextManifestHash', 'sourceContextHash', 'baseline', 'baselineHash',
+    'sourceContextManifestHash', 'sourceContextHash', 'sourceTextHash',
+    'gatewaySelectorHash', 'gatewayTraceHash', 'gatewayPacket', 'baseline', 'baselineHash',
     'chunks', 'planHash',
   ], 'Codex 提取计划 ')
   if (
     row.version !== 1 || row.kind !== 'codex-extraction-plan' || row.portable !== false
+    || !Number.isInteger(row.runId) || row.runId <= 0
     || !Number.isInteger(row.projectId) || row.projectId <= 0
     || !Number.isInteger(row.worldId) || row.worldId <= 0
     || !Number.isInteger(row.workId) || row.workId <= 0
     || !isHash(row.promptTemplateHash) || !isHash(row.baselineContextManifestHash)
     || !isHash(row.baselineContextHash) || !isHash(row.sourceContextManifestHash)
-    || !isHash(row.sourceContextHash) || !isHash(row.baselineHash) || !isHash(row.planHash)
+    || !isHash(row.sourceContextHash) || !isHash(row.sourceTextHash)
+    || !isHash(row.gatewaySelectorHash) || !isHash(row.gatewayTraceHash)
+    || !isHash(row.baselineHash) || !isHash(row.planHash)
     || !row.request || typeof row.request !== 'object' || Array.isArray(row.request)
+    || !row.gatewayPacket || typeof row.gatewayPacket !== 'object' || Array.isArray(row.gatewayPacket)
     || !row.baseline || typeof row.baseline !== 'object' || Array.isArray(row.baseline)
     || !Array.isArray(row.chunks) || row.chunks.length < 1 || row.chunks.length > MAX_MODEL_CALLS
   ) throw new Error('Codex 提取计划检查点不完整。')
-  assertExactKeys(row.request, ['categoryId', 'worldGroupId', 'sourceText', 'supplementTags'], 'Codex 提取请求 ')
+  if (
+    row.gatewayPacket.version !== 'context-packet-v1'
+    || !isHash(row.gatewayPacket.packetHash)
+    || !isHash(row.gatewayPacket.contentHash)
+    || !isHash(row.gatewayPacket.policyHash)
+  ) throw new Error('Codex Gateway Packet 检查点无效。')
+  const { packetHash: gatewayPacketHash, ...gatewayPacketBody } = row.gatewayPacket
+  if (await hashCanonicalValue(gatewayPacketBody) !== gatewayPacketHash) {
+    throw new Error('Codex Gateway Packet hash 不匹配。')
+  }
+  assertExactKeys(row.request, [
+    'categoryId', 'worldGroupId', 'sourceText', 'supplementTags', 'operation', 'authorRequest',
+  ], 'Codex 候选请求 ')
   const request = normalizeRequest(row.request as CodexExtractionRequestV1)
   if (!sameValue(request, row.request)) throw new Error('Codex 提取请求未规范化。')
+  if (await hashCanonicalValue({ sourceText: request.sourceText }) !== row.sourceTextHash) {
+    throw new Error('Codex 原文来源 hash 不匹配。')
+  }
   const baseline = row.baseline as Record<string, unknown>
   assertExactKeys(baseline, ['category', 'entries'], 'Codex 提取基线 ')
   if (!baseline.category || typeof baseline.category !== 'object' || Array.isArray(baseline.category) || !Array.isArray(baseline.entries)) {
     throw new Error('Codex 提取基线不完整。')
   }
   const category = baseline.category as Record<string, unknown>
-  assertExactKeys(category, ['id', 'name', 'icon', 'domain', 'builtInKey', 'fieldSchema', 'fields', 'updatedAt'], 'Codex 分类基线 ')
+  assertExactKeys(category, ['id', 'ragDocumentId', 'name', 'icon', 'domain', 'builtInKey', 'fieldSchema', 'fields', 'updatedAt'], 'Codex 分类基线 ')
   if (
-    category.id !== request.categoryId || typeof category.name !== 'string' || !category.name.trim()
+    category.id !== request.categoryId || !isPortableResourceUidV1(category.ragDocumentId, 'codex-category')
+    || typeof category.name !== 'string' || !category.name.trim()
     || typeof category.icon !== 'string' || !['natural', 'humanity', 'origin'].includes(String(category.domain))
     || (category.builtInKey !== null && typeof category.builtInKey !== 'string')
     || typeof category.fieldSchema !== 'string' || !Array.isArray(category.fields)
@@ -389,15 +519,22 @@ async function parsePlan(value: unknown): Promise<CodexExtractionPlanV1> {
     if (!item || typeof item !== 'object' || Array.isArray(item)) throw new Error(`Codex 原始词条 ${index + 1} 无效。`)
     const entry = item as Record<string, unknown>
     assertExactKeys(entry, [
-      'id', 'categoryId', 'name', 'icon', 'summary', 'description', 'fields', 'refs', 'tags',
+      'id', 'ragDocumentId', 'categoryId', 'name', 'icon', 'summary', 'description', 'fields', 'refs', 'tags',
       'importance', 'cultivationSystemId', 'cultivationStageId', 'importantLocationId', 'order',
+      'origin', 'sourceEvidenceQuotes', 'sourceContentHash', 'producerRunId', 'producerCandidateHash',
       'worldGroupId', 'worldId', 'createdAt', 'updatedAt',
     ], 'Codex 原始词条 ')
     if (
-      !Number.isInteger(entry.id) || (entry.id as number) <= 0 || entry.categoryId !== request.categoryId
+      !Number.isInteger(entry.id) || (entry.id as number) <= 0
+      || !isPortableResourceUidV1(entry.ragDocumentId, 'codex-entry')
+      || entry.categoryId !== request.categoryId
       || typeof entry.name !== 'string' || !entry.name.trim() || typeof entry.icon !== 'string'
       || typeof entry.summary !== 'string' || typeof entry.description !== 'string'
       || typeof entry.fields !== 'string' || typeof entry.refs !== 'string' || typeof entry.tags !== 'string'
+      || !['manual', 'verbatim-extraction', 'ai-created-suggestion', 'import'].includes(String(entry.origin))
+      || typeof entry.sourceEvidenceQuotes !== 'string' || typeof entry.sourceContentHash !== 'string'
+      || (entry.producerRunId !== null && (!Number.isInteger(entry.producerRunId) || (entry.producerRunId as number) <= 0))
+      || (entry.producerCandidateHash !== null && !isHash(entry.producerCandidateHash))
       || !Number.isFinite(entry.importance) || !Number.isInteger(entry.order)
       || (entry.worldGroupId ?? null) !== request.worldGroupId || entry.worldId !== row.worldId
       || !Number.isFinite(entry.createdAt) || !Number.isFinite(entry.updatedAt)
@@ -444,6 +581,7 @@ async function parseProgress(value: unknown): Promise<CodexExtractionProgressV1>
   ) throw new Error('Codex 提取进度检查点不完整。')
   const found = parseCodexEntriesStrictV1(
     JSON.stringify(row.found), plan.baseline.category.fields,
+    { operation: plan.request.operation, sourceText: plan.request.sourceText },
   )
   if (
     new Set(found.map(entry => entry.name.toLocaleLowerCase())).size !== found.length
@@ -470,6 +608,7 @@ async function parseCandidate(value: unknown): Promise<CodexExtractionCandidateV
   const calls = row.calls.map(parseCallEvidence)
   const entries = parseCodexEntriesStrictV1(
     JSON.stringify(row.entries), plan.baseline.category.fields,
+    { operation: plan.request.operation, sourceText: plan.request.sourceText },
   )
   if (
     new Set(entries.map(entry => entry.name.toLocaleLowerCase())).size !== entries.length
@@ -544,6 +683,7 @@ async function latestState(scope: WorkspaceScope, runId: number): Promise<{
   ) throw new Error('Codex 采纳意图选择无效。')
   const expectedFormalItems = row.selectedIndexes.map((index: number, order: number) => formalItem(
     candidate.entries[index], candidate.plan.baseline.entries.length + order, candidate.plan,
+    candidate.candidateHash,
   ))
   if (!row.formalItems.every((item: unknown, index: number) => sameFormalItem(item, expectedFormalItems[index]))) {
     throw new Error('Codex 采纳意图正式项不匹配。')
@@ -567,6 +707,9 @@ async function verifyCurrentPlan(scope: WorkspaceScope, plan: CodexExtractionPla
     current.promptTemplateHash !== plan.promptTemplateHash
     || current.baselineContextHash !== plan.baselineContextHash
     || current.sourceContextHash !== plan.sourceContextHash
+    || current.gatewaySelectorHash !== plan.gatewaySelectorHash
+    || current.gatewayTraceHash !== plan.gatewayTraceHash
+    || current.gatewayPacket.packetHash !== plan.gatewayPacket.packetHash
     || current.baselineHash !== plan.baselineHash
     || current.chunks.length !== plan.chunks.length
   ) throw new Error('Codex 来源、分类、schema、既有词条或提示词模板已变化，请重新提取。')
@@ -601,18 +744,27 @@ async function continueExtraction(input: {
       throw new Error('Codex 提取分块无法重绑，Run 已暂停。')
     }
     const discoveredNames = progress.found.map(entry => entry.name)
-    const messages = buildCodexExtractPromptFromRegisteredContextV1({
-      sourceText: chunkText,
-      baselineContext: input.prepared.baselineContext.text,
-      discoveredNames,
-      supplementTags: progress.plan.request.supplementTags,
-    })
+    const messages = progress.plan.request.operation === 'extract'
+      ? buildCodexExtractPromptFromRegisteredContextV1({
+          sourceText: chunkText,
+          baselineContext: input.prepared.baselineContext.text,
+          discoveredNames,
+          supplementTags: progress.plan.request.supplementTags,
+        })
+      : buildCodexEnrichPromptFromRegisteredContextV1({
+          baselineContext: input.prepared.baselineContext.text,
+          worldContext: chunkText,
+          authorRequest: progress.plan.request.authorRequest,
+          supplementTags: progress.plan.request.supplementTags,
+        })
     const promptInputHash = await hashCanonicalValue({
       promptTemplateHash: progress.plan.promptTemplateHash,
       baselineContextHash: progress.plan.baselineContextHash,
       chunkHash: chunk.chunkHash,
       discoveredNames,
       supplementTags: progress.plan.request.supplementTags,
+      operation: progress.plan.request.operation,
+      authorRequest: progress.plan.request.authorRequest,
     })
     snapshot = await append(input.scope, snapshot, 'model.requested', {
       stepId: CODEX_EXTRACTION_STEP_ID_V1, attempt: 1,
@@ -624,7 +776,10 @@ async function continueExtraction(input: {
     try {
       raw = await (input.runAI
         ? input.runAI(messages, callIndex)
-        : chat(messages, input.aiConfig!, { category: 'codex.extract', projectId: input.scope.projectId }))
+        : chat(messages, input.aiConfig!, {
+            category: progress.plan.request.operation === 'extract' ? 'codex.extract' : 'codex.enrich',
+            projectId: input.scope.projectId,
+          }))
     } catch (error) {
       snapshot = await pauseUnsafeRun(input.scope, snapshot, 'codex-extraction-model-outcome-unknown')
       throw error
@@ -635,7 +790,10 @@ async function continueExtraction(input: {
     })
     let parsed: ExtractedCodexEntry[]
     try {
-      parsed = parseCodexEntriesStrictV1(raw, progress.plan.baseline.category.fields)
+      parsed = parseCodexEntriesStrictV1(raw, progress.plan.baseline.category.fields, {
+        operation: progress.plan.request.operation,
+        sourceText: progress.plan.request.sourceText,
+      })
       if (parsed.some(entry => (
         progress.plan.request.supplementTags ? entry.tags.length < 2 : entry.tags.length !== 0
       ))) throw new Error('Codex 词条标签数量与冻结补充标签选项不一致。')
@@ -706,7 +864,9 @@ export async function generateCodexExtractionCandidateV1(input: {
   const prepared = await prepareSources(input.scope, request)
   let snapshot = await createAgentRunV1({
     scope: input.scope, worldGroupId: request.worldGroupId,
-    contract: contract(input.scope, request.worldGroupId, request.categoryId, prepared.chunks.length),
+    contract: contract(
+      input.scope, request.worldGroupId, request.categoryId, prepared.chunks.length, request.operation,
+    ),
   })
   snapshot = await append(input.scope, snapshot, 'step.scheduled', { stepId: CODEX_EXTRACTION_STEP_ID_V1 })
   snapshot = await append(input.scope, snapshot, 'step.started', { stepId: CODEX_EXTRACTION_STEP_ID_V1, attempt: 1 })
@@ -723,10 +883,38 @@ export async function generateCodexExtractionCandidateV1(input: {
   return continueExtraction({ ...input, snapshot, progress, prepared })
 }
 
+export interface CodexEnrichmentRequestV1 {
+  categoryId: number
+  worldGroupId: number | null
+  authorRequest: string
+  supplementTags: boolean
+}
+
+export async function generateCodexEnrichmentCandidateV1(input: {
+  scope: WorkspaceScope
+  request: CodexEnrichmentRequestV1
+  aiConfig?: AIConfig
+  runAI?: RunAI
+  onDurableBoundary?: (boundary: CodexExtractionBoundaryV1, snapshot: AgentRunSnapshotV1, callIndex: number) => void | Promise<void>
+}): Promise<{ snapshot: AgentRunSnapshotV1; candidate: CodexExtractionCandidateV1 }> {
+  return generateCodexExtractionCandidateV1({
+    ...input,
+    request: {
+      categoryId: input.request.categoryId,
+      worldGroupId: input.request.worldGroupId,
+      sourceText: '',
+      supplementTags: input.request.supplementTags,
+      operation: 'enrich',
+      authorRequest: input.request.authorRequest,
+    },
+  })
+}
+
 export async function readRecoverableCodexExtractionV1(input: {
   scope: WorkspaceScope
   categoryId?: number
   worldGroupId?: number | null
+  operation?: 'extract' | 'enrich'
 }): Promise<{
   snapshot: AgentRunSnapshotV1
   nextCallIndex: number
@@ -737,7 +925,10 @@ export async function readRecoverableCodexExtractionV1(input: {
   const rows = (await readOwnedRows<any>(input.scope, 'agentRuns', { owner: 'work' }))
     .filter(row => (
       (row.status === 'running' || row.status === 'paused')
-      && row.contractJson?.includes('world-origin.codex-extract')
+      && (
+        row.contractJson?.includes('world-origin.codex-extract')
+        || row.contractJson?.includes('world-origin.codex-enrich')
+      )
     ))
     .sort((left, right) => (right.id ?? 0) - (left.id ?? 0))
   for (const row of rows) {
@@ -748,6 +939,7 @@ export async function readRecoverableCodexExtractionV1(input: {
       if (!checkpoint) throw new Error('缺少 Codex 提取检查点。')
       const progress = await parseProgress(checkpoint.resumePayload)
       if (input.categoryId != null && progress.plan.request.categoryId !== input.categoryId) continue
+      if (input.operation && progress.plan.request.operation !== input.operation) continue
       if (Object.prototype.hasOwnProperty.call(input, 'worldGroupId')
         && progress.plan.request.worldGroupId !== (input.worldGroupId ?? null)) continue
       const safeTail = checkpoint.snapshot.projection.lastSequence === checkpoint.checkpoint.throughSequence + 1
@@ -762,7 +954,9 @@ export async function readRecoverableCodexExtractionV1(input: {
       // A crash before the first plan checkpoint is not resumable. The frozen
       // category id in the objective still lets the correct panel expose an
       // explicit abandon action without guessing from the active UI state.
-      if (input.categoryId != null && snapshot.contract.objective !== contractObjective(input.categoryId)) continue
+      if (input.categoryId != null && snapshot.contract.objective !== contractObjective(
+        input.categoryId, input.operation ?? (snapshot.contract.objective.includes('AI 新建') ? 'enrich' : 'extract'),
+      )) continue
       if (Object.prototype.hasOwnProperty.call(input, 'worldGroupId')
         && snapshot.contract.scope.worldGroupId !== (input.worldGroupId ?? null)) continue
       return {
@@ -804,6 +998,7 @@ export async function readPendingCodexExtractionCandidateV1(input: {
   scope: WorkspaceScope
   categoryId?: number
   worldGroupId?: number | null
+  operation?: 'extract' | 'enrich'
 }): Promise<{
   snapshot: AgentRunSnapshotV1
   candidate: CodexExtractionCandidateV1
@@ -812,7 +1007,10 @@ export async function readPendingCodexExtractionCandidateV1(input: {
   const rows = (await readOwnedRows<any>(input.scope, 'agentRuns', { owner: 'work' }))
     .filter(row => (
       ['awaiting_confirmation', 'running', 'verifying'].includes(row.status)
-      && row.contractJson?.includes('world-origin.codex-extract')
+      && (
+        row.contractJson?.includes('world-origin.codex-extract')
+        || row.contractJson?.includes('world-origin.codex-enrich')
+      )
     ))
     .sort((left, right) => (right.id ?? 0) - (left.id ?? 0))
   for (const row of rows) {
@@ -823,6 +1021,7 @@ export async function readPendingCodexExtractionCandidateV1(input: {
       const candidate = state.candidate ?? state.intent?.candidate
       if (!candidate) continue
       if (input.categoryId != null && candidate.plan.request.categoryId !== input.categoryId) continue
+      if (input.operation && candidate.plan.request.operation !== input.operation) continue
       if (Object.prototype.hasOwnProperty.call(input, 'worldGroupId')
         && candidate.plan.request.worldGroupId !== (input.worldGroupId ?? null)) continue
       if (state.intent) return {
@@ -836,7 +1035,12 @@ export async function readPendingCodexExtractionCandidateV1(input: {
   return null
 }
 
-function formalItem(entry: ExtractedCodexEntry, order: number, plan: CodexExtractionPlanV1): CodexExtractionFormalItemV1 {
+function formalItem(
+  entry: ExtractedCodexEntry,
+  order: number,
+  plan: CodexExtractionPlanV1,
+  candidateHash: string,
+): CodexExtractionFormalItemV1 {
   return {
     categoryId: plan.request.categoryId,
     name: entry.name,
@@ -849,6 +1053,13 @@ function formalItem(entry: ExtractedCodexEntry, order: number, plan: CodexExtrac
     importance: entry.importance,
     order,
     worldGroupId: plan.request.worldGroupId,
+    origin: plan.request.operation === 'extract' ? 'verbatim-extraction' : 'ai-created-suggestion',
+    sourceEvidenceQuotes: JSON.stringify(entry.evidenceQuotes),
+    sourceContentHash: plan.request.operation === 'extract'
+      ? plan.sourceTextHash
+      : plan.gatewayPacket.contentHash,
+    producerRunId: plan.runId,
+    producerCandidateHash: candidateHash,
   }
 }
 
@@ -865,6 +1076,11 @@ function formalMatches(item: CodexExtractionFormalItemV1, row: Record<string, an
     && Number(row.importance ?? 0) === item.importance
     && row.order === item.order
     && (row.worldGroupId ?? null) === item.worldGroupId
+    && (row.origin ?? 'manual') === item.origin
+    && (row.sourceEvidenceQuotes ?? '[]') === item.sourceEvidenceQuotes
+    && (row.sourceContentHash ?? '') === item.sourceContentHash
+    && (row.producerRunId ?? null) === item.producerRunId
+    && (row.producerCandidateHash ?? null) === item.producerCandidateHash
 }
 
 function entryMatches(left: CodexExtractionEntryV1, right: CodexExtractionEntryV1 | undefined): boolean {
@@ -886,8 +1102,17 @@ async function adoptionFreshness(input: {
     current = await prepareSources(input.scope, input.candidate.plan.request)
   } catch { /* stale */ }
   if (!current) return { fresh: false, baseline: null, selectedRows: [] }
+  const candidateUpstreamRefs = input.candidate.plan.gatewayPacket.sourceRefs.filter(ref => (
+    ref.table !== 'codexEntries' && ref.table !== 'codexCategories'
+  ))
+  const currentUpstreamRefs = current.gatewayPacket.sourceRefs.filter(ref => (
+    ref.table !== 'codexEntries' && ref.table !== 'codexCategories'
+  ))
+  const sourceFresh = input.candidate.plan.request.operation === 'extract'
+    ? current.sourceContextHash === input.candidate.plan.sourceContextHash
+    : await hashCanonicalValue(currentUpstreamRefs) === await hashCanonicalValue(candidateUpstreamRefs)
   const upstreamFresh = current.promptTemplateHash === input.candidate.plan.promptTemplateHash
-    && current.sourceContextHash === input.candidate.plan.sourceContextHash
+    && sourceFresh
   const originalById = new Map(input.candidate.plan.baseline.entries.map(entry => [entry.id, entry]))
   const formalByName = new Map((input.intent?.formalItems ?? []).map(item => [item.name.toLocaleLowerCase(), item]))
   const originalsFresh = canonicalStringify(input.candidate.plan.baseline.category)
@@ -931,7 +1156,7 @@ async function writeFormalItemsAtomic(
   candidate: CodexExtractionCandidateV1,
   intent: CodexExtractionAdoptionIntentV1,
 ): Promise<void> {
-  await db.transaction('rw', scopeTransactionTables(db.codexEntries, db.codexCategories), async () => {
+  await db.transaction('rw', scopeTransactionTables(db.codexEntries, db.codexCategories, db.agentRuns), async () => {
     const current = await readCodexExtractionBaselineV1({
       scope,
       categoryId: candidate.plan.request.categoryId,
@@ -951,7 +1176,13 @@ async function writeFormalItemsAtomic(
     if (
       result.written.length !== intent.formalItems.length
       || result.unknown.length || result.typeErrors.length || result.fkErrors.length || result.skipped.length
-    ) throw new Error('Codex 冻结候选未完整通过注册表校验，事务已回滚。')
+    ) throw new Error(`Codex 冻结候选未完整通过注册表校验，事务已回滚：${canonicalStringify({
+      written: result.written.length,
+      unknown: result.unknown,
+      typeErrors: result.typeErrors,
+      fkErrors: result.fkErrors,
+      skipped: result.skipped,
+    })}`)
   })
 }
 
@@ -999,6 +1230,7 @@ export async function adoptCodexExtractionCandidateV1(input: {
     if (!intent) {
       const formalItems = indexes.map((index, order) => formalItem(
         candidate.entries[index], candidate.plan.baseline.entries.length + order, candidate.plan,
+        candidate.candidateHash,
       ))
       const body = {
         version: 1 as const, kind: 'codex-extraction-adoption-intent' as const, portable: false as const,

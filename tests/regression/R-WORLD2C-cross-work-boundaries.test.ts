@@ -8,6 +8,7 @@ import { AUTHORING_NODE_BY_ID, defaultConfigForTemplate } from '../../src/lib/no
 import { emptyAuthoringGraph, type AuthoringNodeInstance } from '../../src/lib/node-authoring/contracts'
 import { adoptAuthoringCandidate } from '../../src/lib/node-authoring/executor'
 import { buildRagLibrary } from '../../src/lib/retrieval/rag-library'
+import { backfillResourceUidsV1 } from '../../src/lib/context-gateway/resource-identity'
 import { buildSimulationCanonSnapshot, loadSimulationCanonCandidates, parseSimulationCanonSnapshot } from '../../src/lib/simulation/canon-snapshot'
 import type { NodeFlow, WorkspaceScope } from '../../src/lib/types'
 import { stampNewRecord } from '../../src/lib/world-engine/scope'
@@ -194,6 +195,7 @@ describe('WORLD-2C · 双 Work 下游边界反例', () => {
       { projectId: b.projectId, worldId: null, workId: b.workId, theme: 'B主题秘密', createdAt: now, updatedAt: now },
     ] as any)
 
+    await backfillResourceUidsV1(a.projectId)
     const rag = await buildRagLibrary({ projectId: a.projectId, scope: a, worldGroupId: null })
     const ragText = rag.map(entry => entry.content).join('\n')
     const snapshot = await generateContextSnapshot(a)

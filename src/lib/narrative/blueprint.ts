@@ -310,7 +310,7 @@ export async function addNarrativeNode(input: {
       }
     }
     const ts = Date.now()
-    const row: NarrativeNode = {
+    const row = stampNewRecord(scope, 'narrativeNodes', {
       projectId: scope.projectId,
       moduleId: input.moduleId,
       key,
@@ -324,7 +324,7 @@ export async function addNarrativeNode(input: {
       order: input.order ?? 0,
       createdAt: ts,
       updatedAt: ts,
-    }
+    } satisfies NarrativeNode, { owner: module.worldId != null ? 'world' : 'work' })
     const id = await db.narrativeNodes.add(row) as number
     if (input.kind === 'entry' && !module.entryNodeKey) {
       await db.narrativeModules.update(module.id!, { entryNodeKey: key, updatedAt: ts })

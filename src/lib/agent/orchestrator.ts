@@ -24,6 +24,7 @@ import { adopt } from '../registry/adopt'
 import {
   parseAgentEventPayload,
   type AgentEvent,
+  type AIConfig,
   type InspirationResultMode,
   type WorkspaceScope,
 } from '../types'
@@ -78,15 +79,18 @@ import {
   parseWorldviewFieldCandidateDraft,
   prepareWorldviewFieldCopilot,
   type WorldviewAgentField,
+  type WorldviewFieldOperationV1,
+  type WorldviewFieldOutputBudgetV1,
   type WorldviewFieldCopilotSnapshot,
 } from './worldview-field-copilot'
 import {
   adoptRestoredStoryArcCandidate,
-  parseStoryArcCandidateDraft,
+  parseStoryArcMutationRequestV1,
   prepareStoryArcCopilot,
   runStoryArcCreativeReliabilityV1,
   type StoryArcCopilotSnapshot,
   type StoryArcRequestKind,
+  type StoryArcMutationRequestV1,
 } from './story-arc-copilot'
 import {
   adoptRestoredCharacterDrivenCandidateV1,
@@ -113,6 +117,15 @@ import {
   type CharacterSupplementTaskInputV1,
 } from './character-supplement-copilot'
 import {
+  adoptRestoredCharacterLifecycleCandidateV1,
+  parseCharacterLifecycleCandidateV1,
+  parseCharacterLifecycleTaskInputV1,
+  prepareCharacterLifecycleCopilotV1,
+  serializeCharacterLifecycleCandidateV1,
+  type CharacterLifecycleSnapshotV1,
+  type CharacterLifecycleTaskInputV1,
+} from './character-lifecycle-copilot'
+import {
   adoptRestoredStorylineProgressCandidateV1,
   parseStorylineProgressCandidateDraftV1,
   prepareStorylineProgressCopilotV1,
@@ -127,6 +140,8 @@ import { parseWorldGameNarrativeCandidateV1 } from '../text-game/agent-contract'
 import type {
   AgentContextEvidence,
 } from './context-policy'
+import type { AssembleContextResult } from '../registry/types'
+import type { ContextGatewayExecutionV1 } from '../context-gateway/execution'
 import type { AgentSkillExecutionBindingV1 } from '../types/agent-run'
 import { executeAgentTool } from './tool-registry'
 import { validateDomainCandidateCanon } from './canon-validator'
@@ -160,6 +175,11 @@ import {
 import { createAgentSkillExecutionBindingV1 } from './execution-binding'
 import { hashCanonicalValue } from './run/hash'
 import { readAgentRunV1 } from './run/event-store'
+import {
+  assertWorkspaceContentRevisionFreshV1,
+  captureWorkspaceContentRevisionV1,
+  type WorkspaceContentRevisionVectorV1,
+} from '../authoring/content-revision'
 import type {
   MasterCandidateModelIdentityV1,
   MasterCandidateSemanticReviewArtifactV1,
@@ -175,6 +195,18 @@ import {
   type NarrativeBriefV1,
 } from './narrative-brief'
 import type { InformationBoundaryManifestV1 } from './information-boundary'
+import type { StructuredOutputRunEvidenceV1 } from './structured-output-pipeline'
+import { usePromptStore } from '../../stores/prompt'
+import {
+  freezePromptExecutionOptionsV1,
+  parsePromptExecutionOptionsV1,
+  promptExecutionRequestForModuleV1,
+  verifyPromptExecutionOptionsV1,
+  type GovernedPromptModuleKeyV1,
+  type PromptExecutionEvidenceV1,
+  type PromptExecutionOptionsV1,
+  type PromptExecutionRequestV1,
+} from './prompt-execution'
 
 export { DOMAIN_AGENT_IDS }
 export type { DomainAgentId }
@@ -196,8 +228,14 @@ export interface MasterAgentTask {
   characterRevisionRequest?: CharacterRevisionTaskInputV1
   /** 已有角色补全面板冻结的目标角色、字段闭集与剧情证据开关。 */
   characterSupplementRequest?: CharacterSupplementTaskInputV1
+  /** 角色状态变化/退场冻结的目标状态与触发证据。 */
+  characterLifecycleRequest?: CharacterLifecycleTaskInputV1
   /** 故事线进度映射固定的已写章节。 */
   storylineProgressChapterId?: number
+  /** ARC-1: existing-arc transformations freeze operation and stable target ID. */
+  storyArcMutationRequest?: StoryArcMutationRequestV1
+  /** New formal plans freeze the selected PromptTemplate and run options here. */
+  promptExecution?: PromptExecutionOptionsV1
 }
 
 export interface MasterAgentPlan {
@@ -228,6 +266,10 @@ export interface MasterCandidatePayload {
   label: string
   contextSources: string[]
   contextEvidence?: AgentContextEvidence
+  /** Durable Context Manifest identity frozen before candidate persistence. */
+  contextManifestHash?: string
+  /** Absent on candidates created before WEH-0C. */
+  contentRevision?: WorkspaceContentRevisionVectorV1
   teamBudgetEvidence?: AgentTeamBudgetEvidence
   baseSnapshot: unknown
   mode?: InspirationResultMode
@@ -235,12 +277,16 @@ export interface MasterCandidatePayload {
   characterDrivenPlanId?: number
   characterRevisionRequest?: CharacterRevisionTaskInputV1
   characterSupplementRequest?: CharacterSupplementTaskInputV1
+  characterLifecycleRequest?: CharacterLifecycleTaskInputV1
   outlineMode?: OutlineCopilotMode
   outlineParentId?: number | null
   storyArcKind?: StoryArcRequestKind
+  storyArcMutationRequest?: StoryArcMutationRequestV1
   storyCoreField?: StoryCoreField
   creativeRulesField?: CreativeRulesField
   worldviewField?: WorldviewAgentField
+  worldviewFieldOperation?: WorldviewFieldOperationV1
+  worldviewFieldOutputBudget?: WorldviewFieldOutputBudgetV1
   storylineProgressChapterId?: number
   proseOperation?: ProseCopilotOperation
   proseOutlineNodeId?: number
@@ -259,6 +305,10 @@ export interface MasterCandidatePayload {
   semanticReview?: MasterCandidateSemanticReviewArtifactV1
   /** Present on candidates governed by the bounded creative-reliability policy. */
   creativeArtifact?: CreativeArtifactV1
+  /** Absent on candidates created before WEH-0E or on free-text outputs. */
+  structuredOutputEvidence?: StructuredOutputRunEvidenceV1
+  /** Absent on candidates created before WEH-0F or on non-governed prompt paths. */
+  promptExecutionEvidence?: PromptExecutionEvidenceV1
   /** Per-run narrative drive derived only from already assembled registered sources. */
   narrativeBrief?: NarrativeBriefV1
   /** Prose-only immutable knowledge boundary used for local author revalidation. */
@@ -270,11 +320,28 @@ export interface ExecutedMasterCandidate {
   draft: string
   runtimeNode: GenerationNode<any, any, any>
   runtimeOutput: unknown
+  /** Ephemeral exact-evidence inputs; durable runner persists them before candidate storage. */
+  contextGatewayRuntime?: MasterContextGatewayRuntimeV1
+}
+
+export interface MasterContextGatewayPreparedV1 {
+  execution: ContextGatewayExecutionV1
+  assembled: AssembleContextResult
+  renderedRequest: unknown
+}
+
+export interface MasterContextGatewayRuntimeV1 extends MasterContextGatewayPreparedV1 {
+  rawResponse: unknown
 }
 
 export interface MasterAgentExecutionTrace {
   taskStarted?: (task: MasterAgentTask) => Promise<void>
+  contextGatewayPrepared?: (
+    task: MasterAgentTask,
+    prepared: MasterContextGatewayPreparedV1,
+  ) => Promise<void>
   candidateReady?: (task: MasterAgentTask, candidate: ExecutedMasterCandidate) => Promise<void>
+  taskFailed?: (task: MasterAgentTask, error: unknown) => Promise<void>
 }
 
 interface PlannerDependencies {
@@ -291,7 +358,10 @@ export interface PinnedMasterAgentTaskV1 {
   characterDrivenPlanId?: number
   characterRevisionRequest?: CharacterRevisionTaskInputV1
   characterSupplementRequest?: CharacterSupplementTaskInputV1
+  characterLifecycleRequest?: CharacterLifecycleTaskInputV1
   storylineProgressChapterId?: number
+  storyArcMutationRequest?: StoryArcMutationRequestV1
+  promptExecution?: PromptExecutionRequestV1
   id?: string
 }
 
@@ -300,6 +370,42 @@ export interface MasterAgentReplanFailureV1 {
   code: string
   category: string
   fingerprint: string
+}
+
+function governedPromptModuleForTaskV1(
+  task: Pick<MasterAgentTask, 'agentId' | 'skillId'>,
+): GovernedPromptModuleKeyV1 | null {
+  const skill = resolveAgentSkillV1(task.agentId, task.skillId)
+  if (skill.executionMode === 'worldview-field') return 'worldview.dimension'
+  if (skill.executionMode === 'story-core') return 'story.generate'
+  if (task.agentId === 'character' && skill.executionMode === 'create') return 'character.generate'
+  return null
+}
+
+async function freezeMasterAgentPlanPromptsV1(plan: MasterAgentPlan): Promise<MasterAgentPlan> {
+  const tasks = await Promise.all(plan.tasks.map(async task => {
+    const expectedModuleKey = governedPromptModuleForTaskV1(task)
+    if (!expectedModuleKey) {
+      if (task.promptExecution !== undefined) {
+        throw new Error(`主 Agent 任务 ${task.id} 的 Skill 不允许携带 Prompt 执行选项。`)
+      }
+      return task
+    }
+    if (task.promptExecution) {
+      const frozen = parsePromptExecutionOptionsV1(task.promptExecution, expectedModuleKey)
+      await verifyPromptExecutionOptionsV1(frozen)
+      return { ...task, promptExecution: frozen }
+    }
+    const request = promptExecutionRequestForModuleV1(expectedModuleKey)
+    return {
+      ...task,
+      promptExecution: await freezePromptExecutionOptionsV1({
+        request,
+        template: usePromptStore.getState().getActive(expectedModuleKey),
+      }),
+    }
+  }))
+  return { ...plan, tasks }
 }
 
 function extractJsonObject(text: string): Record<string, unknown> {
@@ -520,6 +626,13 @@ export async function createMasterAgentPlan(input: {
       throw new Error('角色补全 Skill 必须固定角色补全请求。')
     }
     if (
+      pinned.characterLifecycleRequest !== undefined
+      && (pinned.agentId !== 'character' || pinned.skillId !== 'character.lifecycle')
+    ) throw new Error('只有角色状态 Skill 可以固定生命周期请求。')
+    if (pinned.skillId === 'character.lifecycle' && pinned.characterLifecycleRequest === undefined) {
+      throw new Error('角色状态 Skill 必须固定生命周期请求。')
+    }
+    if (
       pinned.storylineProgressChapterId !== undefined
       && (pinned.agentId !== 'outline' || pinned.skillId !== 'outline.storyline-progress')
     ) throw new Error('只有故事线进度 Skill 可以固定映射章节。')
@@ -529,46 +642,75 @@ export async function createMasterAgentPlan(input: {
         throw new Error('故事线进度 Skill 必须固定已写章节 ID。')
       }
     }
+    if (
+      pinned.storyArcMutationRequest !== undefined
+      && (pinned.agentId !== 'outline' || pinned.skillId !== 'outline.story-arcs')
+    ) throw new Error('只有故事线 Skill 可以固定既有故事线变换请求。')
     const characterRevisionRequest = pinned.characterRevisionRequest === undefined
       ? undefined
       : parseCharacterRevisionTaskInputV1(pinned.characterRevisionRequest)
     const characterSupplementRequest = pinned.characterSupplementRequest === undefined
       ? undefined
       : parseCharacterSupplementTaskInputV1(pinned.characterSupplementRequest)
-    return {
+    const characterLifecycleRequest = pinned.characterLifecycleRequest === undefined
+      ? undefined
+      : parseCharacterLifecycleTaskInputV1(pinned.characterLifecycleRequest)
+    const storyArcMutationRequest = pinned.storyArcMutationRequest === undefined
+      ? undefined
+      : parseStoryArcMutationRequestV1(pinned.storyArcMutationRequest)
+    const instruction = pinned.instruction.trim()
+    if (instruction.length > 8_000) {
+      throw new Error('固定领域任务的作者要求超过 8000 字符；已在模型调用前阻止，请缩短后重试。')
+    }
+    const task: MasterAgentTask = {
+      id: pinned.id ?? `${pinned.agentId}-targeted`,
+      agentId: pinned.agentId,
+      ...(pinned.skillId ? { skillId: pinned.skillId } : {}),
+      instruction,
+      dependsOn: [...new Set(pinned.dependsOn ?? [])].slice(0, 5),
+      ...(pinned.perspectiveCharacterId !== undefined
+        ? { perspectiveCharacterId: pinned.perspectiveCharacterId }
+        : {}),
+      ...(pinned.inspirationFragmentIds !== undefined
+        ? { inspirationFragmentIds: [...new Set(pinned.inspirationFragmentIds)].slice(0, 24) }
+        : {}),
+      ...(pinned.characterDrivenPlanId !== undefined
+        ? { characterDrivenPlanId: pinned.characterDrivenPlanId }
+        : {}),
+      ...(characterRevisionRequest !== undefined
+        ? { characterRevisionRequest }
+        : {}),
+      ...(characterSupplementRequest !== undefined
+        ? { characterSupplementRequest }
+        : {}),
+      ...(characterLifecycleRequest !== undefined
+        ? { characterLifecycleRequest }
+        : {}),
+      ...(pinned.storylineProgressChapterId !== undefined
+        ? { storylineProgressChapterId: pinned.storylineProgressChapterId }
+        : {}),
+      ...(storyArcMutationRequest !== undefined ? { storyArcMutationRequest } : {}),
+    }
+    const expectedPromptModule = governedPromptModuleForTaskV1(task)
+    if (pinned.promptExecution !== undefined) {
+      if (!expectedPromptModule || pinned.promptExecution.moduleKey !== expectedPromptModule) {
+        throw new Error('固定任务的 Prompt 模块与 Agent Skill 不一致。')
+      }
+      task.promptExecution = await freezePromptExecutionOptionsV1({
+        request: pinned.promptExecution,
+        template: usePromptStore.getState().getActive(expectedPromptModule),
+      })
+    }
+    return freezeMasterAgentPlanPromptsV1({
       summary: pinned.agentId === 'inspiration'
         ? '按作者选择的灵感碎片生成结构化反推候选。'
         : '按固定领域任务执行一次受治理候选生成。',
-      tasks: [{
-        id: pinned.id ?? `${pinned.agentId}-targeted`,
-        agentId: pinned.agentId,
-        ...(pinned.skillId ? { skillId: pinned.skillId } : {}),
-        instruction: pinned.instruction.trim().slice(0, 8_000),
-        dependsOn: [...new Set(pinned.dependsOn ?? [])].slice(0, 5),
-        ...(pinned.perspectiveCharacterId !== undefined
-          ? { perspectiveCharacterId: pinned.perspectiveCharacterId }
-          : {}),
-        ...(pinned.inspirationFragmentIds !== undefined
-          ? { inspirationFragmentIds: [...new Set(pinned.inspirationFragmentIds)].slice(0, 24) }
-          : {}),
-        ...(pinned.characterDrivenPlanId !== undefined
-          ? { characterDrivenPlanId: pinned.characterDrivenPlanId }
-          : {}),
-        ...(characterRevisionRequest !== undefined
-          ? { characterRevisionRequest }
-          : {}),
-        ...(characterSupplementRequest !== undefined
-          ? { characterSupplementRequest }
-          : {}),
-        ...(pinned.storylineProgressChapterId !== undefined
-          ? { storylineProgressChapterId: pinned.storylineProgressChapterId }
-          : {}),
-      }],
+      tasks: [task],
       workflow,
-    }
+    })
   }
   if (getMasterWorkflowV1(workflow).planner === 'skip') {
-    return fallbackPlan(request, workflow)
+    return freezeMasterAgentPlanPromptsV1(fallbackPlan(request, workflow))
   }
   const config = resolveRequestConfig(
     useAIConfigStore.getState().config,
@@ -624,13 +766,13 @@ export async function createMasterAgentPlan(input: {
       input.budget!.settleCall(reservation, output)
       settled = true
     }
-    return sanitizePlan(extractJsonObject(output), request, workflow)
+    return freezeMasterAgentPlanPromptsV1(sanitizePlan(extractJsonObject(output), request, workflow))
   } catch (error) {
     if (reservation && !settled) input.budget!.settleFailedCall(reservation)
     if (error instanceof AgentTeamBudgetExceededError) throw error
     if (input.signal?.aborted) throw error
     console.warn('[master-agent] 计划模型失败，使用确定性路由降级：', error)
-    return fallbackPlan(request, workflow)
+    return freezeMasterAgentPlanPromptsV1(fallbackPlan(request, workflow))
   }
 }
 
@@ -774,6 +916,14 @@ export interface ExecuteMasterAgentPlanInput {
   signal?: AbortSignal
   completedTaskOutputs?: Readonly<Record<string, string>>
   completedTaskAssumptions?: Readonly<Record<string, readonly CreativeAssumptionV1[]>>
+  /**
+   * Tasks whose candidates have crossed the author-confirmation boundary and
+   * have been committed to Canon.  `staged-author-confirmed` uses this set as
+   * an execution barrier; persisted candidate output alone is not authority.
+   */
+  authorConfirmedTaskIds?: readonly string[]
+  /** Ephemeral, caller-authorized connection freeze; never persisted in the plan or RunContract. */
+  taskConfigOverrides?: Readonly<Record<string, AIConfig>>
   executionTrace?: MasterAgentExecutionTrace
   onTask?: (
     task: MasterAgentTask,
@@ -813,13 +963,23 @@ async function executeSequentialMasterAgentPlan(
     runtimeAssumptions.set(taskId, scopeRuntimeAssumptionsV1(taskId, assumptions))
   }
   const orderedTasks = topologicalTasks(input.plan)
+  const stagedAuthorConfirmed = input.plan.workflow?.workflowId === 'staged-author-confirmed'
+  const authorConfirmedTaskIds = new Set(input.authorConfirmedTaskIds ?? [])
   for (let taskIndex = 0; taskIndex < orderedTasks.length; taskIndex += 1) {
     const task = orderedTasks[taskIndex]
     if (outputs.has(task.id)) continue
+    if (
+      stagedAuthorConfirmed
+      && task.dependsOn.some(taskId => !authorConfirmedTaskIds.has(taskId))
+    ) continue
     if (input.signal?.aborted) throw new DOMException('Aborted', 'AbortError')
     await input.executionTrace?.taskStarted?.(task)
     await input.onTask?.(task, 'running')
     try {
+      const contentRevision = await captureWorkspaceContentRevisionV1({
+        scope,
+        worldGroupId: input.worldGroupId,
+      })
       const dependencyBindings = await Promise.all(task.dependsOn.map(async taskId => {
         const output = outputs.get(taskId)
         if (!output?.trim()) throw new Error(`主 Agent 任务 ${task.id} 缺少依赖输出 ${taskId}。`)
@@ -828,19 +988,32 @@ async function executeSequentialMasterAgentPlan(
           outputHash: await hashCanonicalValue(output),
         }
       }))
-      const upstream = task.dependsOn
-        .map(id => outputs.get(id))
-        .filter((value): value is string => Boolean(value?.trim()))
-        .join('\n\n')
-      const inheritedAssumptions = mergeProvisionalAssumptionsV1(
-        ...task.dependsOn.map(id => runtimeAssumptions.get(id) ?? []),
-      )
+      // A staged downstream task must re-read author-confirmed Canon through
+      // its registered Context Gateway.  Candidate prose and provisional
+      // assumptions remain lineage evidence, never downstream context.
+      const upstream = stagedAuthorConfirmed
+        ? ''
+        : task.dependsOn
+            .map(id => outputs.get(id))
+            .filter((value): value is string => Boolean(value?.trim()))
+            .join('\n\n')
+      const inheritedAssumptions = stagedAuthorConfirmed
+        ? []
+        : mergeProvisionalAssumptionsV1(
+            ...task.dependsOn.map(id => runtimeAssumptions.get(id) ?? []),
+          )
       const skill = resolveAgentSkillV1(task.agentId, task.skillId)
       const executionBinding = createAgentSkillExecutionBindingV1(skill)
       const contextProfile = contextProfiles[skill.contextTaskKind]
       const budgetSnapshot = budget.snapshot()
       const pendingGenerationCalls = runtime.requiredFutureModelCalls
-        ?? orderedTasks.slice(taskIndex).filter(item => !outputs.has(item.id)).length
+        ?? orderedTasks.slice(taskIndex).filter(item => (
+          !outputs.has(item.id)
+          && (
+            !stagedAuthorConfirmed
+            || item.dependsOn.every(taskId => authorConfirmedTaskIds.has(taskId))
+          )
+        )).length
       const contextCompressionRuntime = {
         budget,
         requiredFutureModelCalls: pendingGenerationCalls
@@ -858,8 +1031,17 @@ async function executeSequentialMasterAgentPlan(
             routingCategory: `${AGENT_ROLE_CATEGORIES['world-origin']}.worldview-field`,
             contextProfile,
             contextCompressionRuntime,
+            configOverride: input.taskConfigOverrides?.[task.id],
+            promptExecution: task.promptExecution,
             signal: input.signal,
           })
+          if (prepared.contextGatewayExecution) {
+            await input.executionTrace?.contextGatewayPrepared?.(task, {
+              execution: prepared.contextGatewayExecution,
+              assembled: prepared.input.assembled,
+              renderedRequest: prepared.prepared.messages,
+            })
+          }
           const result = await runBudgetedGenerationNode({
             node: prepared.node,
             prepared: prepared.prepared,
@@ -880,14 +1062,26 @@ async function executeSequentialMasterAgentPlan(
               contextEvidence: prepared.contextEvidence,
               baseSnapshot: prepared.snapshot,
               worldviewField: prepared.targetField,
+              worldviewFieldOperation: prepared.input.mode,
+              worldviewFieldOutputBudget: prepared.input.outputBudget,
               workspaceScope: scope,
               dependsOnTaskIds: task.dependsOn,
               dependencyBindings,
               generator: prepared.modelIdentity,
+              structuredOutputEvidence: result.structuredOutputEvidence,
+              promptExecutionEvidence: prepared.promptExecutionEvidence,
             },
             draft,
             runtimeNode: prepared.node,
             runtimeOutput: result.output,
+            ...(prepared.contextGatewayExecution ? {
+              contextGatewayRuntime: {
+                execution: prepared.contextGatewayExecution,
+                assembled: prepared.input.assembled,
+                renderedRequest: prepared.prepared.messages,
+                rawResponse: result.structuredOutputEvidence ?? result.output,
+              },
+            } : {}),
           })
           outputs.set(task.id, draft)
         } else if (skill.executionMode === 'story-core') {
@@ -901,8 +1095,16 @@ async function executeSequentialMasterAgentPlan(
             routingCategory: `${AGENT_ROLE_CATEGORIES['world-origin']}.story-core`,
             contextProfile,
             contextCompressionRuntime,
+            promptExecution: task.promptExecution,
             signal: input.signal,
           })
+          if (prepared.contextGatewayExecution) {
+            await input.executionTrace?.contextGatewayPrepared?.(task, {
+              execution: prepared.contextGatewayExecution,
+              assembled: prepared.input.assembled,
+              renderedRequest: prepared.prepared.messages,
+            })
+          }
           const result = await runBudgetedGenerationNode({
             node: prepared.node,
             prepared: prepared.prepared,
@@ -927,10 +1129,20 @@ async function executeSequentialMasterAgentPlan(
               dependsOnTaskIds: task.dependsOn,
               dependencyBindings,
               generator: prepared.modelIdentity,
+              structuredOutputEvidence: result.structuredOutputEvidence,
+              promptExecutionEvidence: prepared.promptExecutionEvidence,
             },
             draft,
             runtimeNode: prepared.node,
             runtimeOutput: result.output,
+            ...(prepared.contextGatewayExecution ? {
+              contextGatewayRuntime: {
+                execution: prepared.contextGatewayExecution,
+                assembled: prepared.input.assembled,
+                renderedRequest: prepared.prepared.messages,
+                rawResponse: result.structuredOutputEvidence ?? result.output,
+              },
+            } : {}),
           })
           outputs.set(task.id, draft)
         } else if (skill.executionMode === 'creative-rules') {
@@ -970,6 +1182,7 @@ async function executeSequentialMasterAgentPlan(
               dependsOnTaskIds: task.dependsOn,
               dependencyBindings,
               generator: prepared.modelIdentity,
+              structuredOutputEvidence: result.structuredOutputEvidence,
             },
             draft,
             runtimeNode: prepared.node,
@@ -1017,6 +1230,7 @@ async function executeSequentialMasterAgentPlan(
               dependsOnTaskIds: task.dependsOn,
               dependencyBindings,
               generator: prepared.modelIdentity,
+              structuredOutputEvidence: result.structuredOutputEvidence,
             },
             draft,
             runtimeNode: prepared.node,
@@ -1066,7 +1280,61 @@ async function executeSequentialMasterAgentPlan(
           outputs.set(task.id, draft)
         }
       } else if (task.agentId === 'character') {
-        if (skill.executionMode === 'supplement') {
+        if (skill.executionMode === 'lifecycle') {
+          if (!task.characterLifecycleRequest) throw new Error('角色状态任务缺少冻结目标与证据。')
+          const prepared = await prepareCharacterLifecycleCopilotV1({
+            projectId: input.projectId,
+            scope,
+            worldGroupId: input.worldGroupId,
+            request: task.characterLifecycleRequest,
+            authorRequest: task.instruction,
+            skillId: skill.id as AgentSkillId,
+            contextProfile,
+            signal: input.signal,
+          })
+          await input.executionTrace?.contextGatewayPrepared?.(task, {
+            execution: prepared.contextGatewayExecution,
+            assembled: prepared.input.assembled,
+            renderedRequest: prepared.prepared.messages,
+          })
+          const result = await runBudgetedGenerationNode({
+            node: prepared.node,
+            prepared: prepared.prepared,
+            budget,
+            callLabel: '角色状态演化 Skill',
+            maxOutputTokens: skill.maxOutputTokens,
+          })
+          const draft = serializeCharacterLifecycleCandidateV1(result.output, prepared.snapshot)
+          candidates.push({
+            payload: {
+              version: 1,
+              taskId: task.id,
+              agentId: task.agentId,
+              skillId: skill.id as AgentSkillId,
+              executionBinding,
+              label: prepared.label,
+              contextSources: prepared.contextSources,
+              contextEvidence: prepared.contextEvidence,
+              baseSnapshot: prepared.snapshot,
+              workspaceScope: scope,
+              characterLifecycleRequest: task.characterLifecycleRequest,
+              dependsOnTaskIds: task.dependsOn,
+              dependencyBindings,
+              generator: prepared.modelIdentity,
+              structuredOutputEvidence: result.structuredOutputEvidence,
+            },
+            draft,
+            runtimeNode: prepared.node,
+            runtimeOutput: result.output,
+            contextGatewayRuntime: {
+              execution: prepared.contextGatewayExecution,
+              assembled: prepared.input.assembled,
+              renderedRequest: prepared.prepared.messages,
+              rawResponse: result.structuredOutputEvidence ?? result.output,
+            },
+          })
+          outputs.set(task.id, draft)
+        } else if (skill.executionMode === 'supplement') {
           if (!task.characterSupplementRequest) throw new Error('角色补全任务缺少固定目标与字段。')
           const prepared = await prepareCharacterSupplementCopilotV1({
             projectId: input.projectId,
@@ -1080,6 +1348,13 @@ async function executeSequentialMasterAgentPlan(
             contextCompressionRuntime,
             signal: input.signal,
           })
+          if (prepared.contextGatewayExecution) {
+            await input.executionTrace?.contextGatewayPrepared?.(task, {
+              execution: prepared.contextGatewayExecution,
+              assembled: prepared.input.assembled,
+              renderedRequest: prepared.prepared.messages,
+            })
+          }
           const result = await runBudgetedGenerationNode({
             node: prepared.node,
             prepared: prepared.prepared,
@@ -1106,10 +1381,20 @@ async function executeSequentialMasterAgentPlan(
               characterSupplementRequest: task.characterSupplementRequest,
               dependsOnTaskIds: task.dependsOn,
               dependencyBindings,
+              generator: prepared.modelIdentity,
+              structuredOutputEvidence: result.structuredOutputEvidence,
             },
             draft,
             runtimeNode: prepared.node,
             runtimeOutput: result.output,
+            ...(prepared.contextGatewayExecution ? {
+              contextGatewayRuntime: {
+                execution: prepared.contextGatewayExecution,
+                assembled: prepared.input.assembled,
+                renderedRequest: prepared.prepared.messages,
+                rawResponse: result.structuredOutputEvidence ?? result.output,
+              },
+            } : {}),
           })
           outputs.set(task.id, draft)
         } else {
@@ -1123,8 +1408,16 @@ async function executeSequentialMasterAgentPlan(
             routingCategory: AGENT_ROLE_CATEGORIES.character,
             contextProfile,
             contextCompressionRuntime,
+            promptExecution: task.promptExecution,
             signal: input.signal,
           })
+          if (prepared.contextGatewayExecution) {
+            await input.executionTrace?.contextGatewayPrepared?.(task, {
+              execution: prepared.contextGatewayExecution,
+              assembled: prepared.input.assembled,
+              renderedRequest: prepared.prepared.messages,
+            })
+          }
           const result = await runBudgetedGenerationNode({
             node: prepared.node,
             prepared: prepared.prepared,
@@ -1147,10 +1440,21 @@ async function executeSequentialMasterAgentPlan(
               workspaceScope: scope,
               dependsOnTaskIds: task.dependsOn,
               dependencyBindings,
+              generator: prepared.modelIdentity,
+              structuredOutputEvidence: result.structuredOutputEvidence,
+              promptExecutionEvidence: prepared.promptExecutionEvidence,
             },
             draft,
             runtimeNode: prepared.node,
             runtimeOutput: result.output,
+            ...(prepared.contextGatewayExecution ? {
+              contextGatewayRuntime: {
+                execution: prepared.contextGatewayExecution,
+                assembled: prepared.input.assembled,
+                renderedRequest: prepared.prepared.messages,
+                rawResponse: result.structuredOutputEvidence ?? result.output,
+              },
+            } : {}),
           })
           outputs.set(task.id, draft)
         }
@@ -1209,6 +1513,7 @@ async function executeSequentialMasterAgentPlan(
             dependsOnTaskIds: task.dependsOn,
             dependencyBindings,
             generator: prepared.modelIdentity,
+            structuredOutputEvidence: result.structuredOutputEvidence,
           },
           draft,
           runtimeNode: prepared.node,
@@ -1249,6 +1554,7 @@ async function executeSequentialMasterAgentPlan(
               dependsOnTaskIds: task.dependsOn,
               dependencyBindings,
               generator: prepared.modelIdentity,
+              structuredOutputEvidence: result.structuredOutputEvidence,
             },
             draft,
             runtimeNode: prepared.node,
@@ -1294,6 +1600,7 @@ async function executeSequentialMasterAgentPlan(
               characterRevisionRequest: task.characterRevisionRequest,
               dependsOnTaskIds: task.dependsOn,
               dependencyBindings,
+              structuredOutputEvidence: result.structuredOutputEvidence,
             },
             draft,
             runtimeNode: prepared.node,
@@ -1345,6 +1652,7 @@ async function executeSequentialMasterAgentPlan(
               characterDrivenPlanId: prepared.snapshot.planId,
               dependsOnTaskIds: task.dependsOn,
               dependencyBindings,
+              structuredOutputEvidence: result.structuredOutputEvidence,
             },
             draft,
             runtimeNode: prepared.node,
@@ -1364,8 +1672,16 @@ async function executeSequentialMasterAgentPlan(
             contextCompressionRuntime,
             inheritedAssumptions,
             creativeReliabilityEnabled,
+            mutationRequest: task.storyArcMutationRequest,
             signal: input.signal,
           })
+          if (prepared.contextGatewayExecution) {
+            await input.executionTrace?.contextGatewayPrepared?.(task, {
+              execution: prepared.contextGatewayExecution,
+              assembled: prepared.input.assembled,
+              renderedRequest: prepared.prepared.messages,
+            })
+          }
           if (creativeReliabilityEnabled) {
             const result = await runStoryArcCreativeReliabilityV1({
               prepared,
@@ -1392,6 +1708,7 @@ async function executeSequentialMasterAgentPlan(
                 baseSnapshot: prepared.snapshot,
                 workspaceScope: scope,
                 storyArcKind: prepared.kind,
+                storyArcMutationRequest: prepared.mutation,
                 dependsOnTaskIds: task.dependsOn,
                 dependencyBindings,
                 creativeArtifact: result.artifact,
@@ -1400,6 +1717,14 @@ async function executeSequentialMasterAgentPlan(
               draft,
               runtimeNode: prepared.node,
               runtimeOutput: result.output,
+              ...(prepared.contextGatewayExecution ? {
+                contextGatewayRuntime: {
+                  execution: prepared.contextGatewayExecution,
+                  assembled: prepared.input.assembled,
+                  renderedRequest: prepared.prepared.messages,
+                  rawResponse: result.artifact,
+                },
+              } : {}),
             })
             outputs.set(task.id, draft)
           } else {
@@ -1430,12 +1755,22 @@ async function executeSequentialMasterAgentPlan(
                 baseSnapshot: prepared.snapshot,
                 workspaceScope: scope,
                 storyArcKind: prepared.kind,
+                storyArcMutationRequest: prepared.mutation,
                 dependsOnTaskIds: task.dependsOn,
                 dependencyBindings,
+                structuredOutputEvidence: result.structuredOutputEvidence,
               },
               draft,
               runtimeNode: prepared.node,
               runtimeOutput: result.output,
+              ...(prepared.contextGatewayExecution ? {
+                contextGatewayRuntime: {
+                  execution: prepared.contextGatewayExecution,
+                  assembled: prepared.input.assembled,
+                  renderedRequest: prepared.prepared.messages,
+                  rawResponse: result.structuredOutputEvidence ?? result.output,
+                },
+              } : {}),
             })
             outputs.set(task.id, draft)
           }
@@ -1453,6 +1788,11 @@ async function executeSequentialMasterAgentPlan(
             inheritedAssumptions,
             creativeReliabilityEnabled,
             signal: input.signal,
+          })
+          await input.executionTrace?.contextGatewayPrepared?.(task, {
+            execution: prepared.contextGatewayExecution,
+            assembled: prepared.input.assembled,
+            renderedRequest: prepared.prepared.messages,
           })
           if (creativeReliabilityEnabled) {
             const result = await runOutlineCreativeReliabilityV1({
@@ -1490,6 +1830,12 @@ async function executeSequentialMasterAgentPlan(
               draft,
               runtimeNode: prepared.node,
               runtimeOutput: result.output,
+              contextGatewayRuntime: {
+                execution: prepared.contextGatewayExecution,
+                assembled: prepared.input.assembled,
+                renderedRequest: prepared.prepared.messages,
+                rawResponse: result.artifact.originalText,
+              },
             })
             outputs.set(task.id, draft)
           } else {
@@ -1524,10 +1870,17 @@ async function executeSequentialMasterAgentPlan(
                 outlineParentId: prepared.parentVolumeId,
                 dependsOnTaskIds: task.dependsOn,
                 dependencyBindings,
+                structuredOutputEvidence: result.structuredOutputEvidence,
               },
               draft,
               runtimeNode: prepared.node,
               runtimeOutput: result.output,
+              contextGatewayRuntime: {
+                execution: prepared.contextGatewayExecution,
+                assembled: prepared.input.assembled,
+                renderedRequest: prepared.prepared.messages,
+                rawResponse: result.structuredOutputEvidence ?? result.output,
+              },
             })
             outputs.set(task.id, draft)
           }
@@ -1547,6 +1900,11 @@ async function executeSequentialMasterAgentPlan(
           creativeReliabilityEnabled,
           perspectiveCharacterId: task.perspectiveCharacterId ?? null,
           signal: input.signal,
+        })
+        await input.executionTrace?.contextGatewayPrepared?.(task, {
+          execution: prepared.contextGatewayExecution,
+          assembled: prepared.input.assembled,
+          renderedRequest: prepared.prepared.messages,
         })
         if (creativeReliabilityEnabled) {
           const result = await runProseCreativeReliabilityV1({
@@ -1586,6 +1944,12 @@ async function executeSequentialMasterAgentPlan(
             draft,
             runtimeNode: prepared.node,
             runtimeOutput: result.output,
+            contextGatewayRuntime: {
+              execution: prepared.contextGatewayExecution,
+              assembled: prepared.input.assembled,
+              renderedRequest: prepared.prepared.messages,
+              rawResponse: result.artifact,
+            },
           })
           outputs.set(task.id, draft)
         } else {
@@ -1626,11 +1990,22 @@ async function executeSequentialMasterAgentPlan(
             draft,
             runtimeNode: prepared.node,
             runtimeOutput: result.output,
+            contextGatewayRuntime: {
+              execution: prepared.contextGatewayExecution,
+              assembled: prepared.input.assembled,
+              renderedRequest: prepared.prepared.messages,
+              rawResponse: result.output,
+            },
           })
           outputs.set(task.id, draft)
         }
       }
       const candidate = candidates[candidates.length - 1]
+      candidate.payload.contentRevision = contentRevision
+      await assertWorkspaceContentRevisionFreshV1(contentRevision, {
+        scope,
+        worldGroupId: input.worldGroupId,
+      })
       const candidateAssumptions = candidate.payload.creativeArtifact?.assumptions
         ?? candidate.payload.narrativeBrief?.assumptions
         ?? []
@@ -1642,6 +2017,7 @@ async function executeSequentialMasterAgentPlan(
       await input.executionTrace?.candidateReady?.(task, candidate)
       await input.onTask?.(task, 'completed')
     } catch (error) {
+      await input.executionTrace?.taskFailed?.(task, error)
       const message = error instanceof Error ? error.message : String(error)
       await input.onTask?.(task, 'failed', message)
       throw error
@@ -1701,7 +2077,16 @@ async function executeFanOutMasterAgentPlan(
           budget,
           completedTaskOutputs,
           completedTaskAssumptions,
-          executionTrace: undefined,
+          executionTrace: input.executionTrace?.contextGatewayPrepared
+            ? {
+                contextGatewayPrepared: input.executionTrace.contextGatewayPrepared,
+                ...(input.executionTrace.taskFailed
+                  ? { taskFailed: input.executionTrace.taskFailed }
+                  : {}),
+              }
+            : input.executionTrace?.taskFailed
+              ? { taskFailed: input.executionTrace.taskFailed }
+            : undefined,
           onTask: undefined,
         }, { requiredFutureModelCalls })
         const candidate = generated[0]
@@ -1938,7 +2323,33 @@ export async function adoptMasterCandidate(input: {
   assertMasterCreativeArtifactAdoptableV1(input.payload)
   const scope = await resolveCandidateScope(input)
   await assertMasterCandidateDependenciesAdoptedV1(input.event, input.payload, scope)
-  if (input.runtime) {
+  if (input.payload.skillId === 'character.lifecycle') {
+    if (!input.payload.characterLifecycleRequest) {
+      throw new Error('角色状态候选缺少冻结目标与证据，请重新生成。')
+    }
+    await adoptRestoredCharacterLifecycleCandidateV1({
+      projectId: input.projectId,
+      scope,
+      worldGroupId: input.worldGroupId,
+      snapshot: input.payload.baseSnapshot as CharacterLifecycleSnapshotV1,
+      draft: input.draft,
+      producerRunContractHash: input.payload.runId == null
+        ? null
+        : (await db.agentRuns.get(input.payload.runId))?.contractHash ?? null,
+      producerCandidateHash: input.payload.candidateHash ?? null,
+    })
+  } else if (input.payload.skillId === 'outline.story-arcs') {
+    await adoptRestoredStoryArcCandidate({
+      projectId: input.projectId,
+      scope,
+      worldGroupId: input.worldGroupId,
+      snapshot: input.payload.baseSnapshot as StoryArcCopilotSnapshot,
+      draft: input.draft,
+      producerRunId: input.payload.runId,
+      producerCandidateHash: input.payload.candidateHash,
+      mutation: input.payload.storyArcMutationRequest,
+    })
+  } else if (input.runtime) {
     const output = input.payload.skillId === 'world-origin.worldview-field'
       ? parseWorldviewFieldCandidateDraft(input.draft)
       : input.payload.skillId === 'world-origin.story-core'
@@ -1947,8 +2358,6 @@ export async function adoptMasterCandidate(input: {
       ? parseCreativeRulesCandidateDraftV1(input.draft)
       : input.payload.skillId === 'outline.storyline-progress'
       ? parseStorylineProgressCandidateDraftV1(input.draft)
-      : input.payload.skillId === 'outline.story-arcs'
-      ? parseStoryArcCandidateDraft(input.draft)
       : input.payload.skillId === 'outline.character-driven'
       ? parseCharacterDrivenCandidateDraftV1(input.draft)
       : input.payload.skillId === 'outline.character-revision'
@@ -2097,14 +2506,6 @@ export async function adoptMasterCandidate(input: {
         snapshot: input.payload.baseSnapshot as CharacterDrivenCopilotSnapshotV1,
         draft: input.draft,
       })
-    } else if (input.payload.skillId === 'outline.story-arcs') {
-      await adoptRestoredStoryArcCandidate({
-        projectId: input.projectId,
-        scope,
-        worldGroupId: input.worldGroupId,
-        snapshot: input.payload.baseSnapshot as StoryArcCopilotSnapshot,
-        draft: input.draft,
-      })
     } else if (input.payload.skillId === 'outline.storyline-progress') {
       if (input.payload.storylineProgressChapterId == null) {
         throw new Error('故事线进度候选缺少目标章节，请重新生成。')
@@ -2161,7 +2562,12 @@ export async function adoptMasterCandidate(input: {
       ? `创作规则“${input.payload.label}”已写入项目。`
       : '世界来源已写入项目。'
     : input.payload.agentId === 'character'
-      ? input.payload.skillId === 'character.supplement'
+      ? input.payload.skillId === 'character.lifecycle'
+        ? `角色状态已更新为 ${(parseCharacterLifecycleCandidateV1(
+            input.draft,
+            input.payload.baseSnapshot as CharacterLifecycleSnapshotV1,
+          )).targetStatus}。`
+      : input.payload.skillId === 'character.supplement'
         ? `角色设定已补全 ${input.payload.characterSupplementRequest?.dimensions.length ?? 0} 个字段。`
         : `角色“${(parseCharacterCandidateDraft(input.draft) as CharacterCopilotCandidate).name}”已加入项目。`
       : input.payload.agentId === 'inspiration'

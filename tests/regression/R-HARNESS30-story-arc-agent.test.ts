@@ -41,6 +41,9 @@ import {
 import { AgentTeamBudgetTracker } from '../../src/lib/agent/team-budget'
 import { hashCanonicalValue } from '../../src/lib/agent/run/hash'
 import { db } from '../../src/lib/db/schema'
+import { generateWorkspaceUid } from '../../src/lib/memory/identity'
+import { ensureWorkspaceOwnership } from '../../src/lib/world-engine/ownership'
+import { stampNewRecord } from '../../src/lib/world-engine/scope'
 import {
   adoptGenerationNodeOutput,
   runGenerationNode,
@@ -75,60 +78,33 @@ const directWorkflow = {
 async function createWorkspace(): Promise<{ project: Project; scope: WorkspaceScope }> {
   const now = Date.now()
   const projectId = await db.projects.add({
+    workspaceUid: generateWorkspaceUid(),
     name: '潮汐纪元',
     genre: 'fantasy',
     genres: ['fantasy'],
     description: '',
     status: 'drafting',
     targetWordCount: 100_000,
-    worldCode: 'harness-30-world',
-    worldVersion: 1,
     createdAt: now,
     updatedAt: now,
   } as Project) as number
-  const worldId = await db.worlds.add({
+  const { scope } = await ensureWorkspaceOwnership(projectId)
+  await db.worldviews.add(stampNewRecord(scope, 'worldviews', {
     projectId,
-    code: 'harness-30-world',
-    name: '潮汐世界',
-    description: '',
-    currentVersion: 1,
-    createdAt: now,
-    updatedAt: now,
-  }) as number
-  const workId = await db.works.add({
-    projectId,
-    worldId,
-    title: '潮汐纪元',
-    description: '',
-    genres: ['fantasy'],
-    status: 'drafting',
-    targetWordCount: 100_000,
-    createdAt: now,
-    updatedAt: now,
-  }) as number
-  await db.projects.update(projectId, {
-    activeWorldId: worldId,
-    activeWorkId: workId,
-    ownershipSchemaVersion: 1,
-  })
-  await db.worldviews.add({
-    projectId,
-    worldId,
     worldOrigin: '盐海每十年退潮一次，海床会升起一座浮空城。',
     createdAt: now,
     updatedAt: now,
-  } as never)
-  await db.storyCores.add({
+  }, { owner: 'world' }) as never)
+  await db.storyCores.add(stampNewRecord(scope, 'storyCores', {
     projectId,
-    workId,
     theme: '记忆与责任',
     centralConflict: '守灯人必须决定是否敲响会抹除全城记忆的潮汐钟。',
     createdAt: now,
     updatedAt: now,
-  } as never)
+  }, { owner: 'work' }) as never)
   const project = await db.projects.get(projectId)
   if (!project) throw new Error('测试项目创建失败')
-  return { project, scope: { projectId, worldId, workId } }
+  return { project, scope }
 }
 
 function mainArc(name = '潮汐钟主线'): StoryArcCopilotCandidate {
@@ -153,6 +129,51 @@ function mainArc(name = '潮汐钟主线'): StoryArcCopilotCandidate {
         description: '海潮吞没旧港，主角公开真相并寻找不牺牲记忆的第三条道路。',
         keyEvents: ['旧港撤离', '主角改变潮汐钟用途'],
       },
+    ],
+  }
+}
+
+async function seedExistingArc(scope: WorkspaceScope) {
+  const now = Date.now()
+  const stages = [
+    { id: 'stage-a', title: '退潮启程', description: '主角取得钟塔密钥。', keyEvents: ['前辈遗物暴露密令'] },
+    { id: 'stage-b', title: '钟塔裂痕', description: '主角确认钟声代价。', keyEvents: ['各方争夺钟塔'] },
+    { id: 'stage-c', title: '涨潮抉择', description: '主角必须决定是否敲钟。', keyEvents: ['旧港开始撤离'] },
+  ]
+  const arcId = await db.storyArcs.add(stampNewRecord(scope, 'storyArcs', {
+    projectId: scope.projectId,
+    name: '潮汐钟主线',
+    type: 'main',
+    description: '原版主线描述。',
+    stages: JSON.stringify(stages),
+    createdAt: now,
+    updatedAt: now,
+  }, { owner: 'work' }) as never) as number
+  const progressId = await db.storylineProgress.add(stampNewRecord(scope, 'storylineProgress', {
+    projectId: scope.projectId,
+    arcId,
+    currentStageId: 'stage-b',
+    status: 'active',
+    progressNote: '主角已进入钟塔。',
+    lastActiveChapterId: null,
+    involvedEntities: '[]',
+    evidenceQuote: '钟门在身后合拢。',
+    createdAt: now,
+    updatedAt: now,
+  }, { owner: 'work' }) as never) as number
+  return { arcId, progressId, stages }
+}
+
+function expandedArc(): StoryArcCopilotCandidate {
+  return {
+    name: '潮汐钟主线',
+    type: 'main',
+    description: '原版主线扩充了角色选择、证据链和支线交汇。',
+    stages: [
+      { stageId: 'stage-a', title: '退潮启程', description: '主角依照前辈遗物取得钟塔密钥。', keyEvents: ['前辈遗物暴露密令'] },
+      { stageId: 'stage-b', title: '钟塔裂痕', description: '主角与守卫冲突并确认钟声代价。', keyEvents: ['各方争夺钟塔', '主角核对钟铭'] },
+      { stageId: 'stage-c', title: '涨潮抉择', description: '旧港撤离迫使主角决定是否敲钟。', keyEvents: ['旧港开始撤离'] },
+      { title: '余潮回响', description: '主角的选择触发记忆修复支线，并留下后续压力。', keyEvents: ['支线角色带回被删除的见证'] },
     ],
   }
 }
@@ -203,10 +224,14 @@ describe.sequential('R-HARNESS30 · 故事线 Agent Skill 与受治理采纳', (
     expect(getAgentSkillV1('outline.story-arcs')).toMatchObject({
       agentId: 'outline',
       executionMode: 'story-arcs',
-      promptVersion: 'story-arc-copilot-v6',
+      promptVersion: 'story-arc-copilot-v8',
       writeTargets: [{
         table: 'storyArcs',
-        fields: ['name', 'type', 'stages', 'description'],
+        fields: [
+          'name', 'type', 'stages', 'description', 'origin', 'status',
+          'sourceStoryCoreId', 'sourceStoryCoreRevision', 'sourceStoryCoreHash',
+          'lastAlignedHash', 'producerRunId', 'producerCandidateHash',
+        ],
       }],
     })
   })
@@ -217,6 +242,8 @@ describe.sequential('R-HARNESS30 · 故事线 Agent Skill 与受治理采纳', (
       const body = JSON.parse(String(init?.body))
       const prompt = body.messages.map((message: { content: string }) => message.content).join('\n')
       expect(prompt).toContain('依据现有设定生成一条主线故事线')
+      expect(prompt).toContain('【低权重灵感：作品名】\n潮汐纪元')
+      expect(prompt).toContain('不是主题命令、概念释义题或既定 Canon')
       expect(prompt).toContain('盐海每十年退潮一次')
       expect(prompt).toContain('绝不能放在故事线顶层')
       expect(prompt).toContain('3-5 个因果递进阶段')
@@ -249,7 +276,6 @@ describe.sequential('R-HARNESS30 · 故事线 Agent Skill 与受治理采纳', (
       workspaceScope: scope,
       narrativeBrief: {
         creativeGoal: '依据现有设定生成一条主线故事线',
-        obstacle: '守灯人必须决定是否敲响会抹除全城记忆的潮汐钟。',
       },
       creativeArtifact: {
         status: 'ready',
@@ -298,9 +324,9 @@ describe.sequential('R-HARNESS30 · 故事线 Agent Skill 与受治理采纳', (
     expect(candidates[0].payload.creativeArtifact).toBeUndefined()
     expect(candidates[0].payload.narrativeBrief).toBeUndefined()
     expect(parseStoryArcCandidateDraft(candidates[0].draft)).toEqual([mainArc()])
-    expect(() => parseStoryArcModelResponseLegacyV1(
+    expect(parseStoryArcModelResponseLegacyV1(
       `\`\`\`json\n${JSON.stringify({ storyArcs: [mainArc()] })}\n\`\`\``,
-    )).toThrow('严格 JSON 对象')
+    )).toEqual([mainArc()])
   })
 
   it('上游临时假设通过独立元数据进入后续任务且不改变依赖草稿哈希', async () => {
@@ -380,7 +406,9 @@ describe.sequential('R-HARNESS30 · 故事线 Agent Skill 与受治理采纳', (
     )
 
     expect(generated.gate?.status).toBe('pass')
-    expect(prepared.contextSources).toEqual(expect.arrayContaining(['worldview', 'storyCore']))
+    expect(prepared.contextSources).toEqual(['ragSelection'])
+    expect(prepared.contextEvidence.inputStateSourceKeys)
+      .toEqual(expect.arrayContaining(['worldview', 'storyCore']))
     expect(prepared.contextEvidence.inputState).toMatchObject({
       state: 'partial',
       handling: 'reference-and-create',
@@ -437,7 +465,7 @@ describe.sequential('R-HARNESS30 · 故事线 Agent Skill 与受治理采纳', (
     }))).toEqual([mainArc()])
     expect(parseStoryArcCandidateDraft(JSON.stringify([mainArc()]))).toEqual([mainArc()])
     expect(() => parseStoryArcModelResponseV2(JSON.stringify([mainArc()])))
-      .toThrow('单个 JSON 对象')
+      .toThrow('根必须是 JSON 对象')
     expect(() => parseStoryArcModelResponseV2(JSON.stringify({ storyArcs: [mainArc()], projectId: 7 })))
       .toThrow('不允许的字段')
     expect(() => parseStoryArcModelResponseV2(JSON.stringify({
@@ -831,6 +859,162 @@ describe.sequential('R-HARNESS30 · 故事线 Agent Skill 与受治理采纳', (
     expect(await db.storyArcs.count()).toBe(0)
   })
 
+  it('ARC-1 扩写经 Gateway 冻结原文并原位更新稳定故事线/阶段，采纳前零写入', async () => {
+    const { project, scope } = await createWorkspace()
+    const fixture = await seedExistingArc(scope)
+    const runAI = vi.fn(async messages => {
+      const prompt = messages.map(message => message.content).join('\n')
+      expect(prompt).toContain('本轮扩写目标故事线')
+      expect(prompt).toContain('"stageId": "stage-b"')
+      expect(prompt).toContain('触发它的正式证据或作者要求、关联角色、开始时点')
+      return JSON.stringify({ storyArcs: [expandedArc()] })
+    })
+    const prepared = await prepareStoryArcCopilot({
+      projectId: project.id!,
+      scope,
+      worldGroupId: null,
+      authorRequest: '扩写现有主线，增加角色选择与支线交汇',
+      mutationRequest: { operation: 'expand', targetArcId: fixture.arcId },
+    }, { runAI })
+    const target = prepared.snapshot.arcs?.find(arc => arc.id === fixture.arcId)
+    const targetResourceKey = `story-arc:${target?.ragDocumentId}`
+    expect(target?.ragDocumentId).toBeTruthy()
+    expect(prepared.contextGatewayExecution?.retrievalTrace.mandatory).toContainEqual(
+      expect.objectContaining({
+        resourceKey: targetResourceKey,
+        depth: 'full',
+        sourceRefs: expect.arrayContaining([expect.objectContaining({ table: 'storyArcs' })]),
+      }),
+    )
+    expect(prepared.contextGatewayExecution?.retrievalTrace.mandatory).toEqual(
+      expect.arrayContaining(['name', 'type', 'description', 'stages'].map(field => expect.objectContaining({
+        resourceKey: `${targetResourceKey}:field:${field}`,
+        depth: 'original',
+      }))),
+    )
+    const progressResourceId = (await db.storylineProgress.get(fixture.progressId) as any).ragDocumentId
+    expect(prepared.contextGatewayExecution?.retrievalTrace.mandatory).toContainEqual(
+      expect.objectContaining({
+        resourceKey: `storyline-progress:${progressResourceId}`,
+        depth: 'full',
+      }),
+    )
+    const generated = await runGenerationNode(prepared.node, prepared.prepared)
+    expect(generated.gate?.status).toBe('pass')
+    expect(await db.storyArcs.get(fixture.arcId)).toMatchObject({ description: '原版主线描述。' })
+    expect(await db.storyArcs.count()).toBe(1)
+
+    const adopted = await adoptGenerationNodeOutput(prepared.node, generated.output)
+    expect(adopted.adopted).toBe(true)
+    expect(adopted.adoption).toEqual({ writtenCount: 1, ids: [fixture.arcId] })
+    expect(await db.storyArcs.count()).toBe(1)
+    const row = await db.storyArcs.get(fixture.arcId)
+    const storedStages = JSON.parse(row!.stages) as Array<{ id: string; title: string }>
+    expect(storedStages.slice(0, 3).map(stage => stage.id)).toEqual(['stage-a', 'stage-b', 'stage-c'])
+    expect(storedStages[3].id).toMatch(/^[A-Za-z0-9_-]{8}$/)
+    expect((await db.storylineProgress.get(fixture.progressId))?.currentStageId).toBe('stage-b')
+    expect(runAI).toHaveBeenCalledOnce()
+  })
+
+  it('ARC-1 拒绝未知/伪造 stageId，并在目标基线变化后阻断旧变换候选', async () => {
+    const { project, scope } = await createWorkspace()
+    const fixture = await seedExistingArc(scope)
+    const prepared = await prepareStoryArcCopilot({
+      projectId: project.id!,
+      scope,
+      worldGroupId: null,
+      authorRequest: '润色现有主线',
+      mutationRequest: { operation: 'polish', targetArcId: fixture.arcId },
+    })
+    const forged = expandedArc()
+    forged.stages[0] = { ...forged.stages[0], stageId: 'stage-forged' }
+    const blocked = await adoptGenerationNodeOutput(prepared.node, [forged])
+    expect(blocked.adopted).toBe(false)
+    expect(blocked.gate?.issues.map(issue => issue.code)).toContain('story-arc-stage-id-unknown')
+    expect((await db.storyArcs.get(fixture.arcId))?.description).toBe('原版主线描述。')
+
+    await db.storylineProgress.update(fixture.progressId, {
+      progressNote: '作者已把动态进度推进到新的证据点。',
+      updatedAt: Date.now() + 100,
+    })
+    await expect(adoptGenerationNodeOutput(prepared.node, [expandedArc()]))
+      .rejects.toThrow('故事线已在候选生成后发生变化')
+    expect((await db.storyArcs.get(fixture.arcId))?.description).toBe('原版主线描述。')
+
+    const createPrepared = await prepareStoryArcCopilot({
+      projectId: project.id!,
+      scope,
+      worldGroupId: null,
+      authorRequest: '生成一条新的支线故事线',
+    })
+    const createWithForgedIdentity = {
+      ...mainArc('新支线'),
+      type: 'sub' as const,
+      stages: mainArc().stages.map((stage, index) => ({ ...stage, ...(index === 0 ? { stageId: 'forged' } : {}) })),
+    }
+    const createBlocked = await adoptGenerationNodeOutput(createPrepared.node, [createWithForgedIdentity])
+    expect(createBlocked.adopted).toBe(false)
+    expect(createBlocked.gate?.issues.map(issue => issue.code)).toContain('story-arc-create-stage-id')
+    expect(await db.storyArcs.count()).toBe(1)
+  })
+
+  it('ARC-1 变换任务冻结进 durable 计划，刷新恢复后仍只采纳同一目标记录', async () => {
+    const { project, scope } = await createWorkspace()
+    const fixture = await seedExistingArc(scope)
+    const conversation = await getOrCreateAgentConversation({
+      projectId: project.id!,
+      scope,
+      worldGroupId: null,
+    })
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({
+      choices: [{ message: { content: JSON.stringify({ storyArcs: [expandedArc()] }) } }],
+      usage: { prompt_tokens: 40, completion_tokens: 60, total_tokens: 100 },
+    }), { status: 200 }))
+    vi.stubGlobal('fetch', fetchMock)
+    const transformPlan: MasterAgentPlan = {
+      summary: '扩写当前主线。',
+      tasks: [{
+        id: 'story-arcs-expand-1',
+        agentId: 'outline',
+        skillId: 'outline.story-arcs',
+        instruction: '扩写现有主线，增加角色选择与支线交汇',
+        dependsOn: [],
+        storyArcMutationRequest: { operation: 'expand', targetArcId: fixture.arcId },
+      }],
+      workflow: directWorkflow,
+    }
+    const first = await runDurableMasterAgentPlanV1({
+      scope,
+      worldGroupId: null,
+      conversationId: conversation.id!,
+      plan: transformPlan,
+      budget: new AgentTeamBudgetTracker('balanced'),
+    })
+    expect(first.projection.state).toBe('awaiting_confirmation')
+    expect(first.candidates[0].payload.storyArcMutationRequest).toEqual({
+      operation: 'expand',
+      targetArcId: fixture.arcId,
+    })
+    expect(await db.storyArcs.count()).toBe(1)
+    expect((await db.storyArcs.get(fixture.arcId))?.description).toBe('原版主线描述。')
+    expect(fetchMock).toHaveBeenCalledOnce()
+
+    const restored = await restoreMasterAgentCandidatesV1({ scope, runId: first.runId })
+    expect(restored.candidates[0].payload.storyArcMutationRequest).toEqual({
+      operation: 'expand',
+      targetArcId: fixture.arcId,
+    })
+    await commitMasterAgentCandidateAdoptionV1({
+      scope,
+      runId: first.runId,
+      candidateEventId: restored.candidates[0].event.id!,
+    })
+    expect(await db.storyArcs.count()).toBe(1)
+    expect((await db.storyArcs.get(fixture.arcId))?.description).toBe(expandedArc().description)
+    expect(fetchMock).toHaveBeenCalledOnce()
+    expect((await verifyMasterAgentRunV1({ scope, runId: first.runId })).accepted).toBe(true)
+  })
+
   it('durable 候选刷新恢复不重复模型调用，并只经确认与 adopt 完成终态', async () => {
     const { project, scope } = await createWorkspace()
     const conversation = await getOrCreateAgentConversation({
@@ -848,6 +1032,13 @@ describe.sequential('R-HARNESS30 · 故事线 Agent Skill 与受治理采纳', (
         authorRequest: task.instruction,
         skillId: task.skillId,
       }, { runAI: async () => JSON.stringify({ storyArcs: [mainArc()] }) })
+      if (prepared.contextGatewayExecution) {
+        await options.executionTrace?.contextGatewayPrepared?.(task, {
+          execution: prepared.contextGatewayExecution,
+          assembled: prepared.input.assembled,
+          renderedRequest: prepared.prepared.messages,
+        })
+      }
       const generated = await runGenerationNode(prepared.node, prepared.prepared)
       const candidate: ExecutedMasterCandidate = {
         payload: {
@@ -867,6 +1058,14 @@ describe.sequential('R-HARNESS30 · 故事线 Agent Skill 与受治理采纳', (
         draft: JSON.stringify(generated.output, null, 2),
         runtimeNode: prepared.node,
         runtimeOutput: generated.output,
+        ...(prepared.contextGatewayExecution ? {
+          contextGatewayRuntime: {
+            execution: prepared.contextGatewayExecution,
+            assembled: prepared.input.assembled,
+            renderedRequest: prepared.prepared.messages,
+            rawResponse: generated.output,
+          },
+        } : {}),
       }
       await options.executionTrace?.candidateReady?.(task, candidate)
       return [candidate]
@@ -923,6 +1122,13 @@ describe.sequential('R-HARNESS30 · 故事线 Agent Skill 与受治理采纳', (
         authorRequest: task.instruction,
         skillId: task.skillId,
       }, { runAI: async () => JSON.stringify({ storyArcs: [mainArc('不可篡改主线')] }) })
+      if (prepared.contextGatewayExecution) {
+        await options.executionTrace?.contextGatewayPrepared?.(task, {
+          execution: prepared.contextGatewayExecution,
+          assembled: prepared.input.assembled,
+          renderedRequest: prepared.prepared.messages,
+        })
+      }
       const generated = await runGenerationNode(prepared.node, prepared.prepared)
       await options.executionTrace?.candidateReady?.(task, {
         payload: {
@@ -942,6 +1148,14 @@ describe.sequential('R-HARNESS30 · 故事线 Agent Skill 与受治理采纳', (
         draft: JSON.stringify(generated.output, null, 2),
         runtimeNode: prepared.node,
         runtimeOutput: generated.output,
+        ...(prepared.contextGatewayExecution ? {
+          contextGatewayRuntime: {
+            execution: prepared.contextGatewayExecution,
+            assembled: prepared.input.assembled,
+            renderedRequest: prepared.prepared.messages,
+            rawResponse: generated.output,
+          },
+        } : {}),
       })
       return []
     }

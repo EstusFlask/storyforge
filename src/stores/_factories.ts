@@ -13,6 +13,7 @@ import { create } from 'zustand'
 import type { Table, UpdateSpec } from 'dexie'
 import { db } from '../lib/db/schema'
 import { getTableSpec, readOwnedRows, resolveScopeLike, stampNewRecord, type WorkspaceScopeLike } from '../lib/world-engine/scope'
+import { coordinatePendingEditV1 } from '../lib/authoring/pending-edit-coordinator'
 
 const now = () => Date.now()
 
@@ -104,54 +105,61 @@ export function createProjectSingletonStore<K extends string, T extends ProjectS
 
       save: async (data: Partial<T>) => {
         const state = get()
-        let current = (state as unknown as Record<string, T | null>)[key]
+        const memoryCurrent = (state as unknown as Record<string, T | null>)[key]
         const activeWorldGroupId = (state as unknown as { activeWorldGroupId: number | null }).activeWorldGroupId
+        const pendingProjectId = data.projectId ?? (memoryCurrent as { projectId?: number } | null)?.projectId
+        await coordinatePendingEditV1({
+          key: `project-singleton:${String(table)}:${pendingProjectId ?? 'unknown'}:${activeWorldGroupId ?? 'default'}`,
+          persist: async () => {
+            let current = (get() as unknown as Record<string, T | null>)[key]
 
-        // 以 DB 为准定位既有记录，避免内存为 null/陈旧时误新增重复记录
-        // （与 saveWorldview 同类修复：单例表应每 (projectId, worldGroupId) 仅一条）
-        const projectId = data.projectId ?? (current as { projectId?: number } | null)?.projectId
-        if (!current?.id && projectId != null) {
-          const scope = await resolveScopeLike(projectId)
-          const owner = getTableSpec(String(table)).domainOwner?.legacyDefault
-          const all = await readOwnedRows<T>(scope, String(table), {
-            owner: owner === 'world' || owner === 'work' ? owner : undefined,
-          })
-          current = (activeWorldGroupId == null
-            ? (all.find(r => ((r as { worldGroupId?: number | null }).worldGroupId ?? null) === null) ?? all[0])
-            : all.find(r => (r as { worldGroupId?: number | null }).worldGroupId === activeWorldGroupId)) ?? null
-        }
+            // 以 DB 为准定位既有记录，避免内存为 null/陈旧时误新增重复记录
+            // （与 saveWorldview 同类修复：单例表应每 (projectId, worldGroupId) 仅一条）
+            const projectId = data.projectId ?? (current as { projectId?: number } | null)?.projectId
+            if (!current?.id && projectId != null) {
+              const scope = await resolveScopeLike(projectId)
+              const owner = getTableSpec(String(table)).domainOwner?.legacyDefault
+              const all = await readOwnedRows<T>(scope, String(table), {
+                owner: owner === 'world' || owner === 'work' ? owner : undefined,
+              })
+              current = (activeWorldGroupId == null
+                ? (all.find(r => ((r as { worldGroupId?: number | null }).worldGroupId ?? null) === null) ?? all[0])
+                : all.find(r => (r as { worldGroupId?: number | null }).worldGroupId === activeWorldGroupId)) ?? null
+            }
 
-        if (current?.id) {
-          const ts = now()
-          await getTable().update(
-            current.id,
-            { ...data, updatedAt: ts } as UpdateSpec<T>,
-          )
-          set({
-            [key]: { ...current, ...data, updatedAt: ts },
-          } as unknown as Partial<State> as State)
-          return
-        }
+            if (current?.id) {
+              const ts = now()
+              await getTable().update(
+                current.id,
+                { ...data, updatedAt: ts } as UpdateSpec<T>,
+              )
+              set({
+                [key]: { ...current, ...data, updatedAt: ts },
+              } as unknown as Partial<State> as State)
+              return
+            }
 
-        if (data.projectId) {
-          const ts = now()
-          const scope = await resolveScopeLike(data.projectId)
-          const toInsert = stampNewRecord(scope, String(table), {
-            ...(defaults as object),
-            projectId: data.projectId,
-            // 多世界模式下盖章当前世界组（单世界时为 null，不影响）
-            ...(activeWorldGroupId != null ? { worldGroupId: activeWorldGroupId } : {}),
-            createdAt: ts,
-            updatedAt: ts,
-            ...data,
-          } as T, {
-            owner: getTableSpec(String(table)).domainOwner?.legacyDefault === 'world' ? 'world' : 'work',
-          })
-          const id = (await getTable().add(toInsert)) as number
-          set({
-            [key]: { ...toInsert, id },
-          } as unknown as Partial<State> as State)
-        }
+            if (data.projectId) {
+              const ts = now()
+              const scope = await resolveScopeLike(data.projectId)
+              const toInsert = stampNewRecord(scope, String(table), {
+                ...(defaults as object),
+                projectId: data.projectId,
+                // 多世界模式下盖章当前世界组（单世界时为 null，不影响）
+                ...(activeWorldGroupId != null ? { worldGroupId: activeWorldGroupId } : {}),
+                createdAt: ts,
+                updatedAt: ts,
+                ...data,
+              } as T, {
+                owner: getTableSpec(String(table)).domainOwner?.legacyDefault === 'world' ? 'world' : 'work',
+              })
+              const id = (await getTable().add(toInsert)) as number
+              set({
+                [key]: { ...toInsert, id },
+              } as unknown as Partial<State> as State)
+            }
+          },
+        })
       },
     }
   })

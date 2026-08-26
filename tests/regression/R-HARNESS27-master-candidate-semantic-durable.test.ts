@@ -26,6 +26,9 @@ import { AgentTeamBudgetTracker, resolveAgentTeamBudgetPolicy } from '../../src/
 import { hashCanonicalValue } from '../../src/lib/agent/run/hash'
 import type { AIConfig, WorkspaceScope } from '../../src/lib/types'
 import { exportProjectJSON, importProjectJSON } from '../../src/lib/export/json-export'
+import { backfillResourceUidsV1 } from '../../src/lib/context-gateway/resource-identity'
+import { generateWorkCode, generateWorkspaceUid } from '../../src/lib/memory/identity'
+import { prepareRequiredMasterGatewayFixtureV1 } from '../helpers/master-agent-gateway'
 
 async function createWorkspace(label: string): Promise<{
   scope: WorkspaceScope
@@ -33,6 +36,7 @@ async function createWorkspace(label: string): Promise<{
 }> {
   const now = Date.now()
   const projectId = await db.projects.add({
+    workspaceUid: generateWorkspaceUid(),
     name: label,
     genre: 'fantasy',
     genres: ['fantasy'],
@@ -57,6 +61,7 @@ async function createWorkspace(label: string): Promise<{
     projectId,
     worldId,
     title: label,
+    code: generateWorkCode(),
     description: '',
     genres: ['fantasy'],
     status: 'drafting',
@@ -77,14 +82,6 @@ async function createWorkspace(label: string): Promise<{
     createdAt: now,
     updatedAt: now,
   } as any) as number
-  await db.worldviews.add({
-    projectId,
-    worldId,
-    worldGroupId,
-    worldOrigin: '盐城每夜退潮，居民从未知道海神真名。',
-    createdAt: now,
-    updatedAt: now,
-  } as any)
   await db.inspirationWorkspaces.add({
     projectId,
     worldId,
@@ -100,6 +97,7 @@ async function createWorkspace(label: string): Promise<{
     createdAt: now,
     updatedAt: now,
   } as any)
+  await backfillResourceUidsV1(projectId)
   return { scope: { projectId, worldId, workId }, worldGroupId }
 }
 
@@ -194,6 +192,13 @@ async function executeFixture(options: any): Promise<void> {
     const inspirationWorkspace = task.id === 'inspiration-1'
       ? await db.inspirationWorkspaces.where('projectId').equals(options.scope.projectId).first()
       : null
+    const gateway = task.id === 'character-1'
+      ? await prepareRequiredMasterGatewayFixtureV1({
+          scope: options.scope,
+          worldGroupId: options.worldGroupId,
+          executionTrace: options.executionTrace,
+        }, task, output)
+      : undefined
     await options.executionTrace.candidateReady(task, {
       payload: {
         version: 1,
@@ -201,8 +206,8 @@ async function executeFixture(options: any): Promise<void> {
         agentId: task.agentId,
         skillId: task.skillId,
         label: task.id,
-        contextSources: sources,
-        contextEvidence: {
+        contextSources: gateway?.contextSources ?? sources,
+        contextEvidence: gateway?.contextEvidence ?? {
           profile: 'balanced',
           included: sources,
           omitted: [],
@@ -236,6 +241,7 @@ async function executeFixture(options: any): Promise<void> {
       draft: output,
       runtimeNode: {},
       runtimeOutput: output,
+      ...(gateway ? { contextGatewayRuntime: gateway.contextGatewayRuntime } : {}),
     })
   }
 }
@@ -501,9 +507,7 @@ describe.sequential('R-HARNESS27 · fan-out 叶子 durable 语义终验', { time
       runId: result.runId,
       candidateEventId: revised.event.id!,
     })).rejects.toThrow('重新执行并通过终验前不能采纳')
-    expect((await db.worldviews.toArray()).map(row => row.worldOrigin)).toEqual([
-      '盐城每夜退潮，居民从未知道海神真名。',
-    ])
+    expect(await db.worldviews.count()).toBe(0)
   })
 
   it('有限重规划使旧代 semantic artifact 及其所有下游失效，不跨代重签冒充 fresh', async () => {

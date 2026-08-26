@@ -236,15 +236,118 @@ export interface WorkspacePackageV1 {
 
 export interface MemoryArtifactRefV1 {
   artifactId: string
-  sourceKind: 'agent-event' | 'node-run' | 'agent-run-event' | 'domain-record'
+  sourceKind: 'agent-event' | 'node-run' | 'agent-run-event' | 'agent-run-artifact' | 'domain-record'
   sourceExportId: string
   runExportId?: string
   stepId?: string
   attempt?: number
   contentHash: string
+  /** Present only for exact Harness evidence bodies; the index never copies the body itself. */
+  artifactKind?: ExactRunArtifactKindV1
   authority: 'candidate' | 'accepted' | 'rejected' | 'evidence'
   worldCode?: string
   workCode?: string
+}
+
+export type MemoryPlaneIdV1 =
+  | 'canon-authority'
+  | 'derived-narrative-memory'
+  | 'execution-evidence'
+  | 'bounded-working-context'
+  | 'projection-recovery'
+
+export type ExactRunArtifactKindV1 =
+  | 'context-manifest'
+  | 'selector-result'
+  | 'context-packet'
+  | 'source-snapshot'
+  | 'tool-result'
+  | 'rendered-request'
+  | 'raw-response'
+
+export type ExactRunArtifactRetentionStateV1 = 'available' | 'evidence-pruned'
+
+export interface ExactRunArtifactIdentityV1 {
+  artifactKind: ExactRunArtifactKindV1
+  contentHash: string
+}
+
+export interface ExactRunArtifactPruneReceiptV1 extends ExactRunArtifactIdentityV1 {
+  version: 1
+  state: 'evidence-pruned'
+  reasonCode: 'unreferenced-run-cleanup' | 'explicit-retention-prune'
+  prunedAt: number
+  receiptHash: string
+}
+
+/**
+ * Portable reference emitted by the immutable Run ledger. The content body is
+ * stored once by content hash; pruning changes the body-store retention state,
+ * never this historical reference or a settled Run receipt.
+ */
+export interface ExactRunArtifactReferenceV1 {
+  version: 1
+  artifactKind: ExactRunArtifactKindV1
+  contentHash: string
+  byteLength: number
+  stepId?: string
+  attempt?: number
+}
+
+/**
+ * CTXG-2 content-addressed exact evidence body. The immutable identity is
+ * project + kind + SHA-256; Run ownership remains in the append-only event
+ * ledger so identical bytes can be shared safely by multiple runs.
+ */
+export interface AgentRunArtifactRecordV1 extends ExactRunArtifactIdentityV1 {
+  id?: number
+  projectId: number
+  encoding: 'utf-8'
+  byteLength: number
+  content: string | null
+  retentionState: ExactRunArtifactRetentionStateV1
+  pruneReceiptJson: string | null
+  pruneReceiptHash: string | null
+  createdAt: number
+  updatedAt: number
+}
+
+export interface ExactRunArtifactAvailabilityV1 extends ExactRunArtifactIdentityV1 {
+  state: ExactRunArtifactRetentionStateV1 | 'missing' | 'corrupt'
+  byteLength: number | null
+  pruneReceiptHash: string | null
+}
+
+export interface WorkingContextSourceDecisionV1 {
+  sourceKey: string
+  sourceRevision: string
+  contentHash: string
+  span: { start: number; end: number }
+  disposition: 'kept' | 'compressed' | 'omitted'
+  reasonCode: string
+}
+
+/**
+ * Versioned resume payload for bounded working-context compaction. It stores
+ * only hashes, revisions, spans and decisions. Raw source/request/response
+ * bodies remain immutable exact artifacts and are never deleted by compaction.
+ */
+export interface WorkingContextCompactionCheckpointV1 {
+  version: 1
+  kind: 'working-context-compaction'
+  generation: number
+  baseCheckpointHash: string | null
+  tailFromSequence: number
+  originalPacketHash: string
+  replacementPacketHash: string
+  sources: readonly WorkingContextSourceDecisionV1[]
+  strategy: string
+  provider: string | null
+  promptVersion: string | null
+  gatewayVersion: string
+  beforeTokens: number
+  afterTokens: number
+  rawArtifactRefs: readonly string[]
 }
 
 export interface MemorySettlementReceiptV1 {
@@ -279,6 +382,7 @@ export interface MemoryArtifactIndexV1 {
     contextManifestHashes: readonly string[]
     adoptionHashes: readonly string[]
     artifactRefs: readonly MemoryArtifactRefV1[]
+    artifactAvailability: readonly ExactRunArtifactAvailabilityV1[]
     artifactIndexHash: string
   }[]
   indexHash: string

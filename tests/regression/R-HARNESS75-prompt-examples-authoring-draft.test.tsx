@@ -117,11 +117,11 @@ describe.sequential('R-HARNESS75 · Prompt 示例生成只进入作者草稿', (
     await generateGoodExample(host)
 
     const [messages, , meta] = ai.start.mock.calls[0] as unknown as [
-      Array<{ role: string; content: string }>, unknown, { category: string },
+      Array<{ role: string; content: string }>, unknown, { formalEntryId: string; category: string },
     ]
     expect(messages.map(message => message.content).join('\n')).toContain('你是叙事编辑。')
     expect(messages.map(message => message.content).join('\n')).toContain('请处理：{{userHint}}')
-    expect(meta).toEqual({ category: 'prompt.examples' })
+    expect(meta).toEqual({ formalEntryId: 'prompt.examples.generate', category: 'prompt.examples' })
     const beforeSave = await db.promptTemplates.get(template.id!)
     expect(beforeSave?.examples).toBeUndefined()
     expect(await db.agentRuns.count()).toBe(0)

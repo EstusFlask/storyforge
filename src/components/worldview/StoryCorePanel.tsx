@@ -11,6 +11,7 @@ import {
   formatStoryCoreGenerationRequestV1,
   type StoryCoreField,
 } from '../../lib/agent/story-core-copilot'
+import { STORY_CORE_GENERATABLE_FIELD_SPECS } from '../../lib/registry/field-registry'
 import type { Project } from '../../lib/types'
 import type { FieldGenerationMode } from '../../lib/ai/field-generation-context'
 import {
@@ -18,6 +19,7 @@ import {
   initialRecordTargetAttributes,
   useInitialRecordTarget,
 } from '../shared/initial-record-target'
+import HarnessEvidencePanel from '../agent/HarnessEvidencePanel'
 
 // ── 字段定义 ──────────────────────────────────────────────────
 
@@ -30,15 +32,24 @@ interface FieldDef {
   saveKey: StoryCoreField
 }
 
-const FIELDS: FieldDef[] = [
-  { key: 'logline',         emoji: '📜', label: '一句话故事',   description: '用一句话讲清楚你的故事是什么。',                      dimension: '一句话故事（logline）',       saveKey: 'logline' },
-  { key: 'concept',         emoji: '💡', label: '故事概念',     description: "独特设定或反差点：'如果……会怎么样？'",                 dimension: '故事概念（high concept）',    saveKey: 'concept' },
-  { key: 'theme',           emoji: '🎯', label: '故事主题',     description: '想探讨的人性/价值观主题。',                            dimension: '故事主题',                    saveKey: 'theme' },
-  { key: 'centralConflict', emoji: '⚔️', label: '核心冲突',     description: '主角面对的最大矛盾（外在 + 内在）。',                  dimension: '核心冲突',                    saveKey: 'centralConflict' },
-  { key: 'plotPattern',     emoji: '📊', label: '故事模式',     description: '线性 / 莲花地图 / 多线并行 / 蒙太奇 等。',            dimension: '故事模式',                    saveKey: 'plotPattern' },
-  { key: 'mainPlot',        emoji: '🛤', label: '故事主线',     description: '核心情节线 — 主角的目标与阻碍。',                      dimension: '故事主线',                    saveKey: 'mainPlot' },
-  { key: 'subPlots',        emoji: '🎼', label: '故事复线',     description: '副线情节（情感线 / 配角线 / 暗线 / 悬念线）。',        dimension: '故事复线',                    saveKey: 'subPlots' },
-]
+const FIELD_PRESENTATION: Record<StoryCoreField, Pick<FieldDef, 'emoji' | 'description' | 'dimension'>> = {
+  logline: { emoji: '📜', description: '用一句话讲清楚你的故事是什么。', dimension: '一句话故事（logline）' },
+  concept: { emoji: '💡', description: "独特设定或反差点：'如果……会怎么样？'", dimension: '故事概念（high concept）' },
+  theme: { emoji: '🎯', description: '想探讨的人性/价值观主题。', dimension: '故事主题' },
+  centralConflict: { emoji: '⚔️', description: '主角面对的最大矛盾（外在 + 内在）。', dimension: '核心冲突' },
+  plotPattern: { emoji: '📊', description: '线性 / 莲花地图 / 多线并行 / 蒙太奇 等。', dimension: '故事模式' },
+  mainPlot: { emoji: '🛤', description: '核心情节意图 — 主角的目标与阻碍；确认后可投影为多条可执行故事线。', dimension: '故事主线意图' },
+  subPlots: { emoji: '🎼', description: '副线意图（情感线 / 配角线 / 暗线 / 悬念线），可投影为多条故事线。', dimension: '故事复线意图' },
+}
+
+export const STORY_CORE_PANEL_FIELDS: readonly FieldDef[] = STORY_CORE_GENERATABLE_FIELD_SPECS.map(spec => ({
+  key: spec.field,
+  label: spec.aiGeneration.label,
+  saveKey: spec.field,
+  ...FIELD_PRESENTATION[spec.field],
+}))
+
+const FIELDS = STORY_CORE_PANEL_FIELDS
 
 // ── 主面板 ─────────────────────────────────────────────────────
 
@@ -211,14 +222,23 @@ function FieldEditor({
   const handleGenerate = async () => {
     onRunningChange(true)
     try {
-      await copilot.submitRequest(formatStoryCoreGenerationRequestV1({
+      const request = formatStoryCoreGenerationRequestV1({
         field: field.key,
         mode,
         hint,
-        parameterValues: Object.keys(parameterValues).length ? parameterValues : undefined,
-        systemOverride,
-        userOverride,
-      }))
+      })
+      await copilot.submitTargetedRequest(request, {
+        agentId: 'world-origin',
+        skillId: 'world-origin.story-core',
+        instruction: request,
+        promptExecution: {
+          version: 1,
+          moduleKey: 'story.generate',
+          ...(Object.keys(parameterValues).length ? { parameterValues } : {}),
+          ...(systemOverride === null ? {} : { systemOverride }),
+          ...(userOverride === null ? {} : { userOverride }),
+        },
+      })
     } finally {
       onRunningChange(false)
     }
@@ -317,19 +337,11 @@ function FieldEditor({
               }}
               className="min-h-48 w-full resize-y font-mono text-xs leading-5"
             />
-            {candidate.payload.contextEvidence && (
-              <details className="mt-2 border border-border/60 bg-bg-base px-3 py-2 text-[11px] text-text-muted rounded">
-                <summary className="cursor-pointer text-text-secondary">本次实际输入证据</summary>
-                <p className="mt-2 break-words">
-                  已纳入：{candidate.payload.contextEvidence.included.join('、') || '无'}
-                </p>
-                {candidate.payload.contextEvidence.trimmed.length > 0 && (
-                  <p className="mt-1 text-warning">
-                    因预算移除：{candidate.payload.contextEvidence.trimmed.join('、')}
-                  </p>
-                )}
-              </details>
-            )}
+            <HarnessEvidencePanel
+              contextEvidence={candidate.payload.contextEvidence}
+              lifecycle={candidate.lifecycle}
+              promptExecutionEvidence={candidate.payload.promptExecutionEvidence}
+            />
             <div className="mt-3 flex justify-end gap-2">
               <button
                 type="button"

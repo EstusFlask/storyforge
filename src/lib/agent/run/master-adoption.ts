@@ -43,6 +43,10 @@ import {
   type CharacterSupplementCopilotSnapshotV1,
 } from '../character-supplement-copilot'
 import {
+  parseCharacterLifecycleCandidateV1,
+  type CharacterLifecycleSnapshotV1,
+} from '../character-lifecycle-copilot'
+import {
   parseStoryCoreCandidateDraft,
   storyCoreCandidateMatchesRowV1,
 } from '../story-core-copilot'
@@ -67,6 +71,11 @@ import {
   worldGameCandidateMatchesBusinessStateV1,
   type WorldGameCopilotSnapshotV1,
 } from '../world-game-copilot'
+import { assertWorkspaceContentRevisionFreshV1 } from '../../authoring/content-revision'
+import { maybeInjectHarnessFaultV1 } from '../dev-fault-injection'
+import { assertContextGatewayCandidateAdoptableV1 } from '../../context-gateway/execution'
+import { masterCandidateWriteTargetV1 } from './master-candidate-hash'
+import { resolveAgentSkillV1 } from '../skill-registry'
 
 export interface MasterAgentCandidateAdoptionRefV1 {
   scope: WorkspaceScope
@@ -108,6 +117,12 @@ async function resolveCandidate(
   if (restored.snapshot.run.conversationId !== candidate.event.conversationId) {
     throw new Error('主 Agent durable 候选与运行对话不一致')
   }
+  if (
+    input.worldGroupId !== undefined
+    && (restored.snapshot.run.worldGroupId ?? null) !== input.worldGroupId
+  ) {
+    throw new Error('主 Agent durable 候选与当前世界组不一致，切换世界后不能继续操作旧候选')
+  }
   return { snapshot: restored.snapshot, candidate, stepId }
 }
 
@@ -142,10 +157,79 @@ async function assertRequiredSemanticReviewFresh(
   }
 }
 
+function masterCandidateGatewayScopeAxesV1(
+  payload: MasterAgentDurableCandidateV1['payload'],
+): { chapterId?: number | null; characterId?: number | null } {
+  if (payload.agentId !== 'prose') return {}
+  const chapterId = (payload.baseSnapshot as { chapterId?: unknown } | null)?.chapterId
+  if (
+    chapterId !== null
+    && chapterId !== undefined
+    && (!Number.isInteger(chapterId) || Number(chapterId) < 1)
+  ) {
+    throw new Error('正文候选的 Gateway 章节作用域无效')
+  }
+  return {
+    chapterId: chapterId == null ? null : Number(chapterId),
+    characterId: payload.perspectiveCharacterId ?? null,
+  }
+}
+
+async function assertRequiredContextGatewayFresh(
+  input: MasterAgentCandidateAdoptionRefV1,
+  resolved: ResolvedMasterCandidateV1,
+): Promise<void> {
+  const payload = resolved.candidate.payload
+  await assertContextGatewayCandidateAdoptableV1({
+    skill: resolveAgentSkillV1(payload.agentId, payload.skillId),
+    writeTarget: masterCandidateWriteTargetV1(payload),
+    scope: input.scope,
+    worldGroupId: resolved.snapshot.run.worldGroupId ?? null,
+    ...masterCandidateGatewayScopeAxesV1(payload),
+    runId: resolved.snapshot.run.id,
+    stepId: resolved.stepId,
+    attempt: resolved.snapshot.projection.steps[resolved.stepId].attempt,
+    candidateHash: payload.candidateHash!,
+    contextManifestHash: payload.contextManifestHash,
+    excludedResourceKinds: payload.skillId === 'character.supplement'
+      && payload.characterSupplementRequest?.useEvidence === false
+      ? ['chapter', 'fact', 'foreshadow']
+      : undefined,
+  })
+}
+
 export async function beginMasterAgentCandidateAdoptionV1(
   input: MasterAgentCandidateAdoptionRefV1,
 ): Promise<ResolvedMasterCandidateV1> {
   const resolved = await resolveCandidate(input)
+  if (resolved.candidate.payload.contentRevision) {
+    try {
+      await assertWorkspaceContentRevisionFreshV1(
+        resolved.candidate.payload.contentRevision,
+        {
+          scope: input.scope,
+          worldGroupId: resolved.snapshot.run.worldGroupId ?? null,
+        },
+      )
+    } catch (error) {
+      const step = resolved.snapshot.projection.steps[resolved.stepId]
+      if (step?.status === 'awaiting_confirmation') {
+        await appendAgentRunEventV1({
+          scope: input.scope,
+          runId: input.runId,
+          type: 'candidate.staled',
+          payload: {
+            stepId: resolved.stepId,
+            candidateHash: resolved.candidate.payload.candidateHash!,
+            reason: error instanceof Error ? error.message : 'content_revision_changed',
+          },
+          expectedLastSequence: resolved.snapshot.projection.lastSequence,
+        })
+      }
+      throw new Error(`主 Agent 候选已过期：${error instanceof Error ? error.message : String(error)}`)
+    }
+  }
+  await assertRequiredContextGatewayFresh(input, resolved)
   await assertRequiredSemanticReviewFresh(resolved)
   await assertMasterCandidateDependenciesAdoptedV1(
     resolved.candidate.event,
@@ -171,6 +255,7 @@ export async function beginMasterAgentCandidateAdoptionV1(
     candidateHash,
     taskId: resolved.candidate.payload.taskId,
   })
+  maybeInjectHarnessFaultV1('adoption.before-intent')
   await db.transaction(
     'rw',
     scopeTransactionTables(db.agentConversations, db.agentEvents, db.agentRuns, db.agentRunEvents),
@@ -238,6 +323,10 @@ export async function commitMasterAgentCandidateAdoptionV1(
     || step.confirmation !== 'adopt'
   ) throw new Error('主 Agent durable 候选尚未进入可提交采纳状态')
 
+  // Confirmation and the business write are separate crash-recovery boundaries;
+  // re-check freshness immediately before the only Canon mutation.
+  await assertRequiredContextGatewayFresh(input, resolved)
+
   if (!startedFor(resolved.snapshot, resolved.stepId, resolved.candidate.payload.candidateHash!)) {
     await appendAgentRunEventV1({
       scope: input.scope,
@@ -260,6 +349,7 @@ export async function commitMasterAgentCandidateAdoptionV1(
 
   await assertRequiredSemanticReviewFresh(resolved)
   const adopt = dependencies.adopt ?? adoptMasterCandidate
+  maybeInjectHarnessFaultV1('adoption.before-write')
   const message = await adopt({
     projectId: input.scope.projectId,
     scope: input.scope,
@@ -270,6 +360,7 @@ export async function commitMasterAgentCandidateAdoptionV1(
     runtime: input.runtime,
   })
   await dependencies.afterBusinessAdoption?.()
+  maybeInjectHarnessFaultV1('adoption.after-write')
   const adoptionHash = await hashCanonicalValue({
     version: 1,
     candidateHash: resolved.candidate.payload.candidateHash,
@@ -419,6 +510,17 @@ async function businessAlreadyMatches(
     return (row?.worldOrigin ?? '') === candidate.draft.trim()
   }
   if (agentId === 'character') {
+    if (candidate.payload.skillId === 'character.lifecycle') {
+      const snapshot = candidate.payload.baseSnapshot as CharacterLifecycleSnapshotV1
+      const parsed = parseCharacterLifecycleCandidateV1(candidate.draft, snapshot)
+      const row = (await readOwnedRows<any>(input.scope, 'characters', { owner: 'world' }))
+        .find(item => item.id === parsed.characterId)
+      return Boolean(row
+        && row.narrativeStatus === parsed.targetStatus
+        && row.statusReason === parsed.reason
+        && (row.statusEvidenceChapterId ?? null) === snapshot.request.evidenceChapterId
+        && (row.statusEvidenceStoryArcId ?? null) === snapshot.request.evidenceStoryArcId)
+    }
     if (candidate.payload.skillId === 'character.supplement') {
       return characterSupplementCandidateMatchesBusinessStateV1({
         scope: input.scope,

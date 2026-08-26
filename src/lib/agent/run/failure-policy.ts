@@ -1,10 +1,15 @@
 import { AIError } from '../../types'
+import { isProviderQuotaRejectionV1 } from '../../ai/provider-rejection'
 import type {
   AgentRunFailureActionV1,
   AgentRunFailureCategoryV1,
   AnyAgentRunEventV1,
 } from '../../types/agent-run'
 import { AgentTeamBudgetExceededError } from '../team-budget'
+import {
+  StructuredOutputPipelineErrorV1,
+  StructuredOutputRepairFailedErrorV1,
+} from '../structured-output-pipeline'
 import { hashCanonicalValue } from './hash'
 
 export interface AgentRunFailureEvidenceV1 {
@@ -28,6 +33,25 @@ function decision(error: unknown): Omit<AgentRunFailureEvidenceV1, 'fingerprint'
   if (error instanceof AgentTeamBudgetExceededError) {
     return { code: 'team_budget_exhausted', retryable: false, category: 'budget', action: 'fail' }
   }
+  if (error instanceof StructuredOutputRepairFailedErrorV1) {
+    return {
+      code: 'structured_output_repair_exhausted',
+      retryable: false,
+      category: 'deterministic',
+      action: 'pause-for-author',
+    }
+  }
+  if (error instanceof StructuredOutputPipelineErrorV1) {
+    if (error.evidence.issues.some(issue => issue.category === 'stale')) {
+      return { code: 'stale_input', retryable: false, category: 'stale-input', action: 'replan' }
+    }
+    return {
+      code: 'structured_output_blocked',
+      retryable: false,
+      category: 'deterministic',
+      action: 'pause-for-author',
+    }
+  }
   if (error instanceof Error && error.name === 'MasterCandidateSemanticReviewBlockedError') {
     return {
       code: 'semantic_review_blocked',
@@ -40,6 +64,14 @@ function decision(error: unknown): Omit<AgentRunFailureEvidenceV1, 'fingerprint'
     return { code: 'host_interrupted', retryable: true, category: 'cancelled', action: 'retry' }
   }
   if (error instanceof AIError) {
+    if (isProviderQuotaRejectionV1({ status: error.status, message: error.message })) {
+      return {
+        code: 'provider_quota',
+        retryable: false,
+        category: 'deterministic',
+        action: 'pause-for-author',
+      }
+    }
     if ([408, 409, 425, 429].includes(error.status) || error.status >= 500) {
       return { code: 'provider_transient', retryable: true, category: 'transient', action: 'retry' }
     }

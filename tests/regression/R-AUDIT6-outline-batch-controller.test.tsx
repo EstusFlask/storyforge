@@ -6,10 +6,8 @@ import type { OutlineNode } from '../../src/lib/types'
 
 const mocks = vi.hoisted(() => ({
   runBatch: vi.fn(),
-  adoptItems: vi.fn(),
+  adoptCandidate: vi.fn(),
   restoreBatch: vi.fn(),
-  beginAdoption: vi.fn(),
-  commitAdoption: vi.fn(),
   rejectCandidate: vi.fn(),
 }))
 
@@ -17,14 +15,9 @@ vi.mock('../../src/lib/ai/batch-outline-runner', () => ({
   runBatchOutlineGeneration: mocks.runBatch,
 }))
 
-vi.mock('../../src/lib/outline/adopt-generation', () => ({
-  adoptGeneratedOutlineItems: mocks.adoptItems,
-}))
-
 vi.mock('../../src/lib/outline/harness', () => ({
   restoreLatestOutlineGenerationBatchV1: mocks.restoreBatch,
-  beginOutlineGenerationAdoptionV1: mocks.beginAdoption,
-  commitOutlineGenerationAdoptionV1: mocks.commitAdoption,
+  adoptOutlineGenerationCandidateV1: mocks.adoptCandidate,
   rejectOutlineGenerationCandidateV1: mocks.rejectCandidate,
 }))
 
@@ -119,16 +112,12 @@ function options(patch: Partial<Parameters<typeof useOutlineBatchGeneration>[0]>
 
 beforeEach(() => {
   mocks.runBatch.mockReset()
-  mocks.adoptItems.mockReset()
+  mocks.adoptCandidate.mockReset()
   mocks.restoreBatch.mockReset()
-  mocks.beginAdoption.mockReset()
-  mocks.commitAdoption.mockReset()
   mocks.rejectCandidate.mockReset()
   mocks.restoreBatch.mockResolvedValue(null)
-  mocks.beginAdoption.mockResolvedValue(undefined)
-  mocks.commitAdoption.mockResolvedValue(undefined)
+  mocks.adoptCandidate.mockResolvedValue({ evidence: {}, receiptHash: 'a'.repeat(64), postStateHash: 'b'.repeat(64) })
   mocks.rejectCandidate.mockResolvedValue(undefined)
-  mocks.adoptItems.mockResolvedValue({ writtenCount: 1, firstId: 10, skippedReasons: [] })
 })
 
 afterEach(async () => {
@@ -158,7 +147,7 @@ describe('AUDIT-6 · 批量章纲 controller', () => {
   })
 
   it('多世界模式按卷解析世界上下文和世界规则', async () => {
-    const assembleContext = vi.fn(async (worldGroupId: number | null, volumeId?: number | null) => (
+    const assembleContext = vi.fn(async (_request: unknown, worldGroupId: number | null, volumeId?: number | null) => (
       volumeId == null
         ? assembled('GLOBAL', 'CHARACTERS', 'GLOBAL_RULES')
         : assembled(`WORLD_${worldGroupId}`, '', `RULES_${volumeId}`)
@@ -185,8 +174,18 @@ describe('AUDIT-6 · 批量章纲 controller', () => {
 
     expect(controller.running).toBe(false)
     expect(controller.result?.get(1)?.[0].title).toBe('第一章')
-    expect(assembleContext).toHaveBeenCalledWith(11, 1, undefined)
-    expect(assembleContext).toHaveBeenCalledWith(22, 2, 'PRIOR')
+    expect(assembleContext).toHaveBeenCalledWith(
+      { kind: 'chapters', volumeId: 1 },
+      11,
+      1,
+      undefined,
+    )
+    expect(assembleContext).toHaveBeenCalledWith(
+      { kind: 'chapters', volumeId: 2 },
+      22,
+      2,
+      'PRIOR',
+    )
   })
 
   it('用户取消会中止请求且不保留部分结果', async () => {
@@ -262,16 +261,17 @@ describe('AUDIT-6 · 批量章纲 controller', () => {
 
     await act(async () => { await controller.confirm() })
 
-    expect(mocks.adoptItems).toHaveBeenCalledWith({
-      projectId: 1,
-      worldGroupId: null,
-      parentId: 1,
-      type: 'chapter',
-      items: [{ title: '第二章', summary: '继续' }],
-      startingOrder: 1,
+    expect(mocks.adoptCandidate).toHaveBeenCalledWith({
+      candidate: candidate(1),
+      intent: {
+        version: 1,
+        kind: 'chapters',
+        destinationVolumeId: 1,
+        items: [{ title: '第二章', summary: '继续' }],
+        startingOrder: 1,
+        baseExistingTitles: ['已有章'],
+      },
     })
-    expect(mocks.beginAdoption).toHaveBeenCalledOnce()
-    expect(mocks.commitAdoption).toHaveBeenCalledOnce()
     expect(reloadOutline).toHaveBeenCalledOnce()
     expect(controller.result).toBeNull()
     expect(controller.progress).toBeNull()

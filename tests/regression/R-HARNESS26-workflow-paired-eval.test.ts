@@ -27,6 +27,8 @@ import type {
 } from '../../src/lib/evals/agent-harness/types'
 import type { WorkspaceScope } from '../../src/lib/types'
 import { useAIConfigStore } from '../../src/stores/ai-config'
+import { backfillResourceUidsV1 } from '../../src/lib/context-gateway/resource-identity'
+import { generateWorkCode, generateWorkspaceUid } from '../../src/lib/memory/identity'
 
 const EXECUTION: AgentHarnessWorkflowExecutionV1 = {
   generator: {
@@ -528,6 +530,7 @@ async function createWorkspace(variant: AgentHarnessWorkflowVariantV1): Promise<
 }> {
   const now = Date.now()
   const projectId = await db.projects.add({
+    workspaceUid: generateWorkspaceUid(),
     name: `HARNESS-26 ${variant}`,
     genre: 'fantasy',
     genres: ['fantasy'],
@@ -552,6 +555,7 @@ async function createWorkspace(variant: AgentHarnessWorkflowVariantV1): Promise<
     projectId,
     worldId,
     title: '盐城作品',
+    code: generateWorkCode(),
     description: '',
     genres: ['fantasy'],
     status: 'drafting',
@@ -587,5 +591,6 @@ async function createWorkspace(variant: AgentHarnessWorkflowVariantV1): Promise<
     createdAt: now,
     updatedAt: now,
   } as any)
+  await backfillResourceUidsV1(projectId)
   return { scope: { projectId, worldId, workId }, worldGroupId }
 }

@@ -34,7 +34,25 @@ import { buildChapterInformationBoundaryV1 } from '../../src/lib/agent/informati
 import { hashCanonicalValue } from '../../src/lib/agent/run/hash'
 import { hashChapterText } from '../../src/lib/ai/chapter-memory/text-normalization'
 import type { WorkspaceScope } from '../../src/lib/types'
+import type { AssembleContextResult } from '../../src/lib/registry/types'
 import { runDurableProseSemanticReviewV1 } from '../../src/lib/agent/run/prose-semantic-durable'
+
+function withGatewayEvidence(assembled: AssembleContextResult): AssembleContextResult {
+  const content = '【章纲】守灯人在潮门外观察退潮，不知道月井密钥。'
+  return {
+    ...assembled,
+    text: content,
+    segments: [{ label: 'Context Gateway', layer: 'L0', content, tokens: 24, trimmable: false }],
+    included: ['ragSelection'],
+    omitted: [],
+    sourceEvidence: [{
+      key: 'ragSelection', status: 'included', delivery: 'full', sourceHash: 'a'.repeat(64),
+      originalCharacters: content.length, inputCharacters: content.length,
+      originalTokens: 24, inputTokens: 24,
+    }],
+    totalInputTokens: 24,
+  }
+}
 
 async function seedWorkspace(): Promise<{
   scope: WorkspaceScope
@@ -123,14 +141,14 @@ describe.sequential('R-HARNESS19 · 正文语义评审 durable 主路径', () =>
       operation: 'generate',
       semanticReview: true,
     })
-    const generationAssembled = await assembleContext({
+    const generationAssembled = withGatewayEvidence(await assembleContext({
       projectId: fixture.scope.projectId,
       scope: fixture.scope,
       chapterId: fixture.chapterId,
       outlineNodeId: fixture.outlineNodeId,
       sourceKeys: [...PROSE_GENERATION_SOURCE_KEYS_V1],
       inputBudgetMaxTokens: 48_000,
-    })
+    }))
     const generationManifest = await createContextManifestFromAssemblyV1({
       runId: snapshot.run.id,
       stepId: PROSE_GENERATION_STEP_ID_V1,
@@ -177,7 +195,7 @@ describe.sequential('R-HARNESS19 · 正文语义评审 durable 主路径', () =>
           code: 'pov-knowledge-leak',
           severity: 'blocking',
           candidateQuote: outputText,
-          evidence: [{ sourceKey: 'chapterOutline', quote: '不知道月井密钥' }],
+          evidence: [{ sourceKey: 'ragSelection', quote: '不知道月井密钥' }],
           reason: '守灯人使用了尚未知晓的密钥。',
           revisionInstruction: '改为只观察潮水，不说出密钥。',
           autoRevisable: true,
@@ -243,14 +261,14 @@ describe.sequential('R-HARNESS19 · 正文语义评审 durable 主路径', () =>
       'prose-semantic-rereview',
     ])
 
-    const generationAssembled = await assembleContext({
+    const generationAssembled = withGatewayEvidence(await assembleContext({
       projectId: fixture.scope.projectId,
       scope: fixture.scope,
       chapterId: fixture.chapterId,
       outlineNodeId: fixture.outlineNodeId,
       sourceKeys: [...PROSE_GENERATION_SOURCE_KEYS_V1],
       inputBudgetMaxTokens: 48_000,
-    })
+    }))
     const generationManifest = await createContextManifestFromAssemblyV1({
       runId: snapshot.run.id,
       stepId: PROSE_GENERATION_STEP_ID_V1,
@@ -292,14 +310,14 @@ describe.sequential('R-HARNESS19 · 正文语义评审 durable 主路径', () =>
 
     const reviewSkill = getAgentSkillV1('prose.review')
     const reviewSourceKeys = resolveAgentSkillContextSourceKeysV1(reviewSkill)
-    const reviewAssembled = await assembleContext({
+    const reviewAssembled = withGatewayEvidence(await assembleContext({
       projectId: fixture.scope.projectId,
       scope: fixture.scope,
       chapterId: fixture.chapterId,
       outlineNodeId: fixture.outlineNodeId,
       sourceKeys: reviewSourceKeys,
       inputBudgetMaxTokens: 24_000,
-    })
+    }))
     const reviewManifest = await createContextManifestFromAssemblyV1({
       runId: snapshot.run.id,
       stepId: PROSE_SEMANTIC_REVIEW_STEP_ID_V1,
@@ -311,7 +329,11 @@ describe.sequential('R-HARNESS19 · 正文语义评审 durable 主路径', () =>
       boundary: { chapterId: fixture.chapterId, outlineNodeId: fixture.outlineNodeId },
       readerVersion: 'prose-semantic-review-context-v1',
     })
-    const reviewerBinding = createAgentSkillExecutionBindingV1(reviewSkill)
+    const contractBinding = snapshot.contract.executionBindings?.find(binding => (
+      binding.stepId === PROSE_SEMANTIC_REVIEW_STEP_ID_V1
+    ))
+    if (!contractBinding) throw new Error('测试夹具缺少冻结语义评审 binding')
+    const { stepId: _stepId, ...reviewerBinding } = contractBinding
     snapshot = await beginProseSemanticStepV1({
       scope: fixture.scope,
       snapshot,
@@ -341,7 +363,7 @@ describe.sequential('R-HARNESS19 · 正文语义评审 durable 主路径', () =>
       reviewer: {
         provider: 'test-provider',
         model: 'test-reviewer',
-        promptVersion: 'prose-semantic-review-v1',
+        promptVersion: getAgentSkillV1('prose.review').promptVersion,
         executionBinding: reviewerBinding,
         correlatedJudge: true,
       },
@@ -435,7 +457,7 @@ describe.sequential('R-HARNESS19 · 正文语义评审 durable 主路径', () =>
     expect(completed.receipt?.semanticVerifier).toEqual({
       provider: 'test-provider',
       model: 'test-reviewer',
-      promptVersion: 'prose-semantic-review-v1',
+      promptVersion: 'prose-semantic-review-v2',
     })
     expect(completed.receipt?.criteria.some(criterion => (
       criterion.id === 'prose-generation.semantic-review'

@@ -41,5 +41,27 @@ describe('CF-20260703-7 · InlineTextarea 长文本内部滚动', () => {
     await act(async () => root.unmount())
     host.remove()
   })
-})
 
+  it('编辑中的组件被切页卸载时提交最后草稿，不依赖 blur 事件顺序', async () => {
+    const host = document.createElement('div')
+    document.body.append(host)
+    const root = createRoot(host)
+    const onChange = vi.fn(async () => undefined)
+    await act(async () => {
+      root.render(createElement(InlineTextarea, { value: '旧内容', onChange }))
+    })
+    await act(async () => {
+      host.querySelector('div')?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    })
+    const textarea = host.querySelector('textarea')!
+    await act(async () => {
+      const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set
+      setter?.call(textarea, '切页前最后草稿')
+      textarea.dispatchEvent(new Event('input', { bubbles: true }))
+      root.unmount()
+    })
+    expect(onChange).toHaveBeenCalledOnce()
+    expect(onChange).toHaveBeenCalledWith('切页前最后草稿')
+    host.remove()
+  })
+})

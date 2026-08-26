@@ -23,6 +23,7 @@ import { AgentTeamBudgetTracker } from '../../lib/agent/team-budget'
 import { runDurableConsistencyAuditV1 } from '../../lib/agent/run/consistency-audit-durable'
 import { resolveScopeLike } from '../../lib/world-engine/scope'
 import { useAIConfigStore } from '../../stores/ai-config'
+import { prepareProseGatewayAssemblyV1 } from '../../lib/prose/gateway-context'
 
 interface Props {
   projectId: number
@@ -58,8 +59,8 @@ const TABS: { key: TabType; label: string; icon: typeof ShieldCheck }[] = [
 ]
 
 export default function ReviewPanel(props: Props) {
-  const { projectId, chapterId, outlineNodeId, worldGroupId, chapterContent, chapterTitle, worldContext, characterContext,
-    prevChapterSummary, nextChapterSummary, foreshadowContext, stateContext, onClose, onReviseByReport } = props
+  const { projectId, chapterId, outlineNodeId, worldGroupId, chapterContent, chapterTitle,
+    prevChapterSummary, nextChapterSummary, onClose, onReviseByReport } = props
 
   const ai = useAIStream(createAISessionKey(projectId, 'review.run', chapterId))
   const [auditMode, setAuditMode] = useState<ConsistencyAuditMode>('fast')
@@ -92,11 +93,25 @@ export default function ReviewPanel(props: Props) {
   }, [chapterId, props.consistencyRun, setConsistency])
 
   const handleRunReview = async () => {
+    if (outlineNodeId == null) throw new Error('正文审查缺少目标章纲。')
+    await props.onBeforeConsistencyRun?.()
+    const config = useAIConfigStore.getState().config
+    const assembled = await prepareProseGatewayAssemblyV1({
+      projectId,
+      worldGroupId: worldGroupId ?? null,
+      chapterId,
+      outlineNodeId,
+      operation: 'review',
+      authorRequest: `审查《${chapterTitle}》当前正文的质量与一致性`,
+      config,
+    })
     const messages = buildReviewPrompt(
-      chapterContent, chapterTitle, worldContext,
-      characterContext, prevChapterSummary, foreshadowContext, stateContext
+      chapterContent, chapterTitle, assembled.text,
+      '', '', '', ''
     )
-    const output = await ai.start(messages, undefined, { category: 'review.quality' })
+    const output = await ai.start(messages, undefined, {
+      formalEntryId: 'prose.review.quality', category: 'review.quality',
+    })
     const result = parseReviewResult(output)
     if (result) setReview(chapterId, result)
   }
@@ -104,7 +119,9 @@ export default function ReviewPanel(props: Props) {
   const handleRunAntiAI = async () => {
     const highFreq = extractHighFreqWords(chapterContent)
     const messages = buildAntiAIPrompt(chapterContent, highFreq.map(w => w.replace(/\(\d+次\)/, '')))
-    const output = await ai.start(messages, undefined, { category: 'review.anti-ai' })
+    const output = await ai.start(messages, undefined, {
+      formalEntryId: 'prose.review.anti-ai', category: 'review.anti-ai',
+    })
     const result = parseAntiAIResult(output)
     if (result) setAntiAI(chapterId, result)
   }
@@ -113,7 +130,9 @@ export default function ReviewPanel(props: Props) {
     const messages = buildReadabilityPrompt(
       chapterContent, chapterTitle, prevChapterSummary, nextChapterSummary
     )
-    const output = await ai.start(messages, undefined, { category: 'review.readability' })
+    const output = await ai.start(messages, undefined, {
+      formalEntryId: 'prose.review.readability', category: 'review.readability',
+    })
     const result = parseReadabilityResult(output)
     if (result) setReadability(chapterId, result)
   }
@@ -139,6 +158,7 @@ export default function ReviewPanel(props: Props) {
         model: config.model,
         budget,
         call: messages => ai.start(messages, undefined, {
+          formalEntryId: 'prose.review.consistency',
           category: auditMode === 'fast' ? 'review.consistency.fast' : 'review.consistency.deep',
           projectId,
           configOverrides: { maxTokens: auditMode === 'fast' ? 4_000 : 6_000 },

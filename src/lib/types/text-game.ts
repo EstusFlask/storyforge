@@ -12,6 +12,7 @@ import type { AdventureContentV1 } from './adventure'
 import type { AvgPresentationContentV1, FrozenAvgMediaAsset } from './avg'
 import type { NarrativeSimulationContentV1 } from './narrative-simulation'
 import type { OpenWorldContentV1 } from './open-world'
+import type { RagDocumentMetadata } from './rag-library'
 
 export const GAME_PRODUCT_TYPES = [
   'storygame',
@@ -65,7 +66,7 @@ export interface GameDefinition {
 export const NARRATIVE_BEAT_KINDS = ['narration', 'dialogue', 'action', 'system'] as const
 export type NarrativeBeatKind = typeof NARRATIVE_BEAT_KINDS[number]
 
-export interface NarrativeBeat {
+export interface NarrativeBeat extends RagDocumentMetadata {
   id?: number
   projectId: number
   moduleId: number
@@ -79,7 +80,7 @@ export interface NarrativeBeat {
   updatedAt: number
 }
 
-export interface NarrativeChoice {
+export interface NarrativeChoice extends RagDocumentMetadata {
   id?: number
   projectId: number
   moduleId: number

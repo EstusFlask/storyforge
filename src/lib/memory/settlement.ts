@@ -9,11 +9,32 @@ import type {
 import { isWorkspaceUid } from './identity'
 import { hashCanonicalValue } from '../agent/run/hash'
 import { readAgentRunV1 } from '../agent/run/event-store'
+import { inspectAgentRunArtifactAvailabilityV1 } from './artifact-store'
 import {
   buildMemorySettlementReceiptFromSnapshotV1,
   hashMemoryArtifactIndexV1,
   memoryRunExportIdV1,
 } from './settlement-core'
+
+// MEMINT-0 keeps exact evidence, retention and working-context replay behind
+// the existing settlement boundary instead of exposing a parallel memory API.
+export { planExactArtifactRetentionV1 } from './artifact-retention'
+export { assertExactRunArtifactBodySafeV1, ExactRunArtifactPolicyError } from './evidence-policy'
+export {
+  inspectAgentRunArtifactAvailabilityV1,
+  markAndSweepAgentRunArtifactsV1,
+  pruneAgentRunArtifactsExplicitlyV1,
+  readAgentRunArtifactExactV1,
+  recordAgentRunArtifactV1,
+  AgentRunArtifactStoreError,
+} from './artifact-store'
+export { assertMemoryPlaneContractV1, memoryPlaneForTableV1 } from './plane-contract'
+export {
+  createWorkingContextCompactionCheckpointV1,
+  parseWorkingContextCompactionCheckpointV1,
+  readWorkingContextReplayV1,
+  WorkingContextContractError,
+} from './working-context'
 
 async function workspaceDirtyForSettlement(projectId: number): Promise<boolean> {
   const binding = await db.workspaceDocuments
@@ -98,6 +119,13 @@ export async function buildMemoryArtifactIndexV1(
       evaluatedAt: settlementEvent?.createdAt ?? 0,
     })
     const artifactIndexHash = await hashMemoryArtifactIndexV1(receipt.artifactRefs)
+    const artifactAvailability = await Promise.all(receipt.artifactRefs
+      .filter(ref => ref.sourceKind === 'agent-run-artifact' && ref.artifactKind != null)
+      .map(ref => inspectAgentRunArtifactAvailabilityV1({
+        projectId,
+        artifactKind: ref.artifactKind!,
+        contentHash: ref.contentHash,
+      })))
     if (settlementEvent?.type === 'memory.settlement.recorded') {
       const recorded = await buildMemorySettlementReceiptFromSnapshotV1({
         snapshot,
@@ -131,6 +159,10 @@ export async function buildMemoryArtifactIndexV1(
       contextManifestHashes: receipt.contextManifestHashes,
       adoptionHashes: receipt.adoptionHashes,
       artifactRefs: receipt.artifactRefs,
+      artifactAvailability: artifactAvailability.sort((left, right) => (
+        left.artifactKind.localeCompare(right.artifactKind)
+        || left.contentHash.localeCompare(right.contentHash)
+      )),
       artifactIndexHash,
     })
   }

@@ -112,7 +112,6 @@ export default function DetailedOutlinePanel({ project, initialNodeId }: Props) 
     enhanceAI,
     isRecovering,
     pendingCandidate: pendingDetailedCandidate,
-    buildDetailContext,
     adoptDetailedPatch,
     generateScenes,
     generateEnhanced,
@@ -353,17 +352,6 @@ export default function DetailedOutlinePanel({ project, initialNodeId }: Props) 
         chapters: chapterNodes,
         existingDetails: detailedOutlines,
         scope,
-        contextResolver: async outlineNodeId => {
-          const worldGroupId = nodes.find(node => node.id === outlineNodeId)?.worldGroupId ?? null
-          const context = await buildDetailContext(outlineNodeId, scope, worldGroupId)
-          return {
-            worldGroupId,
-            worldContext: context.worldContext,
-            characterContext: context.characterContext,
-            foreshadowContext: context.foreshadowContext,
-            assembled: context.assembled,
-          }
-        },
         onCandidate: ({ chapter, candidate }) => new Promise(resolve => {
           setSelectedNodeId(chapter.id!)
           clearPendingCandidate()
@@ -404,7 +392,7 @@ export default function DetailedOutlinePanel({ project, initialNodeId }: Props) 
       // 3 秒后清除进度信息
       setTimeout(() => setBatchProgress(null), 3000)
     }
-  }, [adoptDetailedPatch, batchProgress, buildDetailContext, chapterNodes, clearPendingCandidate, detailedOutlines, loadDetailed, nodes, project.id, restoreEnhanced])
+  }, [adoptDetailedPatch, batchProgress, chapterNodes, clearPendingCandidate, detailedOutlines, loadDetailed, project.id, restoreEnhanced])
 
   const handleBatchStop = useCallback(() => {
     batchAbortRef.current?.abort()

@@ -37,6 +37,8 @@ import {
   type H86VerificationCallInputV1,
 } from './story-arc-main-path'
 import type { H86StoryArcFixtureV1 } from './story-arc-main-path-fixtures'
+import { generateWorkCode, generateWorkspaceUid } from '../../memory/identity'
+import { backfillResourceUidsV1 } from '../../context-gateway/resource-identity'
 
 const H86_PROJECT_PREFIX = '[H86-EVAL] '
 const CALL_TIMEOUT_MS = 180_000
@@ -174,6 +176,7 @@ class H86CallFailure extends Error {
 async function seedWorkspace(fixture: H86StoryArcFixtureV1): Promise<H86WorkspaceV1> {
   const now = Date.now()
   const projectId = await db.projects.add({
+    workspaceUid: generateWorkspaceUid(),
     name: `${H86_PROJECT_PREFIX}${fixture.id} ${fixture.projectName}`,
     genre: fixture.genre,
     genres: [fixture.genre],
@@ -198,6 +201,7 @@ async function seedWorkspace(fixture: H86StoryArcFixtureV1): Promise<H86Workspac
     projectId,
     worldId,
     title: fixture.projectName,
+    code: generateWorkCode(),
     description: fixture.logline,
     genres: [fixture.genre],
     status: 'drafting',
@@ -268,6 +272,7 @@ async function seedWorkspace(fixture: H86StoryArcFixtureV1): Promise<H86Workspac
       },
     }), 1)
   }
+  await backfillResourceUidsV1(projectId)
   const project = await db.projects.get(projectId)
   if (!project) throw new Error('H86 评测项目创建失败')
   return { project, scope }
@@ -429,6 +434,13 @@ async function agentHarnessGeneration(
           }
         },
       })
+      if (prepared.contextGatewayExecution) {
+        await options.executionTrace?.contextGatewayPrepared?.(task, {
+          execution: prepared.contextGatewayExecution,
+          assembled: prepared.input.assembled,
+          renderedRequest: prepared.prepared.messages,
+        })
+      }
       const skill = getAgentSkillV1('outline.story-arcs')
       const generated = await runBudgetedGenerationNode({
         node: prepared.node,
@@ -461,6 +473,14 @@ async function agentHarnessGeneration(
         draft: JSON.stringify(generated.output, null, 2),
         runtimeNode: prepared.node,
         runtimeOutput: generated.output,
+        ...(prepared.contextGatewayExecution ? {
+          contextGatewayRuntime: {
+            execution: prepared.contextGatewayExecution,
+            assembled: prepared.input.assembled,
+            renderedRequest: prepared.prepared.messages,
+            rawResponse: generated.structuredOutputEvidence ?? generated.output,
+          },
+        } : {}),
       }
       await options.executionTrace?.candidateReady?.(task, candidate)
       return [candidate]

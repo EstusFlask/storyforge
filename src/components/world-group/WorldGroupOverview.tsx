@@ -2,7 +2,7 @@
  * 世界总览面板 — 管理多个世界组 + 世界关系
  */
 import { useState, useEffect } from 'react'
-import { Plus, Trash2, GripVertical, ArrowRight, ChevronRight, Sparkles, Loader2, Check } from 'lucide-react'
+import { Plus, Trash2, GripVertical, ChevronRight, Sparkles, Loader2, Check, Pencil } from 'lucide-react'
 import { useWorldGroupStore } from '../../stores/world-group'
 import { useAIConfigStore } from '../../stores/ai-config'
 import {
@@ -26,16 +26,28 @@ interface Props {
 
 const ADOPTION_RECOVERY_MESSAGE = '上次世界选择已确认但尚未完成写入；请继续原运行完成写入与终验，不会重复调用模型。'
 
+interface WorldLinkFormState {
+  from: number | ''
+  to: number | ''
+  type: WorldGroupLinkType
+  name: string
+  description: string
+  bidirectional: boolean
+}
+
+const EMPTY_LINK_FORM: WorldLinkFormState = {
+  from: '', to: '', type: 'portal', name: '', description: '', bidirectional: false,
+}
+
 export default function WorldGroupOverview({ project }: Props) {
-  const { groups, links, loading, loadAll, createGroup, deleteGroup, ensurePrimaryGroup, createLink, deleteLink } = useWorldGroupStore()
+  const { groups, links, loading, loadAll, createGroup, deleteGroup, ensurePrimaryGroup, createLink, updateLink, deleteLink } = useWorldGroupStore()
   const aiConfig = useAIConfigStore(state => state.config)
   const [editingGroup, setEditingGroup] = useState<WorldGroup | null>(null)
   const [confirmDeleteId, setConfirmDeleteId] = useState<number | null>(null)
   // 关系创建
   const [showLinkForm, setShowLinkForm] = useState(false)
-  const [linkForm, setLinkForm] = useState<{ from: number | ''; to: number | ''; type: WorldGroupLinkType; name: string }>({
-    from: '', to: '', type: 'portal', name: '',
-  })
+  const [editingLinkId, setEditingLinkId] = useState<number | null>(null)
+  const [linkForm, setLinkForm] = useState<WorldLinkFormState>(EMPTY_LINK_FORM)
 
   // AI 建议世界
   const [showSuggest, setShowSuggest] = useState(false)
@@ -238,16 +250,43 @@ export default function WorldGroupOverview({ project }: Props) {
 
   const handleCreateLink = async () => {
     if (linkForm.from === '' || linkForm.to === '' || linkForm.from === linkForm.to) return
-    await createLink({
-      projectId: project.id!,
+    const patch = {
       fromGroupId: Number(linkForm.from),
       toGroupId: Number(linkForm.to),
       linkType: linkForm.type,
-      name: linkForm.name || undefined,
-      bidirectional: false,
-    })
-    setLinkForm({ from: '', to: '', type: 'portal', name: '' })
+      name: linkForm.name.trim() || undefined,
+      description: linkForm.description.trim() || undefined,
+      bidirectional: linkForm.bidirectional,
+    }
+    if (editingLinkId == null) {
+      await createLink({ projectId: project.id!, ...patch })
+    } else {
+      await updateLink(editingLinkId, patch)
+    }
+    setEditingLinkId(null)
+    setLinkForm(EMPTY_LINK_FORM)
     setShowLinkForm(false)
+  }
+
+  const handleEditLink = (linkId: number) => {
+    const link = links.find(item => item.id === linkId)
+    if (!link) return
+    setEditingLinkId(linkId)
+    setLinkForm({
+      from: link.fromGroupId,
+      to: link.toGroupId,
+      type: link.linkType,
+      name: link.name ?? '',
+      description: link.description ?? '',
+      bidirectional: link.bidirectional === true,
+    })
+    setShowLinkForm(true)
+  }
+
+  const closeLinkForm = () => {
+    setShowLinkForm(false)
+    setEditingLinkId(null)
+    setLinkForm(EMPTY_LINK_FORM)
   }
 
   // 如果正在编辑某个世界，显示详情
@@ -463,17 +502,20 @@ export default function WorldGroupOverview({ project }: Props) {
               <div className="flex items-center justify-between">
                 <h3 className="text-sm font-semibold text-text-primary">世界关系</h3>
                 <button
-                  onClick={() => setShowLinkForm(v => !v)}
+                  onClick={() => showLinkForm ? closeLinkForm() : setShowLinkForm(true)}
                   className="flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg bg-bg-elevated text-text-secondary border border-border hover:text-accent hover:border-accent/50 transition-colors"
                 >
                   <Plus className="w-3.5 h-3.5" />
-                  添加关系
+                  {showLinkForm ? '取消' : '添加关系'}
                 </button>
               </div>
 
               {/* 关系创建表单 */}
               {showLinkForm && (
-                <div className="flex items-center gap-2 flex-wrap p-3 bg-bg-surface border border-border rounded-lg">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 p-3 bg-bg-surface border border-border rounded-lg">
+                  <div className="sm:col-span-2 text-xs font-medium text-text-secondary">
+                    {editingLinkId == null ? '新建世界通道' : '编辑世界通道'}
+                  </div>
                   <select
                     value={linkForm.from}
                     onChange={e => setLinkForm(f => ({ ...f, from: e.target.value ? Number(e.target.value) : '' }))}
@@ -482,7 +524,6 @@ export default function WorldGroupOverview({ project }: Props) {
                     <option value="">起点世界</option>
                     {groups.map(g => <option key={g.id} value={g.id}>{g.icon} {g.name}</option>)}
                   </select>
-                  <ArrowRight className="w-3.5 h-3.5 text-text-muted" />
                   <select
                     value={linkForm.to}
                     onChange={e => setLinkForm(f => ({ ...f, to: e.target.value ? Number(e.target.value) : '' }))}
@@ -504,14 +545,29 @@ export default function WorldGroupOverview({ project }: Props) {
                     value={linkForm.name}
                     onChange={e => setLinkForm(f => ({ ...f, name: e.target.value }))}
                     placeholder="通道名称（可选）"
-                    className="px-2 py-1.5 bg-bg-base border border-border rounded text-xs text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent w-32"
+                    className="px-2 py-1.5 bg-bg-base border border-border rounded text-xs text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent"
+                  />
+                  <label className="flex items-center gap-2 px-2 py-1.5 text-xs text-text-secondary bg-bg-base border border-border rounded">
+                    <input
+                      type="checkbox"
+                      checked={linkForm.bidirectional}
+                      onChange={event => setLinkForm(form => ({ ...form, bidirectional: event.target.checked }))}
+                    />
+                    双向通道
+                  </label>
+                  <textarea
+                    value={linkForm.description}
+                    onChange={event => setLinkForm(form => ({ ...form, description: event.target.value }))}
+                    placeholder="描述通道触发方式、方向差异或其它约束（可选）"
+                    rows={2}
+                    className="sm:col-span-2 px-2 py-1.5 bg-bg-base border border-border rounded text-xs text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent resize-y"
                   />
                   <button
                     onClick={handleCreateLink}
                     disabled={linkForm.from === '' || linkForm.to === '' || linkForm.from === linkForm.to}
-                    className="px-3 py-1.5 text-xs rounded-lg bg-accent text-white hover:bg-accent-hover disabled:opacity-40 transition-colors"
+                    className="sm:col-span-2 px-3 py-1.5 text-xs rounded-lg bg-accent text-white hover:bg-accent-hover disabled:opacity-40 transition-colors"
                   >
-                    创建
+                    {editingLinkId == null ? '创建关系' : '保存关系'}
                   </button>
                 </div>
               )}
@@ -527,15 +583,25 @@ export default function WorldGroupOverview({ project }: Props) {
                     return (
                       <div key={l.id} className="flex items-center gap-2 px-3 py-2 bg-bg-surface border border-border rounded-lg text-sm group">
                         <span>{from?.icon} {from?.name}</span>
-                        <ArrowRight className="w-3.5 h-3.5 text-text-muted" />
+                        <span className="text-text-muted" aria-label={l.bidirectional ? '双向' : '单向'}>
+                          {l.bidirectional ? '↔' : '→'}
+                        </span>
                         <span>{to?.icon} {to?.name}</span>
                         <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-bg-elevated text-text-muted border border-border/50">
                           {WORLD_LINK_TYPE_LABELS[l.linkType]}
                         </span>
                         {l.name && <span className="text-text-muted text-xs">（{l.name}）</span>}
+                        {l.description && <span className="text-text-muted text-xs truncate">{l.description}</span>}
+                        <button
+                          onClick={() => handleEditLink(l.id!)}
+                          className="ml-auto p-1 rounded text-text-muted hover:text-accent opacity-0 group-hover:opacity-100 transition-all"
+                          title="编辑关系"
+                        >
+                          <Pencil className="w-3.5 h-3.5" />
+                        </button>
                         <button
                           onClick={() => deleteLink(l.id!)}
-                          className="ml-auto p-1 rounded text-text-muted hover:text-red-400 opacity-0 group-hover:opacity-100 transition-all"
+                          className="p-1 rounded text-text-muted hover:text-red-400 opacity-0 group-hover:opacity-100 transition-all"
                           title="删除关系"
                         >
                           <Trash2 className="w-3.5 h-3.5" />

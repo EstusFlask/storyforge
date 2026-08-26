@@ -28,6 +28,8 @@ export interface AgentContextEvidence {
   omitted: string[]
   trimmed: string[]
   sourceEvidence?: AssembleContextSourceEvidence[]
+  /** Semantic input-policy sources proven through a Gateway packet's SourceRefs. */
+  inputStateSourceKeys?: string[]
   inputState?: AgentContextInputStateEvidenceV1
   estimatedInputTokens: number
   inputBudgetTokens: number
@@ -84,6 +86,8 @@ function mergeSourceEvidence(
         : 'omitted'
     const inputTokens = current.inputTokens + source.inputTokens
     const originalTokens = current.originalTokens + source.originalTokens
+    const inputCharacters = (current.inputCharacters ?? 0) + (source.inputCharacters ?? 0)
+    const originalCharacters = (current.originalCharacters ?? 0) + (source.originalCharacters ?? 0)
     byKey.set(source.key, {
       key: source.key,
       status,
@@ -96,6 +100,8 @@ function mergeSourceEvidence(
           : 'full',
       originalTokens,
       inputTokens,
+      originalCharacters,
+      inputCharacters,
       ...(
         current.sourceHash && source.sourceHash && current.sourceHash === source.sourceHash
           ? { sourceHash: current.sourceHash }

@@ -71,8 +71,7 @@ async function resolveCharacterId(
     .filter(character =>
       character.name === name
       && (character.isCrossWorld
-        || character.homeWorldGroupId == null
-        || character.homeWorldGroupId === (worldGroupId ?? null)))
+        || (character.homeWorldGroupId ?? null) === (worldGroupId ?? null)))
   return matches.length === 1 ? matches[0].id ?? null : null
 }
 

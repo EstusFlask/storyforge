@@ -1,6 +1,10 @@
 import { CHARACTER_DIMENSIONS } from '../character/character-dimensions'
 import { CONTEXT_SOURCE_BY_KEY } from '../registry/context-sources'
-import { FIELD_BY_TARGET } from '../registry/field-registry'
+import {
+  FIELD_BY_TARGET,
+  STORY_CORE_GENERATABLE_FIELD_SPECS,
+  WORLDVIEW_GENERATABLE_FIELD_SPECS,
+} from '../registry/field-registry'
 import { ADOPTION_EXTENSIONS } from '../registry/adoption-schema'
 import { REGISTRY_BY_NAME } from '../registry/project-tables'
 import {
@@ -14,7 +18,12 @@ import {
   type AgentContextInputStateV1,
   type AgentContextTaskKind,
 } from './context-policy'
-import type { AssembleContextSourceEvidence } from '../registry/types'
+import {
+  CONTEXT_RESOURCE_KINDS_V1,
+  type AssembleContextSourceEvidence,
+  type ContextResourceDepthV1,
+  type ContextResourceKind,
+} from '../registry/types'
 import { AGENT_TOOL_BY_NAME } from './tool-registry'
 
 export const DOMAIN_AGENT_IDS = ['world-origin', 'character', 'inspiration', 'outline', 'prose'] as const
@@ -25,12 +34,15 @@ export type AgentSkillExecutionModeV1 =
   | 'worldview-field'
   | 'world-suggest'
   | 'worldview-expand'
+  | 'world-link-context'
   | 'constitution-extract'
   | 'codex-extract'
+  | 'codex-enrich'
   | 'story-core'
   | 'creative-rules'
   | 'create'
   | 'supplement'
+  | 'lifecycle'
   | 'relationships'
   | 'locations'
   | 'map-config'
@@ -104,6 +116,27 @@ export interface AgentSkillContextCompressionPolicyV1 {
   maxFullTextBudgetScale: number
 }
 
+export interface AgentSkillContextGatewayPolicyV1 {
+  version: 1
+  /** shadow is evidence-only; required makes V3 freshness an adoption precondition. */
+  rollout: 'shadow' | 'required'
+  /**
+   * Optional canary boundary. When present, only these registered table.field
+   * write targets require the Gateway/V3 adoption gate; the remaining targets
+   * stay on the legacy path until their own phase gate passes.
+   */
+  requiredWriteTargets?: readonly string[]
+  providerSourceKeys: readonly string[]
+  allowedResourceKinds: readonly ContextResourceKind[]
+  allowedDepths: readonly ContextResourceDepthV1[]
+  maxReadCalls: number
+  maxRetrievedTokens: number
+  maxPlanningSteps: number
+  maxPlanningModelTokens: number
+  allowOriginalRead: boolean
+  additionalReadToolNames: readonly string[]
+}
+
 export interface AgentSkillDefinitionV1 {
   version: 1
   id: string
@@ -122,6 +155,8 @@ export interface AgentSkillDefinitionV1 {
   optionalContextSourceKeys: readonly string[]
   inputPolicy: AgentSkillInputPolicyV1
   contextCompression: AgentSkillContextCompressionPolicyV1
+  /** Optional until each formal domain is migrated through its phase gate. */
+  contextGateway?: AgentSkillContextGatewayPolicyV1
   maxOutputTokens: number
   writeTargets: readonly AgentSkillWriteTargetV1[]
   lastVerifiedAt: string
@@ -129,25 +164,36 @@ export interface AgentSkillDefinitionV1 {
 }
 
 const OUTLINE_CONTEXT_SOURCE_KEYS = [
-  'canonAssertions',
-  'worldview',
-  'storyCore',
-  'activeNarrativeBlueprint',
-  'characterDrivenPlan',
-  'powerSystem',
-  'cultivationProgress',
-  'codex',
-  'characters',
-  'creativeRules',
-  'worldRules',
-  'historical',
-  'locations',
-  'foreshadows',
-  'storyArcs',
-  'storylineProgress',
-  'existingVolumeOutlines',
-  'writtenChapterProgress',
+  'ragSelection',
 ] as const
+
+const OUTLINE_CONTEXT_GATEWAY_POLICY = {
+  version: 1,
+  rollout: 'required',
+  requiredWriteTargets: [
+    'outlineNodes.parentId',
+    'outlineNodes.type',
+    'outlineNodes.title',
+    'outlineNodes.summary',
+    'outlineNodes.order',
+  ],
+  providerSourceKeys: ['ragSelection'],
+  allowedResourceKinds: [
+    'world', 'worldview-field', 'world-link', 'story-core-field',
+    'character', 'character-relation', 'story-arc', 'storyline-progress',
+    'outline-node', 'detailed-outline', 'narrative-blueprint', 'chapter',
+    'foreshadow', 'location', 'codex-entry', 'fact', 'reference',
+  ],
+  allowedDepths: ['index', 'summary', 'focused', 'full', 'original'],
+  maxReadCalls: 8,
+  maxRetrievedTokens: 64_000,
+  maxPlanningSteps: 8,
+  maxPlanningModelTokens: 64_000,
+  allowOriginalRead: true,
+  additionalReadToolNames: [
+    'list_context_catalog', 'search_context', 'read_context_resource', 'read_original_evidence',
+  ],
+} as const satisfies AgentSkillContextGatewayPolicyV1
 
 const WORLD_GAME_CONTEXT_SOURCE_KEYS = ['worldGameAuthoring'] as const
 
@@ -200,7 +246,13 @@ const WORLD_SUGGEST_CONTEXT_SOURCE_KEYS = [
 ] as const
 
 const CONSTITUTION_EXTRACT_CONTEXT_SOURCE_KEYS = ['constitutionScanSources'] as const
-const CODEX_EXTRACT_CONTEXT_SOURCE_KEYS = ['manualText', 'codexExtractionBaseline'] as const
+const CODEX_EXTRACT_CONTEXT_SOURCE_KEYS = ['manualText', 'ragSelection'] as const
+const CODEX_ENRICH_CONTEXT_SOURCE_KEYS = ['ragSelection'] as const
+const CODEX_CANDIDATE_WRITE_FIELDS = [
+  'categoryId', 'name', 'icon', 'summary', 'description', 'fields', 'refs', 'tags',
+  'importance', 'origin', 'sourceEvidenceQuotes', 'sourceContentHash', 'producerRunId',
+  'producerCandidateHash', 'order', 'worldGroupId',
+] as const
 const CULTIVATION_PROGRESS_EXTRACTION_CONTEXT_SOURCE_KEYS = [
   'chapterContent',
   'cultivationProgressExtractionBaseline',
@@ -423,80 +475,9 @@ export const OUTLINE_IMPACT_REGENERATION_CONTEXT_SOURCE_KEYS = [
   'consistencyReport',
 ] as const
 
-export const OUTLINE_DETAIL_CONTEXT_SOURCE_KEYS = [
-  'canonAssertions',
-  'chapterOutline',
-  'adjacentChapterOutlines',
-  'detailedOutline',
-  'worldview',
-  'storyCore',
-  'activeNarrativeBlueprint',
-  'characterDrivenPlan',
-  'powerSystem',
-  'cultivationProgress',
-  'codex',
-  'characters',
-  'creativeRules',
-  'worldRules',
-  'historical',
-  'locations',
-  'foreshadows',
-] as const
+export const OUTLINE_DETAIL_CONTEXT_SOURCE_KEYS = ['ragSelection'] as const
 
-const PROSE_CONTEXT_SOURCE_KEYS = [
-  'contextMemo',
-  'chapterOutline',
-  'detailedOutline',
-  'chapterContinuityHandoff',
-  'previousPlanReconciliation',
-  'previousChapterEnding',
-  'recentChapterSummaries',
-  'worldview',
-  'storyCore',
-  'activeNarrativeBlueprint',
-  'characterDrivenPlan',
-  'powerSystem',
-  'cultivationProgress',
-  'codex',
-  'characters',
-  'creativeRules',
-  'worldRules',
-  'historical',
-  'locations',
-  'foreshadows',
-  'storyArcs',
-  'storylineProgress',
-  'emotionBeats',
-  'stateCards',
-  'currentFacts',
-  'consistencyDossier',
-  'canonAssertions',
-  'heldItems',
-  'retrievedPassages',
-  'references',
-  'userStyleProfile',
-] as const
-
-const PROSE_REVIEW_CONTEXT_SOURCE_KEYS = [
-  'chapterOutline',
-  'detailedOutline',
-  'chapterContinuityHandoff',
-  'previousPlanReconciliation',
-  'previousChapterEnding',
-  'recentChapterSummaries',
-  'storyCore',
-  'characters',
-  'creativeRules',
-  'worldRules',
-  'foreshadows',
-  'storyArcs',
-  'storylineProgress',
-  'stateCards',
-  'currentFacts',
-  'consistencyDossier',
-  'canonAssertions',
-  'heldItems',
-] as const
+const PROSE_CONTEXT_SOURCE_KEYS = ['ragSelection'] as const
 
 const PROSE_EMOTION_BEAT_CONTEXT_SOURCE_KEYS = [
   'chapterOutline',
@@ -518,6 +499,8 @@ export const PROSE_ORGANIZATION_CONTEXT_SOURCE_KEYS = [
   'characterRelations',
   'itemLedger',
   'foreshadows',
+  'storyArcs',
+  'storylineProgress',
   'canonAssertions',
   'characterKnowledge',
   'retrievedPassages',
@@ -808,7 +791,13 @@ const OUTLINE_CHAPTER_INPUT_POLICY = {
 } as const satisfies AgentSkillInputPolicyV1
 
 const OUTLINE_DETAIL_INPUT_POLICY = {
-  sourceKeys: ['chapterOutline', 'storyCore', 'characters'],
+  sourceKeys: [
+    'chapterOutline',
+    'storyArcs',
+    'storylineProgress',
+    'writtenChapterProgress',
+    'activeNarrativeBlueprint',
+  ],
   states: {
     empty: {
       handling: 'require-upstream',
@@ -826,7 +815,17 @@ const OUTLINE_DETAIL_INPUT_POLICY = {
 } as const satisfies AgentSkillInputPolicyV1
 
 const PROSE_INPUT_POLICY = {
-  sourceKeys: ['chapterOutline', 'detailedOutline', 'storyCore', 'characters'],
+  sourceKeys: [
+    'chapterOutline',
+    'detailedOutline',
+    'storyArcs',
+    'storylineProgress',
+    'activeNarrativeBlueprint',
+    'chapterContinuityHandoff',
+    'characterKnowledge',
+    'currentFacts',
+    'consistencyDossier',
+  ],
   states: {
     empty: {
       handling: 'require-upstream',
@@ -933,7 +932,8 @@ const WORLD_SUGGEST_COMPRESSION_POLICY = compressionPolicy([
   'storyCore',
 ])
 const CONSTITUTION_EXTRACT_COMPRESSION_POLICY = compressionPolicy(['constitutionScanSources'])
-const CODEX_EXTRACT_COMPRESSION_POLICY = compressionPolicy(['manualText', 'codexExtractionBaseline'])
+const CODEX_EXTRACT_COMPRESSION_POLICY = compressionPolicy(CODEX_EXTRACT_CONTEXT_SOURCE_KEYS)
+const CODEX_ENRICH_COMPRESSION_POLICY = compressionPolicy(CODEX_ENRICH_CONTEXT_SOURCE_KEYS)
 const CULTIVATION_PROGRESS_EXTRACTION_COMPRESSION_POLICY = compressionPolicy(
   CULTIVATION_PROGRESS_EXTRACTION_CONTEXT_SOURCE_KEYS,
 )
@@ -958,18 +958,7 @@ const CHARACTER_SUPPLEMENT_COMPRESSION_POLICY = compressionPolicy([
   'characterPassages',
 ])
 const INSPIRATION_COMPRESSION_POLICY = compressionPolicy(['inspirationWorkspace'])
-const OUTLINE_COMPRESSION_POLICY = compressionPolicy([
-  'worldview',
-  'storyCore',
-  'activeNarrativeBlueprint',
-  'characterDrivenPlan',
-  'powerSystem',
-  'codex',
-  'characters',
-  'historical',
-  'storyArcs',
-  'existingVolumeOutlines',
-])
+const OUTLINE_COMPRESSION_POLICY = compressionPolicy(['ragSelection'])
 const WORLD_GAME_COMPRESSION_POLICY = compressionPolicy(['worldGameAuthoring'])
 const OUTLINE_STORY_ARC_COMPRESSION_POLICY = compressionPolicy([
   'worldview',
@@ -1020,38 +1009,30 @@ const OUTLINE_CHARACTER_REVISION_COMPRESSION_POLICY = compressionPolicy([
 const OUTLINE_IMPACT_REGENERATION_COMPRESSION_POLICY = compressionPolicy(
   OUTLINE_IMPACT_REGENERATION_CONTEXT_SOURCE_KEYS,
 )
-const OUTLINE_DETAIL_COMPRESSION_POLICY = compressionPolicy([
-  'detailedOutline',
-  'worldview',
-  'storyCore',
-  'activeNarrativeBlueprint',
-  'characterDrivenPlan',
-  'powerSystem',
-  'codex',
-  'characters',
-  'creativeRules',
-  'worldRules',
-  'historical',
-  'locations',
-  'foreshadows',
-])
-const PROSE_COMPRESSION_POLICY = compressionPolicy([
-  'worldview',
-  'storyCore',
-  'activeNarrativeBlueprint',
-  'characterDrivenPlan',
-  'powerSystem',
-  'codex',
-  'characters',
-  'historical',
-  'storyArcs',
-  'references',
-])
-const PROSE_REVIEW_COMPRESSION_POLICY = compressionPolicy([
-  'storyCore',
-  'characters',
-  'storyArcs',
-])
+const OUTLINE_DETAIL_COMPRESSION_POLICY = compressionPolicy(['ragSelection'])
+const PROSE_COMPRESSION_POLICY = compressionPolicy(['ragSelection'])
+
+const PROSE_CONTEXT_GATEWAY_POLICY = {
+  version: 1 as const,
+  rollout: 'required' as const,
+  requiredWriteTargets: ['chapters.content', 'chapters.wordCount'],
+  providerSourceKeys: ['ragSelection'],
+  allowedResourceKinds: [
+    'world', 'worldview-field', 'story-core-field', 'character',
+    'character-relation', 'story-arc', 'storyline-progress', 'outline-node',
+    'detailed-outline', 'chapter', 'foreshadow', 'location', 'codex-entry',
+    'fact', 'reference', 'narrative-blueprint',
+  ],
+  allowedDepths: ['index', 'summary', 'focused', 'full', 'original'],
+  maxReadCalls: 8,
+  maxRetrievedTokens: 48_000,
+  maxPlanningSteps: 6,
+  maxPlanningModelTokens: 24_000,
+  allowOriginalRead: true,
+  additionalReadToolNames: [
+    'list_context_catalog', 'search_context', 'read_context_resource', 'read_original_evidence',
+  ],
+} as const
 const PROSE_EMOTION_BEAT_COMPRESSION_POLICY = compressionPolicy([
   'detailedOutline',
   'worldview',
@@ -1192,34 +1173,88 @@ export const AGENT_SKILLS = [
     optionalContextSourceKeys: [],
     inputPolicy: WORLDVIEW_FIELD_INPUT_POLICY,
     contextCompression: WORLDVIEW_FIELD_COMPRESSION_POLICY,
+    contextGateway: {
+      version: 1,
+      rollout: 'required',
+      requiredWriteTargets: WORLDVIEW_GENERATABLE_FIELD_SPECS.map(spec => `worldviews.${spec.field}`),
+      providerSourceKeys: ['ragSelection'],
+      allowedResourceKinds: [
+        'world', 'worldview-field', 'story-core-field', 'character',
+        'character-relation', 'story-arc', 'storyline-progress', 'outline-node',
+        'detailed-outline', 'chapter', 'foreshadow', 'location', 'codex-entry',
+        'world-link', 'fact', 'reference', 'narrative-blueprint',
+      ],
+      allowedDepths: ['index', 'summary', 'focused', 'full', 'original'],
+      maxReadCalls: 4,
+      maxRetrievedTokens: 24_000,
+      maxPlanningSteps: 5,
+      maxPlanningModelTokens: 24_000,
+      allowOriginalRead: true,
+      additionalReadToolNames: [
+        'list_context_catalog', 'search_context', 'read_context_resource', 'read_original_evidence',
+      ],
+    },
     maxOutputTokens: 6_000,
     writeTargets: [{
       table: 'worldviews',
-      fields: [
-        'worldOrigin',
-        'powerHierarchy',
-        'divineDesign',
-        'worldStructure',
-        'worldDimensions',
-        'continentLayout',
-        'mountainsRivers',
-        'climateByRegion',
-        'naturalResourceOverview',
-        'races',
-        'factionLayout',
-        'regionDimensions',
-        'politicsOverview',
-        'economyOverview',
-        'cultureOverview',
-        'internalConflicts',
-        'itemDesign',
-      ],
+      fields: WORLDVIEW_GENERATABLE_FIELD_SPECS.map(spec => spec.field),
     }],
-    lastVerifiedAt: '2026-08-09',
+    lastVerifiedAt: '2026-08-23',
     regressionTests: [
+      'R-WE1-worldview-generatable-contract',
       'R-HARNESS32-worldview-field-agent',
       'R-HARNESS32-worldview-panels-ui',
+      'R-RACE1-races-gateway-canary',
+      'R-RACE2-races-mode-length-contract',
+      'R-RACE3-worldview-candidate-review',
+      'R-RACE4-races-fault-matrix',
     ],
+  },
+  {
+    version: 1,
+    id: 'world-origin.world-link-context',
+    agentId: 'world-origin',
+    defaultForAgent: false,
+    label: '世界通道上下文',
+    owner: 'world-foundation-agent',
+    promptVersion: 'world-link-context-v1',
+    executionMode: 'world-link-context',
+    contextTaskKind: 'agent-world-origin',
+    readToolNames: [],
+    contextSourceKeys: WORLD_SUGGEST_CONTEXT_SOURCE_KEYS,
+    optionalContextSourceKeys: [],
+    inputPolicy: {
+      sourceKeys: WORLD_SUGGEST_CONTEXT_SOURCE_KEYS,
+      states: {
+        empty: { handling: 'create-from-request', instruction: '目标世界和通道是强制资源；缺失时停止，不得猜测相邻世界。' },
+        partial: { handling: 'reference-and-create', instruction: '只沿指定通道展开一个相邻世界，并保留方向与进出约束。' },
+        complete: { handling: 'grounded-transform', instruction: '严格依据目标世界和指定通道资源工作，不得跨第二跳读取。' },
+      },
+    },
+    contextCompression: WORLD_SUGGEST_COMPRESSION_POLICY,
+    contextGateway: {
+      version: 1,
+      rollout: 'required',
+      requiredWriteTargets: [],
+      providerSourceKeys: ['ragSelection'],
+      allowedResourceKinds: [
+        'world', 'world-link', 'worldview-field', 'story-core-field', 'character',
+        'character-relation', 'story-arc', 'outline-node', 'chapter', 'fact', 'codex-entry',
+      ],
+      allowedDepths: ['index', 'summary', 'focused', 'full', 'original'],
+      maxReadCalls: 3,
+      maxRetrievedTokens: 16_000,
+      maxPlanningSteps: 3,
+      maxPlanningModelTokens: 12_000,
+      allowOriginalRead: true,
+      additionalReadToolNames: [
+        'list_context_catalog', 'search_context', 'read_context_resource', 'read_original_evidence',
+      ],
+    },
+    maxOutputTokens: 2_000,
+    writeTargets: [],
+    lastVerifiedAt: '2026-08-23',
+    regressionTests: ['R-MW1-world-link-governance'],
   },
   {
     version: 1,
@@ -1330,13 +1365,83 @@ export const AGENT_SKILLS = [
       },
     },
     contextCompression: CODEX_EXTRACT_COMPRESSION_POLICY,
+    contextGateway: {
+      version: 1,
+      rollout: 'required',
+      requiredWriteTargets: CODEX_CANDIDATE_WRITE_FIELDS.map(field => `codexEntries.${field}`),
+      providerSourceKeys: ['ragSelection'],
+      allowedResourceKinds: ['codex-entry'],
+      allowedDepths: ['index', 'summary', 'focused', 'full', 'original'],
+      maxReadCalls: 2,
+      maxRetrievedTokens: 20_000,
+      maxPlanningSteps: 2,
+      maxPlanningModelTokens: 8_000,
+      allowOriginalRead: true,
+      additionalReadToolNames: [
+        'list_context_catalog', 'search_context', 'read_context_resource', 'read_original_evidence',
+      ],
+    },
     maxOutputTokens: 4_000,
     writeTargets: [{
       table: 'codexEntries',
-      fields: ['categoryId', 'name', 'icon', 'summary', 'description', 'fields', 'refs', 'tags', 'importance', 'order', 'worldGroupId'],
+      fields: [...CODEX_CANDIDATE_WRITE_FIELDS],
     }],
-    lastVerifiedAt: '2026-08-14',
-    regressionTests: ['R-HARNESS70-codex-extraction-durable'],
+    lastVerifiedAt: '2026-08-24',
+    regressionTests: [
+      'R-HARNESS70-codex-extraction-durable',
+      'R-RACE5-codex-extraction-enrichment',
+      'R-CODEX1-gateway-provenance',
+    ],
+  },
+  {
+    version: 1,
+    id: 'world-origin.codex-enrich',
+    agentId: 'world-origin',
+    defaultForAgent: false,
+    label: 'Codex AI 新建词条建议',
+    owner: 'world-foundation-agent',
+    promptVersion: 'codex-enrich-v1',
+    executionMode: 'codex-enrich',
+    contextTaskKind: 'agent-world-origin',
+    readToolNames: [],
+    contextSourceKeys: CODEX_ENRICH_CONTEXT_SOURCE_KEYS,
+    optionalContextSourceKeys: [],
+    inputPolicy: {
+      sourceKeys: CODEX_ENRICH_CONTEXT_SOURCE_KEYS,
+      states: {
+        empty: { handling: 'require-upstream', instruction: '缺少世界 Canon 或分类基线时不创建建议。' },
+        partial: { handling: 'reference-and-create', instruction: '在已登记世界 Canon 范围内生成明确标记的 AI 新建建议。' },
+        complete: { handling: 'reference-and-create', instruction: '结合完整上下文创建新词条建议，不自动改写任何 Canon。' },
+      },
+    },
+    contextCompression: CODEX_ENRICH_COMPRESSION_POLICY,
+    contextGateway: {
+      version: 1,
+      rollout: 'required',
+      requiredWriteTargets: CODEX_CANDIDATE_WRITE_FIELDS.map(field => `codexEntries.${field}`),
+      providerSourceKeys: ['ragSelection'],
+      allowedResourceKinds: [
+        'world', 'worldview-field', 'story-core-field', 'character', 'character-relation',
+        'story-arc', 'storyline-progress', 'outline-node', 'detailed-outline', 'chapter',
+        'foreshadow', 'location', 'codex-entry', 'fact', 'reference', 'narrative-blueprint',
+      ],
+      allowedDepths: ['index', 'summary', 'focused', 'full', 'original'],
+      maxReadCalls: 4,
+      maxRetrievedTokens: 32_000,
+      maxPlanningSteps: 5,
+      maxPlanningModelTokens: 24_000,
+      allowOriginalRead: true,
+      additionalReadToolNames: [
+        'list_context_catalog', 'search_context', 'read_context_resource', 'read_original_evidence',
+      ],
+    },
+    maxOutputTokens: 4_000,
+    writeTargets: [{
+      table: 'codexEntries',
+      fields: [...CODEX_CANDIDATE_WRITE_FIELDS],
+    }],
+    lastVerifiedAt: '2026-08-24',
+    regressionTests: ['R-RACE5-codex-extraction-enrichment', 'R-CODEX1-gateway-provenance'],
   },
   {
     version: 1,
@@ -1353,12 +1458,33 @@ export const AGENT_SKILLS = [
     optionalContextSourceKeys: [],
     inputPolicy: STORY_CORE_INPUT_POLICY,
     contextCompression: STORY_CORE_COMPRESSION_POLICY,
+    contextGateway: {
+      version: 1,
+      rollout: 'required',
+      requiredWriteTargets: STORY_CORE_GENERATABLE_FIELD_SPECS.map(spec => `storyCores.${spec.field}`),
+      providerSourceKeys: ['ragSelection'],
+      allowedResourceKinds: [
+        'world', 'worldview-field', 'story-core-field', 'character',
+        'character-relation', 'story-arc', 'storyline-progress', 'outline-node',
+        'detailed-outline', 'chapter', 'foreshadow', 'location', 'codex-entry',
+        'world-link', 'fact', 'reference', 'narrative-blueprint',
+      ],
+      allowedDepths: ['index', 'summary', 'focused', 'full', 'original'],
+      maxReadCalls: 4,
+      maxRetrievedTokens: 24_000,
+      maxPlanningSteps: 5,
+      maxPlanningModelTokens: 24_000,
+      allowOriginalRead: true,
+      additionalReadToolNames: [
+        'list_context_catalog', 'search_context', 'read_context_resource', 'read_original_evidence',
+      ],
+    },
     maxOutputTokens: 6_000,
     writeTargets: [{
       table: 'storyCores',
-      fields: ['logline', 'concept', 'theme', 'centralConflict', 'plotPattern', 'mainPlot', 'subPlots'],
+      fields: STORY_CORE_GENERATABLE_FIELD_SPECS.map(spec => spec.field),
     }],
-    lastVerifiedAt: '2026-08-09',
+    lastVerifiedAt: '2026-08-23',
     regressionTests: [
       'R-HARNESS31-story-core-agent',
       'R-HARNESS31-story-core-panel-ui',
@@ -1400,11 +1526,32 @@ export const AGENT_SKILLS = [
     promptVersion: 'character-copilot-v1',
     executionMode: 'create',
     contextTaskKind: 'agent-character',
-    readToolNames: ['read_worldview', 'read_story_core', 'read_characters', 'read_world_rules', 'read_history'],
-    contextSourceKeys: [],
+    readToolNames: [],
+    contextSourceKeys: [...CHARACTER_INPUT_POLICY.sourceKeys],
     optionalContextSourceKeys: [],
     inputPolicy: CHARACTER_INPUT_POLICY,
     contextCompression: CHARACTER_COMPRESSION_POLICY,
+    contextGateway: {
+      version: 1,
+      rollout: 'required',
+      requiredWriteTargets: ['characters.name'],
+      providerSourceKeys: ['ragSelection'],
+      allowedResourceKinds: [
+        'world', 'worldview-field', 'story-core-field', 'character',
+        'character-relation', 'story-arc', 'storyline-progress', 'outline-node',
+        'detailed-outline', 'chapter', 'foreshadow', 'location', 'codex-entry',
+        'world-link', 'fact', 'reference', 'narrative-blueprint',
+      ],
+      allowedDepths: ['index', 'summary', 'focused', 'full', 'original'],
+      maxReadCalls: 5,
+      maxRetrievedTokens: 32_000,
+      maxPlanningSteps: 6,
+      maxPlanningModelTokens: 32_000,
+      allowOriginalRead: true,
+      additionalReadToolNames: [
+        'list_context_catalog', 'search_context', 'read_context_resource', 'read_original_evidence',
+      ],
+    },
     maxOutputTokens: 6_000,
     writeTargets: [{
       table: 'characters',
@@ -1524,6 +1671,27 @@ export const AGENT_SKILLS = [
     optionalContextSourceKeys: CHARACTER_SUPPLEMENT_OPTIONAL_CONTEXT_SOURCE_KEYS,
     inputPolicy: CHARACTER_SUPPLEMENT_INPUT_POLICY,
     contextCompression: CHARACTER_SUPPLEMENT_COMPRESSION_POLICY,
+    contextGateway: {
+      version: 1,
+      rollout: 'required',
+      requiredWriteTargets: CHARACTER_DIMENSIONS.map(dimension => `characters.${dimension.key}`),
+      providerSourceKeys: ['ragSelection'],
+      allowedResourceKinds: [
+        'world', 'worldview-field', 'story-core-field', 'character',
+        'character-relation', 'story-arc', 'storyline-progress', 'outline-node',
+        'detailed-outline', 'chapter', 'foreshadow', 'location', 'codex-entry',
+        'world-link', 'fact', 'reference', 'narrative-blueprint',
+      ],
+      allowedDepths: ['index', 'summary', 'focused', 'full', 'original'],
+      maxReadCalls: 5,
+      maxRetrievedTokens: 48_000,
+      maxPlanningSteps: 6,
+      maxPlanningModelTokens: 48_000,
+      allowOriginalRead: true,
+      additionalReadToolNames: [
+        'list_context_catalog', 'search_context', 'read_context_resource', 'read_original_evidence',
+      ],
+    },
     maxOutputTokens: 8_000,
     writeTargets: [{
       table: 'characters',
@@ -1531,6 +1699,59 @@ export const AGENT_SKILLS = [
     }],
     lastVerifiedAt: '2026-08-09',
     regressionTests: ['R-HARNESS38-character-supplement-agent', 'R-HARNESS38-character-supplement-ui'],
+  },
+  {
+    version: 1,
+    id: 'character.lifecycle',
+    agentId: 'character',
+    defaultForAgent: false,
+    label: '角色状态演化与退场',
+    owner: 'character-agent',
+    promptVersion: 'character-lifecycle-copilot-v1',
+    executionMode: 'lifecycle',
+    contextTaskKind: 'agent-character',
+    readToolNames: [],
+    contextSourceKeys: CHARACTER_SUPPLEMENT_CONTEXT_SOURCE_KEYS,
+    optionalContextSourceKeys: CHARACTER_SUPPLEMENT_OPTIONAL_CONTEXT_SOURCE_KEYS,
+    inputPolicy: CHARACTER_SUPPLEMENT_INPUT_POLICY,
+    contextCompression: CHARACTER_SUPPLEMENT_COMPRESSION_POLICY,
+    contextGateway: {
+      version: 1,
+      rollout: 'required',
+      requiredWriteTargets: [
+        'characters.narrativeStatus', 'characters.statusEvidenceChapterId',
+        'characters.statusEvidenceStoryArcId', 'characters.statusReason',
+        'characters.exitChapterId', 'characters.ending', 'characters.activeChapterRange',
+        'characters.statusProducerContractHash', 'characters.statusProducerCandidateHash',
+      ],
+      providerSourceKeys: ['ragSelection'],
+      allowedResourceKinds: [
+        'world', 'worldview-field', 'story-core-field', 'character',
+        'character-relation', 'story-arc', 'storyline-progress', 'outline-node',
+        'detailed-outline', 'chapter', 'foreshadow', 'location', 'codex-entry',
+        'world-link', 'fact', 'narrative-blueprint',
+      ],
+      allowedDepths: ['index', 'summary', 'focused', 'full', 'original'],
+      maxReadCalls: 5,
+      maxRetrievedTokens: 48_000,
+      maxPlanningSteps: 6,
+      maxPlanningModelTokens: 48_000,
+      allowOriginalRead: true,
+      additionalReadToolNames: [
+        'list_context_catalog', 'search_context', 'read_context_resource', 'read_original_evidence',
+      ],
+    },
+    maxOutputTokens: 4_000,
+    writeTargets: [{
+      table: 'characters',
+      fields: [
+        'narrativeStatus', 'statusEvidenceChapterId', 'statusEvidenceStoryArcId',
+        'statusReason', 'exitChapterId', 'ending', 'activeChapterRange',
+        'statusProducerContractHash', 'statusProducerCandidateHash',
+      ],
+    }],
+    lastVerifiedAt: '2026-08-23',
+    regressionTests: ['R-CHAR1-character-gateway-contract', 'R-CHAR1-character-lifecycle-ui'],
   },
   {
     version: 1,
@@ -1648,7 +1869,7 @@ export const AGENT_SKILLS = [
     defaultForAgent: false,
     label: '主线与支线编排',
     owner: 'outline-agent',
-    promptVersion: 'story-arc-copilot-v6',
+    promptVersion: 'story-arc-copilot-v8',
     executionMode: 'story-arcs',
     contextTaskKind: 'agent-outline',
     readToolNames: [],
@@ -1656,9 +1877,37 @@ export const AGENT_SKILLS = [
     optionalContextSourceKeys: [],
     inputPolicy: OUTLINE_STORY_ARC_INPUT_POLICY,
     contextCompression: OUTLINE_STORY_ARC_COMPRESSION_POLICY,
+    contextGateway: {
+      version: 1,
+      rollout: 'required',
+      requiredWriteTargets: ['storyArcs.name', 'storyArcs.type', 'storyArcs.stages', 'storyArcs.description'],
+      providerSourceKeys: ['ragSelection'],
+      allowedResourceKinds: [
+        'world', 'worldview-field', 'story-core-field', 'character',
+        'character-relation', 'story-arc', 'storyline-progress', 'outline-node',
+        'detailed-outline', 'chapter', 'foreshadow', 'location', 'codex-entry',
+        'world-link', 'fact', 'reference', 'narrative-blueprint',
+      ],
+      allowedDepths: ['index', 'summary', 'focused', 'full', 'original'],
+      maxReadCalls: 5,
+      maxRetrievedTokens: 48_000,
+      maxPlanningSteps: 6,
+      maxPlanningModelTokens: 48_000,
+      allowOriginalRead: true,
+      additionalReadToolNames: [
+        'list_context_catalog', 'search_context', 'read_context_resource', 'read_original_evidence',
+      ],
+    },
     maxOutputTokens: 10_000,
-    writeTargets: [{ table: 'storyArcs', fields: ['name', 'type', 'stages', 'description'] }],
-    lastVerifiedAt: '2026-08-09',
+    writeTargets: [{
+      table: 'storyArcs',
+      fields: [
+        'name', 'type', 'stages', 'description', 'origin', 'status',
+        'sourceStoryCoreId', 'sourceStoryCoreRevision', 'sourceStoryCoreHash',
+        'lastAlignedHash', 'producerRunId', 'producerCandidateHash',
+      ],
+    }],
+    lastVerifiedAt: '2026-08-23',
     regressionTests: [
       'R-HARNESS30-story-arc-agent',
       'R-HARNESS30-story-arc-panel-ui',
@@ -1796,18 +2045,19 @@ export const AGENT_SKILLS = [
     defaultForAgent: true,
     label: '卷章纲编排',
     owner: 'outline-agent',
-    promptVersion: 'outline-copilot-v1',
+    promptVersion: 'outline-copilot-v2',
     executionMode: 'auto',
     contextTaskKind: 'agent-outline',
     readToolNames: [],
     contextSourceKeys: OUTLINE_CONTEXT_SOURCE_KEYS,
-    optionalContextSourceKeys: [],
+    optionalContextSourceKeys: ['priorOutlineCandidate'],
     inputPolicy: OUTLINE_VOLUME_INPUT_POLICY,
     contextCompression: OUTLINE_COMPRESSION_POLICY,
+    contextGateway: OUTLINE_CONTEXT_GATEWAY_POLICY,
     maxOutputTokens: 12_000,
-    writeTargets: [{ table: 'outlineNodes', fields: ['title', 'summary'] }],
-    lastVerifiedAt: '2026-08-08',
-    regressionTests: ['R-AGENT1-chat-copilot-outline', 'R-HARNESS11-outline-batch-durable', 'R-HARNESS16-semantic-context-compression', 'R-HARNESS18-execution-version-freshness'],
+    writeTargets: [{ table: 'outlineNodes', fields: ['parentId', 'type', 'title', 'summary', 'order'] }],
+    lastVerifiedAt: '2026-08-24',
+    regressionTests: ['R-WEH0-skill-runtime-contract', 'R-AGENT1-chat-copilot-outline', 'R-HARNESS11-outline-batch-durable', 'R-HARNESS16-semantic-context-compression', 'R-HARNESS18-execution-version-freshness'],
   },
   {
     version: 1,
@@ -1816,18 +2066,19 @@ export const AGENT_SKILLS = [
     defaultForAgent: false,
     label: '卷纲编排',
     owner: 'outline-agent',
-    promptVersion: 'outline-copilot-v1',
+    promptVersion: 'outline-copilot-v2',
     executionMode: 'volumes',
     contextTaskKind: 'agent-outline',
     readToolNames: [],
     contextSourceKeys: OUTLINE_CONTEXT_SOURCE_KEYS,
-    optionalContextSourceKeys: [],
+    optionalContextSourceKeys: ['priorOutlineCandidate'],
     inputPolicy: OUTLINE_VOLUME_INPUT_POLICY,
     contextCompression: OUTLINE_COMPRESSION_POLICY,
+    contextGateway: OUTLINE_CONTEXT_GATEWAY_POLICY,
     maxOutputTokens: 8_000,
-    writeTargets: [{ table: 'outlineNodes', fields: ['title', 'summary'] }],
-    lastVerifiedAt: '2026-08-08',
-    regressionTests: ['R-HARNESS14-workflow-classifier', 'R-AGENT1-chat-copilot-outline', 'R-HARNESS16-semantic-context-compression', 'R-HARNESS18-execution-version-freshness'],
+    writeTargets: [{ table: 'outlineNodes', fields: ['parentId', 'type', 'title', 'summary', 'order'] }],
+    lastVerifiedAt: '2026-08-24',
+    regressionTests: ['R-WEH0-skill-runtime-contract', 'R-HARNESS14-workflow-classifier', 'R-AGENT1-chat-copilot-outline', 'R-HARNESS16-semantic-context-compression', 'R-HARNESS18-execution-version-freshness'],
   },
   {
     version: 1,
@@ -1836,18 +2087,19 @@ export const AGENT_SKILLS = [
     defaultForAgent: false,
     label: '章纲编排',
     owner: 'outline-agent',
-    promptVersion: 'outline-copilot-v1',
+    promptVersion: 'outline-copilot-v2',
     executionMode: 'chapters',
     contextTaskKind: 'agent-outline',
     readToolNames: [],
     contextSourceKeys: OUTLINE_CONTEXT_SOURCE_KEYS,
-    optionalContextSourceKeys: [],
+    optionalContextSourceKeys: ['priorOutlineCandidate'],
     inputPolicy: OUTLINE_CHAPTER_INPUT_POLICY,
     contextCompression: OUTLINE_COMPRESSION_POLICY,
+    contextGateway: OUTLINE_CONTEXT_GATEWAY_POLICY,
     maxOutputTokens: 12_000,
-    writeTargets: [{ table: 'outlineNodes', fields: ['title', 'summary'] }],
-    lastVerifiedAt: '2026-08-08',
-    regressionTests: ['R-HARNESS14-workflow-classifier', 'R-AGENT1-chat-copilot-outline', 'R-HARNESS16-semantic-context-compression', 'R-HARNESS18-execution-version-freshness'],
+    writeTargets: [{ table: 'outlineNodes', fields: ['parentId', 'type', 'title', 'summary', 'order'] }],
+    lastVerifiedAt: '2026-08-24',
+    regressionTests: ['R-WEH0-skill-runtime-contract', 'R-HARNESS14-workflow-classifier', 'R-AGENT1-chat-copilot-outline', 'R-HARNESS16-semantic-context-compression', 'R-HARNESS18-execution-version-freshness'],
   },
   {
     version: 1,
@@ -1856,7 +2108,7 @@ export const AGENT_SKILLS = [
     defaultForAgent: false,
     label: '单章场景细纲',
     owner: 'outline-agent',
-    promptVersion: 'detailed-outline-copilot-v1',
+    promptVersion: 'detailed-outline-copilot-v2',
     executionMode: 'details',
     contextTaskKind: 'agent-outline',
     readToolNames: [],
@@ -1864,6 +2116,20 @@ export const AGENT_SKILLS = [
     optionalContextSourceKeys: [],
     inputPolicy: OUTLINE_DETAIL_INPUT_POLICY,
     contextCompression: OUTLINE_DETAIL_COMPRESSION_POLICY,
+    contextGateway: {
+      ...OUTLINE_CONTEXT_GATEWAY_POLICY,
+      requiredWriteTargets: [
+        'detailedOutlines.scenes',
+        'detailedOutlines.openingHook',
+        'detailedOutlines.endingCliffhanger',
+        'detailedOutlines.sceneLocation',
+        'detailedOutlines.appearingCharacterIds',
+        'detailedOutlines.foreshadowIds',
+        'detailedOutlines.emotionArc',
+        'detailedOutlines.prohibitions',
+        'detailedOutlines.lastUsedSummary',
+      ],
+    },
     maxOutputTokens: 8_000,
     writeTargets: [{
       table: 'detailedOutlines',
@@ -1879,7 +2145,7 @@ export const AGENT_SKILLS = [
         'lastUsedSummary',
       ],
     }],
-    lastVerifiedAt: '2026-08-09',
+    lastVerifiedAt: '2026-08-24',
     regressionTests: [
       'R-HARNESS8-detailed-outline-generation-durable',
       'R-HARNESS37-detailed-outline-entry',
@@ -1897,13 +2163,14 @@ export const AGENT_SKILLS = [
     contextTaskKind: 'agent-prose',
     readToolNames: [],
     contextSourceKeys: PROSE_CONTEXT_SOURCE_KEYS,
-    optionalContextSourceKeys: ['characterKnowledge'],
+    optionalContextSourceKeys: [],
     inputPolicy: PROSE_INPUT_POLICY,
     contextCompression: PROSE_COMPRESSION_POLICY,
+    contextGateway: PROSE_CONTEXT_GATEWAY_POLICY,
     maxOutputTokens: 16_000,
-    writeTargets: [{ table: 'chapters', fields: ['content'] }],
-    lastVerifiedAt: '2026-08-08',
-    regressionTests: ['R-HARNESS7-prose-generation-durable', 'R-HARNESS9-information-boundary', 'R-HARNESS16-semantic-context-compression', 'R-HARNESS18-execution-version-freshness'],
+    writeTargets: [{ table: 'chapters', fields: ['content', 'wordCount'] }],
+    lastVerifiedAt: '2026-08-24',
+    regressionTests: ['R-WEH0-skill-runtime-contract', 'R-HARNESS7-prose-generation-durable', 'R-HARNESS9-information-boundary', 'R-HARNESS16-semantic-context-compression', 'R-HARNESS18-execution-version-freshness'],
   },
   {
     version: 1,
@@ -1912,18 +2179,19 @@ export const AGENT_SKILLS = [
     defaultForAgent: false,
     label: '章节正文生成',
     owner: 'prose-agent',
-    promptVersion: 'prose-copilot-v1',
+    promptVersion: 'prose-copilot-v2',
     executionMode: 'generate',
     contextTaskKind: 'agent-prose',
     readToolNames: [],
     contextSourceKeys: PROSE_CONTEXT_SOURCE_KEYS,
-    optionalContextSourceKeys: ['characterKnowledge'],
+    optionalContextSourceKeys: [],
     inputPolicy: PROSE_INPUT_POLICY,
     contextCompression: PROSE_COMPRESSION_POLICY,
+    contextGateway: PROSE_CONTEXT_GATEWAY_POLICY,
     maxOutputTokens: 16_000,
-    writeTargets: [{ table: 'chapters', fields: ['content'] }],
-    lastVerifiedAt: '2026-08-08',
-    regressionTests: ['R-HARNESS14-workflow-classifier', 'R-HARNESS7-prose-generation-durable', 'R-HARNESS16-semantic-context-compression', 'R-HARNESS17-context-compression-eval', 'R-HARNESS18-execution-version-freshness'],
+    writeTargets: [{ table: 'chapters', fields: ['content', 'wordCount'] }],
+    lastVerifiedAt: '2026-08-24',
+    regressionTests: ['R-WEH0-skill-runtime-contract', 'R-HARNESS14-workflow-classifier', 'R-HARNESS7-prose-generation-durable', 'R-HARNESS16-semantic-context-compression', 'R-HARNESS17-context-compression-eval', 'R-HARNESS18-execution-version-freshness'],
   },
   {
     version: 1,
@@ -1932,18 +2200,19 @@ export const AGENT_SKILLS = [
     defaultForAgent: false,
     label: '章节正文续写',
     owner: 'prose-agent',
-    promptVersion: 'prose-copilot-v1',
+    promptVersion: 'prose-copilot-v2',
     executionMode: 'continue',
     contextTaskKind: 'agent-prose',
     readToolNames: [],
     contextSourceKeys: PROSE_CONTEXT_SOURCE_KEYS,
-    optionalContextSourceKeys: ['characterKnowledge'],
+    optionalContextSourceKeys: [],
     inputPolicy: PROSE_INPUT_POLICY,
     contextCompression: PROSE_COMPRESSION_POLICY,
+    contextGateway: PROSE_CONTEXT_GATEWAY_POLICY,
     maxOutputTokens: 16_000,
-    writeTargets: [{ table: 'chapters', fields: ['content'] }],
-    lastVerifiedAt: '2026-08-08',
-    regressionTests: ['R-HARNESS14-workflow-classifier', 'R-HARNESS7-prose-generation-durable', 'R-HARNESS16-semantic-context-compression', 'R-HARNESS18-execution-version-freshness'],
+    writeTargets: [{ table: 'chapters', fields: ['content', 'wordCount'] }],
+    lastVerifiedAt: '2026-08-24',
+    regressionTests: ['R-WEH0-skill-runtime-contract', 'R-HARNESS14-workflow-classifier', 'R-HARNESS7-prose-generation-durable', 'R-HARNESS16-semantic-context-compression', 'R-HARNESS18-execution-version-freshness'],
   },
   {
     version: 1,
@@ -2146,18 +2415,19 @@ export const AGENT_SKILLS = [
     defaultForAgent: false,
     label: '正文证据型语义评审',
     owner: 'prose-agent',
-    promptVersion: 'prose-semantic-review-v1',
+    promptVersion: 'prose-semantic-review-v2',
     executionMode: 'review',
     contextTaskKind: 'agent-prose',
     readToolNames: [],
-    contextSourceKeys: PROSE_REVIEW_CONTEXT_SOURCE_KEYS,
-    optionalContextSourceKeys: ['characterKnowledge'],
+    contextSourceKeys: PROSE_CONTEXT_SOURCE_KEYS,
+    optionalContextSourceKeys: [],
     inputPolicy: PROSE_INPUT_POLICY,
-    contextCompression: PROSE_REVIEW_COMPRESSION_POLICY,
+    contextCompression: PROSE_COMPRESSION_POLICY,
+    contextGateway: { ...PROSE_CONTEXT_GATEWAY_POLICY, requiredWriteTargets: [] },
     maxOutputTokens: 3_000,
     writeTargets: [],
-    lastVerifiedAt: '2026-08-08',
-    regressionTests: ['R-HARNESS19-prose-semantic-review'],
+    lastVerifiedAt: '2026-08-24',
+    regressionTests: ['R-WEH0-skill-runtime-contract', 'R-HARNESS19-prose-semantic-review'],
   },
   {
     version: 1,
@@ -2166,27 +2436,28 @@ export const AGENT_SKILLS = [
     defaultForAgent: false,
     label: '正文证据定向修订',
     owner: 'prose-agent',
-    promptVersion: 'prose-semantic-revision-v1',
+    promptVersion: 'prose-semantic-revision-v2',
     executionMode: 'revise',
     contextTaskKind: 'agent-prose',
     readToolNames: [],
     contextSourceKeys: PROSE_CONTEXT_SOURCE_KEYS,
-    optionalContextSourceKeys: ['characterKnowledge'],
+    optionalContextSourceKeys: [],
     inputPolicy: PROSE_INPUT_POLICY,
     contextCompression: PROSE_COMPRESSION_POLICY,
+    contextGateway: { ...PROSE_CONTEXT_GATEWAY_POLICY, requiredWriteTargets: [] },
     maxOutputTokens: 16_000,
     writeTargets: [],
-    lastVerifiedAt: '2026-08-08',
-    regressionTests: ['R-HARNESS19-prose-semantic-review'],
+    lastVerifiedAt: '2026-08-24',
+    regressionTests: ['R-WEH0-skill-runtime-contract', 'R-HARNESS19-prose-semantic-review'],
   },
   {
     version: 1,
     id: 'prose.organize',
     agentId: 'prose',
     defaultForAgent: false,
-    label: '章节六域证据整理',
+    label: '章节七域证据整理',
     owner: 'prose-agent',
-    promptVersion: 'chapter-organization-v1',
+    promptVersion: 'chapter-organization-v2',
     executionMode: 'organize',
     contextTaskKind: 'agent-prose',
     readToolNames: [],
@@ -2202,9 +2473,12 @@ export const AGENT_SKILLS = [
       { table: 'storyTimelineEvents', fields: ['title', 'storyTime', 'importance', 'description', 'chapterId', 'chapterTitle', 'order'] },
       { table: 'characterRelations', fields: ['fromCharacterId', 'toCharacterId', 'relationType', 'label', 'description', 'isBidirectional'] },
       { table: 'foreshadows', fields: ['status', 'plantChapterId', 'echoChapterIds', 'resolveChapterId', 'notes'] },
+      { table: 'storylineProgress', fields: ['arcId', 'currentStageId', 'status', 'progressNote', 'lastActiveChapterId', 'lastActiveChapterTitle', 'involvedEntities', 'evidenceQuote'] },
+      { table: 'storylineCrossings', fields: ['arcIdA', 'arcIdB', 'chapterId', 'chapterTitle', 'note', 'evidenceQuote'] },
+      { table: 'storyArcs', fields: ['name', 'type', 'description', 'stages'] },
     ],
-    lastVerifiedAt: '2026-08-08',
-    regressionTests: ['R-AGENT5-chapter-organization', 'R-HARNESS20-chapter-post-adoption-durable'],
+    lastVerifiedAt: '2026-08-24',
+    regressionTests: ['R-AGENT5-chapter-organization', 'R-HARNESS20-chapter-post-adoption-durable', 'R-PROGRESS1-post-adoption-policy'],
   },
   {
     version: 1,
@@ -2496,13 +2770,14 @@ export const AGENT_SKILL_IDS: readonly AgentSkillId[] = AGENT_SKILLS.map(skill =
 
 export function resolveAgentSkillContextSourceKeysV1(
   skill: AgentSkillDefinitionV1,
-  options: { includeOptional?: boolean } = {},
+  options: { includeOptional?: boolean; includeGatewayProviders?: boolean } = {},
 ): string[] {
   const toolSources = skill.readToolNames.flatMap(name => AGENT_TOOL_BY_NAME.get(name)?.sourceKeys ?? [])
   return [...new Set([
     ...toolSources,
     ...skill.contextSourceKeys,
     ...(options.includeOptional ? skill.optionalContextSourceKeys : []),
+    ...(options.includeGatewayProviders ? skill.contextGateway?.providerSourceKeys ?? [] : []),
   ])]
 }
 
@@ -2569,7 +2844,10 @@ export function validateAgentSkillContextEvidenceV1(
   const included = assertUniqueStringArray(evidence.included, '上下文 included')
   const omitted = assertUniqueStringArray(evidence.omitted, '上下文 omitted')
   const trimmed = assertUniqueStringArray(evidence.trimmed, '上下文 trimmed')
-  const authorized = new Set(resolveAgentSkillContextSourceKeysV1(skill, { includeOptional: true }))
+  const authorized = new Set(resolveAgentSkillContextSourceKeysV1(skill, {
+    includeOptional: true,
+    includeGatewayProviders: true,
+  }))
   for (const key of [...included, ...omitted, ...trimmed]) {
     if (!authorized.has(key)) throw new Error(`Agent Skill ${skill.id} 上下文来源越权 ${key}`)
   }
@@ -2594,6 +2872,16 @@ export function validateAgentSkillContextEvidenceV1(
         || source.inputTokens < 0
         || source.originalTokens < source.inputTokens
       ) throw new Error(`Agent Skill ${skill.id} 来源 ${source.key} token 证据无效`)
+      if (source.originalCharacters !== undefined || source.inputCharacters !== undefined) {
+        if (
+          !Number.isInteger(source.originalCharacters)
+          || source.originalCharacters! < 0
+          || !Number.isInteger(source.inputCharacters)
+          || source.inputCharacters! < 0
+          || source.originalCharacters! < source.inputCharacters!
+          || (source.delivery === 'full' && source.originalCharacters !== source.inputCharacters)
+        ) throw new Error(`Agent Skill ${skill.id} 来源 ${source.key} 字符证据无效`)
+      }
       if (source.status === 'included') {
         if (!included.includes(source.key) || source.delivery === 'none' || source.inputTokens < 1) {
           throw new Error(`Agent Skill ${skill.id} 来源 ${source.key} included 证据不一致`)
@@ -2672,8 +2960,19 @@ export function validateAgentSkillContextEvidenceV1(
       || !AGENT_CONTEXT_INPUT_STATES.includes(evidence.inputState.state)
       || !AGENT_CONTEXT_INPUT_HANDLINGS.includes(evidence.inputState.handling)
     ) throw new Error(`Agent Skill ${skill.id} 输入状态证据无效`)
+    const inputStateSourceKeys = evidence.inputStateSourceKeys === undefined
+      ? undefined
+      : assertUniqueStringArray(evidence.inputStateSourceKeys, 'inputStateSourceKeys')
+    if (inputStateSourceKeys?.some(key => !skill.inputPolicy.sourceKeys.includes(key))) {
+      throw new Error(`Agent Skill ${skill.id} inputStateSourceKeys 含未登记输入来源`)
+    }
     const expected = resolveAgentSkillInputStateV1(skill, [{
       ...evidence,
+      ...(inputStateSourceKeys ? {
+        included: skill.inputPolicy.sourceKeys.filter(key => inputStateSourceKeys.includes(key)),
+        omitted: skill.inputPolicy.sourceKeys.filter(key => !inputStateSourceKeys.includes(key)),
+        trimmed: [],
+      } : {}),
       totalInputTokens: evidence.estimatedInputTokens,
       inputBudget: evidence.inputBudgetTokens,
     }])
@@ -2687,8 +2986,8 @@ export function validateAgentSkillDefinitionsV1(
   definitions: readonly AgentSkillDefinitionV1[],
 ): void {
   const executionModesByAgent: Record<DomainAgentId, ReadonlySet<AgentSkillExecutionModeV1>> = {
-    'world-origin': new Set(['complete', 'worldview-field', 'world-suggest', 'worldview-expand', 'constitution-extract', 'codex-extract', 'story-core', 'creative-rules', 'locations', 'map-config', 'history-consult', 'history-storm', 'review']),
-    character: new Set(['create', 'supplement', 'relationships', 'character-reply', 'memory-curator']),
+    'world-origin': new Set(['complete', 'worldview-field', 'world-suggest', 'worldview-expand', 'world-link-context', 'constitution-extract', 'codex-extract', 'codex-enrich', 'story-core', 'creative-rules', 'locations', 'map-config', 'history-consult', 'history-storm', 'review']),
+    character: new Set(['create', 'supplement', 'lifecycle', 'relationships', 'character-reply', 'memory-curator']),
     inspiration: new Set(['reference-summary', 'reference-characters', 'reverse', 'review']),
     outline: new Set(['auto', 'story-arcs', 'foreshadow-suggestions', 'storyline-progress', 'character-driven', 'character-revision', 'world-game', 'impact-summary-regenerate', 'volumes', 'chapters', 'details']),
     prose: new Set(['auto', 'generate', 'continue', 'emotion-beats', 'inventory-extraction', 'story-timeline-extraction', 'cultivation-progress-extraction', 'style-learn', 'selection-edit', 'selection-check', 'review', 'revise', 'organize', 'memory', 'consistency', 'scene-director', 'adventure-intent', 'adventure-narrator', 'simulation-briefing', 'simulation-advisor', 'simulation-narrator', 'simulation-actor-suggestion', 'open-world-expression', 'open-world-narration']),
@@ -2734,7 +3033,14 @@ export function validateAgentSkillDefinitionsV1(
       throw new Error(`Agent Skill ${skill.id} 的输入状态来源重复`)
     }
     for (const sourceKey of skill.inputPolicy.sourceKeys) {
-      if (!authorizedSourceKeys.includes(sourceKey)) {
+      // A required Canon Gateway reads through its frozen provider source and
+      // projects logical domain availability from exact SourceRefs. Those
+      // logical keys classify empty/partial/complete input; they are not a
+      // second, direct context-reading authority.
+      const projectedByRequiredGateway = skill.contextGateway?.rollout === 'required'
+        && skill.contextGateway.providerSourceKeys.includes('ragSelection')
+        && CONTEXT_SOURCE_BY_KEY.has(sourceKey)
+      if (!authorizedSourceKeys.includes(sourceKey) && !projectedByRequiredGateway) {
         throw new Error(`Agent Skill ${skill.id} 的输入状态来源未获读取授权 ${sourceKey}`)
       }
     }
@@ -2771,6 +3077,52 @@ export function validateAgentSkillDefinitionsV1(
     }
     if (!Number.isFinite(compression.maxFullTextBudgetScale) || compression.maxFullTextBudgetScale < 1) {
       throw new Error(`Agent Skill ${skill.id} 的全文回退比例无效`)
+    }
+    const gateway = skill.contextGateway
+    if (gateway) {
+      if (gateway.version !== 1 || !['shadow', 'required'].includes(gateway.rollout)) {
+        throw new Error(`Agent Skill ${skill.id} 的 Context Gateway 版本或 rollout 无效`)
+      }
+      if (!gateway.providerSourceKeys.length
+        || new Set(gateway.providerSourceKeys).size !== gateway.providerSourceKeys.length) {
+        throw new Error(`Agent Skill ${skill.id} 的 Context Gateway provider source 无效`)
+      }
+      for (const sourceKey of gateway.providerSourceKeys) {
+        if (!CONTEXT_SOURCE_BY_KEY.get(sourceKey)?.resources) {
+          throw new Error(`Agent Skill ${skill.id} 的 Context Gateway source ${sourceKey} 未挂 Provider`)
+        }
+      }
+      if (!gateway.allowedResourceKinds.length
+        || gateway.allowedResourceKinds.some(kind => !CONTEXT_RESOURCE_KINDS_V1.includes(kind))) {
+        throw new Error(`Agent Skill ${skill.id} 的 Context Gateway resource kind 无效`)
+      }
+      const depths: readonly ContextResourceDepthV1[] = ['index', 'summary', 'focused', 'full', 'original']
+      if (!gateway.allowedDepths.length || gateway.allowedDepths.some(depth => !depths.includes(depth))
+        || (gateway.allowedDepths.includes('original') && !gateway.allowOriginalRead)) {
+        throw new Error(`Agent Skill ${skill.id} 的 Context Gateway depth 无效`)
+      }
+      for (const [key, value] of Object.entries({
+        maxReadCalls: gateway.maxReadCalls,
+        maxRetrievedTokens: gateway.maxRetrievedTokens,
+        maxPlanningSteps: gateway.maxPlanningSteps,
+        maxPlanningModelTokens: gateway.maxPlanningModelTokens,
+      })) {
+        if (!Number.isSafeInteger(value) || value < 1) {
+          throw new Error(`Agent Skill ${skill.id} 的 Context Gateway ${key} 无效`)
+        }
+      }
+      if (!gateway.additionalReadToolNames.length
+        || new Set(gateway.additionalReadToolNames).size !== gateway.additionalReadToolNames.length) {
+        throw new Error(`Agent Skill ${skill.id} 的 Context Gateway 追加读取工具无效`)
+      }
+      for (const toolName of gateway.additionalReadToolNames) {
+        const tool = AGENT_TOOL_BY_NAME.get(toolName)
+        if (!tool || tool.risk !== 'read' || ![
+          'list_context_catalog', 'search_context', 'read_context_resource', 'read_original_evidence',
+        ].includes(toolName)) {
+          throw new Error(`Agent Skill ${skill.id} 的 Context Gateway 工具 ${toolName} 未登记`)
+        }
+      }
     }
     for (const target of skill.writeTargets) {
       if (!REGISTRY_BY_NAME.has(target.table)) {

@@ -25,6 +25,7 @@ import { characterAxesLabel } from '../../lib/character/character-axes'
 import { adoptCharacterDrivenVolumes } from '../../lib/story-planning/character-driven-adoption'
 import CharacterRevisionPanel from './CharacterRevisionPanel'
 import { useMasterCopilot } from '../agent/useMasterCopilot'
+import HarnessEvidencePanel from '../agent/HarnessEvidencePanel'
 
 type CharacterArcInput = CharacterDrivenPlanArc
 type PlotVolume = CharacterDrivenPlotVolume
@@ -605,19 +606,11 @@ export default function CharacterDrivenPlotPanel({ project, worldGroupId }: Prop
               className="min-h-72 w-full resize-y bg-bg-base border border-border px-3 py-2 font-mono text-xs leading-5 text-text-primary rounded"
               minRows={14}
             />
-            {candidate.payload.contextEvidence && (
-              <details className="mt-2 border border-border/60 bg-bg-base px-3 py-2 text-[11px] text-text-muted rounded">
-                <summary className="cursor-pointer text-text-secondary">本次实际输入证据</summary>
-                <p className="mt-2 break-words">
-                  已纳入：{candidate.payload.contextEvidence.included.join('、') || '无'}
-                </p>
-                {candidate.payload.contextEvidence.trimmed.length > 0 && (
-                  <p className="mt-1 text-warning">
-                    因预算移除：{candidate.payload.contextEvidence.trimmed.join('、')}
-                  </p>
-                )}
-              </details>
-            )}
+            <HarnessEvidencePanel
+              contextEvidence={candidate.payload.contextEvidence}
+              lifecycle={candidate.lifecycle}
+              promptExecutionEvidence={candidate.payload.promptExecutionEvidence}
+            />
             <div className="mt-3 flex justify-end gap-2">
               <button
                 type="button"

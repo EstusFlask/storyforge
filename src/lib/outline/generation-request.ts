@@ -1,4 +1,5 @@
 import type { AssembleContextResult } from '../registry/types'
+import type { WorkspaceContentRevisionVectorV1 } from '../authoring/content-revision'
 
 export type OutlineGenerationRequest =
   | { kind: 'volumes' }
@@ -9,6 +10,7 @@ export type OutlineGenerationRequest =
 export interface PreparedGenerationContext {
   operation: string
   assembled: AssembleContextResult
+  contentRevision: WorkspaceContentRevisionVectorV1
 }
 
 export function outlineGenerationModuleKey(

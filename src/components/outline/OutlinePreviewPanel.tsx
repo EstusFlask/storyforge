@@ -5,11 +5,15 @@ export default function OutlinePreviewPanel({
   items,
   onConfirm,
   onCancel,
+  canConfirm = true,
+  disabledReason,
 }: {
   label: string
   items: { title: string; summary: string }[]
   onConfirm: () => void
   onCancel: () => void
+  canConfirm?: boolean
+  disabledReason?: string
 }) {
   return (
     <div className="border border-accent/50 rounded-lg overflow-hidden">
@@ -20,9 +24,9 @@ export default function OutlinePreviewPanel({
             className="flex items-center gap-1 px-2 py-1 text-xs text-text-muted hover:text-text-primary rounded transition-colors">
             <X className="w-3 h-3" /> 取消
           </button>
-          <button onClick={onConfirm}
-            className="flex items-center gap-1 px-3 py-1 text-xs bg-accent text-white rounded hover:bg-accent-hover transition-colors">
-            <Check className="w-3 h-3" /> 确认写入
+          <button onClick={onConfirm} disabled={!canConfirm}
+            className="flex items-center gap-1 px-3 py-1 text-xs bg-accent text-white rounded hover:bg-accent-hover transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
+            <Check className="w-3 h-3" /> {canConfirm ? '确认写入' : (disabledReason ?? '缺少 durable 候选')}
           </button>
         </div>
       </div>

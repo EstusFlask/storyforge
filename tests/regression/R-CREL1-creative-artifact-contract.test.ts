@@ -185,18 +185,15 @@ describe('R-CREL1 · lossless JSON envelope normalization', () => {
     expect(result.issues).toEqual([])
   })
 
-  it('does not guess an object from prose or multiple objects', () => {
+  it('extracts one balanced object from prose but rejects competing JSON roots', () => {
     const prose = normalizeCreativeJsonEnvelopeV1('结果如下：{"storyArcs":[]}')
-    expect(prose.value).toBeNull()
-    expect(prose.issues[0]).toMatchObject({
-      code: 'creative-json-not-single-object',
-      disposition: 'repairable',
-      path: '$',
-    })
+    expect(prose.value).toEqual({ storyArcs: [] })
+    expect(prose.steps).toContain('extract-first-balanced-json')
+    expect(prose.issues).toEqual([])
 
     const multiple = normalizeCreativeJsonEnvelopeV1('{"a":1}\n{"b":2}')
     expect(multiple.value).toBeNull()
-    expect(multiple.issues[0].code).toBe('creative-json-invalid')
+    expect(multiple.issues[0]?.code).toBe('creative-json-not-single-object')
   })
 
   it('does not accept arrays as the root contract', () => {
@@ -205,4 +202,3 @@ describe('R-CREL1 · lossless JSON envelope normalization', () => {
     expect(result.issues[0].code).toBe('creative-json-not-single-object')
   })
 })
-

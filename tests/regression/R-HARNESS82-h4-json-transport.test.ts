@@ -47,4 +47,36 @@ describe('R-HARNESS82 · H4 JSON transport', () => {
     expect(body.tool_choice).toBeUndefined()
     expect(estimateChatRequestOptionsTokens({ responseFormat: 'json_object' })).toBeGreaterThan(0)
   })
+
+  it('serializes NVIDIA-style strict JSON schema transport and counts the schema budget', async () => {
+    useAIConfigStore.setState({ config: CONFIG, presets: [], taskRoutes: {} })
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({
+      choices: [{ message: { content: '{"ok":true}' } }],
+      usage: { prompt_tokens: 12, completion_tokens: 8, total_tokens: 20 },
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+    vi.stubGlobal('fetch', fetchMock)
+    const jsonSchema = {
+      name: 'strict_probe',
+      schema: {
+        type: 'object',
+        properties: { ok: { type: 'boolean' } },
+        required: ['ok'],
+        additionalProperties: false,
+      },
+      strict: true,
+    }
+
+    await expect(chat(
+      [{ role: 'user', content: '返回 JSON' }],
+      CONFIG,
+      { category: 'eval.race6.blind-grader', contextOverflowPolicy: 'reject' },
+      undefined,
+      undefined,
+      { jsonSchema },
+    )).resolves.toBe('{"ok":true}')
+
+    const body = JSON.parse(String(fetchMock.mock.calls[0][1]?.body))
+    expect(body.response_format).toEqual({ type: 'json_schema', json_schema: jsonSchema })
+    expect(estimateChatRequestOptionsTokens({ jsonSchema })).toBeGreaterThan(0)
+  })
 })

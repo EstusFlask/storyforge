@@ -1,4 +1,9 @@
-import type { ContextCompressionEvidenceV1 } from '../registry/types'
+import type {
+  ContextCompressionEvidenceV1,
+  ContextSufficiencyReportV1,
+  RetrievalTraceV1,
+} from '../registry/types'
+import type { ExactRunArtifactKindV1 } from './memory-engineering'
 
 export type AgentRunWorkflowKind =
   | 'direct-generation'
@@ -8,6 +13,12 @@ export type AgentRunWorkflowKind =
   | 'multi-domain-sequential'
   | 'fan-out-synthesize'
   | 'long-running-resumable'
+
+export type AgentExecutionBoundaryV1 =
+  | 'formal'
+  | 'evaluation'
+  | 'simulation'
+  | 'experimental'
 
 export interface AgentRunScopeV1 {
   projectId: number
@@ -33,8 +44,69 @@ export interface AgentSkillExecutionBindingV1 {
   toolSchemaHash: string
 }
 
+/** Immutable PromptTemplate/options identity bound before a formal step starts. */
+export interface AgentRunPromptExecutionBindingV1 {
+  version: 1
+  moduleKey: string
+  templateId: number | null
+  templateName: string
+  templateScope: 'system' | 'user'
+  templateUpdatedAt: number
+  templateHash: string
+  parameterValuesHash: string
+  overridesHash: string
+}
+
+/** Immutable snapshot of the operation-level FormalAIEntryBinding used by a run step. */
+export interface AgentRunFormalAIEntryBindingV1 {
+  version: 1
+  entryId: string
+  bindingJson: string
+  bindingHash: string
+}
+
 export interface AgentRunStepExecutionBindingV1 extends AgentSkillExecutionBindingV1 {
   stepId: string
+  promptExecution?: AgentRunPromptExecutionBindingV1
+  formalEntry?: AgentRunFormalAIEntryBindingV1
+}
+
+export type AgentOptionalContextActivationReasonV2 =
+  | 'perspective-character'
+  | 'prior-outline-candidate'
+  | 'explicit-runtime-boundary'
+
+export interface AgentOptionalContextActivationV2 {
+  sourceKey: string
+  reasonCode: AgentOptionalContextActivationReasonV2
+  /** Hash of the runtime boundary that activated the optional source. */
+  boundaryHash?: string
+}
+
+/**
+ * Immutable Skill-derived execution snapshot. The canonical V2 Skill body is
+ * stored as JSON so an accepted run remains auditable after the live registry
+ * changes without creating a second editable registry.
+ */
+export interface AgentSkillExecutionBindingV2 {
+  version: 2
+  skillId: string
+  skillVersion: 2
+  skillDefinitionJson: string
+  skillDefinitionHash: string
+  contextAccessPolicyHash: string
+  promptVersion: string
+  toolSchemaVersion: string
+  toolSchemaHash: string
+  contextSourceKeys: string[]
+  optionalContextActivations: AgentOptionalContextActivationV2[]
+  writeTargets: AgentRunWriteTargetV1[]
+  maxOutputTokens: number
+}
+
+export interface AgentRunStepExecutionBindingV2 extends AgentSkillExecutionBindingV2 {
+  stepId: string
+  formalEntry?: AgentRunFormalAIEntryBindingV1
 }
 
 /** Durable provenance for a run created from another run's verified artifact. */
@@ -132,6 +204,33 @@ export interface AgentRunContractV1 {
     verifierSetVersion: string
     taskIds: string[]
   }
+  /** PROGRESS-1: immutable author/policy authorization for automated child work. */
+  automationAuthorization?: {
+    version: 1
+    mode: 'author-confirmed' | 'preauthorized'
+    policy: 'suggest' | 'auto-with-budget'
+    taskKey: string
+    settingsHash: string
+    sourceTextHash: string
+    taskTypes: Array<'organization' | 'memory' | 'retrieval' | 'consistency'>
+    /** Frozen effective routes for the two model-bearing steps. */
+    modelRoutes?: Array<{
+      taskType: 'organization' | 'memory'
+      provider: string
+      model: string
+    }>
+    maxCostUsd: number
+    allowUnknownCost: boolean
+    estimate: {
+      modelCalls: number
+      inputTokensMin: number
+      inputTokensMax: number
+      outputTokensMin: number
+      outputTokensMax: number
+      costUsdMin: number | null
+      costUsdMax: number | null
+    }
+  }
   budget: {
     maxModelCalls: number
     maxToolCalls: number
@@ -154,10 +253,41 @@ export interface AgentRunContractV1 {
   }
 }
 
+/**
+ * V2 requires every executable step to carry a complete Skill-derived binding.
+ * Historical V1 contracts remain readable and are never upgraded in place.
+ */
+export interface AgentRunContractV2 extends Omit<AgentRunContractV1, 'version' | 'executionBindings'> {
+  version: 2
+  executionBindings: AgentRunStepExecutionBindingV2[]
+}
+
+export interface AgentRunContractV3 extends Omit<AgentRunContractV2, 'version'> {
+  version: 3
+  executionBoundary: AgentExecutionBoundaryV1
+}
+
+export type AgentRunContract = AgentRunContractV1 | AgentRunContractV2 | AgentRunContractV3
+
 export interface AcceptedAgentRunContractV1 {
   contract: AgentRunContractV1
   contractHash: string
 }
+
+export interface AcceptedAgentRunContractV2 {
+  contract: AgentRunContractV2
+  contractHash: string
+}
+
+export interface AcceptedAgentRunContractV3 {
+  contract: AgentRunContractV3
+  contractHash: string
+}
+
+export type AcceptedAgentRunContract =
+  | AcceptedAgentRunContractV1
+  | AcceptedAgentRunContractV2
+  | AcceptedAgentRunContractV3
 
 export type ContextManifestSourceStatus = 'included' | 'omitted' | 'trimmed'
 export type ContextManifestSourceDeliveryV1 = 'full' | 'compressed' | 'truncated'
@@ -229,6 +359,71 @@ export interface ContextManifestV2 {
   totalInputTokens: number
   sources: ContextManifestSourceV2[]
   v1ManifestHash: string
+  manifestHash: string
+}
+
+export type ContextManifestArtifactRoleV3 =
+  | 'selector-result'
+  | 'context-packet'
+  | 'source-snapshot'
+  | 'tool-result'
+  | 'rendered-request'
+  | 'raw-response'
+
+export interface ContextManifestArtifactRefV3 {
+  role: ContextManifestArtifactRoleV3
+  artifactKind: ExactRunArtifactKindV1
+  contentHash: string
+  byteLength: number
+  sourceKey?: string
+  resourceKey?: string
+  /** Hash of the exact source body inside a source-snapshot artifact. */
+  sourceContentHash?: string
+  /** Hash of the Canon SourceRefs carried inside a source-snapshot artifact. */
+  sourceRefsHash?: string
+  toolName?: string
+  callIndex?: number
+}
+
+/** CTXG-6 immutable final evidence view for one Run step attempt. */
+export interface ContextManifestV3 {
+  version: 3
+  runId: number
+  stepId: string
+  attempt: number
+  scope: ContextManifestV2['scope']
+  inputBudget: number
+  totalInputTokens: number
+  sources: ContextManifestSourceV2[]
+  v1ManifestHash: string
+  v2ManifestHash: string
+  gateway: {
+    scopeFingerprint: string
+    gatewayVersionHash: string
+    policyHash: string
+    selectorPolicyId: string
+    selectorHash: string
+    selectorArtifactHash: string
+    inventoryHash: string
+    catalogVersion: string
+    contextPacketHash: string
+    sufficiency: ContextSufficiencyReportV1
+    retrievalTrace: RetrievalTraceV1
+  }
+  artifacts: ContextManifestArtifactRefV3[]
+  prompt: {
+    promptHash: string
+    renderedRequestArtifactHash: string
+  }
+  candidate: {
+    candidateHash: string
+    rawResponseArtifactHash: string
+  }
+  workingContext: {
+    generation: number
+    packetArtifactHash: string
+    checkpointHash: string | null
+  }
   manifestHash: string
 }
 
@@ -328,7 +523,7 @@ export interface AgentRunRecord {
   parentReceiptHash?: string | null
   parentArtifactHash?: string | null
   status: AgentRunState
-  contractVersion: 1
+  contractVersion: 1 | 2 | 3
   contractJson: string
   contractHash: string
   generation: number
@@ -379,6 +574,7 @@ export type AgentRunEventTypeV1 =
   | 'step.succeeded'
   | 'step.failed'
   | 'context.assembled'
+  | 'evidence.artifact.recorded'
   | 'model.requested'
   | 'model.responded'
   | 'tool.called'
@@ -434,6 +630,13 @@ export interface AgentRunEventPayloadByTypeV1 {
     fingerprint?: string
   }
   'context.assembled': { stepId: string; attempt: number; manifestHash: string }
+  'evidence.artifact.recorded': {
+    artifactKind: import('./memory-engineering').ExactRunArtifactKindV1
+    contentHash: string
+    byteLength: number
+    stepId?: string
+    attempt?: number
+  }
   'model.requested': { stepId: string; attempt: number; bindingHash: string }
   'model.responded': { stepId: string; attempt: number; outputHash: string }
   'tool.called': { stepId: string; attempt: number; toolName: string; callHash: string }

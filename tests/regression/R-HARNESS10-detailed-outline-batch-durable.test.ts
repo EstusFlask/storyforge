@@ -4,11 +4,16 @@ vi.mock('../../src/lib/ai/client', () => ({
   chat: vi.fn(async () => clientMock.output),
 }))
 import { db } from '../../src/lib/db/schema'
-import { assembleContext } from '../../src/lib/registry/assemble-context'
 import { adopt } from '../../src/lib/registry/adopt'
 import { adoptChapterOutlineWorkshopResult } from '../../src/lib/outline/adopt-workshop'
 import { batchGenerateDetails } from '../../src/lib/ai/batch-detail-runner'
 import { hashCanonicalValue } from '../../src/lib/agent/run/hash'
+import { prepareDetailedOutlineGatewayAssemblyV1 } from '../../src/lib/outline/detail-gateway-context'
+import { generateWorkspaceUid } from '../../src/lib/memory/identity'
+import { ensureWorkspaceOwnership } from '../../src/lib/world-engine/ownership'
+import { stampNewRecord } from '../../src/lib/world-engine/scope'
+import { useAIConfigStore } from '../../src/stores/ai-config'
+import { verifyContextGatewayCandidateEvidenceV1 } from '../../src/lib/context-gateway/attempt-evidence'
 import {
   beginDetailedOutlineBatchStepV1,
   commitDetailedOutlineBatchCandidateV1,
@@ -50,72 +55,41 @@ async function createWorkspace(): Promise<{
 }> {
   const now = Date.now()
   const projectId = await db.projects.add({
+    workspaceUid: generateWorkspaceUid(),
     name: '批量细纲 durable',
     genre: 'fantasy',
     genres: ['fantasy'],
     description: '',
     status: 'drafting',
     targetWordCount: 100_000,
-    worldCode: 'batch-world',
-    worldVersion: 1,
     createdAt: now,
     updatedAt: now,
   } as any) as number
-  const worldId = await db.worlds.add({
-    projectId,
-    code: 'batch-world',
-    name: '批量世界',
-    description: '',
-    currentVersion: 1,
-    createdAt: now,
-    updatedAt: now,
-  }) as number
-  const workId = await db.works.add({
-    projectId,
-    worldId,
-    title: '批量作品',
-    description: '',
-    genres: ['fantasy'],
-    status: 'drafting',
-    targetWordCount: 100_000,
-    createdAt: now,
-    updatedAt: now,
-  }) as number
-  await db.projects.update(projectId, { activeWorldId: worldId, activeWorkId: workId, ownershipSchemaVersion: 1 })
-  const worldGroupId = await db.worldGroups.add({
+  const { scope } = await ensureWorkspaceOwnership(projectId)
+  const worldGroupId = await db.worldGroups.add(stampNewRecord(scope, 'worldGroups', {
     projectId,
     name: '主世界',
     order: 0,
     createdAt: now,
     updatedAt: now,
-  }) as number
-  const outlineNodeIds = await db.outlineNodes.bulkAdd([
-    {
+  }, { owner: 'world' })) as number
+  const outlineNodeIds: number[] = []
+  for (const [order, row] of [
+    { title: '潮门一', summary: '守灯人抵达潮门。' },
+    { title: '潮门二', summary: '守灯人听见钟声。' },
+  ].entries()) {
+    outlineNodeIds.push(await db.outlineNodes.add(stampNewRecord(scope, 'outlineNodes', {
       projectId,
-      workId,
       worldGroupId,
       parentId: null,
       type: 'chapter',
-      title: '潮门一',
-      summary: '守灯人抵达潮门。',
-      order: 0,
+      ...row,
+      order,
       createdAt: now,
       updatedAt: now,
-    },
-    {
-      projectId,
-      workId,
-      worldGroupId,
-      parentId: null,
-      type: 'chapter',
-      title: '潮门二',
-      summary: '守灯人听见钟声。',
-      order: 1,
-      createdAt: now,
-      updatedAt: now,
-    },
-  ] as any, { allKeys: true }) as number[]
-  return { scope: { projectId, worldId, workId }, worldGroupId, outlineNodeIds }
+    }, { owner: 'work' })) as number)
+  }
+  return { scope, worldGroupId, outlineNodeIds }
 }
 
 async function createCandidate(input: {
@@ -125,17 +99,14 @@ async function createCandidate(input: {
   recordLedger?: boolean
 }) {
   const { fixture, outlineNodeId } = input
-  const assembled = await assembleContext({
+  const assembled = await prepareDetailedOutlineGatewayAssemblyV1({
     projectId: fixture.scope.projectId,
     scope: fixture.scope,
     worldGroupId: fixture.worldGroupId,
     outlineNodeId,
-    sourceKeys: [
-      'canonAssertions', 'chapterOutline', 'adjacentChapterOutlines', 'worldview', 'storyCore',
-      'activeNarrativeBlueprint', 'characterDrivenPlan', 'powerSystem',
-      'cultivationProgress', 'codex', 'characters', 'creativeRules',
-      'worldRules', 'historical', 'locations', 'foreshadows',
-    ],
+    operation: 'enhanced',
+    authorRequest: '批量完善细纲',
+    config: useAIConfigStore.getState().config,
   })
   const manifest = await detailedOutlineBatchManifestV1({
     runId: input.snapshot.run.id,
@@ -276,32 +247,16 @@ describe.sequential('R-HARNESS10 · 批量细纲 durable run', { timeout: 20_000
   it('真实批量 runner 在作者确认前不写正式细纲，确认后才完成父任务', async () => {
     const fixture = await createWorkspace()
     const chapter = (await db.outlineNodes.get(fixture.outlineNodeIds[0]))!
-    const assembled = await assembleContext({
-      projectId: fixture.scope.projectId,
-      scope: fixture.scope,
-      worldGroupId: fixture.worldGroupId,
-      outlineNodeId: chapter.id,
-      sourceKeys: [
-        'canonAssertions', 'chapterOutline', 'adjacentChapterOutlines', 'worldview', 'storyCore',
-        'activeNarrativeBlueprint', 'characterDrivenPlan', 'powerSystem',
-        'cultivationProgress', 'codex', 'characters', 'creativeRules',
-        'worldRules', 'historical', 'locations', 'foreshadows',
-      ],
-    })
-    expect(assembled.included).toContain('adjacentChapterOutlines')
     let release: ((decision: 'adopt' | 'reject') => void) | null = null
+    let actualCandidate: DetailedOutlineBatchCandidateV1 | null = null
     let candidateReady: (() => void) | null = null
     const ready = new Promise<void>(resolve => { candidateReady = resolve })
     const run = batchGenerateDetails({
       chapters: [chapter],
       existingDetails: [],
       scope: fixture.scope,
-      contextResolver: async () => ({
-        worldGroupId: fixture.worldGroupId,
-        worldContext: assembled.text,
-        assembled,
-      }),
-      onCandidate: async () => {
+      onCandidate: async ({ candidate }) => {
+        actualCandidate = candidate
         candidateReady?.()
         return new Promise<'adopt' | 'reject'>(resolve => { release = resolve })
       },
@@ -325,5 +280,15 @@ describe.sequential('R-HARNESS10 · 批量细纲 durable run', { timeout: 20_000
     expect(result.generated).toBe(1)
     expect(await db.detailedOutlines.count()).toBe(1)
     expect((await db.agentRuns.get(result.runIds[0]))?.status).toBe('completed')
+    expect(actualCandidate?.gatewayEvidenceVersion).toBe(3)
+    const exact = actualCandidate!
+    const evidence = await verifyContextGatewayCandidateEvidenceV1({
+      scope: fixture.scope,
+      runId: exact.runId,
+      stepId: exact.stepId,
+      attempt: exact.durable.attempt,
+      candidateHash: exact.durable.candidateHash,
+    })
+    expect(evidence.manifest.version).toBe(3)
   })
 })
