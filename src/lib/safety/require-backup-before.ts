@@ -54,9 +54,31 @@ interface BackupDialogAdapter {
 }
 
 let dialogAdapter: BackupDialogAdapter | null = null
+const dialogAdapterRegistrations: BackupDialogAdapter[] = []
 
-export function setBackupDialogAdapter(adapter: BackupDialogAdapter | null): void {
+/**
+ * Register an application dialog adapter and return its owner-scoped cleanup.
+ *
+ * Providers may be nested by isolated tools or tests. Removing one provider
+ * must reveal the previous live adapter instead of clearing the root adapter.
+ */
+export function setBackupDialogAdapter(adapter: BackupDialogAdapter | null): () => void {
+  if (!adapter) {
+    dialogAdapterRegistrations.length = 0
+    dialogAdapter = null
+    return () => {}
+  }
+
+  dialogAdapterRegistrations.push(adapter)
   dialogAdapter = adapter
+  let registered = true
+  return () => {
+    if (!registered) return
+    registered = false
+    const index = dialogAdapterRegistrations.lastIndexOf(adapter)
+    if (index >= 0) dialogAdapterRegistrations.splice(index, 1)
+    dialogAdapter = dialogAdapterRegistrations[dialogAdapterRegistrations.length - 1] ?? null
+  }
 }
 
 /**

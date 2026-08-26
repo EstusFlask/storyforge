@@ -4,7 +4,7 @@ import { usePromptStore } from '../../stores/prompt'
 import { useAIConfigStore } from '../../stores/ai-config'
 import { getModelPreset } from '../../lib/ai/context-budget'
 import type { PromptModuleKey, PromptParameter, PromptTemplate } from '../../lib/types/prompt'
-import { DialogProvider, useDialog } from './Dialog'
+import { useDialog } from './Dialog'
 import { useToast } from './Toast'
 
 interface Props {
@@ -207,11 +207,7 @@ function PromptRunPanelContent({
 }
 
 export default function PromptRunPanel(props: Props) {
-  return (
-    <DialogProvider>
-      <PromptRunPanelContent {...props} />
-    </DialogProvider>
-  )
+  return <PromptRunPanelContent {...props} />
 }
 
 // ── 单个参数的 UI 控件 ─────────────────────────────────────────────────

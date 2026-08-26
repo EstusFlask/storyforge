@@ -70,7 +70,7 @@ export function DialogProvider({ children }: { children: React.ReactNode }) {
   }), [open])
 
   useEffect(() => {
-    setBackupDialogAdapter({
+    return setBackupDialogAdapter({
       chooseBackup: async (options: RequireBackupOptions): Promise<BackupChoice> => {
         const proceed = await api.confirm({
           title: `危险操作:${options.operation}`,
@@ -95,7 +95,6 @@ export function DialogProvider({ children }: { children: React.ReactNode }) {
       },
       confirm: api.confirm,
     })
-    return () => setBackupDialogAdapter(null)
   }, [api])
 
   const isDanger = dialog?.tone === 'danger'
