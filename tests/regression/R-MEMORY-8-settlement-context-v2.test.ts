@@ -76,8 +76,14 @@ describe('MEMORY-8 · Harness settlement and ContextManifestV2', () => {
   afterEach(async () => { db.close() })
 
   it('keeps every formal UI model entry governed while auxiliary entries remain explicitly non-Canon', () => {
-    expect(aiEntryRegistry.entries.filter(entry => entry.entryKind === 'formal')
-      .every(entry => ['durable-run', 'generation-node', 'simulation-runtime'].includes(entry.executionBoundary))).toBe(true)
+    const formalEntries = aiEntryRegistry.entries.filter(entry => entry.entryKind === 'formal')
+    expect(formalEntries
+      .every(entry => ['durable-run', 'generation-node', 'authoring-draft', 'simulation-runtime']
+        .includes(entry.executionBoundary))).toBe(true)
+    expect(formalEntries.filter(entry => entry.executionBoundary === 'authoring-draft')
+      .every(entry => entry.adoptAllowed === true
+        && 'adoptionTargets' in entry
+        && entry.adoptionTargets.length > 0)).toBe(true)
     expect(aiEntryRegistry.entries.filter(entry => entry.entryKind !== 'formal')
       .every(entry => entry.adoptAllowed === false && !('adoptionTargets' in entry))).toBe(true)
   })
