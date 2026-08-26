@@ -2,7 +2,7 @@
  * NS-4 · 双层事实记忆 — 时序事实账本数据模型。
  *
  * 设计权威：桌面《StoryForge_长期一致性目标实现方案.md》§14（LC-1 数据模型）
- * 与 docs/MASTER-BLUEPRINT.md §16 / ROADMAP NS-4。
+ * 与 docs/CONSISTENCY-COVERAGE-MAP.md 及 docs/DATA-GOVERNANCE.md 的时序事实约束一致。
  *
  * 核心取舍（§14.1，已核 schema.ts）：
  * - 实体身份用【方案A·分类型 FK】，不用多态 subjectType+subjectId

@@ -3,7 +3,7 @@
  *
  * 为什么不用 react-i18next:项目当前无真实多语言需求,装重库会增包体积(刚做完性能优化)。
  * 这套零依赖方案提供 t() + useTranslation + 语言切换 + 类型安全的 key,
- * 当真正需要全量多语言时,可按 docs/refactor/I18N-GUIDE.md 平滑升级到 react-i18next。
+ * 维护与渐进迁移规则见 docs/guides/I18N.md。
  *
  * 用法:
  *   const { t } = useTranslation()

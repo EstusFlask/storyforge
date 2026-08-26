@@ -1,7 +1,7 @@
 /**
  * R-17: ensureSchema 生产环境不自动删库
  *
- * 对应 MASTER-BLUEPRINT §4.0.3。
+ * R-17：schema 启动与必需表反例。
  *
  * 反例:
  *   旧实现发现缺表后无条件 Dexie.delete('storyforge')。

@@ -3,7 +3,7 @@ import type { RagDocumentMetadata } from './rag-library'
 /**
  * Phase 35-a — 词条系统（Codex）数据模型
  *
- * 设计见 docs/CODEX-REDESIGN.md 第三章。
+ * 当前产品边界与数据治理见 docs/PROJECT-MASTER-CHARTER.md 和 docs/DATA-GOVERNANCE.md。
  * 用「通用词条表 + 分类树 + 字段 schema」承载自然物产/人工器物/种族/势力/城池等可枚举实体，
  * 取代分散的自由文本字段；天然支持用户自定义分类与字段。
  */

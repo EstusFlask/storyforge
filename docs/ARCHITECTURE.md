@@ -1,191 +1,181 @@
 # StoryForge 当前架构总览
 
-> 最后更新：2026-08-17
->
-> 适用版本：`main@5021094` / 应用语义版本 `3.9.1`
->
-> 本文描述当前代码事实；历史设计与施工过程不作为运行架构权威。
+> 版本：2.0.0 · 更新：2026-08-26 · 权威层级：L1
+> 本文描述当前主干代码事实与目标架构接缝。产品边界以项目总纲为准；代码偏差见对齐审计。
 
-## 1. 系统定位
+## 1. 运行形态
 
-StoryForge 是 React + TypeScript + IndexedDB 的纯前端、本地优先创作应用。用户项目、手稿、Canon、运行记录和设置保存在浏览器；AI 请求只发送到用户配置的服务商。项目没有自建业务后端，也没有 staging，`main` 会直接进入生产构建。
+StoryForge 当前是 React + TypeScript + Vite 的本地优先单页应用，核心业务数据保存在浏览器 IndexedDB，文件工作区可使用 File System Access / OPFS。AI 请求发送到用户配置的模型服务。应用没有自建核心业务后端，也没有 staging；`main` 进入生产发布链。
 
-当前架构的核心不是“把更多提示词拼给模型”，而是把所有正式 AI 创作收进一条受治理的 Agent + Harness 主路径：
+路由只有四个壳入口：
+
+- `/`：产品综合页 `ProductHubPage`；
+- `/projects`：项目列表与传统入口；
+- `/settings`：模型与应用设置；
+- `/workspace/:projectId`：分步骤长篇工作区。
+
+综合页承载世界引擎、作品、节点、跑团、角色聊天、文字游戏与市场实验入口；分步骤工作区仍是当前主要、最完整的作者路径。
+
+## 2. 产品与共享底座
+
+```mermaid
+flowchart TB
+  subgraph P["独立产品域"]
+    L["分步骤长篇"]
+    N["节点模式"]
+    S["短篇"]
+    A["小说转剧本"]
+    C["小说转漫画"]
+    W["世界引擎"]
+    U["跑团 / 角色聊天 / AI小镇 / 文字游戏"]
+  end
+  B["共享工程底座\nReact / IndexedDB / 模型接入 / Harness / 记忆 / 媒资设施"]
+  R["三注册表\nContext / Field+Adoption / Project Tables"]
+  L <-->|"同一能力，不同操作表达"| N
+  W -->|"只读 WorldRelease"| U
+  B --> P
+  R --> B
+```
+
+共享底座允许复用执行、存储、模型、记忆和媒资设施，不意味着产品数据混合。世界引擎只拥有语义内容；上层产品拥有自己的 production、media、build、release、session 和 evolution。
+
+## 3. 当前工程指标
+
+<!-- project-metrics:start -->
+> 本区块由 `npm run gen:project-metrics` 从当前代码生成；`npm run check:project-metrics` 在 CI 中防止漂移。
+
+| 当前事实 | 数值 | 单一事实源 |
+|---|---:|---|
+| 应用语义版本 | `3.9.1` | `package.json` |
+| TypeScript 生产源码 | 993 个文件 / 356439 行 | `tsconfig.json` |
+| IndexedDB schema | v79 / 115 张 required tables | `schema.ts` / `REQUIRED_TABLES` |
+| PROJECT_TABLES | 115 张表 | `project-tables.ts` |
+| Prompt 主线 | 65 个 moduleKey / 210 条内置模板 | `PromptModuleKey` / `prompt-seeds*.ts` |
+| CONTEXT_SOURCES | 86 个上下文源 | `context-sources.ts` |
+| 写回治理 | 39 个通用 adopt target / 44 个领域扩展 | `adoption-schema.ts` |
+<!-- project-metrics:end -->
+
+## 4. 分层架构
+
+| 层 | 职责 | 主要实现 |
+|---|---|---|
+| 产品与 UI | 收集意图、展示候选、作者确认、运行体验 | `src/pages`、`src/components` |
+| 产品应用服务 | 长篇、改编、世界、跑团、聊天、文字游戏生产与运行 | `src/lib/{novel,adaptation,screenplay,comic,world-engine,ttrpg,character-interaction,game-production,...}` |
+| Agent / Skill | 任务分类、能力契约、读写权限、Prompt/Tool 版本 | `src/lib/agent` |
+| Durable Harness | run、event、checkpoint、attempt、stale、receipt | `src/lib/agent/run` |
+| Context Gateway / 记忆 | 目录、预选、按需读取、原文与长期记忆 | `src/lib/context-gateway`、`src/lib/memory`、`src/lib/retrieval` |
+| 三注册表 | AI 读取、候选采纳、表生命周期 | `src/lib/registry` |
+| 领域一致性 | Canon、事实、关系、时间、主支线、状态和冲突 | `src/lib/consistency`、`fact-ledger`、`storyline`、`knowledge-ledger` |
+| 数据与文件 | Dexie schema、迁移、备份、导入导出、OPFS | `src/lib/db`、`migrations`、`export`、`storage`、`media` |
+
+## 5. 正式 AI 主路径
 
 ```text
 产品入口 / 作者意图
-  -> Master Agent 或登记的领域 Skill
-  -> Run Contract + 执行版本 + 预算
-  -> CONTEXT_SOURCES + assembleContext()
-  -> 模型 / 只读工具
-  -> CreativeArtifact + 确定性验证
-  -> durable ledger / checkpoint / receipt
-  -> 作者预览、编辑和确认
-  -> FIELD_REGISTRY + AdoptionSchema + adopt()
-  -> Canon / 正文 / 派生影响处理
+→ AI Entry Registry 中的 formal 入口
+→ 登记 Skill + Run Contract
+→ CONTEXT_SOURCES / Context Gateway
+→ provider adapter / 闭集只读工具
+→ 原始输出 + CreativeArtifact
+→ schema / 确定性验证 / 有界 repair
+→ durable candidate + checkpoint
+→ 作者预览、编辑、采纳或拒绝
+→ FIELD_REGISTRY / AdoptionSchema / adopt()
+→ post-state + terminal receipt
 ```
 
-## 2. 七层架构
+AI 入口注册表同时允许有明确边界的 `auxiliary`、`evaluation` 和 `experimental` 调用。它们不得直接写 Canon，也不得在 UI 中冒充正式 durable 流程。架构扫描器阻止未登记直连。
 
-| 层 | 主要职责 | 关键实现 |
-|---|---|---|
-| 产品与交互 | 世界引擎、分步骤创作、节点创作、Agent 对话、互动运行时；只表达用户意图和确认 | `src/pages`、`src/components` |
-| Agent 与 Skill | 意图分类、领域能力、读写权限、提示词/工具版本、依赖计划 | `src/lib/agent/orchestrator.ts`、`skill-registry.ts`、`workflow-catalog.ts` |
-| Durable Harness | Run 合同、事件账本、checkpoint、恢复、父子 lineage、候选与终态回执 | `src/lib/agent/run`、`src/lib/types/agent-run.ts` |
-| 创作可靠性 | 分级产物、1+1 调用策略、归一化、定向修复、NarrativeBrief、调用证据 | `src/lib/agent/creative-reliability.ts`、`creative-execution.ts`、`narrative-brief.ts` |
-| 上下文与采纳 | 受治理读取、预算裁剪、字段白名单、集合策略、作者确认写回 | `src/lib/registry` |
-| 领域与运行时 | Canon、一致性、检索、世界/作品归属、发布、节点图、SIM 回放 | `src/lib/consistency`、`retrieval`、`world-engine`、`node-*`、`simulation` |
-| 本地数据与生命周期 | Dexie schema、迁移、导入导出、删除、引用重映射、作用域 | `src/lib/db`、`src/lib/migrations`、`src/lib/export`、`PROJECT_TABLES` |
+## 6. 三注册表
 
-## 3. 三注册表仍是单一事实源
+### 6.1 `CONTEXT_SOURCES`
 
-### 3.1 AI 读什么
+登记稳定 source key、owner、作用域和加载器。`assembleContext()` 与 Context Gateway 是正式读取接缝；Skill 只声明 keys，不在组件中维护字段清单。Context Manifest 保存实际读取、哈希、预算和遗漏。
 
-`CONTEXT_SOURCES` 登记来源、作用域、owner、预算和加载方式；`assembleContext()` 是正式项目上下文的唯一入口。Agent Skill 只能声明注册表内来源或由闭集工具间接取得登记来源，不能在组件中查询数据库后手拼隐藏上下文。
+### 6.2 `FIELD_REGISTRY` / Adoption
 
-### 3.2 AI 写什么
+Field Registry 决定 AI 可写字段；Adoption Schema/Extension 决定集合身份、外键、替换范围和领域事务。候选不是正式数据；stale 校验、作者确认和 post-state 回读构成采纳闭环。
 
-`FIELD_REGISTRY` 登记允许写入的字段，`ADOPTION_SCHEMAS` 登记集合身份、去重、外键和替换范围；`adopt()` 负责校验、作用域和正式写回。模型输出、候选 payload 或组件状态本身都不是 Canon。
+### 6.3 `PROJECT_TABLES`
 
-### 3.3 表如何活完整个生命周期
+当前 required tables 与 `PROJECT_TABLES` 数量由检查器保持一致。注册表派生导出、导入、删除、迁移、作用域和引用重映射，覆盖普通记录、运行账本和共享 blob object。任何新表先登记再使用。
 
-`PROJECT_TABLES` 覆盖当前 69 张 required tables，派生项目/World/Work 作用域、导出、导入、删除、迁移、分享范围和引用重映射。新增表不能只改 Dexie schema；运行账本表同样受该注册表治理。
+## 7. 数据域
 
-## 4. Agent 执行模型
+### 7.1 `Project` / `World` / `Work`
 
-### 4.1 Master Agent
+`Project` 目前仍是本地物理容器和大量旧功能的兼容根；`World` 与 `Work` 提供显式语义 owner，`Work.worldId` 绑定来源世界。该兼容结构尚未完全表达总纲中的“独立长篇不等于世界引擎”，因此新增代码不能继续默认每个 Project 都是可发布世界。
 
-Master Agent 负责把作者请求映射为登记的领域任务，冻结任务顺序、依赖、预算与完成条件。它不能创造不存在的 Skill、工具或写权限，也不能直接修改 Canon。
+### 7.2 长篇与节点
 
-### 4.2 领域 Skill Registry
+分步骤工作区保存世界观、故事、角色、大纲、细纲、正文、事实、关系、伏笔、状态、检索和 run 数据。节点模式拥有 DAG、节点输入输出和运行记录，但目标是调用同一长篇能力；任何平行节点 AI/DB 写入都是架构缺陷。
 
-每个 Skill 固定：
+### 7.3 改编产品
 
-- 所属领域 Agent 与执行模式；
-- 必需、可选上下文来源和不完整输入策略；
-- 上下文压缩边界；
-- Prompt / Skill / Tool schema 版本；
-- 最大输出预算；
-- 可写表、字段和 Adoption Extension；
-- freshness 日期与回归证据。
+短篇通过 Work kind/profile 区分规模；剧本与漫画使用 adaptation source/plan、screenplay scene、comic page/panel/visual subject 等独立表。漫画媒资由共享 blob 存储承载但 owner 在漫画产品。
 
-世界来源、角色、灵感、大纲和正文是当前五个领域 Agent；故事核心、故事线、世界观字段、关系、地点、历史、伏笔、章纲、细纲、正文、抽取、文风等能力以 Skill 形式登记。
+### 7.4 世界引擎
 
-### 4.3 Tool Registry
+世界领域提供投影、完整度、world code、release、source selection 和可运行世界包设施。目标出口是稳定世界编号与不可变版本，而不是直接暴露可变 Project 表。
 
-当前工具层以闭集只读能力为主。参数、作用域、风险和返回结构由代码定义，模型只能选择登记名称。工具调用不会因此获得数据库写权限；正式写回仍需候选、作者确认和 Adoption。
+### 7.5 上层产品
 
-## 5. Durable Harness
+游戏生产使用 consultation、brief、command、build、artifact、media、release 与质量证据；角色互动和跑团有各自 production/runtime 数据。`SimulationSession` 及事件/checkpoint 保存私域运行。媒资通过共享设施存储，归具体 build/product release，不归 WorldRelease。
 
-Harness 不负责“写得更有文采”，它负责一次创作运行能够被解释、恢复和安全收口。
-
-| 能力 | 保证 |
-|---|---|
-| Run Contract | 冻结 workflow、Skill、读源、写目标、预算、验收和执行版本 |
-| Event ledger | 消息、计划、任务、候选、确认、错误和状态转换可回放 |
-| Checkpoint | 刷新或中断后从持久化状态继续，不依赖组件内存 |
-| Hash / CAS / stale | 输入、候选、目标或父证据变化时拒绝旧写入 |
-| Parent lineage | 章后处理、影响修复和下游生成能证明来自哪个已完成上游 |
-| Verification receipt | 协议、作用域、确定性、采纳和终态证据可回读 |
-| Failure policy | 区分协议、provider、预算、stale 和不可恢复错误，阻止盲目重试 |
-
-运行记录主要由 `agentRuns / agentRunEvents / agentRunCheckpoints / agentEvents` 承载。它们不是新的 Canon；候选只有通过正式采纳后才改变业务数据。
-
-## 6. 创作可靠性控制面
-
-`CreativeArtifactV1` 同时保存原稿、可编辑稿、合法/拒绝片段、问题、临时假设、Canon 证据、调用用量与修复记录。状态分为 `ready`、`usable-with-warnings`、`manual-repair`、`blocked`。
-
-默认政策：
-
-- 一个产物一次生成；
-- 只有确定性定位到可修问题时最多一次定向修复；
-- 相同失败停止；
-- 非重试型 4xx、授权、余额、权限、stale 和网络结果未知不自动重发；
-- 普通文学质量问题作为警告，不冒充数据安全硬失败；
-- 即使不能采纳，也尽量保留原稿、合法片段和问题说明。
-
-## 7. World / Work / Runtime 作用域
-
-`Project` 仍是 IndexedDB 的物理兼容工作区；显式 `World` 与 `Work` 提供逻辑归属，`Work.worldId` 是作品绑定权威。`WorkspaceScope` owner gate 贯穿 Store、Context、Adoption、Agent ledger、导入导出和删除。
-
-- World Canon 可供同一世界下多个作品引用。
-- Work 内容、正文、候选和运行记录必须隔离。
-- NarrativeModule / Release / 世界包使用稳定依赖与 hash 冻结。
-- SIM 运行时读取冻结 Canon 快照，事件、存档和回放不会自动改写创作 Canon。
-
-## 8. AI 入口分类
-
-所有生产源码中的模型调用由 `src/lib/agent/ai-entry-registry.json` 和架构检查器登记为：
-
-- `governed`：进入 durable Run、GenerationNode 或专用确定性运行时；
-- `auxiliary`：只读审校、评测、内存草稿或临时可视化，不直接写 Canon；
-- `migration`：正在迁移的明确临时入口，必须有理由和退出边界。
-
-未登记的新直连会使 CI 失败。评测调用与生产创作调用必须物理区分，不能用 verifier 结果冒充 generator 质量。
-
-## 9. 数据流与失败流
+## 8. 世界到产品的单向流
 
 ```mermaid
 flowchart LR
-  U["作者请求"] --> A["Master Agent / Skill"]
-  A --> C["Run Contract"]
-  C --> R["assembleContext"]
-  R --> M["模型或只读工具"]
-  M --> N["归一化与确定性验证"]
-  N -->|可用或带警告| P["CreativeArtifact 预览"]
-  N -->|可定向修复| X["最多一次修复"]
-  X --> P
-  N -->|安全阻断| B["保留证据并停止"]
-  P -->|作者确认| D["adopt"]
-  P -->|编辑或拒绝| E["保持候选，不改 Canon"]
-  D --> F["终态回读与 receipt"]
-  C -.-> L["ledger / checkpoint"]
-  M -.-> L
-  N -.-> L
-  F -.-> L
+  D["世界草稿"] -->|"作者封存"| R["不可变 WorldRelease"]
+  R -->|"SourceSelection / manifest / hash"| P["产品 Production"]
+  P --> M["产品媒资"]
+  P --> B["Build + 验证"]
+  M --> B
+  B --> G["不可变 Product Release"]
+  G --> S["Runtime Session / 私域演化"]
+  S -. "不得自动回写" .-> D
 ```
 
-## 10. 目录索引
+运行时只读绑定 release。若未来把衍生内容转成世界新版本，应走另一个显式创作/采纳流程。
+
+## 9. 失败与恢复
+
+Durable Harness 将运行状态写入 ledger/checkpoint；provider 调用有 attempt identity；候选保存输入/目标 revision；采纳使用事务和 post-state。网络结果未知、认证/配额、stale、协议错误和不可恢复错误分开处理。
+
+UI 刷新后必须从 durable 状态恢复。没有 checkpoint 的辅助调用只能返回内存结果或只读报告，不得静默写正式数据。
+
+## 10. 关键目录
 
 ```text
 src/
-├── components/          产品面板、候选预览、作者确认与运行状态
-├── pages/               产品首页、工作区与路由
-├── stores/              Zustand 领域状态与本地投影
+├── pages/                  路由壳与产品综合页
+├── components/             产品 UI、候选、设置与运行面板
+├── stores/                 UI 投影与领域状态
 └── lib/
-    ├── agent/           Master Agent、Skill、Tool、创作可靠性与 durable Run
-    ├── registry/        Context / Field / Adoption / Project Tables 三注册表
-    ├── db/              Dexie schema 与启动安全
-    ├── migrations/      版本与 owner 迁移
-    ├── consistency/     事实、持有物、影响图与确定性守卫
-    ├── retrieval/       章节记忆、摘要与原文检索
-    ├── generation/      透明 GenerationNode 执行接口
-    ├── world-engine/    World / Work / Narrative / Release / 分享包
-    ├── node-authoring/  自由节点创作
-    ├── simulation/      互动事件、回放、检查点与分支
-    ├── evals/           去内容化评测、checkpoint 与评分
-    └── export/          备份、导入导出和便携重映射
+    ├── agent/              Skill、AI 入口与 durable run
+    ├── context-gateway/    渐进式上下文目录和读取
+    ├── registry/           三注册表
+    ├── db|migrations|export|storage/
+    ├── novel|outline|prose|storyline/
+    ├── adaptation|screenplay|comic/
+    ├── world-engine/
+    ├── ttrpg|character-interaction|game-production/
+    ├── simulation|text-game|adventure|avg|open-world/
+    └── media/              跨产品媒资设施，不是世界引擎模块
 ```
 
-## 11. 架构守卫与交付门
+## 11. 当前诚实边界
 
-提交前至少运行：
+- 代码中已存在大量上层产品、市场和托管能力，但存在“实现领先于总纲发展顺序”和实验入口可见的问题；不等于这些产品已完整交付。
+- Product/World/Work 的兼容关系仍会把独立作品与世界引擎混在同一 Project 表达，需要按对齐审计渐进纠正，不能再扩大耦合。
+- Harness、Context Gateway 和规模夹具证明了重要工程基础，不等于百万字真实小说的一致性已经完成验证。
+- 世界 Release、上层 Production/Release 与媒资 owner 已有基础，但“稳定世界数据出口供所有上层产品统一读取”仍需收口。
+- 账户、云端社区、支付和商业平台不是当前核心运行前提；相关代码必须 capability gate / experimental，不能掩盖主产品未完成。
 
-```bash
-npm run check:architecture
-npm run check:required-tables
-npm run check:ai-manual
-npx tsc --noEmit
-npm run build
-```
+当前能力与缺口以 [`roadmap/CAPABILITY-BASELINE.md`](./roadmap/CAPABILITY-BASELINE.md) 和
+[`audits/PROJECT-CHARTER-ALIGNMENT-AUDIT-20260826.md`](./audits/PROJECT-CHARTER-ALIGNMENT-AUDIT-20260826.md) 为准。
 
-完整交付运行 `npm run ci`；涉及真实 UI/API 时再在隔离浏览器数据中运行 `npm run ci:e2e`。架构守卫会检查三注册表、AI 入口、来源可达性、Agent freshness、项目指标、Canon 覆盖和 bundle budget。
+## 12. 交付门
 
-## 12. 当前诚实边界
-
-- Harness 能保证权限、状态、成本停止、恢复和证据，不能保证随机模型每次达到文学质量目标。
-- CREL 工程控制面与本轮开发任务已完成，现进入实验性社区观察。sealed held-out 的 token 倍率 `1.514404` 略超 `1.5`、独立作者 A/B 为 0/6 的历史结论保持不变；2026-08-17 产品决策只关闭它们作为交付阻塞项，不等于评测通过。
-- 有限 fan-out、自动语义审查和更宽的多 Agent 能力必须经过独立真实模型成本/质量证据后才能默认开放。
-- 账号、云同步、社区发现、协作和治理不属于当前纯前端运行架构。
-
-本次更新的完整说明、验证证据和社区观察边界见 [AI-HARNESS-REBUILD-RELEASE-20260817.md](./AI-HARNESS-REBUILD-RELEASE-20260817.md) 与 [HARNESS-COMMUNITY-VALIDATION.md](./adr/HARNESS-COMMUNITY-VALIDATION.md)。
+代码提交前执行定向测试和最低架构门；交付运行 `npm run ci`，适用时运行 `npm run ci:e2e`。详细要求见
+[`ENGINEERING-QUALITY-STANDARD.md`](./ENGINEERING-QUALITY-STANDARD.md)。

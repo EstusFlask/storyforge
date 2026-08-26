@@ -1,7 +1,7 @@
 /**
  * R-06: deleteNode 绕过 deleteChapter → emotionBeatCards 残留
  *
- * 对应 MASTER-BLUEPRINT §4.0.7 / GPT-5.5 审查 P0-7
+ * R-06：节点删除级联反例。
  *
  * 反例:
  *   旧 deleteNode 用 db.chapters.bulkDelete() 直接删章节,

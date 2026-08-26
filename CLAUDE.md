@@ -1,209 +1,171 @@
-# StoryForge · 项目执行原则（详细宪法）
+# StoryForge 项目开发宪法
 
-> **本文件是项目的详细宪法。** 编码 Agent 的短入口是 `AGENTS.md`；开始任务后按
-> [`docs/CONTEXT-ROUTING.md`](docs/CONTEXT-ROUTING.md) 读取本文件或其它文档的相关章节，
-> 不把所有长文档作为每个任务的固定前缀。三注册表、数据红线和完成定义不得因上下文瘦身而跳过。
-> 文件位置：仓库根目录。
-> 创建：2026-06-04 ｜ 维护者：本项目作者 + 协作 AI 模型。
+> 版本：2.0.0 · 生效：2026-08-26
+> 本文件是详细工程宪法；短入口为 `AGENTS.md`。产品方向首先服从
+> [`docs/PROJECT-MASTER-CHARTER.md`](docs/PROJECT-MASTER-CHARTER.md)，文档裁决与读取范围服从
+> [`docs/DOCUMENT-AUTHORITY.md`](docs/DOCUMENT-AUTHORITY.md) 和
+> [`docs/CONTEXT-ROUTING.md`](docs/CONTEXT-ROUTING.md)。
 
----
+## 1. 权威与裁决
 
-## 🔒 第一铁律：三个注册表是项目的"宪法"
+冲突按以下顺序处理：
 
-本项目所有的扩展（加表 / 加字段 / 加 AI 动作 / 加上下文源）必须收口到三个单一事实源注册表，不允许散落手写。
+1. 项目总纲；
+2. 当前产品地图、能力基线与路线图；
+3. 本宪法、架构、数据、Harness 与质量标准；
+4. 三注册表及代码契约；
+5. 具体产品契约、测试与当前实现；
+6. Git 历史和 WPS 历史归档。
 
+旧 Blueprint、施工卡、完成报告、评测流水和旧路线图只用于追溯，不得覆盖现行总纲。发现当前代码与总纲冲突时，登记偏差并纠正代码，不能以“已经实现”为由反向改写产品边界。
+
+## 2. 产品边界宪法
+
+### 2.1 独立创作产品
+
+- 分步骤长篇拥有完整的世界观、故事、角色、主支线、大纲、细纲、正文和长程记忆链，不依赖世界引擎才能工作。
+- 节点模式公开并组合同一条长篇生产链；它可以有自己的图、节点配置和运行记录，但必须复用同一 Skill、上下文、采纳和领域数据。
+- 短篇、小说转剧本、小说转漫画分别有自己的输入、计划、产物、状态、验证和版本；不能只是长篇页面开关或一次 Prompt。
+
+### 2.2 世界引擎
+
+世界引擎是可编辑、可封存、可版本化、可用唯一编号引用的语义内容包。它可以只含部分世界观，也可以含故事、角色、主支线、大纲、细纲乃至正文。完整度是能力画像，不是必须填满的表单。
+
+世界引擎不包含为具体衍生产品生产的图片、音乐、音效、配音、视频、UI 或排版资产。它提供外貌、地点、时代、风格等语义依据；媒资在上层产品生产阶段生成并归具体产品实例。
+
+### 2.3 上层产品
+
+跑团、角色聊天、AI 小镇和文字游戏通过“世界编号 + 不可变版本”单向读取世界引擎。每个上层产品必须拥有自己的：
+
+- 配置与体验目标；
+- 主 Agent 与专业生产能力；
+- 内容、规则和媒资生产；
+- 组装、验证、修复与不可变发行；
+- 运行状态、记忆、存档和私域演化。
+
+上层运行或私域演化不得自动回写共享世界。若作者希望把衍生内容变成新世界版本，必须启动独立、显式、由世界作者确认的再创作流程。
+
+### 2.4 发展顺序
+
+默认依赖顺序是：权威与主干 → 分步骤长篇及节点同源 → 独立短篇/改编产品 → 世界引擎出口 → 逐个完成上层垂直产品 → 网站、社区、平台与商业化。多个半成品页面齐头扩张不算进度。
+
+## 3. 三注册表铁律
+
+所有扩展必须收口到三个单一事实源：
+
+```text
+CONTEXT_SOURCES + assembleContext()       -> AI 读什么
+FIELD_REGISTRY + AdoptionSchema + adopt() -> AI 正式写什么
+PROJECT_TABLES                            -> 表如何经历完整生命周期
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                                                              │
-│   ① CONTEXT_SOURCES    →  AI 读什么（上下文装配）            │
-│      assembleContext({need: [...]})                          │
-│                                                              │
-│   ② FIELD_REGISTRY + AdoptionSchema  →  AI 写回什么          │
-│      adopt({target, data})                                   │
-│                                                              │
-│   ③ PROJECT_TABLES     →  表的生命周期（导出/导入/删除/迁移）│
-│      派生 5 个生命周期 API,不允许手写表清单                 │
-│                                                              │
-└─────────────────────────────────────────────────────────────┘
+
+任何模型动作，不论自上而下生成、下游提取还是反向分析，都必须回答：
+
+1. 从哪些注册源读取，作用域与版本是什么？
+2. 产生候选还是正式数据，允许写哪些 field/schema？
+3. 涉及哪些表，导出、导入、删除、迁移、重映射和 owner 是否完整？
+4. 用户修改后如何让旧候选 stale，并让新状态进入下游？
+
+禁止：
+
+- 组件或 service 内手拼世界/角色/大纲上下文；
+- 绕过 `adopt()` 直接把模型结果散写入受治理表；
+- 在删除、导入导出或迁移处手写平行表清单；
+- 同一功能维护两套 field mapping、AI 入口、数据库或恢复状态；
+- 以“先修按钮”为理由把注册表留到以后。
+
+普通确定性 UI 编辑可以通过领域仓储写入，但受治理数据必须遵守 owner、revision、引用和生命周期契约；AI 候选不能借此绕过采纳。
+
+## 4. Agent、Skill 与 Harness
+
+正式生成链应为：
+
+```text
+用户意图
+-> 登记的产品入口 / Skill
+-> Run Contract（版本、读写、预算、完成条件）
+-> Context Manifest / Gateway（目录、预选、按需原文）
+-> 模型或闭集只读工具
+-> CreativeArtifact（原输出、可编辑候选、问题、用量）
+-> 确定性校验与最多一次有依据的定向修复
+-> 作者预览、编辑、采纳或拒绝
+-> adopt() + transaction
+-> post-state 回读与 terminal receipt
 ```
 
-**任何 AI 动作的本质都是**：
+Harness 必须承担权限、状态、预算、幂等、stale、恢复、证据与停止策略；模型承担意图理解、创意生成和语义判断。可确定验证的工程约束不得只放进 Prompt；开放语义工作也不得被僵硬编排替代。
 
-> **读** = `CONTEXT_SOURCES.assembleContext({need})`
-> **写** = `FIELD_REGISTRY/AdoptionSchema.adopt({target, data})`
-> **表元信息** = `PROJECT_TABLES`
+固定前缀和 token 截断只可作为最后保护。长程创作必须保留原文、事实、摘要、索引和事件层，通过渐进式披露按需读取，并记录未读取来源，不能把“没有放进本次上下文”误判成“项目里不存在”。
 
-不管"上→下生成"（如生成章节正文）、"下→上反推"（如灵感反推）、"下游提取"（如状态卡提取）——**三类全部走同一个机制,只是 reads/writes 方向不同**。
+## 5. 数据与发布红线
 
-2026-08-17 起，正式模型执行还必须经过统一 Agent + Harness：领域 Skill 声明读写权限和执行版本，
-Run Contract 冻结任务、预算与完成条件，durable ledger/checkpoint/receipt 负责恢复和终态证明，
-`CreativeArtifact` 保存分级候选、问题和用量。三注册表仍是数据单一事实源；Harness 是执行控制面，
-两者不能互相替代。普通 UI 不得以“只是调用一次模型”为由绕过 Skill/Run 或 AI 入口登记。
+- 当前是本地优先 React + TypeScript + IndexedDB 产品；用户手稿主要存于浏览器。
+- `main` 直接部署，没有 staging。任何 schema、迁移、删除或导入错误都可能损坏真实创作数据。
+- 每条持久化数据必须能回答 owner、project/world/work/product instance、draft/release、来源、revision 与引用。
+- schema 变更必须有迁移、反例、往返、删除与旧数据启动验证；不得靠清库通过测试。
+- 正式封存版本不可变；上层实例必须锁定源世界版本，草稿修改不得静默改变已有发行或运行。
+- API Key 不进入仓库、日志、测试夹具或文档；连接成功不代表模型、余额、权限与任务输出契约均可用。
+- 失败状态必须区分 provider、认证、配额、限流、协议、结构、预算、stale 和结果未知，禁止笼统吞错。
 
----
+## 6. 质量与完成定义
 
-## 🚫 动手前的「四问」（必须依次过）
+质量要求详见 [`docs/ENGINEERING-QUALITY-STANDARD.md`](docs/ENGINEERING-QUALITY-STANDARD.md)。一个功能只有同时满足以下条件才算完成：
 
-每次接到任务（加功能 / 修 bug / 改交互），动手前**必须依次回答这四个问题**。任何一问过不了 → 停下，先去补注册表 → 再写功能。
+1. **产品正确**：属于正确产品，用户能完成真实目标。
+2. **架构闭环**：入口、读取、候选、采纳、表生命周期、调用方和下游均有唯一契约。
+3. **数据安全**：刷新、中断、迁移、导入导出、删除、作用域切换和并发不丢失或串改。
+4. **失败可恢复**：有界重试、checkpoint、stale 阻断与明确错误。
+5. **无平行旧入口**：取代旧入口时同步下线；未完成能力默认隐藏或明确实验性。
+6. **有验证证据**：定向测试、反例、架构门、完整 CI、必要 E2E 与真实隔离数据路径通过。
+7. **文档真实**：能力基线、路线图、AI Manual 和相关产品契约同步更新。
 
-### ① 它**读**什么？
-- 必须经 `CONTEXT_SOURCES + assembleContext`
-- **不允许**：在面板组件里手挑组合 `buildWorldContext + buildCharacterContext + ...`
-- 如果 `CONTEXT_SOURCES` 里没有需要的源 → **先去注册表加一行**，再写功能
+“没有任何 Bug”不是可证明的终态；要求是关键路径有防线、未知失败可观测可恢复、同类缺陷有回归门。
 
-### ② 它**写**什么？
-- 必须经 `FIELD_REGISTRY + AdoptionSchema + adopt()`
-- **不允许**：直接 `db.xxx.add / update`、手写字段映射、手写去重逻辑
-- 如果是新字段 → 先去 `FIELD_REGISTRY` 加一行；如果是集合写回 → 先去 `AdoptionSchema` 加一条
+## 7. 每次任务的执行清单
 
-### ③ 它涉及**哪些表的生命周期**？
-- 必须经 `PROJECT_TABLES` 派生（`cascadeDeleteProject / cascadeDeleteGroup / stampPrimaryWorld / exportProjectByRegistry / importProjectByRegistry`）
-- **不允许**：在 `deleteProject` / `deleteGroup` / `migrateToMultiWorld` / `exportProjectJSON` 任何一处手写表清单
-- 如果是新表 → 先去 `PROJECT_TABLES` 加一行（含 owner / worldScoped / refs / exportable），生命周期自动覆盖
+- [ ] 已确认总纲章节、产品归属、阶段与明确非范围。
+- [ ] 已查看工作树与相关提交，未覆盖他人改动。
+- [ ] 已用 `rg` 建立入口 → 读 → 写 → 表 → 下游 → 测试闭包。
+- [ ] 已核对 `CONTEXT_SOURCES`、`FIELD_REGISTRY` / Adoption、`PROJECT_TABLES`。
+- [ ] 已说明世界版本、产品实例、媒资与运行数据的 owner。
+- [ ] 已复用现有 Skill/Harness/服务，未复制平行体系。
+- [ ] 已补正反例、生命周期与必要 E2E。
+- [ ] 已跑 `npm run ci`，必要时 `npm run ci:e2e`，并记录外部阻塞。
+- [ ] 已更新现行文档，没有恢复归档文档权威。
+- [ ] 已运行 `git diff --check`，工作树与提交边界清楚。
 
-### ④ 如果以上三个注册表里**没登记**？
-- **🛑 立刻停下**
-- 先去注册表加一行
-- **然后**再写功能
-- **绝不允许**"先把这个 bug 修了，注册表改造慢慢来"
+## 8. 停止扩大改动的信号
 
----
+遇到以下情况应保留证据并请求裁决：
 
-## ❌ 反面教材（永远不要这样做）
+- 无法确认是否丢失真实用户数据；
+- 迁移、导入导出或删除反例失败且根因未定；
+- 总纲、现行产品契约和代码互相矛盾，且不同选择会改变产品边界；
+- 需要新的外部权限、账户、付费或不可逆远程操作；
+- 关键结果只能靠模型“应该会遵守”而没有工程约束；
+- 任务要通过新增第二套系统才能看似完成。
 
-| 老毛病（头疼医头） | 正确做法 |
+困难、测试耗时或实现复杂本身不是停止理由。
+
+## 9. 现行文档地图
+
+| 文档 | 用途 |
 |---|---|
-| 修 `deleteGroup` 漏 codex → 在该函数里多加几行 `db.codexEntries.delete(...)` | 改 `PROJECT_TABLES` 让 codex 的 worldScoped/refs 登记好，生命周期 API 自动覆盖 |
-| 修灵感反推字段错位（AI 吐 `summary` 写不到 `worldOrigin`） → 在 InspirationPanel 里加 if/else 映射 | 改 `FIELD_REGISTRY` 给 `worldOrigin` 加 `aliases: ['summary']`，`adopt()` 自动处理 |
-| 修章节正文不读 worldRules → 在 ChapterEditor 里加一行 `buildWorldRulesContext()` | 在 `CONTEXT_SOURCES` 注册 `worldRules` 源，所有调用 `assembleContext({need:['worldRules']})` 自动注入 |
-| 加新表 → 直接 schema.ts 加 + 在 deleteProject 加一行 + 在 export 加一行 + 在 import remap 加一行... | `PROJECT_TABLES` 加一行，5 个生命周期 API 自动覆盖 |
-| 加新 AI 动作 → 写新 adapter + 在面板里手拼 `buildXxxContext + ai.start` | 先登记 Skill/AI 入口与 Run Contract，读取走 `assembleContext`，候选走 CreativeArtifact，确认写入走 `adopt()` |
+| `docs/PROJECT-MASTER-CHARTER.md` | 最高产品总纲与长期边界 |
+| `docs/DOCUMENT-AUTHORITY.md` | 现行文档白名单、裁决与归档位置 |
+| `docs/ARCHITECTURE.md` | 当前代码和数据架构事实 |
+| `docs/DATA-GOVERNANCE.md` | 三注册表、owner、版本与生命周期规范 |
+| `docs/HARNESS-QUALITY-STANDARD.md` | Agent/Skill/Harness、上下文与恢复标准 |
+| `docs/ENGINEERING-QUALITY-STANDARD.md` | 工程、数据、测试与发布质量门 |
+| `docs/roadmap/README.md` | 依总纲排序的当前施工路线 |
+| `docs/roadmap/CAPABILITY-BASELINE.md` | 当前已实现、部分实现与缺失能力 |
+| `docs/products/` | 各产品边界、上下游与验收契约 |
+| `docs/AI-FUNCTIONS-MANUAL.generated.md` | 由代码生成的 AI 行为事实 |
+| `docs/CONSISTENCY-COVERAGE-MAP.md` | 一致性反例与可执行覆盖状态 |
+| `docs/COLLAB-WORKFLOW.md` | 分支、PR、审查、合并与交接 |
 
-**任何"先这样吧，等以后再统一"的念头 = 头疼医头 = 必然制造下一个反复出现的 bug**。直接拒绝。
+其它文档只有在 `DOCUMENT-AUTHORITY.md` 列明时才是现行资料。历史原因优先使用 `git log` / `git blame`；完整清理前文档快照位于 WPS `storyforge故事熔炉/已过时-v3.9.1-2026-08-26`。
 
----
+## 10. 宪法维护
 
-## 📚 文档地图（按任务路由）
-
-| 文档 | 地位 | 用途 |
-|---|---|---|
-| **`AGENTS.md`** | 🟢 自动入口 | 短宪法、数据红线、分支与验证要求 |
-| **`docs/CONTEXT-ROUTING.md`** | 🟢 上下文索引 | 按任务决定需要读取的章节、源码闭包和测试 |
-| **`CLAUDE.md`（本文件）** | 🔒 详细宪法 | 三注册表、四问、数据与完成定义；命中相关边界时读取 |
-| **`docs/MASTER-BLUEPRINT.md`** | 🔴 施工权威 | 有 Blueprint 任务 ID 或数据结构争议时读取对应章节 |
-| `docs/ARCHITECTURE.md` | 🟢 当前架构总览 | Agent/Harness、三注册表、World/Work、数据流与失败流 |
-| `docs/AI-HARNESS-REBUILD-RELEASE-20260817.md` | 🟢 当前更新说明 | 大架构更新、验证证据和社区发布边界 |
-| `docs/DATA-FLOW-MAP.md` | 🟡 历史审计记录 | 数据流总表 + 已修 bug 清单 |
-| `docs/DATA-FLOW-DIAGRAM.md` | 🟢 可视化辅助 | 15 张 Mermaid 流程图 |
-| `docs/roadmap/README.md` | 🟢 当前任务索引 | 新体系/完整功能读取对应体系、依赖与施工顺序 |
-| `docs/roadmap/CAPABILITY-BASELINE.md` | 🟢 当前能力事实 | 新体系/完整功能核对对应章节，防重复开发 |
-| `docs/roadmap/COMPLETED.md` | 🟡 完成索引 | 已交付能力与历史证据入口；完整旧文见 `ROADMAP-LEGACY.md` |
-| `docs/WORLD-RULES-MULTIWORLD-DESIGN.md` | 🟢 待实施设计 | Phase 40（多世界化真实与幻想） |
-| `docs/CODEX-REDESIGN.md` | 🟢 待实施设计 | Phase 35 词条化重构 |
-| `docs/CONSISTENCY-CHECK-DESIGN.md` | 🟢 待实施设计 | Phase 38/39 |
-| `docs/AI-FUNCTIONS-MANUAL.generated.md` | 🟢 AI 功能清单 | 由代码生成的当前权威版本；旧手写版 `docs/AI-FUNCTIONS-MANUAL.md` 仅作历史参考，不再作为施工依据 |
-| ⚠️ `docs/ARCHITECTURE-REFACTOR.md` | 🔴 v1 已废弃 | 被 MASTER-BLUEPRINT 取代 |
-
----
-
-## ⚠️ 触及生产数据或路线图时必须知道的事
-
-### 1. 这是有真实用户的生产项目
-- 用户数据全在浏览器 IndexedDB（纯前端项目）
-- 任何 DB schema 变更 / 删除操作 / 数据迁移代码改动 = **可能直接损坏用户半年的小说手稿**
-- 任何 push 到 main 分支的代码 = **立刻通过 Vercel 部署给全部用户**
-- **没有 staging 环境**
-
-### 2. 重构有 4 个阶段（严格串行，不可并行）
-按 `MASTER-BLUEPRINT.md` §4：
-- **Phase 0 · 紧急修复**（8 项 P0，含本轮自我承认无效的修复）
-- **Phase 1 · 三支柱地基**（建立三个注册表）
-- **Phase 2 · 多世界 + 上下文贯通**
-- **Phase 3 · 精品化**（测试 / CI / 安全 / 性能）
-
-### 3. 当前已知的"自己说修了实际无效"的坑
-见 `MASTER-BLUEPRINT.md` §1.3。这类坑的根因都是违反了上面的"四问铁律"——**散在手写处而非走注册表**。
-
-### 4. 外部三份审查（不可质疑事实基准）
-本项目经历了三份独立审查：
-- 内部全量审计（Claude）
-- GPT-5.5 独立审查
-- Gemini-3.1 独立审查
-
-三份共识结论在 `MASTER-BLUEPRINT.md` §13。**任何接手者不得无凭据地推翻这些结论**。
-
----
-
-## 🔧 改动前的检查清单（每次 commit 前必过）
-
-- [ ] 已按 `docs/CONTEXT-ROUTING.md` 建立关联闭包；有 Blueprint ID 时已读对应任务的「前置 / 改法 / 验证 / 完成判据」
-- [ ] 已过「四问」（§动手前的「四问」）
-- [ ] 改在分支上（非 main），分支名 `refactor/phase-X-task-Y` 或 `fix/issue-Z`
-- [ ] `npx tsc --noEmit` 零错
-- [ ] `npm run build` 成功
-- [ ] 已跑对应反例测试（如 R-1/R-2/R-3 等，见 §7）
-- [ ] commit message 含任务 ID + 完成判据状态 + 验证证据
-- [ ] **如果改了 DB schema** → 已写迁移测试 + 已在测试项目跑过导出/导入往返
-- [ ] **如果新增了表/字段/源/动作** → 已同步更新对应注册表
-
----
-
-## ✅ 完成定义（Definition of Done · 交付前必逐条勾选）
-
-> **为什么有这条**：词条化等历史返工的根因不是技术难，而是"加功能不收口、半成品单列出来留着不管"。不立规矩，屎山会以"半成品堆积"的形态再长出来。本条是**流程防线**，与三注册表（数据防线）、ESLint（代码防线）互补。
-
-一个功能 / 任务要算"完成"，必须**同时**满足：
-
-1. **可用**：主路径端到端走得通（不是"代码写完了"，是"用户真能用出结果"）。
-2. **无重复 / 旧入口已下线**：🚫 不允许新旧并存。新功能取代老功能时，**老入口必须同步删除或下线**，不能侧栏 / 面板里新旧两个都挂着让用户困惑。
-3. **数据读写走注册表**：读经 `CONTEXT_SOURCES`、写经 `adopt()`、表生命周期经 `PROJECT_TABLES`。没有裸 `db.xxx` 散写。
-4. **半成品必须对用户不可见**：若一个功能暂时做不完，**明确标注"实验性 / Labs"并默认隐藏**，不允许"做一半还单列在侧栏 / 正式 UI 里"误导用户。做不完就藏起来，不是摆出来。
-5. **有验证证据**：tsc / build / 对应反例测试 / `check:architecture` / `check:required-tables` 全绿；commit 写清验证证据。
-
-> 交付（合并 main / 部署）前对照本清单逐条勾选。任何一条不满足 → 不算完成，要么补齐，要么按第 4 条藏起来。
-
----
-
-## 🛑 立刻停下来的信号
-
-任何接手者遇到以下情况 → **立刻停下，写到 `docs/roadmap/README.md` 对应体系，开 issue，等决策。不要"我觉得应该可以"**：
-
-- 反例测试某条失败且 30 分钟内修不好
-- tsc 错误不能解
-- 改完代码本地数据库出现损坏
-- 不确定一个动作是否会丢用户数据
-- 文档与代码冲突且不知如何裁决
-- 任务描述含糊（如出现 "略 / TODO / 暂时这样" 等占位词）
-- 想"先这样吧，等以后再统一"
-
----
-
-## 🤝 跨模型 / 跨人接手的提示
-
-如果接手者是另一个 AI 模型（GPT / Gemini / Claude 其他会话）：
-
-1. 从 `AGENTS.md` 进入，按 `docs/CONTEXT-ROUTING.md` 定位任务相关的宪法、路线图和 Blueprint 段落。
-2. 用任务 ID、符号、调用方和测试建立关联闭包；历史只通过 `git log` / `rg` 取证。
-3. 有 Blueprint 任务 ID 时，严格按对应段落的"前置 → 改法 → 验证 → 完成判据"执行。
-4. **不要假设"你记得之前模型做了什么"** — 一切以当前代码、测试和 `git log` 为准。
-5. 完成一个任务后等审查（默认审查者：另一个 AI 模型 / 人类）才能合并到 main。
-
----
-
-## 📜 本文件维护规则
-
-- **任何改动本文件 = 改动项目宪法**，需要项目作者明确授权
-- 添加新的"反面教材"或"四问"延伸时，可以追加（不需授权），但不能修改铁律本身
-- 本文件不应超过 500 行；过长意味着失焦
-- 文件应在每个 Phase 完成后做一次"是否还准确"的复核
-- 自动入口与路由由 `npm run check:agent-context` 守护，任务专用长内容不得回填到 `AGENTS.md`
-
----
-
-## 🎯 最终目标
-
-把 StoryForge 重构成**质量优秀、可参评开源项目大赛得奖**的项目。判据见 `MASTER-BLUEPRINT.md` §11.2。
-
-> **不头疼医头、不脚痛医脚。**
-> **改一处，让所有相关功能受益。**
-> **这就是三个注册表存在的意义。**
+本文件修改必须与总纲一致，并同步检查 `AGENTS.md`、文档权威索引、质量标准和自动检查器。新增细则可以提高质量门，不能削弱三注册表、数据安全、产品隔离和验证要求。若规则增长到普通任务无法按需读取，应把专门细则迁移到现行标准文档，并保持本文件聚焦。

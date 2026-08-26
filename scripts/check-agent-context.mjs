@@ -35,10 +35,14 @@ if (entryBytes > maxEntryBytes) {
 }
 
 const entryRequirements = [
+  ['docs/PROJECT-MASTER-CHARTER.md', 'master charter link'],
+  ['docs/DOCUMENT-AUTHORITY.md', 'document authority link'],
   ['CONTEXT_SOURCES', 'AI read registry'],
   ['FIELD_REGISTRY', 'AI write registry'],
   ['PROJECT_TABLES', 'table lifecycle registry'],
   ['docs/CONTEXT-ROUTING.md', 'task routing link'],
+  ['分步骤长篇', 'independent long-form product boundary'],
+  ['世界引擎', 'world-engine product boundary'],
   ['IndexedDB', 'production data warning'],
   ['main', 'production branch warning'],
   ['npm run ci', 'delivery verification'],
@@ -73,6 +77,8 @@ const routingRequirements = [
   ['AI 写回', 'AI write route'],
   ['schema', 'data lifecycle route'],
   ['新体系', 'roadmap route'],
+  ['世界引擎', 'world-engine route'],
+  ['上层产品', 'upper-product route'],
   ['PR', 'collaboration route'],
   ['历史追溯', 'history route'],
   ['rg', 'targeted search guidance'],

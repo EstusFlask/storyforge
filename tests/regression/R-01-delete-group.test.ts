@@ -1,7 +1,7 @@
 /**
  * R-1: deleteGroup 事务作用域完整性
  *
- * 对应 MASTER-BLUEPRINT §4.0.1 / GPT-5.5 审查 + 内部审计 P0-1
+ * R-01：删除世界组的注册表级联反例。
  *
  * 反例:
  *   旧代码 deleteGroup 的 db.transaction 表清单只声明 9 张,

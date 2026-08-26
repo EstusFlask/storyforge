@@ -1,7 +1,7 @@
 /**
  * R-4: importProjectJSON 原子性 + FK fail-fast
  *
- * 对应 MASTER-BLUEPRINT §4.0.5。
+ * R-04：导入原子性与外键反例。
  *
  * 反例:
  *   旧导入逻辑先创建项目,再遇到无效 FK 时用 0 fallback 或静默跳过。

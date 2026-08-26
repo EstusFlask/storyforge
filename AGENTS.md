@@ -1,70 +1,77 @@
 # AGENTS.md · StoryForge 开发入口
 
-> 这是编码 Agent 的默认入口，也是普通任务唯一必须自动加载的项目文档。
-> `CLAUDE.md` 保留详细宪法解释；其余文档按
-> [`docs/CONTEXT-ROUTING.md`](docs/CONTEXT-ROUTING.md) 命中任务后读取相关段落，禁止无差别全文预载。
+> 普通任务唯一自动加载的项目文档。先按本文建立关联闭包，再通过
+> [`docs/CONTEXT-ROUTING.md`](docs/CONTEXT-ROUTING.md) 按任务读取现行文档片段。
+> 项目方向以 [`docs/PROJECT-MASTER-CHARTER.md`](docs/PROJECT-MASTER-CHARTER.md) 为最高权威；
+> 未列入 [`docs/DOCUMENT-AUTHORITY.md`](docs/DOCUMENT-AUTHORITY.md) 的旧文档不得作为施工依据。
 
-## 先守住三注册表
+## 先确定产品边界
 
-StoryForge 是纯前端 React + TypeScript + IndexedDB 生产项目。用户手稿只存在浏览器中，
-`main` 会直接部署，没有 staging。任何扩展都必须收口到三个单一事实源：
+StoryForge 是多个独立叙事产品、世界引擎和共享工程底座的组合，不是一个不断膨胀的单体模块。
+
+- 分步骤长篇是独立核心产品；不以世界引擎为前置条件。
+- 节点模式是同一长篇能力的可视、可组合表达，不得复制第二套生成、记忆或数据体系。
+- 短篇、小说转剧本、小说转漫画分别是独立端到端产品。
+- 世界引擎只保存可版本化语义内容，不拥有产品媒资或上层运行状态。
+- 跑团、角色聊天、AI 小镇和文字游戏只读引用冻结的世界版本；各自拥有生产、媒资、发布、运行与私域演化，运行结果不得自动回写世界引擎。
+
+开始功能前先声明：它属于哪个产品、生产阶段还是运行阶段、数据由谁拥有、是否引用世界版本、媒资归哪个产品实例。边界不清时先补产品契约，不用代码制造既成事实。
+
+## 守住三注册表
+
+StoryForge 是 React + TypeScript + IndexedDB 的本地优先生产项目。用户手稿主要存在浏览器中，
+`main` 直接进入生产部署，没有 staging。任何扩展必须收口到三个单一事实源：
 
 1. `CONTEXT_SOURCES` + `assembleContext()`：AI 读什么。
-2. `FIELD_REGISTRY` + `AdoptionSchema` + `adopt()`：AI 写什么。
-3. `PROJECT_TABLES`：表的导出、导入、删除、迁移、世界作用域和引用重映射生命周期。
+2. `FIELD_REGISTRY` + `AdoptionSchema` + `adopt()`：AI 可以正式写什么。
+3. `PROJECT_TABLES`：表的导出、导入、删除、迁移、作用域和引用重映射生命周期。
 
 动手前依次回答：
 
-1. 它读什么，是否已登记在 `CONTEXT_SOURCES`？
-2. 它写什么，是否已登记在 `FIELD_REGISTRY` / `AdoptionSchema`？
-3. 它涉及哪些表，是否由 `PROJECT_TABLES` 派生完整生命周期？
-4. 登记缺失时，先补注册表和测试，再写功能；不得先造旁路。
+1. 入口和用户结果是什么？
+2. AI/代码读取哪些来源，是否已登记在 `CONTEXT_SOURCES`？
+3. 候选最终写入哪些字段，是否已登记在 `FIELD_REGISTRY` / `AdoptionSchema`？
+4. 涉及哪些表，是否由 `PROJECT_TABLES` 派生完整生命周期？
+5. 哪些调用方、下游、反例和真实用户路径会受影响？
 
-禁止在组件或 service 中手拼上下文、直接散写受治理表、手写表清单、复制一套平行
-AI/DB/导入导出入口。领域扩展只能使用架构守卫认可、带理由与复审边界的显式入口。
+登记缺失时，先补注册表、契约与测试，再写功能。禁止在组件或 service 中手拼上下文、散写受治理表、手写表清单、复制 AI/DB/导入导出入口。
 
-正式模型调用还必须进入 Agent Skill / Run Contract / durable Harness 或 AI 入口注册表明确登记的
-只读、内存草稿、评测、模拟边界；候选使用统一 CreativeArtifact/运行证据，作者确认后才可
-`adopt()`。不得在 UI 新增未登记直连、隐藏重试或组件内恢复状态。
+## 正式 AI 与 Harness
+
+正式模型调用必须进入登记的 Agent Skill / Run Contract / durable Harness，或在 AI 入口注册表中明确标注只读、内存草稿、评测、模拟等有限边界。
+
+- 上下文由注册源、Context Gateway 和渐进式披露选择；固定条数裁剪只能是最终预算保护。
+- 模型输出先成为 `CreativeArtifact` 候选；作者确认后才可 `adopt()`。
+- durable run 保存 contract、manifest、事件、checkpoint、stale 证据、repair 与终态 receipt。
+- 重试必须有界且可见；授权、余额、非重试型 4xx、结果未知或 stale 不得隐藏重发。
+- 可验证的 schema、事务、作用域、版本、权限、预算和状态机不得只写进提示词。
 
 ## 任务开始方式
 
-1. 先查看 `git status --short --branch`、相关提交和任务描述，保护用户已有改动。
-2. 用 `rg` 定位任务 ID、符号、调用方、注册表行和测试；先建立“入口 → 读写 →
-   生命周期 → 调用方 → 测试”的关联闭包。
-3. 按 `docs/CONTEXT-ROUTING.md` 只读取命中的文档章节和源码片段。普通 UI、局部 Bug
-   或纯测试任务不得因此加载整份 Blueprint、路线图、历史日志。
-4. 新体系、完整功能或小功能先核对路线图对应体系的范围、依赖和能力基线；已存在的
-   能力必须复用，不按历史标题重复开发。
-5. 从世界引擎派生新产品或扩展产品生产链时，先读
-   [`docs/WORLD-ENGINE-TO-PRODUCT-DEVELOPMENT-CHARTER.md`](docs/WORLD-ENGINE-TO-PRODUCT-DEVELOPMENT-CHARTER.md)，
-   先冻结该产品的世界数据需求与来源选择，再进入产品专属生产和媒资流程。
-6. 在独立分支工作。分支使用 `feat/`、`fix/` 或 `refactor/`；不得直接 push `main`。
+1. 查看 `git status --short --branch`、相关提交和任务描述，保护现有改动。
+2. 用 `rg` 定位入口、符号、调用方、三注册表行、schema/migration 与测试，建立“入口 → 读取 → 候选/写回 → 生命周期 → 下游 → 测试”的关联闭包。
+3. 按 `docs/CONTEXT-ROUTING.md` 读取命中的现行文档；历史原因从 Git 与 WPS 归档取证，不恢复旧文档权威。
+4. 新体系或完整功能先核对当前能力基线与路线图；复用已经存在的基础设施，不按旧任务标题重复开发。
+5. 在独立分支工作，使用 `feat/`、`fix/` 或 `refactor/`；不得直接 push `main`。
 
 ## 数据与发布红线
 
-- schema、迁移、删除、合并、导入导出、引用重映射必须有反例测试；涉及真实用户数据时
-  还要用隔离测试项目完成往返或生命周期验证。
-- 新表先登记 `PROJECT_TABLES`，新 AI 可写字段先登记 `FIELD_REGISTRY`，新上下文源先登记
-  `CONTEXT_SOURCES`；不得只修改 schema、组件或某一个调用点。
+- schema、迁移、删除、合并、导入导出、引用重映射必须有正反例；涉及真实用户数据时，用隔离测试项目完成往返或生命周期验证。
+- 新表先登记 `PROJECT_TABLES`，新 AI 可写字段先登记 `FIELD_REGISTRY`，新上下文源先登记 `CONTEXT_SOURCES`。
 - 新入口取代旧入口时同步下线旧入口；半成品必须标为实验性并默认隐藏。
-- 不确定是否丢数据、文档与代码无法裁决、迁移失败、关键反例无法修复时停止扩大改动，
-  保留证据并请求决策。
-- 不运行破坏性 Git/文件命令，不覆盖无关工作区改动，不使用 `npm audit fix --force`。
+- 世界引擎与上层产品之间只允许显式、版本化读取；上层运行数据和媒资不得落入世界引擎。
+- 不确定是否丢数据、迁移失败、文档与代码无法裁决或关键反例失败时停止扩大改动，保留证据并请求决策。
+- 不运行破坏性 Git/文件命令，不覆盖无关改动，不使用 `npm audit fix --force`。
 
-## 验证与交付
+## 验证与完成
 
-验证按风险递增，失败日志只保留摘要和错误附近内容：
+验证按风险递增：
 
 1. 先跑改动对应的定向测试或检查器。
 2. 代码提交前至少通过 `npm run check:architecture`、`npm run check:required-tables`、
    `npm run check:ai-manual`、`npx tsc --noEmit`、相关测试和 `npm run build`。
-3. 交付单元运行 `npm run ci`；若外部依赖审计因已知上游公告阻塞，必须单独报告，
-   其余闸门仍全部运行，不得把部分通过写成 CI 全绿。
-4. 适用时运行 `npm run ci:e2e`，并在独立浏览器数据中完成真实 UI/API 验证，禁止修改
-   作者当前预览项目。
-5. 提交前运行 `git diff --check`，提交信息写明任务 ID、完成边界和验证证据。
+3. 交付单元运行 `npm run ci`；外部依赖审计若受上游公告阻塞，单独报告，其余闸门仍须完成。
+4. 涉及真实 UI/API、数据恢复或跨产品纵切面时，在隔离浏览器数据中运行 `npm run ci:e2e`，不得修改作者当前项目。
+5. 提交前运行 `git diff --check`；提交信息写明任务、边界与验证证据。
 
-完成意味着：主路径可用、旧入口已收口、三注册表与数据生命周期完整、有回归证据、
-相关文档已更新、工作树干净。交接与合并细节只在需要 PR/合并/跨模型交接时读取
-`docs/COLLAB-WORKFLOW.md` 对应章节。
+完成意味着：产品边界正确、主路径可用、旧入口收口、三注册表与数据生命周期完整、刷新/失败可恢复、下游真实生效、有回归和必要 E2E、文档更新且工作树干净。PR、合并和交接按 `docs/COLLAB-WORKFLOW.md` 执行。

@@ -5,7 +5,7 @@ import path from 'node:path'
 import ts from 'typescript'
 
 const root = process.cwd()
-const target = path.join(root, 'docs', 'MASTER-BLUEPRINT.md')
+const target = path.join(root, 'docs', 'ARCHITECTURE.md')
 const START = '<!-- project-metrics:start -->'
 const END = '<!-- project-metrics:end -->'
 
@@ -114,12 +114,12 @@ const current = source.match(new RegExp(`${START}[\\s\\S]*?${END}`))?.[0] ?? ''
 
 if (process.argv.includes('--check')) {
   if (current !== generated) {
-    console.error('[project-metrics] MASTER-BLUEPRINT 实时事实已漂移，请运行 `npm run gen:project-metrics`。')
+    console.error('[project-metrics] ARCHITECTURE 实时事实已漂移，请运行 `npm run gen:project-metrics`。')
     process.exit(1)
   }
-  console.log('[project-metrics] ok: Blueprint metrics match current code.')
+  console.log('[project-metrics] ok: architecture metrics match current code.')
 } else {
-  if (!current) throw new Error('MASTER-BLUEPRINT 缺少 project-metrics 标记')
+  if (!current) throw new Error('ARCHITECTURE 缺少 project-metrics 标记')
   fs.writeFileSync(target, source.replace(current, generated))
-  console.log('[project-metrics] updated docs/MASTER-BLUEPRINT.md')
+  console.log('[project-metrics] updated docs/ARCHITECTURE.md')
 }

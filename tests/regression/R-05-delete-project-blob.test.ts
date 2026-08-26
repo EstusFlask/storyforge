@@ -1,7 +1,7 @@
 /**
  * R-05: deleteProject 漏间接归属表 + blob 残留
  *
- * 对应 MASTER-BLUEPRINT §4.0.6 / GPT-5.5 + Gemini-3.1 双重审查发现的 P0-6
+ * R-05：删除项目与 blob 回收反例。
  *
  * 反例:
  *   旧 deleteProject 只删带 projectId 字段的表;

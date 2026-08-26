@@ -2,7 +2,7 @@
  * 三注册表 · 共享类型定义(Phase 1.1a)
  *
  * 这里只定义类型,不含数据。数据在 project-tables.ts。
- * 设计依据:MASTER-BLUEPRINT.md §5.1(PROJECT_TABLES 强化版)。
+ * 治理依据:docs/DATA-GOVERNANCE.md（PROJECT_TABLES 单一事实源）。
  */
 import type { Table } from 'dexie'
 import type { AIProvider } from '../types/ai'

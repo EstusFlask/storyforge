@@ -1,7 +1,7 @@
 /**
  * R-07: migrateToMultiWorld 漏给 outlineNodes 盖章
  *
- * 对应 MASTER-BLUEPRINT §4.0.8 / Gemini-3.1 独立发现的 P0-8
+ * R-07：大纲迁移 owner stamp 反例。
  *
  * 反例:
  *   旧 migrateToMultiWorld 给 worldviews/codexEntries 等盖章到主世界,

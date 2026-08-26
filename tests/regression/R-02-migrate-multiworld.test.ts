@@ -1,7 +1,7 @@
 /**
  * R-2: migrateToMultiWorld 事务作用域完整性
  *
- * 对应 MASTER-BLUEPRINT §4.0.2。
+ * R-02：多世界迁移生命周期反例。
  *
  * 反例:
  *   migrateToMultiWorld 的事务声明没有包含 codexEntries,

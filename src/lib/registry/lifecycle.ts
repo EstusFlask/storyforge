@@ -7,7 +7,7 @@
  *   - stampPrimaryWorld(projectId, primaryId)
  *   - transactionTablesFor(operation)
  *
- * 设计依据:docs/MASTER-BLUEPRINT.md §5.1。
+ * 治理依据:docs/DATA-GOVERNANCE.md（表生命周期必须从 PROJECT_TABLES 派生）。
  *
  * ⚠️ Phase 1.1a 阶段:本文件【纯新增】,现有 stores 暂未切换调用。
  *    1.1b 才把 deleteProject/deleteGroup/migrate 改成调这里。

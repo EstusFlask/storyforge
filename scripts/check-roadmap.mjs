@@ -2,241 +2,118 @@
 
 import fs from 'node:fs'
 import path from 'node:path'
-import crypto from 'node:crypto'
 import { fileURLToPath } from 'node:url'
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
-const roadmapDir = path.join(root, 'docs', 'roadmap')
 const files = {
   entry: path.join(root, 'docs', 'ROADMAP.md'),
-  current: path.join(roadmapDir, 'README.md'),
-  baseline: path.join(roadmapDir, 'CAPABILITY-BASELINE.md'),
-  completed: path.join(roadmapDir, 'COMPLETED.md'),
-  legacy: path.join(root, 'docs', 'ROADMAP-LEGACY.md'),
+  charter: path.join(root, 'docs', 'PROJECT-MASTER-CHARTER.md'),
+  authority: path.join(root, 'docs', 'DOCUMENT-AUTHORITY.md'),
+  current: path.join(root, 'docs', 'roadmap', 'README.md'),
+  baseline: path.join(root, 'docs', 'roadmap', 'CAPABILITY-BASELINE.md'),
+  completed: path.join(root, 'docs', 'roadmap', 'COMPLETED.md'),
 }
-
-const expectedLegacySha =
-  'e497de7d0f8100489bdcb3a7b3fcb528d07024b9dcb832f7de6e2701d584667d'
-const expectedLegacyHeadingCount = 197
-const expectedStatusHeadingCount = 166
-const statusMarkers = [
-  '✅',
-  '⏳',
-  '🟡',
-  '🔴',
-  '🟠',
-  '🟢',
-  '🧪',
-  '🚧',
-  '⚠️',
-  '❌',
-  '🚫',
-  '⌧',
-  '⬜',
-  '🔵',
-  '🏗️',
-  '📋',
-  '🎯',
-  '📅',
-]
-const expectedStatusCounts = {
-  active: 31,
-  partial: 11,
-  completed: 115,
-  deprecated: 2,
-  historical: 7,
-}
-const portfolioIds = [
-  'GOV-1',
-  'INV-1',
-  'CANON-1',
-  'PIPE-1',
-  'WORLD-1',
-  'STORY-1',
-  'AUTHOR-1',
-  'IDEA-1',
-  'AGENT-1',
-  'SIM-1',
-  'PRODUCT-1',
-  'PLATFORM-1',
-]
 
 const failures = []
-const read = (file) => {
+const read = (name, file) => {
   try {
     return fs.readFileSync(file, 'utf8')
   } catch {
-    failures.push(`missing roadmap document: ${path.relative(root, file)}`)
+    failures.push(`missing ${name}: ${path.relative(root, file)}`)
     return ''
   }
 }
 
-const entry = read(files.entry)
-const current = read(files.current)
-const baseline = read(files.baseline)
-const completed = read(files.completed)
-const legacy = read(files.legacy)
+const docs = Object.fromEntries(Object.entries(files).map(([name, file]) => [name, read(name, file)]))
 
-const legacyIdPattern =
-  '(?:CONSISTENCY-\\d+|INVENTORY-\\d+|QUICKWIN-\\d+|EDITOR-\\d+|PIPELINE-\\d+|CF-\\d{8}-\\d+|PR-\\d{8}-\\d+|CM-\\d+|AUDIT-\\d+[A-Za-z]?|ENH-[A-Z0-9-]+|FB-\\d+[A-Za-z-]*|HEALTH-\\d+|BUG-[A-Z0-9-]+|NS-\\d+|Phase\\s+\\d+(?:\\.\\d+){0,2}|[A-H]-\\d+|25\\.5\\.\\d+)'
-const hasStatusSemantics = (title) =>
-  statusMarkers.some((marker) => title.includes(marker)) ||
-  /待开发|待办|完成|部分|废弃|作废|关闭|未规划|长期/.test(title)
-
-const classifyLegacyHeading = (title) => {
-  if (title.startsWith('❌') || title.startsWith('⌧') || /已关闭|已下线/.test(title)) {
-    return 'deprecated'
-  }
-  if (title.startsWith('✅')) {
-    return /部分|第一阶段|待(?:审|复测|预览|后续)|原始记录|后续|基础版已完成|跑偏/.test(
-      title,
-    )
-      ? 'partial'
-      : 'completed'
-  }
-  if (['🔴', '🟠', '🟡', '🟢', '⬜'].some((marker) => title.startsWith(marker))) {
-    return /已完成|已修|底层已修|测试体系已完成|段一/.test(title)
-      ? 'partial'
-      : 'active'
-  }
-  if (/✅.*(?:完成|已修)/.test(title)) return 'completed'
-  if (/Phase\s+\d|待开发|待办|未规划|长期/.test(title)) return 'active'
-  return 'historical'
+const stageHeadings = [
+  '阶段 A · 权威与主干',
+  '阶段 B · 分步骤长篇与节点同源',
+  '阶段 C · 独立创作产品',
+  '阶段 D · 世界引擎',
+  '阶段 E · 上层垂直产品',
+  '阶段 F · 网站、社区、平台与商业化',
+]
+let priorIndex = -1
+for (const heading of stageHeadings) {
+  const index = docs.current.indexOf(heading)
+  if (index < 0) failures.push(`current roadmap missing stage: ${heading}`)
+  else if (index <= priorIndex) failures.push(`current roadmap stage order is invalid at: ${heading}`)
+  priorIndex = Math.max(priorIndex, index)
 }
 
-if (legacy) {
-  const headings = [...legacy.matchAll(/^#{2,4}\s+(.+)$/gm)].map((match) => match[1])
-  const statusHeadings = headings.filter(hasStatusSemantics)
-  const statusCounts = Object.fromEntries(
-    Object.keys(expectedStatusCounts).map((category) => [
-      category,
-      statusHeadings.filter((title) => classifyLegacyHeading(title) === category).length,
-    ]),
-  )
+const requiredIds = [
+  'A-GOV-01', 'A-GOV-02',
+  'B-LF-01', 'B-LF-02', 'B-LF-03', 'B-LF-04', 'B-LF-05', 'B-LF-06',
+  'B-NODE-01', 'B-NODE-02',
+  'C-SHORT-01', 'C-SCREENPLAY-01', 'C-COMIC-01',
+  'D-WORLD-01', 'D-WORLD-02', 'D-WORLD-03', 'D-WORLD-04',
+  'E-TTRPG-01', 'E-CHAT-01', 'E-TOWN-01', 'E-TEXTADV-01', 'E-AVG-01', 'E-OPENWORLD-01',
+  'F-PLATFORM-01', 'F-COMMERCIAL-01',
+]
+for (const id of requiredIds) {
+  if (!docs.current.includes(id)) failures.push(`current roadmap missing task: ${id}`)
+  if (!docs.baseline.includes(id)) failures.push(`capability baseline missing task: ${id}`)
+}
 
-  if (headings.length !== expectedLegacyHeadingCount) {
-    failures.push(
-      `legacy heading count changed: expected ${expectedLegacyHeadingCount}, got ${headings.length}`,
-    )
-  }
-  if (statusHeadings.length !== expectedStatusHeadingCount) {
-    failures.push(
-      `legacy status heading count changed: expected ${expectedStatusHeadingCount}, got ${statusHeadings.length}`,
-    )
-  }
-  for (const [category, expected] of Object.entries(expectedStatusCounts)) {
-    if (statusCounts[category] !== expected) {
-      failures.push(
-        `legacy ${category} heading count changed: expected ${expected}, got ${statusCounts[category]}`,
-      )
-    }
-  }
-
-  const currentPlanningDocs = `${current}\n${baseline}\n${completed}`
-  const activeIds = [
-    ...new Set(
-      statusHeadings
-        .filter((title) => ['active', 'partial'].includes(classifyLegacyHeading(title)))
-        .flatMap((title) => [...title.matchAll(new RegExp(legacyIdPattern, 'g'))].map((match) => match[0])),
-    ),
-  ]
-  for (const id of activeIds) {
-    const alias = id === 'INVENTORY-1' ? 'INV-1' : id
-    if (!currentPlanningDocs.includes(id) && !currentPlanningDocs.includes(alias)) {
-      failures.push(`active or partial legacy item has no current destination: ${id}`)
-    }
+for (const status of ['implemented', 'partial', 'missing', 'experimental']) {
+  if (!docs.baseline.includes(`\`${status}\``)) {
+    failures.push(`capability baseline missing status definition: ${status}`)
   }
 }
 
-if (!entry.includes('./roadmap/README.md')) {
-  failures.push('docs/ROADMAP.md must link to docs/roadmap/README.md')
-}
-for (const name of ['CAPABILITY-BASELINE.md', 'COMPLETED.md']) {
-  if (!entry.includes(`./roadmap/${name}`)) {
-    failures.push(`docs/ROADMAP.md must link to docs/roadmap/${name}`)
-  }
-}
-if (!entry.includes('./ROADMAP-LEGACY.md')) {
-  failures.push('docs/ROADMAP.md must link to docs/ROADMAP-LEGACY.md')
-}
-
-if (legacy) {
-  const actual = crypto.createHash('sha256').update(legacy).digest('hex')
-  if (actual !== expectedLegacySha) {
-    failures.push(
-      `ROADMAP-LEGACY.md changed: expected ${expectedLegacySha}, got ${actual}`,
-    )
-  }
-}
-
-for (const id of portfolioIds) {
-  if (!current.includes(id)) failures.push(`current roadmap missing portfolio ${id}`)
-  if (!baseline.includes(id)) failures.push(`capability baseline missing portfolio ${id}`)
-}
-
-const links = /\[[^\]]+\]\(([^)\s]+)(?:\s+"[^"]*")?\)/g
-for (const file of [
-  files.entry,
-  files.current,
-  files.baseline,
-  files.completed,
-  files.legacy,
+for (const [id, status] of [
+  ['BASE-DATA-01', 'implemented'],
+  ['BASE-REG-01', 'implemented'],
+  ['BASE-AI-01', 'implemented'],
+  ['BASE-HARNESS-01', 'implemented'],
+  ['BASE-CTX-01', 'implemented'],
+  ['B-LF-05', 'implemented'],
 ]) {
-  const source = read(file)
-  for (const match of source.matchAll(links)) {
+  const row = docs.baseline.split('\n').find(line => line.includes(`| ${id} |`)) ?? ''
+  if (!row.includes(`| ${status} |`)) failures.push(`${id} must be ${status} in capability baseline`)
+  if (!docs.completed.includes(`| ${id} |`)) failures.push(`completed index missing ${id}`)
+}
+
+for (const [needle, label] of [
+  ['./PROJECT-MASTER-CHARTER.md', 'master charter'],
+  ['./roadmap/README.md', 'current roadmap'],
+  ['./roadmap/CAPABILITY-BASELINE.md', 'capability baseline'],
+  ['./roadmap/COMPLETED.md', 'completed index'],
+]) {
+  if (!docs.entry.includes(needle)) failures.push(`docs/ROADMAP.md missing link to ${label}`)
+}
+
+const forbidden = /MASTER-BLUEPRINT|ROADMAP-LEGACY|docs\/refactor\/|docs\/completion\/|docs\/text-game\//
+for (const name of ['entry', 'current', 'baseline', 'completed']) {
+  if (forbidden.test(docs[name])) failures.push(`${path.relative(root, files[name])} references archived authority`)
+}
+
+const markdownLink = /\[[^\]]+\]\(([^)\s]+)(?:\s+"[^"]*")?\)/g
+for (const [name, file] of Object.entries(files)) {
+  for (const match of docs[name].matchAll(markdownLink)) {
     const target = match[1]
     if (/^(?:https?:|mailto:|#)/.test(target)) continue
     const clean = target.split('#')[0]
     if (!clean) continue
     const resolved = path.resolve(path.dirname(file), clean)
     if (!fs.existsSync(resolved)) {
-      failures.push(
-        `broken roadmap link: ${path.relative(root, file)} -> ${target}`,
-      )
+      failures.push(`broken roadmap link: ${path.relative(root, file)} -> ${target}`)
     }
   }
 }
 
-const legacyTaskIds = [
-  'CONSISTENCY-2',
-  'CONSISTENCY-0',
-  'CONSISTENCY-3',
-  'INVENTORY-1',
-  'QUICKWIN-3',
-  'EDITOR-2',
-  'EDITOR-5',
-  'PIPELINE-1',
-  'PIPELINE-2',
-  'PIPELINE-3',
-  'CF-20260703-8',
-  'CF-20260702-7',
-  'CF-20260702-9',
-  'CF-20260702-12',
-  'CM-1',
-  'AUDIT-5',
-  'AUDIT-6',
-  'AUDIT-7',
-  'AUDIT-8',
-  'AUDIT-9',
-  'AUDIT-10',
-  'AUDIT-11',
-  'HEALTH-1',
-  'HEALTH-4',
-  'HEALTH-5',
-]
-for (const id of legacyTaskIds) {
-  if (!legacy.includes(id)) failures.push(`legacy snapshot missing task ${id}`)
-  if (!current.includes(id) && !current.includes(id.replace('PIPELINE-', 'PIPE-'))) {
-    failures.push(`current roadmap missing task mapping ${id}`)
-  }
+if (!docs.charter.includes('阶段 B：完成分步骤长篇与节点同源')) {
+  failures.push('master charter no longer contains the stage B dependency')
+}
+if (!docs.authority.includes('docs/roadmap/CAPABILITY-BASELINE.md')) {
+  failures.push('document authority does not register the capability baseline')
 }
 
 if (failures.length) {
   console.error('roadmap check failed:')
-  for (const failure of failures) console.error(`- ${failure}`)
+  failures.forEach(failure => console.error(`- ${failure}`))
   process.exit(1)
 }
 
-console.log(
-  `roadmap check passed: ${portfolioIds.length} portfolios, ${legacyTaskIds.length} sampled tasks, ${expectedStatusHeadingCount} classified legacy headings, legacy snapshot intact`,
-)
+console.log(`roadmap check passed: ${requiredIds.length} charter-aligned tasks across stages A-F`)

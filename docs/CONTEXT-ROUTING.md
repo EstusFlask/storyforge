@@ -1,88 +1,88 @@
 # StoryForge 上下文路由
 
-> 目标：保留工程级全局理解，同时避免每个任务重复注入与当前变更无关的长文档和源码。
-> 本文只规定“何时读什么”；三注册表、数据红线和完成定义以 `AGENTS.md` / `CLAUDE.md`
-> 为准，不因节省输入而降低。
+> 版本：2.0.0 · 生效：2026-08-26
+> 目标：保持项目级关联理解，同时只读取当前任务需要的现行文档与源码。三注册表和数据红线不因上下文精简而降低。
 
-## 1. 默认上下文
+## 1. 默认入口
 
-编码 Agent 默认只自动加载根目录 `AGENTS.md`。开始任务后先用 `rg`、类型引用和测试建立
-关联闭包，再按下表增量读取。不要把所有链接当作新的必读清单。
+普通编码任务只自动加载 `AGENTS.md`。随后先用 `rg`、类型引用、schema、调用方和测试建立关联闭包，再按本文读取片段。不要把文档链接变成全量必读清单。
 
-每个任务都应能回答：
+每个任务先回答：
 
-- 用户入口和当前行为在哪里？
-- 读取经过哪个 `CONTEXT_SOURCES` 源，写回经过哪个 field/schema？
-- 涉及哪些 `PROJECT_TABLES` 生命周期和外键/作用域？
-- 哪些调用方、回归测试和真实用户路径会受影响？
-
-这四项是“项目级理解”的边界，不是“把全仓库放进上下文”的理由。
+- 属于哪个产品和总纲章节？生产还是运行？
+- 用户入口、上游、下游和可见结果是什么？
+- AI 读哪些 `CONTEXT_SOURCES`，写哪些 Field/Adoption？
+- 哪些 `PROJECT_TABLES`、owner、版本、导入导出和删除路径受影响？
+- 哪些调用方、反例、真实 UI/API 路径会变化？
 
 ## 2. 按任务读取
 
 | 任务类型 | 先定位 | 按需读取 | 默认不读 |
 |---|---|---|---|
-| 局部 UI、交互、样式、明确 Bug | 组件、store/service、调用方、现有回归 | 相关源码与测试的命中片段；触及数据时再转数据路线 | Blueprint、完整路线图、协作日志 |
-| AI 读取、Prompt、上下文预算 | `moduleKey`、`reads`、`CONTEXT_SOURCES`、adapter/runner | `context-sources.ts`、`assemble-context.ts`、对应 Prompt/AI Manual 行与测试 | 其它领域 Prompt、整份 AI Manual |
-| AI 写回、解析、采纳 | `writes`、field key、schema key、adopt 调用方 | `field-registry.ts`、`adoption-schema.ts`、`adopt.ts`、对应 parser/use-case/test | 无关表、无关面板 |
-| Agent Harness、创作可靠性、长运行恢复、完成验证 | run/step/attempt、`completed` 来源、context/write scope、checkpoint/receipt、产物级调用停止与质量分级 | 先读 `AI-HARNESS-REBUILD-RELEASE-20260817.md` 当前总览；实现任务再按命中范围读取 Harness/CREL 设计、Runner、orchestrator、GenerationNode、三注册表和 simulation runtime 对应片段 | 未命中的外部研究、完整 Blueprint、其它阶段实施细节 |
-| 记忆工程、硬盘映像、人工自检、双向同步 | `MEMORY-*`、`MEMORY-CLOSE-*`、documentId、baseline、projection、folder handle、sync receipt | 新收口任务先读 `MEMORY-ENGINEERING-CLOSURE-CHARTER-20260817.md`；追溯 MEMORY-0～10 再读原施工方案对应阶段；用户操作/恢复/隐私读 `MEMORY-WORKSPACE-GUIDE.md`；再读 `project-tables.ts`、目标领域表/field/context 登记、folder storage、Harness ledger/post-adoption 与相关测试 | 完整 Harness 历史完成卡、未命中的 CREL 评测、整份 Blueprint |
-| schema、迁移、删除、合并、导入导出 | 表名、owner、refs、world scope、迁移版本 | `project-tables.ts`、`schema.ts`、相关 lifecycle 实现、迁移/往返/删除测试；Blueprint 对应数据段 | 其它 Phase、历史完成流水 |
-| 新体系或完整功能 | 稳定 ID、唯一归属、前置依赖 | 路线图中对应体系、能力基线同名章节、关联设计文档；若有 Blueprint ID，仅读该 ID 的“前置/改法/验证/完成判据” | 路线图其它体系、完整 Blueprint |
-| 从世界引擎派生或扩展上层产品 | `WorldRelease`、产品世界数据需求、`SourceSelection`、产品 owner | 先读 `WORLD-ENGINE-TO-PRODUCT-DEVELOPMENT-CHARTER.md`；再读该产品能力基线、设计文档、来源适配器和三注册表命中片段 | 其它产品的完整生产/媒资实现、假设中的跨产品公共层 |
-| PR、合并、发布、跨模型交接 | branch/commit/PR/check 状态 | `COLLAB-WORKFLOW.md` 相关流程、PR diff、受影响测试 | 全部协作日志 |
-| 历史追溯、来源审计 | 任务 ID、commit、文件名 | `git log` / `git blame` / `rg` 命中；必要时读 `ROADMAP-LEGACY.md` 或 `COLLAB-LOG.md` 邻近片段 | 历史文档全文 |
-| 宪法冲突或新增架构规则 | 冲突的注册表/红线条款 | `CLAUDE.md` 对应章节、架构检查器和当前代码证据 | 与冲突无关的设计文档 |
+| 局部 UI、交互、样式、明确 Bug | 组件、store/service、调用方、回归 | 命中源码/测试；触及产品边界时读对应 `docs/products/` | 全部产品文档、历史归档 |
+| AI 读取、Prompt、上下文预算 | `moduleKey`、Skill `reads`、source key、Context Manifest | `DATA-GOVERNANCE.md` 相关节；`context-sources.ts`、Context Gateway、Prompt 与测试 | 其它领域 Prompt、完整 AI Manual |
+| AI 写回、解析、采纳 | Skill `writes`、field/schema/extension、候选和 stale | Field Registry、Adoption、durable run、目标领域仓储与测试 | 无关表与面板 |
+| Agent/Harness、恢复、长程一致性 | run/step/attempt、contract、checkpoint、receipt、context/write scope | `HARNESS-QUALITY-STANDARD.md`；命中的 `src/lib/agent`、Gateway、registry、memory/retrieval 与 eval/test | 旧 Harness 蓝图、完成卡、评测流水 |
+| schema、迁移、删除、导入导出 | 表、owner、refs、schema 版本、blob | `DATA-GOVERNANCE.md`；`project-tables.ts`、schema、迁移、export、lifecycle 及正反例 | 手写历史表清单 |
+| 分步骤长篇或节点 | 具体模块、Skill、领域数据、节点 adapter | `products/LONGFORM-AND-NODE.md`、能力基线相关行、入口→下游闭包 | 上层产品完整实现 |
+| 短篇、剧本、漫画 | work/adaptation kind、source manifest、产物 owner | `products/INDEPENDENT-CREATION.md`、对应领域代码和表/Skill | 世界引擎或游戏媒资的无关实现 |
+| 世界引擎 | World draft/release、code/version/completeness、source gateway | `products/WORLD-ENGINE.md`、数据治理、world-engine 代码与三注册表 | 上层运行状态、产品媒资实现 |
+| 跑团/聊天/AI 小镇/文字游戏 | source release、product instance、production/build/release/session | `products/UPPER-PRODUCTS.md`、目标产品代码、世界只读出口和 owner | 其它上层产品内部细节 |
+| 新体系或完整产品 | 总纲阶段、稳定 ID、依赖和当前能力状态 | 总纲、对应产品契约、能力基线、路线图与质量标准 | 旧任务名驱动的历史方案 |
+| PR、合并、发布、交接 | branch/commit/PR/check 状态 | `COLLAB-WORKFLOW.md` 相关段、diff、验证证据 | 协作历史全文 |
+| 历史追溯 | 任务 ID、commit、被删文件名 | `git log` / `git blame`；必要时 WPS 已过时归档 | 把旧文档重新当现行权威 |
+| 文档或宪法冲突 | 冲突条款和代码事实 | 总纲、`DOCUMENT-AUTHORITY.md`、CLAUDE 对应节和检查器 | 无关产品材料 |
 
-只有用户明确要求仓库全量审计、来源鉴定或总体接手报告时，才扩大到跨体系扫描；即便如此，
-也应先目录/符号/指标后片段，避免先把大文件全文放入对话。
+只有用户明确要求全仓审计、主干整合或总体接手报告时才扩大扫描；仍应先目录、指标、符号和状态，再读取命中片段。
 
 ## 3. 定位示例
 
 ```bash
-# 找任务在当前路线图中的唯一归属
-rg -n -C 4 'MEMORY-|CANON-1|CONSISTENCY-2' docs/roadmap docs/MEMORY-ENGINEERING-DEVELOPMENT-PLAN-20260817.md
+# 产品和当前能力
+rg -n -C 4 '长篇|节点|世界引擎|TTRPG|漫画' \
+  docs/PROJECT-MASTER-CHARTER.md docs/products docs/roadmap/CAPABILITY-BASELINE.md
 
-# 找 Blueprint 中某任务的标题，再读取该标题到下一同级标题之间
-rg -n '^#{2,4} .*2\\.7|^#{2,4} .*INVENTORY-1' docs/MASTER-BLUEPRINT.md
+# 一个 AI 动作的读写闭包
+rg -n 'skill-id|moduleKey|sourceKey|targetField' \
+  src/lib/agent src/lib/registry src/components tests
 
-# 建立一个字段/表/上下文源的代码关联闭包
-rg -n 'characterId|itemLedger|CONTEXT_SOURCES|FIELD_REGISTRY|PROJECT_TABLES' src tests
+# 一个表的完整生命周期
+rg -n 'tableName|ownerField|refs' \
+  src/lib/registry/project-tables.ts src/lib/db src/lib/migrations src/lib/export tests
 
-# 追踪历史证据，不预载完整日志
-rg -n -C 6 '任务 ID|分支名|commit SHA' docs/COLLAB-LOG.md docs/ROADMAP-LEGACY.md
+# 历史原因而不是旧文档预载
+git log --all --oneline -- path/to/file
+git blame -L START,END path/to/file
 ```
 
-读取长文件时先确定行号，再取相邻必要范围；测试输出成功时只记录命令和通过数量，失败时
-保留首个根因与必要堆栈。构建产物、覆盖率明细和重复日志不进入长期任务上下文。
-
-## 4. 一个完整功能的上下文包
-
-一个功能保持在同一任务中完成“分析 → 实现 → 测试 → review”，避免每个文件重开任务。
-切换到无关体系时再开新任务，避免旧失败路径长期累积。
-
-开工卡使用以下最小结构：
+## 4. 功能开工卡
 
 ```text
-任务 ID / 用户故事：
-唯一归属与非范围：
-入口与受影响调用方：
-读：CONTEXT_SOURCES / 普通读取
-写：FIELD_REGISTRY / AdoptionSchema / 普通写入
-表：PROJECT_TABLES / schema / 迁移判断
+任务 ID / 总纲章节 / 产品：
+当前阶段与为什么现在做：
+用户目标与明确非范围：
+入口 → 上游 → 动作 → 产物 → 下游：
+生产阶段 / 运行阶段：
+世界来源与锁定版本（如适用）：
+媒资 owner（如适用）：
+读：CONTEXT_SOURCES / Gateway：
+写：FIELD_REGISTRY / Adoption / 普通领域写：
+表：PROJECT_TABLES / schema / migration：
 复用能力与要下线的旧入口：
-定向测试、完整闸门、真实项目验证：
+正例、反例、生命周期、CI、E2E：
 ```
 
-## 5. 可测门槛
+## 5. 输出与证据卫生
 
-`npm run check:agent-context` 会：
+读取长文件先找标题/符号行号，再取必要范围。成功测试只记录命令与数量；失败保留首个根因和附近堆栈。构建产物、覆盖率明细、重复日志和模型完整原文不进入长期文档。
 
-- 限制自动入口体积，防止把任务专用长文档重新塞回 `AGENTS.md`。
-- 检查三注册表、生产数据、分支与验证红线没有因瘦身丢失。
-- 拒绝恢复“所有任务全文阅读 Blueprint/路线图/协作历史”的指令。
-- 检查本路由仍覆盖 UI、AI 读写、数据生命周期、路线图、PR 和历史追溯。
+一个功能在同一任务中完成分析、实现、定向测试、review 和交付；切换到无关产品再开新任务。不要为每个文件重开上下文，也不要让无关旧失败长期占据当前任务。
 
-2026-07-25 治理前，入口链强制读取 6 份文档，共 2,979 行、166,002 bytes。治理后的固定输入
-只有 `AGENTS.md`；检查器会输出当前大小和相对基线降幅。实际 API/Agent token 仍受系统指令、
-对话历史和工具实现影响，因此以“固定项目输入下降”表述，不把该数字冒充完整账单节省。
+## 6. 自动门
+
+`npm run check:agent-context` 检查：
+
+- `AGENTS.md` 保持短入口并包含三注册表、产品边界、生产数据与 CI 红线；
+- 本路由覆盖局部 UI、AI 读写、schema、新体系、PR 和历史追溯；
+- 不恢复强制全文读取旧 Blueprint、路线图或协作日志；
+- 宪法继续把任务专用内容委托给本路由。

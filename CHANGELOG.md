@@ -1,6 +1,17 @@
 # Changelog
 
+> 本文件保留发布当时的历史表述，不定义当前产品完成状态。当前边界与状态以
+> [项目总纲](./docs/PROJECT-MASTER-CHARTER.md)和[能力基线](./docs/roadmap/CAPABILITY-BASELINE.md)为准；
+> 历史施工文档已进入 [WPS 归档清单](https://www.kdocs.cn/l/cidJLBJJTi03)。
+
 ## Unreleased
+
+### 项目权威、主干与文档体系重建（2026-08-26）
+
+- 建立新项目总纲，明确独立长篇/节点、短篇/改编、世界引擎和上层产品之间的边界。
+- 正规整合全部已发现本地/远程分支和开放 PR 的独有内容，并建立可审计分支台账。
+- 把清理前文档完整快照上传 WPS 版本化已过时目录并通过哈希校验；主干只保留现行权威、质量、产品、路线与必要操作/法律资料。
+- 重建开发宪法、架构、三注册表数据治理、Harness、工程质量、产品契约、能力基线和路线图；旧 Blueprint/施工卡不再指导开发。
 
 ### 可编辑记忆工程、本地项目工作区与长期一致性收口（2026-08-17）
 
@@ -32,7 +43,7 @@
 
 - 主体工程由 PR #66 合入，Deep Audit、语义 YAML、真实长篇恢复链和项目自有存储位置由 PR #71 收口；GitHub Actions / Node 24 兼容升级由 PR #68 完成。
 - 记忆工程收口验证通过 397 个测试文件 / 1,942 项测试和 Chromium E2E 53/53；最终主干在 Node 24 CI 上通过 435 个测试文件 / 2,043 项测试和 Chromium E2E 53/53。
-- 完整施工、停止边界与验收结论见 [记忆工程施工与验收记录](./docs/MEMORY-ENGINEERING-DEVELOPMENT-PLAN-20260817.md)、[收口纲领](./docs/MEMORY-ENGINEERING-CLOSURE-CHARTER-20260817.md) 和 [本地记忆工作区指南](./docs/MEMORY-WORKSPACE-GUIDE.md)。
+- 历史施工与验收材料见 [WPS 归档清单](https://www.kdocs.cn/l/cidJLBJJTi03)；当前操作与隐私边界见 [本地记忆工作区指南](./docs/MEMORY-WORKSPACE-GUIDE.md)。
 
 ### Agent + Harness 统一执行架构与创作可靠性工程（2026-08-17）
 
@@ -68,7 +79,7 @@
 - 2026-08-17 产品决策将本轮 Agent + Harness / CREL 工程标记为阶段性开发完成并转入社区观察；`HARNESS-0～86`、`CREL-0～14` 已进入已完成索引，独立作者 A/B 与原预注册社区质量门关闭，不再作为本轮待开发或交付阻塞项。关闭不等于通过：历史 A/B 仍为 0/6，sealed held-out 成本门仍为 FAIL。
 - 当前入口继续标注实验性/预览，不宣传“已经替作者完成 80% 工作”或“新路径质量已全面优于旧路径”。sealed held-out 已消耗，不能为过门而重跑、调阈值或挑样本；后续先按作者主动提交的采用结果、修改时间和问题类型观察真实使用。
 
-完整说明见 [docs/AI-HARNESS-REBUILD-RELEASE-20260817.md](./docs/AI-HARNESS-REBUILD-RELEASE-20260817.md) 和 [社区观察产品决策](./docs/adr/HARNESS-COMMUNITY-VALIDATION.md)。
+历史完整说明与评测材料见 [WPS 归档清单](https://www.kdocs.cn/l/cidJLBJJTi03)；当前约束见 [Harness 质量标准](./docs/HARNESS-QUALITY-STANDARD.md)。
 
 ## v3.9.1 — 2026-08-04 · 分步骤模式最终稳定版
 

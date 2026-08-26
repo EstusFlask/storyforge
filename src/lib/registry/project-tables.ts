@@ -7,8 +7,8 @@
  * ⚠️ 加新表 = 在此加一行 + schema.ts 加版本 + types 加类型。其它生命周期自动覆盖。
  *
  * 当前事实来源:本注册表 + schema.ts + ensure-schema.ts，三者由 CI 双向校验。
- * docs/refactor/PROJECT_TABLES_ALL.md 仅保留 Phase 1 前的历史快照。
- * 设计依据:docs/MASTER-BLUEPRINT.md §5.1
+ * 历史手写表清单已归档，禁止恢复为第二事实源。
+ * 治理依据:docs/DATA-GOVERNANCE.md。
  */
 import { db } from '../db/schema'
 import type { DomainOwnershipSpec, TableSpec, WorkspaceMemoryClassificationV1 } from './types'

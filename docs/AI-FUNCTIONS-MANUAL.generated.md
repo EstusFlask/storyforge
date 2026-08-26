@@ -281,7 +281,7 @@ AI 输出经 `adopt({ target, data })` 写回,只有这里登记的字段可写(
 
 ## 四、AI 调用点（消耗统计 category · 在哪触发)
 
-共 44 个 category。
+共 43 个 category。
 未分类调用: 0 个。动态 category 调用: 36 个。
 
 | category | 触发文件 |
@@ -309,8 +309,7 @@ AI 输出经 `adopt({ target, data })` 写回,只有这里登记的字段可写(
 | `inventory.extract` | `src/lib/agent/run/inventory-extraction-durable.ts:943` |
 | `location.extract` | `src/lib/agent/run/location-extraction-durable.ts:618` |
 | `node.creation` | `src/lib/node-authoring/executor.ts:362`<br/>`src/lib/node-flow/executor.ts:207` |
-| `outline.chapter` | `src/lib/ai/batch-outline-runner.ts:198`<br/>`src/lib/ai/chunked-chapter-generator.ts:241`<br/>`src/lib/ai/chunked-chapter-generator.ts:292`<br/>`src/lib/outline/generation-node.ts:60` |
-| `outline.deviation` | `src/lib/ai/chunked-chapter-generator.ts:148` |
+| `outline.chapter` | `src/lib/ai/batch-outline-runner.ts:198`<br/>`src/lib/outline/generation-node.ts:60` |
 | `outline.impact-regenerate` | `src/lib/agent/run/impact-outline-regeneration-durable.ts:652` |
 | `outline.volume` | `src/lib/outline/generation-node.ts:55` |
 | `outline.workshop.collision` | `src/lib/outline/workshop.ts:452` |
@@ -418,4 +417,4 @@ AI 输出经 `adopt({ target, data })` 写回,只有这里登记的字段可写(
 
 ---
 
-生成时间基准:commit `da43297e`
+生成时间基准:commit `5679dada`

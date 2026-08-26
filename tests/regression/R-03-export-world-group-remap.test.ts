@@ -1,7 +1,7 @@
 /**
  * R-3: 多世界导出/导入 worldGroupId remap 正确性
  *
- * 对应 MASTER-BLUEPRINT §4.0.4 / BUG-EXPORT-WG。
+ * R-03：世界组导出与引用重映射反例。
  *
  * 反例:
  *   worldGroups 导出使用 _exportId 序号,但其它表保留原始 DB worldGroupId。
