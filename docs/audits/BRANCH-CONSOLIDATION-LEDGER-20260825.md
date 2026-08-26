@@ -2,7 +2,7 @@
 
 > 建立日期：2026-08-25<br>
 > 基准：`origin/main@b9b9c62b`<br>
-> 状态：整合、权威重建与验证已完成；等待把本台账提交快进到 `main` 后执行引用清理
+> 状态：完成；整合、权威重建、验证、推送与引用清理均已闭环
 
 ## 1. 目的与原则
 
@@ -153,6 +153,31 @@ WPS 归档位置：`storyforge故事熔炉 / 已过时-v3.9.1-2026-08-26`。
 - [x] 最新星标历史先进入主干历史；现行 README 不再引用后，自动工作流、脚本与资产已显式退役。
 - [x] 过时文档已上传 WPS 版本化归档并回读校验。
 - [x] 完整 CI、E2E、构建、覆盖率、架构与 bundle 门全部通过。
-- [ ] 本台账提交后，把整合分支以 `--ff-only` 快进到本地 `main` 并普通推送远程。
-- [ ] 推送后确认 PR #60/#75 状态，并只在祖先关系成立后删除所有非 `main` 本地/远程分支和多余工作树。
-- [ ] 最终确认本地与远程只剩同 SHA 的 `main`，再把清理结果补记到本台账。
+- [x] 整合分支已以 `--ff-only` 快进到本地 `main`，并通过普通推送同步远程；没有强推。
+- [x] PR #60/#75 均由 GitHub 确认为 `MERGED`；所有待删分支先通过祖先检查，再执行引用清理。
+- [x] 清理后本地分支、远程 heads 与工作树均只剩 `main`，且清理基线 SHA 完全相同。
+
+## 10. 推送与引用清理结果
+
+2026-08-26 的最终操作按以下顺序完成：
+
+1. 原项目工作树从 `feat/ttrpg-game-platform` 切换到旧本地 `main`。
+2. 使用 `git merge --ff-only refactor/project-document-authority`，把已完整验证的整合历史快进到本地 `main`。
+3. 使用普通 `git push origin main` 把远端主干从 `1b9277e7` 更新到 `8ed59765`；没有使用 `--force` 或历史改写。
+4. GitHub 随即确认 PR #60 与 #75 均为 `MERGED`，时间为 `2026-08-26T06:56:07Z`；开放 PR 数为 0。
+5. 再次证明 `origin/fix/dexie-premature-commit` 与 `origin/readme-assets` 都是 `main` 祖先后，通过 `git push origin --delete` 删除这两个远程分支。
+6. 五个辅助工作树均在干净状态下通过非强制 `git worktree remove` 删除。
+7. 七个本地来源/整合分支均通过非强制 `git branch -d` 删除。
+
+引用清理完成后的机器核验结果：
+
+| 核验面 | 最终结果 |
+|---|---|
+| 本地分支 | 仅 `main` |
+| 远程 heads | 仅 `refs/heads/main` |
+| Git 工作树 | 仅 `/Users/qinyingying/Desktop/project/storyforge` |
+| 开放 PR | 0 |
+| PR #60 / #75 | 均为 `MERGED` |
+| 清理基线 | 本地 `main` = `origin/main` = `8ed59765f0a9cdfc57b3dc2b684e6971d21508c4` |
+
+本节本身是清理完成后的唯一文档追加；提交并普通推送后，以包含本节的最新 `main` SHA 为最终同步点。
